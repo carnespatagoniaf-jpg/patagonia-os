@@ -10,7 +10,7 @@
     "lint": "eslint src --ext .ts,.tsx"
   },
   "dependencies": {
-    "@patagonia/domain": "3.0.0",
+    "@patagonia/domain": "workspace:*",
     "@supabase/supabase-js": "^2.49.1",
     "lucide-react": "^0.468.0",
     "react": "^18.3.1",
