@@ -1,0 +1,20 @@
+{
+  "name": "patagonia-os",
+  "private": true,
+  "version": "3.1.0",
+  "workspaces": [
+    "apps/web",
+    "apps/api",
+    "packages/domain"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @patagonia/web",
+    "build": "npm run build -w @patagonia/domain && npm run build -w @patagonia/web && npm run build -w @patagonia/api",
+    "test": "npm run test -w @patagonia/domain",
+    "typecheck": "npm run typecheck -w @patagonia/web && npm run typecheck -w @patagonia/api",
+    "lint": "npm run lint -w @patagonia/web"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
