@@ -26,6 +26,20 @@ export interface CartItem {
   unitPrice: Money;
 }
 
+export type CashSessionStatus = "open" | "closed";
+
+export interface CashSession {
+  id: string;
+  branchId: string;
+  status: CashSessionStatus;
+  openingAmount: Money;
+  openedAt: string;
+  openedBy: string;
+  closingCounted?: Money;
+  difference?: Money;
+  closedAt?: string;
+}
+
 export function lineTotal(item: CartItem): Money {
   return roundMoney(item.quantity * item.unitPrice);
 }

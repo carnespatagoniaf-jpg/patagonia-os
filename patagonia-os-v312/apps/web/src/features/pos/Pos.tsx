@@ -9,6 +9,7 @@ import {
   type Product
 } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
+import { useCashSession } from "../cash/useCashSession";
 
 export function Pos() {
   const [products, setProducts] = useState<Product[]>(demoProducts);
@@ -16,6 +17,20 @@ export function Pos() {
   const [search, setSearch] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [message, setMessage] = useState("");
+  const {
+    session: cashSession,
+    loading: cashLoading,
+    error: cashError,
+    lastClose,
+    open: openCash,
+    close: closeCash,
+    registerCashSale
+  } = useCashSession();
+  const [openingAmount, setOpeningAmount] = useState("");
+  const [cashMessage, setCashMessage] = useState("");
+  const [showCloseForm, setShowCloseForm] = useState(false);
+  const [closingAmount, setClosingAmount] = useState("");
+  const cashSessionOpen = cashSession?.status === "open";
 
   const filtered = products.filter((p) =>
     `${p.name} ${p.code}`.toLowerCase().includes(search.toLowerCase())
@@ -45,8 +60,38 @@ export function Pos() {
     });
   }
 
+  async function handleOpenCash() {
+    try {
+      const amount = Number(openingAmount);
+      if (!Number.isFinite(amount) || amount < 0) {
+        throw new Error("Ingresá un monto inicial válido.");
+      }
+      await openCash(amount);
+      setOpeningAmount("");
+      setCashMessage("");
+    } catch (error) {
+      setCashMessage(error instanceof Error ? error.message : "No se pudo abrir la caja.");
+    }
+  }
+
+  async function handleCloseCash() {
+    try {
+      const amount = Number(closingAmount);
+      if (!Number.isFinite(amount) || amount < 0) {
+        throw new Error("Ingresá un monto contado válido.");
+      }
+      await closeCash(amount);
+      setClosingAmount("");
+      setShowCloseForm(false);
+      setCashMessage("");
+    } catch (error) {
+      setCashMessage(error instanceof Error ? error.message : "No se pudo cerrar la caja.");
+    }
+  }
+
   function charge() {
     try {
+      if (!cashSessionOpen) throw new Error("Abrí la caja antes de cobrar.");
       cart.forEach(assertSellable);
       if (!cart.length) throw new Error("Agregá al menos un producto.");
 
@@ -58,6 +103,8 @@ export function Pos() {
           return { ...product, stock: product.stock - sold };
         })
       );
+
+      if (paymentMethod === "cash") registerCashSale(total);
 
       setMessage(`Venta registrada en modo demo por ${formatMoney(total)} · ${paymentMethod}`);
       setCart([]);
@@ -76,7 +123,69 @@ export function Pos() {
         </div>
       </header>
 
-      <div className="pos-layout">
+      {!cashLoading && cashSession && cashSession.status === "open" && (
+        <section className="panel cash-status">
+          <div className="cash-status-row">
+            <div>
+              <strong>Caja abierta</strong>
+              <p className="muted">Apertura: {formatMoney(cashSession.openingAmount)}</p>
+            </div>
+            {!showCloseForm && (
+              <button onClick={() => setShowCloseForm(true)}>Cerrar caja</button>
+            )}
+            {showCloseForm && (
+              <div className="cash-close-form">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="Monto contado"
+                  value={closingAmount}
+                  onChange={(event) => setClosingAmount(event.target.value)}
+                />
+                <button onClick={handleCloseCash}>Confirmar cierre</button>
+                <button className="secondary" onClick={() => setShowCloseForm(false)}>Cancelar</button>
+              </div>
+            )}
+          </div>
+          {cashMessage && <div className="message">{cashMessage}</div>}
+        </section>
+      )}
+
+      {!cashLoading && !cashSessionOpen && (
+        <section className="panel cash-banner">
+          {lastClose && (
+            <div className={`message${lastClose.difference < 0 ? " warning" : ""}`}>
+              Caja cerrada · Contado {formatMoney(lastClose.closingCounted)} · Esperado{" "}
+              {formatMoney(lastClose.expectedCash)} · Diferencia {formatMoney(lastClose.difference)}
+            </div>
+          )}
+          <div className="cash-banner-row">
+            <div>
+              <strong>No hay caja abierta para esta sucursal.</strong>
+              <p className="muted">Ingresá el monto inicial para abrir la caja y empezar a vender.</p>
+            </div>
+            {cashError ? (
+              <p className="message">{cashError}</p>
+            ) : (
+              <div className="cash-banner-form">
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  placeholder="Monto inicial"
+                  value={openingAmount}
+                  onChange={(event) => setOpeningAmount(event.target.value)}
+                />
+                <button onClick={handleOpenCash}>Abrir caja</button>
+              </div>
+            )}
+          </div>
+          {cashMessage && <div className="message">{cashMessage}</div>}
+        </section>
+      )}
+
+      <div className={cashSessionOpen ? "pos-layout" : "pos-layout pos-layout-disabled"}>
         <section className="panel products-panel">
           <div className="search-box">
             <Search size={19} />
