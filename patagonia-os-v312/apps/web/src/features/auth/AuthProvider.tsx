@@ -59,7 +59,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         try {
           await loadProfile(nextSession.user.id);
         } catch {
-          await supabase.auth.signOut();
+          if (supabase) await supabase.auth.signOut();
         }
       }
       setLoading(false);

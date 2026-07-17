@@ -9,7 +9,7 @@ export type Permission =
   | "purchases.manage"
   | "users.manage";
 
-const rolePermissions: Record<UserProfile["role"], Permission[] | ["*"]> = {
+const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> = {
   owner: ["*"],
   admin: ["dashboard.view","sales.create","sales.cancel","inventory.view","inventory.adjust","purchases.manage","users.manage"],
   manager: ["dashboard.view","sales.create","sales.cancel","inventory.view","inventory.adjust","purchases.manage"],
