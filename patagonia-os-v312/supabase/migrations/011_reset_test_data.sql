@@ -1,0 +1,10 @@
+delete from public.inventory_movements where reference_type = 'purchase';
+delete from public.shift_registers;
+delete from public.treasury_movements;
+delete from public.treasury_accounts;
+delete from public.purchase_items;
+delete from public.supplier_payments;
+delete from public.purchases;
+delete from public.suppliers;
+delete from public.cash_movements;
+delete from public.cash_sessions;

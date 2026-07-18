@@ -7,11 +7,12 @@ export type Permission =
   | "inventory.view"
   | "inventory.adjust"
   | "purchases.manage"
+  | "employees.manage"
   | "users.manage";
 
 const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> = {
   owner: ["*"],
-  admin: ["dashboard.view","sales.create","sales.cancel","inventory.view","inventory.adjust","purchases.manage","users.manage"],
+  admin: ["dashboard.view","sales.create","sales.cancel","inventory.view","inventory.adjust","purchases.manage","employees.manage","users.manage"],
   manager: ["dashboard.view","sales.create","sales.cancel","inventory.view","inventory.adjust","purchases.manage"],
   cashier: ["dashboard.view","sales.create","inventory.view"],
   production: ["dashboard.view","inventory.view","inventory.adjust"],

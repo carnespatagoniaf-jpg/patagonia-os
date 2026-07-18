@@ -18,6 +18,7 @@ export interface Product {
   priceRetail: Money;
   stock: Quantity;
   minStock: Quantity;
+  active?: boolean;
 }
 
 export interface CartItem {
@@ -68,4 +69,238 @@ export function assertSellable(item: CartItem): void {
 
 export function roundMoney(value: number): number {
   return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+export function marginPercent(cost: Money, priceRetail: Money): number {
+  if (cost <= 0) return 0;
+  return roundMoney(((priceRetail - cost) / cost) * 100);
+}
+
+export function priceFromMargin(cost: Money, marginPct: number): Money {
+  return roundMoney(cost * (1 + marginPct / 100));
+}
+
+export interface Supplier {
+  id: string;
+  name: string;
+  category: string;
+  phone?: string;
+  notes?: string;
+  active: boolean;
+}
+
+export interface PurchaseItem {
+  id: string;
+  purchaseId: string;
+  productId?: string;
+  description?: string;
+  quantity: Quantity;
+  unit: "kg" | "unit";
+  unitPrice: Money;
+  lineTotal: Money;
+}
+
+export interface Purchase {
+  id: string;
+  branchId: string;
+  supplierId: string;
+  purchaseDate: string;
+  invoiceNumber?: string;
+  total: Money;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface SupplierPayment {
+  id: string;
+  branchId: string;
+  supplierId: string;
+  paymentDate: string;
+  amount: Money;
+  paymentMethod: PaymentMethod;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface PurchaseLineInput {
+  quantity: Quantity;
+  unitPrice: Money;
+}
+
+export function purchaseLineTotal(line: PurchaseLineInput): Money {
+  return roundMoney(line.quantity * line.unitPrice);
+}
+
+export function purchaseTotal(lines: PurchaseLineInput[]): Money {
+  return roundMoney(lines.reduce((sum, line) => sum + purchaseLineTotal(line), 0));
+}
+
+export interface TreasuryAccount {
+  id: string;
+  name: string;
+  paymentMethod?: PaymentMethod;
+  initialBalance: Money;
+  active: boolean;
+}
+
+export type TreasuryMovementDirection = "in" | "out";
+
+export type ShiftPeriod = "morning" | "afternoon";
+
+export interface ShiftRegister {
+  id: string;
+  branchId: string;
+  shiftDate: string;
+  shift: ShiftPeriod;
+  openingCash: Money;
+  closingCountedCash?: Money;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ShiftSale {
+  id: string;
+  shiftId: string;
+  accountId: string;
+  amount: Money;
+}
+
+export type ShiftOutflowType = "vale_mercaderia" | "vale_adelanto" | "pago_proveedor" | "gasto";
+
+export interface ShiftOutflow {
+  id: string;
+  shiftId: string;
+  accountId: string;
+  type: ShiftOutflowType;
+  amount: Money;
+  detail: string;
+  employeeId?: string;
+  supplierId?: string;
+  createdAt: string;
+}
+
+export interface Employee {
+  id: string;
+  branchId: string;
+  fullName: string;
+  baseSalary: Money;
+  active: boolean;
+}
+
+export type PayrollAdjustmentType = "bonus" | "deduction";
+
+export interface PayrollAdjustment {
+  id: string;
+  employeeId: string;
+  adjustmentDate: string;
+  type: PayrollAdjustmentType;
+  amount: Money;
+  reason: string;
+}
+
+export interface PayrollLiquidation {
+  id: string;
+  employeeId: string;
+  branchId: string;
+  periodStart: string;
+  periodEnd: string;
+  baseSalary: Money;
+  adjustmentsTotal: Money;
+  vouchersTotal: Money;
+  netAmount: Money;
+  createdAt: string;
+}
+
+export interface FixedCost {
+  id: string;
+  branchId: string;
+  name: string;
+  monthlyAmount: Money;
+  active: boolean;
+}
+
+export const STOCK_COUNT_CATEGORIES = ["achura", "cerdo", "pollo", "vacuno", "embutidos", "preparados", "varios"] as const;
+
+export interface StockCount {
+  id: string;
+  branchId: string;
+  countDate: string;
+  category: string;
+  value: Money;
+}
+
+export interface CarcassBatch {
+  id: string;
+  branchId: string;
+  batchDate: string;
+  animalType: string;
+  supplierId?: string;
+  totalWeight: Quantity;
+  totalCost: Money;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface CarcassCut {
+  id: string;
+  batchId: string;
+  cutName: string;
+  productId?: string;
+  weight: Quantity;
+  unitPrice: Money;
+  lineTotal: Money;
+}
+
+export function carcassCutLineTotal(cut: { weight: Quantity; unitPrice: Money }): Money {
+  return roundMoney(cut.weight * cut.unitPrice);
+}
+
+export interface Creditor {
+  id: string;
+  branchId: string;
+  name: string;
+  phone?: string;
+  notes?: string;
+  active: boolean;
+}
+
+export interface CreditorDebt {
+  id: string;
+  creditorId: string;
+  debtDate: string;
+  amount: Money;
+  reason: string;
+  createdAt: string;
+}
+
+export interface CreditorPayment {
+  id: string;
+  creditorId: string;
+  paymentDate: string;
+  amount: Money;
+  accountId: string;
+  accountName?: string;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface CreditorBalance {
+  creditorId: string;
+  totalDebt: Money;
+  totalPaid: Money;
+  balance: Money;
+}
+
+export interface ProfitabilityPeriod {
+  id: string;
+  branchId: string;
+  periodStart: string;
+  periodEnd: string;
+  salesTotal: Money;
+  purchasesTotal: Money;
+  fixedCostsTotal: Money;
+  stockStart: Money;
+  stockEnd: Money;
+  grossProfit: Money;
+  createdAt: string;
 }
