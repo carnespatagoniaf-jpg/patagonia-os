@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { BarChart3, Beef, Boxes, FileText, HandCoins, LogOut, PackagePlus, ShoppingCart, TrendingUp, Users, Wallet } from "lucide-react";
+import { BarChart3, Beef, Boxes, FileText, HandCoins, KeyRound, LogOut, PackagePlus, ShoppingCart, TrendingUp, Users, Wallet } from "lucide-react";
 import { useAuth } from "../features/auth/AuthProvider";
 import { canAccessPage, type Page } from "../features/auth/permissions";
 import { useActiveBranch } from "../features/branches/BranchProvider";
@@ -22,7 +22,8 @@ const items: Array<{ page: Page; label: string; icon: typeof BarChart3 }> = [
   { page: "profitability", label: "Rentabilidad", icon: TrendingUp },
   { page: "carcass", label: "Despiece", icon: Beef },
   { page: "creditors", label: "Deudas", icon: HandCoins },
-  { page: "reports", label: "Reportes", icon: FileText }
+  { page: "reports", label: "Reportes", icon: FileText },
+  { page: "users", label: "Usuarios", icon: KeyRound }
 ];
 
 function BranchSwitcher() {

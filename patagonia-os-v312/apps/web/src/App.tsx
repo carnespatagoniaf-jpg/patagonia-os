@@ -10,6 +10,7 @@ import { Employees } from "./features/employees/Employees";
 import { Profitability } from "./features/profitability/Profitability";
 import { Carcass } from "./features/carcass/Carcass";
 import { Creditors } from "./features/creditors/Creditors";
+import { Users } from "./features/users/Users";
 import { Login } from "./features/auth/Login";
 import { useAuth } from "./features/auth/AuthProvider";
 import { canAccessPage } from "./features/auth/permissions";
@@ -50,6 +51,7 @@ export default function App() {
         {allowed && page === "carcass" && <Carcass />}
         {allowed && page === "creditors" && <Creditors />}
         {allowed && page === "reports" && <Reports />}
+        {allowed && page === "users" && <Users />}
       </Layout>
     </BranchProvider>
   );

@@ -42,7 +42,8 @@ export const PAGE_PERMISSIONS = {
   profitability: "profitability.view",
   carcass: "carcass.manage",
   creditors: "creditors.manage",
-  reports: "reports.view"
+  reports: "reports.view",
+  users: "users.manage"
 } as const satisfies Record<string, Permission>;
 
 export type Page = keyof typeof PAGE_PERMISSIONS;
