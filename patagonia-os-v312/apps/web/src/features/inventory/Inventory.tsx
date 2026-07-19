@@ -4,7 +4,7 @@ import { marginPercent, priceFromMargin } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
-import { createProduct, listProductsForBranch, updateProduct } from "./inventory-service";
+import { adjustProductStock, createProduct, listProductsForBranch, updateProduct } from "./inventory-service";
 import { parseAmount } from "../../lib/money";
 
 function formatMoney(value: number) {
@@ -53,6 +53,10 @@ export function Inventory() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<DraftProduct>(emptyDraft());
+
+  const [adjustingId, setAdjustingId] = useState<string | null>(null);
+  const [adjustCounted, setAdjustCounted] = useState("");
+  const [adjustReason, setAdjustReason] = useState("");
 
   async function reload() {
     if (!isSupabaseConfigured || !branchId) return;
@@ -144,6 +148,32 @@ export function Inventory() {
       await reload();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo actualizar el producto.");
+    }
+  }
+
+  function startAdjustStock(product: Product) {
+    setAdjustingId(product.id);
+    setAdjustCounted(String(product.stock));
+    setAdjustReason("");
+  }
+
+  async function handleAdjustStock() {
+    try {
+      if (!branchId || !adjustingId) return;
+      const counted = Number(adjustCounted);
+      if (!Number.isFinite(counted) || counted < 0) throw new Error("La cantidad contada no puede ser negativa.");
+      if (!adjustReason.trim()) throw new Error("Ingresá un motivo (ej. conteo mensual, merma).");
+
+      const result = await adjustProductStock({ branchId, productId: adjustingId, countedQuantity: counted, reason: adjustReason.trim() });
+      setAdjustingId(null);
+      setMessage(
+        result.delta === 0
+          ? "El stock contado coincide con el registrado, no hubo ajuste."
+          : `Stock ajustado: ${result.delta > 0 ? "+" : ""}${result.delta}.`
+      );
+      await reload();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo ajustar el stock.");
     }
   }
 
@@ -246,6 +276,38 @@ export function Inventory() {
                       <button className="secondary" onClick={() => setEditingId(null)}>Cancelar</button>
                     </td>
                   </>
+                ) : adjustingId === product.id ? (
+                  <>
+                    <td>{product.code}</td>
+                    <td>{product.name}</td>
+                    <td>{UNIT_LABELS[product.unit]}</td>
+                    <td className="num">{formatMoney(product.cost)}</td>
+                    <td className="num">{marginPercent(product.cost, product.priceRetail)}%</td>
+                    <td className="num">{formatMoney(product.priceRetail)}</td>
+                    <td className="num">
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.001"
+                        className="num"
+                        value={adjustCounted}
+                        onChange={(e) => setAdjustCounted(e.target.value)}
+                        style={{ width: 70 }}
+                      />
+                      <div className="muted" style={{ fontSize: 11 }}>registrado: {product.stock}</div>
+                    </td>
+                    <td className="num">{product.minStock}</td>
+                    <td colSpan={2}>
+                      <input
+                        placeholder="Motivo (ej. conteo, merma)"
+                        value={adjustReason}
+                        onChange={(e) => setAdjustReason(e.target.value)}
+                        style={{ width: "100%", marginBottom: 6 }}
+                      />
+                      <button onClick={handleAdjustStock}>Guardar ajuste</button>{" "}
+                      <button className="secondary" onClick={() => setAdjustingId(null)}>Cancelar</button>
+                    </td>
+                  </>
                 ) : (
                   <>
                     <td>{product.code}</td>
@@ -257,7 +319,10 @@ export function Inventory() {
                     <td className="num">{product.stock} {product.stock <= product.minStock ? "⚠" : ""}</td>
                     <td className="num">{product.minStock}</td>
                     <td>{(product.active ?? true) ? "Activo" : "Inactivo"}</td>
-                    <td><button className="secondary" onClick={() => startEdit(product)}>Editar</button></td>
+                    <td>
+                      <button className="secondary" onClick={() => startEdit(product)}>Editar</button>{" "}
+                      <button className="secondary" onClick={() => startAdjustStock(product)}>Ajustar stock</button>
+                    </td>
                   </>
                 )}
               </tr>

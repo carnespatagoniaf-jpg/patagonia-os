@@ -83,3 +83,30 @@ export async function updateProduct(input: UpdateProductInput): Promise<void> {
 
   if (error) throw error;
 }
+
+export interface AdjustProductStockInput {
+  branchId: string;
+  productId: string;
+  countedQuantity: number;
+  reason: string;
+}
+
+export interface AdjustProductStockResult {
+  previous: number;
+  counted: number;
+  delta: number;
+}
+
+export async function adjustProductStock(input: AdjustProductStockInput): Promise<AdjustProductStockResult> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.rpc("adjust_product_stock", {
+    p_branch_id: input.branchId,
+    p_product_id: input.productId,
+    p_counted_quantity: input.countedQuantity,
+    p_reason: input.reason
+  });
+
+  if (error) throw error;
+  return { previous: Number(data.previous), counted: Number(data.counted), delta: Number(data.delta) };
+}
