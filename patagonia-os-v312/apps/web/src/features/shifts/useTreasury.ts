@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { TreasuryAccount } from "@patagonia/domain";
 import { isSupabaseConfigured } from "../../lib/supabase";
-import { useAuth } from "../auth/AuthProvider";
+import { useActiveBranch } from "../branches/BranchProvider";
 import {
   adjustTreasuryAccount,
   createTreasuryAccount,
@@ -16,8 +16,6 @@ import {
   type TreasuryMovementRow
 } from "./treasury-service";
 
-const DEMO_BRANCH_ID = "demo-branch";
-
 const DEMO_ACCOUNTS: TreasuryAccount[] = [
   { id: "demo-cash", name: "Efectivo", paymentMethod: "cash", initialBalance: 50000, active: true },
   { id: "demo-qr", name: "Mercado Pago", paymentMethod: "qr", initialBalance: 20000, active: true },
@@ -25,8 +23,7 @@ const DEMO_ACCOUNTS: TreasuryAccount[] = [
 ];
 
 export function useTreasury() {
-  const { profile } = useAuth();
-  const branchId = isSupabaseConfigured ? profile?.branch_id ?? null : DEMO_BRANCH_ID;
+  const { branchId } = useActiveBranch();
 
   const [accounts, setAccounts] = useState<TreasuryAccount[]>(isSupabaseConfigured ? [] : DEMO_ACCOUNTS);
   const [balances, setBalances] = useState<TreasuryAccountBalance[]>(

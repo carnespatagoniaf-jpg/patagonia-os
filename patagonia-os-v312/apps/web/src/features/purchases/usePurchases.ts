@@ -2,7 +2,7 @@ import { useCallback, useState } from "react";
 import type { Purchase, PurchaseItem, SupplierPayment } from "@patagonia/domain";
 import { purchaseTotal } from "@patagonia/domain";
 import { isSupabaseConfigured } from "../../lib/supabase";
-import { useAuth } from "../auth/AuthProvider";
+import { useActiveBranch } from "../branches/BranchProvider";
 import {
   createPurchase,
   listPurchaseItems,
@@ -16,8 +16,6 @@ import {
 } from "./purchases-service";
 import { fetchSupplierBalance, type SupplierBalance } from "./suppliers-service";
 
-const DEMO_BRANCH_ID = "demo-branch";
-
 interface DemoLedger {
   purchases: Purchase[];
   items: Record<string, PurchaseItem[]>;
@@ -25,8 +23,7 @@ interface DemoLedger {
 }
 
 export function usePurchases() {
-  const { profile } = useAuth();
-  const branchId = isSupabaseConfigured ? profile?.branch_id ?? null : DEMO_BRANCH_ID;
+  const { branchId } = useActiveBranch();
 
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [items, setItems] = useState<Record<string, PurchaseItem[]>>({});

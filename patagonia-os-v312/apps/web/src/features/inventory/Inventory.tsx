@@ -3,7 +3,7 @@ import type { Product } from "@patagonia/domain";
 import { marginPercent, priceFromMargin } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
-import { useAuth } from "../auth/AuthProvider";
+import { useActiveBranch } from "../branches/BranchProvider";
 import { createProduct, listProductsForBranch, updateProduct } from "./inventory-service";
 import { parseAmount } from "../../lib/money";
 
@@ -42,8 +42,7 @@ function draftFromProduct(p: Product): DraftProduct {
 }
 
 export function Inventory() {
-  const { profile } = useAuth();
-  const branchId = isSupabaseConfigured ? profile?.branch_id ?? null : "demo-branch";
+  const { branchId } = useActiveBranch();
 
   const [products, setProducts] = useState<Product[]>(isSupabaseConfigured ? [] : demoProducts);
   const [loading, setLoading] = useState(isSupabaseConfigured);

@@ -16,6 +16,19 @@ button { cursor: pointer; }
 }
 .brand { font-size: 20px; font-weight: 900; letter-spacing: .04em; }
 .branch { color: #a7b0bd; font-size: 12px; margin-top: 5px; }
+.branch-switcher { margin-top: 14px; }
+.branch-switcher select {
+  width: 100%; background: #1f242c; color: white; border: 1px solid #333a45;
+  border-radius: 8px; padding: 8px 10px; font-size: 13px;
+}
+.branch-switcher-label { margin-top: 14px; color: #cbd2dc; font-size: 12px; font-weight: 600; }
+.branch-switcher-add { margin-top: 8px; background: transparent; border: 0; color: #8b1e1e; font-size: 12px; padding: 0; text-decoration: underline; }
+.branch-switcher-new { margin-top: 8px; display: grid; gap: 6px; }
+.branch-switcher-new input {
+  background: #1f242c; color: white; border: 1px solid #333a45; border-radius: 8px; padding: 8px 10px; font-size: 13px;
+}
+.branch-switcher-new button { font-size: 12px; padding: 6px 10px; }
+.branch-switcher-error { color: #ff9b9b; font-size: 11px; margin-top: 4px; }
 .sidebar nav { display: grid; gap: 8px; margin-top: 40px; }
 .nav-item {
   display: flex; align-items: center; gap: 11px; width: 100%; color: #cbd2dc;

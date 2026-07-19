@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Creditor, CreditorBalance, CreditorDebt, CreditorPayment } from "@patagonia/domain";
 import { isSupabaseConfigured } from "../../lib/supabase";
-import { useAuth } from "../auth/AuthProvider";
+import { useActiveBranch } from "../branches/BranchProvider";
 import {
   createCreditor,
   createCreditorDebt,
@@ -15,11 +15,8 @@ import {
   type RegisterCreditorPaymentInput
 } from "./creditors-service";
 
-const DEMO_BRANCH_ID = "demo-branch";
-
 export function useCreditors() {
-  const { profile } = useAuth();
-  const branchId = isSupabaseConfigured ? profile?.branch_id ?? null : DEMO_BRANCH_ID;
+  const { branchId } = useActiveBranch();
 
   const [creditors, setCreditors] = useState<Creditor[]>([]);
   const [loading, setLoading] = useState(isSupabaseConfigured);

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { FixedCost, ProfitabilityPeriod, StockCount } from "@patagonia/domain";
 import { isSupabaseConfigured } from "../../lib/supabase";
-import { useAuth } from "../auth/AuthProvider";
+import { useActiveBranch } from "../branches/BranchProvider";
 import {
   closeProfitabilityPeriod,
   createFixedCost,
@@ -28,8 +28,7 @@ const DEMO_FIXED_COSTS: FixedCost[] = [
 ];
 
 export function useProfitability() {
-  const { profile } = useAuth();
-  const branchId = isSupabaseConfigured ? profile?.branch_id ?? null : DEMO_BRANCH_ID;
+  const { branchId } = useActiveBranch();
 
   const [fixedCosts, setFixedCosts] = useState<FixedCost[]>(isSupabaseConfigured ? [] : DEMO_FIXED_COSTS);
   const [loading, setLoading] = useState(isSupabaseConfigured);

@@ -143,6 +143,10 @@ export function Carcass() {
   const gananciaTotal = selectedBatch ? cutsTotal - selectedBatch.totalCost : 0;
   const margenTotal = selectedBatch ? marginPercent(selectedBatch.totalCost, cutsTotal) : 0;
 
+  function handlePrint() {
+    window.print();
+  }
+
   return (
     <>
       <header className="page-header">
@@ -247,11 +251,15 @@ export function Carcass() {
       </div>
 
       {selectedBatch && (
-        <section className="panel" style={{ marginTop: 18 }}>
+        <section className="panel print-area" style={{ marginTop: 18 }}>
           <div className="panel-title">
             <h2>Cortes de {selectedBatch.animalType} — {selectedBatch.batchDate}</h2>
+            <button className="secondary no-print" onClick={handlePrint}>Imprimir</button>
           </div>
-          <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 4 }}>
+          <p className="muted print-only-header">
+            Compra {formatMoney(selectedBatch.totalCost)} · Venta {formatMoney(cutsTotal)} · Ganancia {formatMoney(gananciaTotal)} ({margenTotal}%)
+          </p>
+          <div className="cash-banner-form no-print" style={{ flexWrap: "wrap", marginBottom: 4 }}>
             <input placeholder="Corte (ej. Asado)" value={cutName} onChange={(e) => setCutName(e.target.value)} />
             <input type="number" min="0" step="0.001" placeholder="Peso (kg)" value={cutWeight} onChange={(e) => setCutWeight(e.target.value)} />
             <input type="text" inputMode="decimal" placeholder="Precio venta ($/kg)" value={cutPrice} onChange={(e) => setCutPrice(e.target.value)} />
@@ -260,11 +268,11 @@ export function Carcass() {
               <button className="secondary" onClick={() => { setEditingCutId(null); setCutName(""); setCutWeight(""); setCutPrice(""); }}>Cancelar</button>
             )}
           </div>
-          <p className="muted" style={{ marginBottom: 14 }}>Subtotal de este corte: {formatMoney(previewCutTotal)}</p>
+          <p className="muted no-print" style={{ marginBottom: 14 }}>Subtotal de este corte: {formatMoney(previewCutTotal)}</p>
 
           <table className="data-table">
             <thead>
-              <tr><th>Corte</th><th className="num">Peso</th><th className="num">Precio/kg</th><th className="num">Subtotal</th><th></th></tr>
+              <tr><th>Corte</th><th className="num">Peso</th><th className="num">Precio/kg</th><th className="num">Subtotal</th><th className="no-print"></th></tr>
             </thead>
             <tbody>
               {cuts.map((cut) => (
@@ -273,7 +281,7 @@ export function Carcass() {
                   <td className="num">{cut.weight} kg</td>
                   <td className="num">{formatMoney(cut.unitPrice)}</td>
                   <td className="num">{formatMoney(cut.lineTotal)}</td>
-                  <td>
+                  <td className="no-print">
                     <button className="secondary" onClick={() => startEditCut(cut.id)}>Editar</button>{" "}
                     <button className="danger" onClick={() => handleDeleteCut(cut.id)}>Quitar</button>
                   </td>

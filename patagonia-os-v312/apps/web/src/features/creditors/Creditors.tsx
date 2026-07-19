@@ -113,6 +113,10 @@ export function Creditors() {
     }
   }
 
+  function handlePrint() {
+    window.print();
+  }
+
   return (
     <>
       <header className="page-header">
@@ -177,10 +181,12 @@ export function Creditors() {
 
       {selectedCreditor && (
         <>
-          <section className="panel" style={{ marginTop: 18 }}>
+          <section className="panel print-area" style={{ marginTop: 18 }}>
             <div className="panel-title">
               <h2>Detalle de cuenta corriente</h2>
+              <button className="secondary no-print" onClick={handlePrint}>Imprimir</button>
             </div>
+            <p className="muted print-only-header">{selectedCreditor.name}</p>
             <table className="data-table">
               <thead>
                 <tr>

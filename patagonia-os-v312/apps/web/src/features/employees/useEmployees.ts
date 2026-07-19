@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Employee, PayrollAdjustment, PayrollLiquidation } from "@patagonia/domain";
 import { isSupabaseConfigured } from "../../lib/supabase";
-import { useAuth } from "../auth/AuthProvider";
+import { useActiveBranch } from "../branches/BranchProvider";
 import {
   createEmployee,
   createPayrollAdjustment,
@@ -26,8 +26,7 @@ const DEMO_EMPLOYEES: Employee[] = [
 ];
 
 export function useEmployees() {
-  const { profile } = useAuth();
-  const branchId = isSupabaseConfigured ? profile?.branch_id ?? null : DEMO_BRANCH_ID;
+  const { branchId } = useActiveBranch();
 
   const [employees, setEmployees] = useState<Employee[]>(isSupabaseConfigured ? [] : DEMO_EMPLOYEES);
   const [loading, setLoading] = useState(isSupabaseConfigured);

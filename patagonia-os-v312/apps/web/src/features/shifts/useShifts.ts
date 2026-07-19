@@ -1,7 +1,7 @@
 import { useCallback, useState } from "react";
 import type { ShiftOutflow, ShiftPeriod, ShiftRegister, ShiftSale } from "@patagonia/domain";
 import { isSupabaseConfigured } from "../../lib/supabase";
-import { useAuth } from "../auth/AuthProvider";
+import { useActiveBranch } from "../branches/BranchProvider";
 import {
   deleteShiftOutflow,
   deleteShiftSale,
@@ -17,15 +17,12 @@ import {
   type ShiftRangeRow
 } from "./shifts-service";
 
-const DEMO_BRANCH_ID = "demo-branch";
-
 function shiftKey(branchId: string, date: string, shift: ShiftPeriod) {
   return `${branchId}__${date}__${shift}`;
 }
 
 export function useShifts() {
-  const { profile } = useAuth();
-  const branchId = isSupabaseConfigured ? profile?.branch_id ?? null : DEMO_BRANCH_ID;
+  const { branchId } = useActiveBranch();
 
   const [current, setCurrent] = useState<ShiftRegister | null>(null);
   const [sales, setSales] = useState<ShiftSale[]>([]);

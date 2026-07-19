@@ -149,6 +149,10 @@ export function Employees() {
     }
   }
 
+  function handlePrint() {
+    window.print();
+  }
+
   return (
     <>
       <header className="page-header">
@@ -235,7 +239,7 @@ export function Employees() {
       {selectedEmployee && (
         <>
           <div className="content-grid" style={{ marginTop: 18 }}>
-            <section className="panel">
+            <section className="panel no-print">
               <div className="panel-title">
                 <h2>Premios y descuentos</h2>
                 <span>{detailLoading ? "Cargando…" : null}</span>
@@ -294,11 +298,15 @@ export function Employees() {
             </section>
           </div>
 
-          <section className="panel" style={{ marginTop: 18 }}>
+          <section className="panel print-area" style={{ marginTop: 18 }}>
             <div className="panel-title">
               <h2>Liquidación</h2>
+              <button className="secondary no-print" onClick={handlePrint}>Imprimir</button>
             </div>
-            <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 14 }}>
+            <p className="muted print-only-header">
+              {selectedEmployee.fullName} · Sueldo base {formatMoney(selectedEmployee.baseSalary)}
+            </p>
+            <div className="cash-banner-form no-print" style={{ flexWrap: "wrap", marginBottom: 14 }}>
               <input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
               <input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
               <button className="secondary" onClick={() => { setPeriodStart(addDaysIso(todayIso(), -6)); setPeriodEnd(todayIso()); }}>Semana</button>
@@ -325,7 +333,7 @@ export function Employees() {
               </div>
             </div>
 
-            <button className="charge-button" style={{ marginTop: 14 }} onClick={handleLiquidate}>
+            <button className="charge-button no-print" style={{ marginTop: 14 }} onClick={handleLiquidate}>
               Liquidar período
             </button>
 

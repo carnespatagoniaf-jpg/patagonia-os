@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { CarcassBatch, CarcassCut } from "@patagonia/domain";
 import { isSupabaseConfigured } from "../../lib/supabase";
-import { useAuth } from "../auth/AuthProvider";
+import { useActiveBranch } from "../branches/BranchProvider";
 import {
   deleteCarcassBatch,
   deleteCarcassCut,
@@ -13,11 +13,8 @@ import {
   type SaveCarcassCutInput
 } from "./carcass-service";
 
-const DEMO_BRANCH_ID = "demo-branch";
-
 export function useCarcass() {
-  const { profile } = useAuth();
-  const branchId = isSupabaseConfigured ? profile?.branch_id ?? null : DEMO_BRANCH_ID;
+  const { branchId } = useActiveBranch();
 
   const [batches, setBatches] = useState<CarcassBatch[]>([]);
   const [loading, setLoading] = useState(isSupabaseConfigured);
