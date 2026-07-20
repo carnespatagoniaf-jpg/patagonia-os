@@ -1,4 +1,4 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "../../lib/supabase";
 
@@ -32,12 +32,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [passwordRecovery, setPasswordRecovery] = useState(false);
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
+  // signIn() ya llama a loadProfile() directamente; sin esto, el evento
+  // SIGNED_IN de onAuthStateChange dispara una segunda llamada en paralelo
+  // a la misma consulta, y una de las dos puede volver vacía (visto en
+  // producción: mismo usuario, mismo filtro, una respuesta con la fila y
+  // la otra sin ninguna). Esta bandera evita la carrera.
+  const signingInRef = useRef(false);
 
   async function loadProfile(userId: string) {
     if (!supabase) return;
     const { data, error } = await supabase
       .from("profiles")
-      .select("id,company_id,branch_id,full_name,role,active")
+      .select("id,company_id,branch_id,full_name,role,active,companies(active)")
       .eq("id", userId)
       .maybeSingle();
 
@@ -55,6 +61,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (!data.active) throw new Error("El usuario está desactivado.");
+    const company = data.companies as unknown as { active: boolean } | { active: boolean }[] | null;
+    const companyActive = Array.isArray(company) ? (company[0]?.active ?? true) : (company?.active ?? true);
+    if (!companyActive) throw new Error("Esta empresa está desactivada.");
     setIsPlatformAdmin(false);
     setProfile(data as UserProfile);
   }
@@ -74,6 +83,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { data: listener } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
       if (event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
       setSession(nextSession);
+      if (signingInRef.current) {
+        // signIn() está manejando este login directamente; evitar una
+        // segunda llamada a loadProfile en paralelo.
+        setLoading(false);
+        return;
+      }
       setProfile(null);
       if (nextSession?.user) {
         try {
@@ -90,10 +105,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function signIn(email: string, password: string) {
     if (!supabase) throw new Error("Supabase todavía no está configurado.");
-    const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-    if (error) throw error;
-    if (!data.user) throw new Error("No se pudo iniciar sesión.");
-    await loadProfile(data.user.id);
+    signingInRef.current = true;
+    try {
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      if (!data.user) throw new Error("No se pudo iniciar sesión.");
+      await loadProfile(data.user.id);
+    } finally {
+      signingInRef.current = false;
+    }
   }
 
   async function signOut() {

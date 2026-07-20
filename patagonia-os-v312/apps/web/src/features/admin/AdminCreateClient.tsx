@@ -1,7 +1,11 @@
-import { useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { LockKeyhole } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
-import { createClient, type CreateClientResult } from "./admin-service";
+import { createClient, listCompanies, setCompanyActive, type CompanySummary, type CreateClientResult } from "./admin-service";
+
+function formatDate(iso: string) {
+  return new Date(iso).toLocaleDateString("es-AR");
+}
 
 interface Draft {
   companyName: string;
@@ -21,6 +25,35 @@ export function AdminCreateClient() {
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<CreateClientResult | null>(null);
 
+  const [companies, setCompanies] = useState<CompanySummary[]>([]);
+  const [companiesLoading, setCompaniesLoading] = useState(true);
+  const [togglingId, setTogglingId] = useState<string | null>(null);
+
+  const reloadCompanies = useCallback(async () => {
+    setCompaniesLoading(true);
+    try {
+      setCompanies(await listCompanies());
+    } finally {
+      setCompaniesLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void reloadCompanies();
+  }, [reloadCompanies]);
+
+  async function toggleActive(company: CompanySummary) {
+    setTogglingId(company.id);
+    try {
+      await setCompanyActive(company.id, !company.active);
+      await reloadCompanies();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo actualizar el cliente.");
+    } finally {
+      setTogglingId(null);
+    }
+  }
+
   async function submit(event: React.FormEvent) {
     event.preventDefault();
     setMessage("");
@@ -39,6 +72,7 @@ export function AdminCreateClient() {
       });
       setResult(created);
       setDraft(emptyDraft());
+      await reloadCompanies();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo crear el cliente.");
     } finally {
@@ -47,8 +81,9 @@ export function AdminCreateClient() {
   }
 
   return (
-    <main className="login-page">
-      <section className="login-card">
+    <main className="login-page" style={{ alignItems: "flex-start", paddingTop: 48, paddingBottom: 48 }}>
+      <div style={{ display: "grid", gap: 24, width: "min(880px, 100%)" }}>
+      <section className="login-card" style={{ width: "min(430px, 100%)", margin: "0 auto" }}>
         <div className="login-logo"><LockKeyhole /></div>
         <p className="eyebrow">PATAGONIA OS · ADMIN</p>
         <h1>Dar de alta un cliente</h1>
@@ -91,6 +126,48 @@ export function AdminCreateClient() {
 
         <button className="login-link-button" onClick={() => void signOut()}>Salir</button>
       </section>
+
+      <section className="panel">
+        <div className="panel-title">
+          <h2>Clientes</h2>
+          <span>{companiesLoading ? "Cargando…" : `${companies.length} clientes`}</span>
+        </div>
+
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Negocio</th>
+              <th className="num">Sucursales</th>
+              <th className="num">Usuarios</th>
+              <th>Alta</th>
+              <th>Estado</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {companies.map((company) => (
+              <tr key={company.id}>
+                <td>{company.name}</td>
+                <td className="num">{company.branchCount}</td>
+                <td className="num">{company.userCount}</td>
+                <td>{formatDate(company.createdAt)}</td>
+                <td>{company.active ? "Activo" : "Inactivo"}</td>
+                <td>
+                  <button
+                    className="secondary"
+                    disabled={togglingId === company.id}
+                    onClick={() => toggleActive(company)}
+                  >
+                    {togglingId === company.id ? "…" : company.active ? "Desactivar" : "Activar"}
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {companies.length === 0 && !companiesLoading && <p className="muted">Todavía no diste de alta ningún cliente.</p>}
+      </section>
+      </div>
     </main>
   );
 }
