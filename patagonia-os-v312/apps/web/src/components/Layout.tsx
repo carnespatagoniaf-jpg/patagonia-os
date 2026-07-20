@@ -71,6 +71,48 @@ function BranchSwitcher() {
   );
 }
 
+function ChangePasswordForm() {
+  const { updatePassword } = useAuth();
+  const [open, setOpen] = useState(false);
+  const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function handleSave() {
+    setMessage("");
+    if (password.length < 6) { setMessage("Mínimo 6 caracteres."); return; }
+    if (password !== confirm) { setMessage("No coinciden."); return; }
+    setBusy(true);
+    try {
+      await updatePassword(password);
+      setOpen(false);
+      setPassword("");
+      setConfirm("");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo cambiar.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return (
+      <button className="branch-switcher-add" onClick={() => setOpen(true)}>Cambiar contraseña</button>
+    );
+  }
+
+  return (
+    <div className="branch-switcher-new">
+      <input type="password" placeholder="Contraseña nueva" value={password} onChange={(e) => setPassword(e.target.value)} />
+      <input type="password" placeholder="Confirmar" value={confirm} onChange={(e) => setConfirm(e.target.value)} />
+      <button className="secondary" disabled={busy} onClick={handleSave}>{busy ? "Guardando…" : "Guardar"}</button>
+      <button className="secondary" onClick={() => { setOpen(false); setMessage(""); }}>Cancelar</button>
+      {message && <p className="branch-switcher-error">{message}</p>}
+    </div>
+  );
+}
+
 export function Layout({ page, onPageChange, children }: Props) {
   const { profile, signOut } = useAuth();
   const visibleItems = items.filter((item) => canAccessPage(profile, item.page));
@@ -100,6 +142,7 @@ export function Layout({ page, onPageChange, children }: Props) {
         </nav>
 
         <div className="sidebar-footer">
+          <ChangePasswordForm />
           <button className="nav-item" onClick={() => void signOut()}>
             <LogOut size={19} />
             Salir

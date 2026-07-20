@@ -12,6 +12,7 @@ import { Carcass } from "./features/carcass/Carcass";
 import { Creditors } from "./features/creditors/Creditors";
 import { Users } from "./features/users/Users";
 import { Login } from "./features/auth/Login";
+import { ResetPassword } from "./features/auth/ResetPassword";
 import { useAuth } from "./features/auth/AuthProvider";
 import { canAccessPage } from "./features/auth/permissions";
 import { BranchProvider } from "./features/branches/BranchProvider";
@@ -19,7 +20,7 @@ import { isSupabaseConfigured } from "./lib/supabase";
 
 export default function App() {
   const [page, setPage] = useState<Page>("dashboard");
-  const { loading, session, profile } = useAuth();
+  const { loading, session, profile, passwordRecovery } = useAuth();
 
   useEffect(() => {
     if (page !== "dashboard" && !canAccessPage(profile, page)) {
@@ -28,6 +29,10 @@ export default function App() {
   }, [profile, page]);
 
   if (loading) return <main className="loading-page">Cargando Patagonia OS…</main>;
+
+  if (isSupabaseConfigured && passwordRecovery) {
+    return <ResetPassword />;
+  }
 
   if (isSupabaseConfigured && (!session || !profile)) {
     return <Login />;

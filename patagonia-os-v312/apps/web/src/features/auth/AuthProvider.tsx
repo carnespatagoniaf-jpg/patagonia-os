@@ -16,8 +16,11 @@ interface AuthContextValue {
   session: Session | null;
   user: User | null;
   profile: UserProfile | null;
+  passwordRecovery: boolean;
   signIn(email: string, password: string): Promise<void>;
   signOut(): Promise<void>;
+  sendPasswordReset(email: string): Promise<void>;
+  updatePassword(newPassword: string): Promise<void>;
 }
 
 const AuthContext = createContext<AuthContextValue | null>(null);
@@ -26,6 +29,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [passwordRecovery, setPasswordRecovery] = useState(false);
 
   async function loadProfile(userId: string) {
     if (!supabase) return;
@@ -52,7 +56,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }).catch(() => setLoading(false));
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (_event, nextSession) => {
+    const { data: listener } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
+      if (event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
       setSession(nextSession);
       setProfile(null);
       if (nextSession?.user) {
@@ -80,6 +85,22 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (supabase) await supabase.auth.signOut();
     setSession(null);
     setProfile(null);
+    setPasswordRecovery(false);
+  }
+
+  async function sendPasswordReset(email: string) {
+    if (!supabase) throw new Error("Supabase todavía no está configurado.");
+    const { error } = await supabase.auth.resetPasswordForEmail(email, {
+      redirectTo: window.location.origin
+    });
+    if (error) throw error;
+  }
+
+  async function updatePassword(newPassword: string) {
+    if (!supabase) throw new Error("Supabase todavía no está configurado.");
+    const { error } = await supabase.auth.updateUser({ password: newPassword });
+    if (error) throw error;
+    setPasswordRecovery(false);
   }
 
   const value = useMemo<AuthContextValue>(() => ({
@@ -87,9 +108,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     session,
     user: session?.user ?? null,
     profile,
+    passwordRecovery,
     signIn,
-    signOut
-  }), [loading, session, profile]);
+    signOut,
+    sendPasswordReset,
+    updatePassword
+  }), [loading, session, profile, passwordRecovery]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
