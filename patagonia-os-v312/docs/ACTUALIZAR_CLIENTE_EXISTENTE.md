@@ -8,6 +8,13 @@ duplicar algo que ya corrió.
 Se hace **cada vez que agarrás una versión nueva del repo para un cliente
 que ya venía andando** (incluida "Carnes Patagonia").
 
+Desde que existe la base compartida (multi-tenant, ver Camino A de
+`docs/INSTALACION_NUEVO_CLIENTE.md`), la mayoría de los clientes viven en
+el **mismo** proyecto Supabase — actualizar ese proyecto actualiza a todos
+los clientes que aloja a la vez. Este checklist sigue aplicando igual,
+tanto para esa base compartida como para un cliente con instalación
+aislada (Camino B).
+
 ---
 
 ## 0. Antes de tocar nada: anotá dónde está parado ese cliente

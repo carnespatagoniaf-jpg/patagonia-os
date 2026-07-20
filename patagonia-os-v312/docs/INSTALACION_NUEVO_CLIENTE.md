@@ -1,5 +1,40 @@
 # Checklist de instalación para un cliente nuevo
 
+## Camino A (default): alta en la base compartida
+
+Desde que existe el modelo multi-tenant (`platform_admins` +
+`create-client`, migración `025_platform_admins.sql`), **dar de alta un
+cliente nuevo no requiere Supabase ni Netlify nuevos**. Todos los clientes
+viven en el mismo proyecto/base, aislados por empresa (RLS por
+`company_id`, ya probado con dos empresas reales conviviendo sin verse
+entre sí).
+
+Pasos:
+
+1. Entrá al sitio con tu login de **platform admin** (el que se dio de alta
+   una vez con `supabase/seed/create_platform_admin.sql`).
+2. Vas a caer directo en la pantalla **"Dar de alta un cliente"**.
+3. Completá: nombre del negocio, nombre de la primera sucursal, nombre y
+   email del dueño → **Crear cliente**.
+4. Te muestra el email y una **contraseña temporal** — pasásela al dueño
+   (una sola vez, no se puede volver a ver). Recomendale cambiarla
+   apenas entre, desde "Cambiar contraseña" en el menú.
+5. Listo. El dueño ya puede loguearse, y desde ahí usa la app normalmente
+   (agregar sucursales, usuarios, productos, etc. — todo lo de siempre).
+
+Si en algún momento el cliente necesita más de una sucursal, o más
+usuarios, eso lo hace él mismo desde la app ("+ Nueva sucursal", "+ Nuevo
+usuario") — no vuelve a este checklist.
+
+## Camino B: instalación aislada (Supabase y sitio propios)
+
+Este es el camino que se usaba antes de tener multi-tenant. Sigue
+disponible para el caso puntual de un cliente que exija su propia
+infraestructura separada (por ejemplo, por un requisito de
+confidencialidad/compliance específico), pero **ya no es el default** —
+implica mantener un proyecto Supabase y un sitio Netlify más por cada
+cliente así.
+
 Esto se hace **una sola vez por cliente** (una carnicería = un proyecto de
 Supabase propio + un sitio propio en Netlify). Agregar sucursales, usuarios o
 empleados a un cliente que ya está instalado **no** requiere repetir nada de
@@ -61,6 +96,9 @@ haya corrido):
 023_adjust_product_stock.sql
 024_update_staff_user.sql
 ```
+
+(`025_platform_admins.sql` no hace falta acá — es solo para la base
+compartida del Camino A, donde un mismo proyecto aloja más de un cliente.)
 
 Si alguno tira error, no sigas con el siguiente hasta resolverlo — están
 pensados para depender de que todo lo anterior haya quedado bien.

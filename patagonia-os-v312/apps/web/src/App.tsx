@@ -13,6 +13,7 @@ import { Creditors } from "./features/creditors/Creditors";
 import { Users } from "./features/users/Users";
 import { Login } from "./features/auth/Login";
 import { ResetPassword } from "./features/auth/ResetPassword";
+import { AdminCreateClient } from "./features/admin/AdminCreateClient";
 import { useAuth } from "./features/auth/AuthProvider";
 import { canAccessPage } from "./features/auth/permissions";
 import { BranchProvider } from "./features/branches/BranchProvider";
@@ -20,7 +21,7 @@ import { isSupabaseConfigured } from "./lib/supabase";
 
 export default function App() {
   const [page, setPage] = useState<Page>("dashboard");
-  const { loading, session, profile, passwordRecovery } = useAuth();
+  const { loading, session, profile, passwordRecovery, isPlatformAdmin } = useAuth();
 
   useEffect(() => {
     if (page !== "dashboard" && !canAccessPage(profile, page)) {
@@ -32,6 +33,10 @@ export default function App() {
 
   if (isSupabaseConfigured && passwordRecovery) {
     return <ResetPassword />;
+  }
+
+  if (isSupabaseConfigured && session && isPlatformAdmin && !profile) {
+    return <AdminCreateClient />;
   }
 
   if (isSupabaseConfigured && (!session || !profile)) {

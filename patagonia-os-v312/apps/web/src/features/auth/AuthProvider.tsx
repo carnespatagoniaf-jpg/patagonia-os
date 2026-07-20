@@ -17,6 +17,7 @@ interface AuthContextValue {
   user: User | null;
   profile: UserProfile | null;
   passwordRecovery: boolean;
+  isPlatformAdmin: boolean;
   signIn(email: string, password: string): Promise<void>;
   signOut(): Promise<void>;
   sendPasswordReset(email: string): Promise<void>;
@@ -30,6 +31,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [profile, setProfile] = useState<UserProfile | null>(null);
   const [passwordRecovery, setPasswordRecovery] = useState(false);
+  const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
 
   async function loadProfile(userId: string) {
     if (!supabase) return;
@@ -37,10 +39,23 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .from("profiles")
       .select("id,company_id,branch_id,full_name,role,active")
       .eq("id", userId)
-      .single();
+      .maybeSingle();
 
     if (error) throw error;
+
+    if (!data) {
+      // Sin fila en profiles: puede ser un platform admin (da de alta
+      // clientes nuevos, no pertenece a ninguna empresa) en vez de un
+      // usuario sin perfil real.
+      const { data: isAdmin } = await supabase.rpc("am_i_platform_admin");
+      setIsPlatformAdmin(Boolean(isAdmin));
+      setProfile(null);
+      if (!isAdmin) throw new Error("No se encontró tu perfil.");
+      return;
+    }
+
     if (!data.active) throw new Error("El usuario está desactivado.");
+    setIsPlatformAdmin(false);
     setProfile(data as UserProfile);
   }
 
@@ -86,6 +101,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setSession(null);
     setProfile(null);
     setPasswordRecovery(false);
+    setIsPlatformAdmin(false);
   }
 
   async function sendPasswordReset(email: string) {
@@ -109,11 +125,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     user: session?.user ?? null,
     profile,
     passwordRecovery,
+    isPlatformAdmin,
     signIn,
     signOut,
     sendPasswordReset,
     updatePassword
-  }), [loading, session, profile, passwordRecovery]);
+  }), [loading, session, profile, passwordRecovery, isPlatformAdmin]);
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
