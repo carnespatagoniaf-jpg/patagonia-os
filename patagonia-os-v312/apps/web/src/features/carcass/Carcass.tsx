@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
+import type { Product } from "@patagonia/domain";
 import { carcassCutLineTotal, marginPercent } from "@patagonia/domain";
 import { useCarcass } from "./useCarcass";
 import { useSuppliers } from "../purchases/useSuppliers";
+import { useActiveBranch } from "../branches/BranchProvider";
+import { listProductsForBranch } from "../inventory/inventory-service";
 import { todayIso } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
 
@@ -14,6 +17,8 @@ const ANIMAL_TYPES = ["Vaca / media res", "Cerdo", "Pollo", "Mocho", "Otro"];
 export function Carcass() {
   const { batches, loading, error, saveBatch, removeBatch, cuts, cutsLoading, loadCuts, saveCut, removeCut } = useCarcass();
   const { suppliers } = useSuppliers();
+  const { branchId } = useActiveBranch();
+  const [products, setProducts] = useState<Product[]>([]);
 
   const [message, setMessage] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -29,12 +34,18 @@ export function Carcass() {
   const [cutName, setCutName] = useState("");
   const [cutWeight, setCutWeight] = useState("");
   const [cutPrice, setCutPrice] = useState("");
+  const [cutProductId, setCutProductId] = useState("");
   const [editingCutId, setEditingCutId] = useState<string | null>(null);
 
   useEffect(() => {
     if (selectedId) void loadCuts(selectedId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedId]);
+
+  useEffect(() => {
+    if (!branchId) return;
+    listProductsForBranch(branchId).then(setProducts).catch(() => setProducts([]));
+  }, [branchId]);
 
   const selectedBatch = batches.find((b) => b.id === selectedId) ?? null;
 
@@ -110,12 +121,20 @@ export function Carcass() {
       if (!Number.isFinite(weight) || weight <= 0) throw new Error("Ingresá el peso del corte.");
       if (!Number.isFinite(price) || price < 0) throw new Error("Ingresá el precio de venta.");
 
-      await saveCut({ id: editingCutId ?? undefined, batchId: selectedBatch.id, cutName: cutName.trim(), weight, unitPrice: price });
+      await saveCut({
+        id: editingCutId ?? undefined,
+        batchId: selectedBatch.id,
+        cutName: cutName.trim(),
+        productId: cutProductId || undefined,
+        weight,
+        unitPrice: price
+      });
       setCutName("");
       setCutWeight("");
       setCutPrice("");
+      setCutProductId("");
       setEditingCutId(null);
-      setMessage("Corte guardado.");
+      setMessage(cutProductId ? "Corte guardado y sumado al stock." : "Corte guardado.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo guardar el corte.");
     }
@@ -128,6 +147,7 @@ export function Carcass() {
     setCutName(cut.cutName);
     setCutWeight(String(cut.weight));
     setCutPrice(String(cut.unitPrice));
+    setCutProductId(cut.productId ?? "");
   }
 
   async function handleDeleteCut(cutId: string) {
@@ -263,16 +283,25 @@ export function Carcass() {
             <input placeholder="Corte (ej. Asado)" value={cutName} onChange={(e) => setCutName(e.target.value)} />
             <input type="number" min="0" step="0.001" placeholder="Peso (kg)" value={cutWeight} onChange={(e) => setCutWeight(e.target.value)} />
             <input type="text" inputMode="decimal" placeholder="Precio venta ($/kg)" value={cutPrice} onChange={(e) => setCutPrice(e.target.value)} />
+            <select value={cutProductId} onChange={(e) => setCutProductId(e.target.value)}>
+              <option value="">Sin producto (no suma stock)</option>
+              {products.map((product) => (
+                <option key={product.id} value={product.id}>{product.name}</option>
+              ))}
+            </select>
             <button onClick={handleSaveCut}>{editingCutId ? "Guardar cambio" : "Agregar corte"}</button>
             {editingCutId && (
-              <button className="secondary" onClick={() => { setEditingCutId(null); setCutName(""); setCutWeight(""); setCutPrice(""); }}>Cancelar</button>
+              <button className="secondary" onClick={() => { setEditingCutId(null); setCutName(""); setCutWeight(""); setCutPrice(""); setCutProductId(""); }}>Cancelar</button>
             )}
           </div>
-          <p className="muted no-print" style={{ marginBottom: 14 }}>Subtotal de este corte: {formatMoney(previewCutTotal)}</p>
+          <p className="muted no-print" style={{ marginBottom: 14 }}>
+            Subtotal de este corte: {formatMoney(previewCutTotal)}
+            {" · "}Si el corte no tiene producto asociado, no suma stock — creá el producto en Stock primero si querés que este corte lo alimente.
+          </p>
 
           <table className="data-table">
             <thead>
-              <tr><th>Corte</th><th className="num">Peso</th><th className="num">Precio/kg</th><th className="num">Subtotal</th><th className="no-print"></th></tr>
+              <tr><th>Corte</th><th className="num">Peso</th><th className="num">Precio/kg</th><th className="num">Subtotal</th><th>Stock</th><th className="no-print"></th></tr>
             </thead>
             <tbody>
               {cuts.map((cut) => (
@@ -281,6 +310,7 @@ export function Carcass() {
                   <td className="num">{cut.weight} kg</td>
                   <td className="num">{formatMoney(cut.unitPrice)}</td>
                   <td className="num">{formatMoney(cut.lineTotal)}</td>
+                  <td>{cut.productId ? (products.find((p) => p.id === cut.productId)?.name ?? "Sí") : "-"}</td>
                   <td className="no-print">
                     <button className="secondary" onClick={() => startEditCut(cut.id)}>Editar</button>{" "}
                     <button className="danger" onClick={() => handleDeleteCut(cut.id)}>Quitar</button>
