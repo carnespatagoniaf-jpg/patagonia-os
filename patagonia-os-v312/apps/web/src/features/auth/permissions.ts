@@ -18,9 +18,28 @@ export type Permission =
   | "branches.manage"
   | "audit.view";
 
+// "owner" es interno nuestro (el equipo de Patagonia OS): ve todo, incluidas
+// herramientas todavía en prueba (Mostrador, Usuarios, Auditoría) antes de
+// decidir si pasan a formar parte de lo que se le vende a un cliente.
+// "admin" es el techo de lo que tiene un cliente real: todo el paquete
+// comercial, sin las herramientas internas de arriba.
 const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> = {
   owner: ["*"],
-  admin: ["*"],
+  admin: [
+    "dashboard.view",
+    "sales.create",
+    "sales.cancel",
+    "inventory.view",
+    "inventory.adjust",
+    "purchases.manage",
+    "treasury.manage",
+    "employees.manage",
+    "profitability.view",
+    "carcass.manage",
+    "creditors.manage",
+    "reports.view",
+    "branches.manage"
+  ],
   manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view"],
   cashier: ["dashboard.view", "sales.create", "inventory.view"],
   production: ["dashboard.view", "inventory.view", "inventory.adjust"],
