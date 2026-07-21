@@ -2,6 +2,7 @@ import type { UserProfile } from "./AuthProvider";
 
 export type Permission =
   | "dashboard.view"
+  | "pos.sell"
   | "sales.create"
   | "sales.cancel"
   | "inventory.view"
@@ -35,7 +36,7 @@ export function can(profile: UserProfile | null, permission: Permission) {
 /** Permiso requerido para cada página del menú — fuente única de verdad para el tipo Page. */
 export const PAGE_PERMISSIONS = {
   dashboard: "dashboard.view",
-  sale: "sales.create",
+  sale: "pos.sell",
   shifts: "sales.create",
   inventory: "inventory.view",
   purchases: "purchases.manage",
