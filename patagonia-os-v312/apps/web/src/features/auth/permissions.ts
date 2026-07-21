@@ -14,7 +14,8 @@ export type Permission =
   | "creditors.manage"
   | "reports.view"
   | "users.manage"
-  | "branches.manage";
+  | "branches.manage"
+  | "audit.view";
 
 const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> = {
   owner: ["*"],
@@ -43,7 +44,8 @@ export const PAGE_PERMISSIONS = {
   carcass: "carcass.manage",
   creditors: "creditors.manage",
   reports: "reports.view",
-  users: "users.manage"
+  users: "users.manage",
+  audit: "audit.view"
 } as const satisfies Record<string, Permission>;
 
 export type Page = keyof typeof PAGE_PERMISSIONS;

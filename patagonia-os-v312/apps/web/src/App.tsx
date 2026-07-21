@@ -11,6 +11,7 @@ import { Profitability } from "./features/profitability/Profitability";
 import { Carcass } from "./features/carcass/Carcass";
 import { Creditors } from "./features/creditors/Creditors";
 import { Users } from "./features/users/Users";
+import { AuditLog } from "./features/audit/AuditLog";
 import { Login } from "./features/auth/Login";
 import { ResetPassword } from "./features/auth/ResetPassword";
 import { AdminCreateClient } from "./features/admin/AdminCreateClient";
@@ -62,6 +63,7 @@ export default function App() {
         {allowed && page === "creditors" && <Creditors />}
         {allowed && page === "reports" && <Reports />}
         {allowed && page === "users" && <Users />}
+        {allowed && page === "audit" && <AuditLog />}
       </Layout>
     </BranchProvider>
   );
