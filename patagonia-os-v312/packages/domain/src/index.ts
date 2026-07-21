@@ -118,6 +118,8 @@ export interface SupplierPayment {
   paymentDate: string;
   amount: Money;
   paymentMethod: PaymentMethod;
+  accountId?: string;
+  accountName?: string;
   notes?: string;
   createdAt: string;
 }
@@ -270,6 +272,8 @@ export interface CreditorDebt {
   debtDate: string;
   amount: Money;
   reason: string;
+  accountId?: string;
+  accountName?: string;
   createdAt: string;
 }
 

@@ -5,14 +5,20 @@ import { useActiveBranch } from "../branches/BranchProvider";
 import {
   createCreditor,
   createCreditorDebt,
+  deleteCreditorDebt,
+  deleteCreditorPayment,
   getCreditorBalance,
   listCreditorDebts,
   listCreditorPayments,
   listCreditors,
   registerCreditorPayment,
+  updateCreditorDebt,
+  updateCreditorPayment,
   type CreateCreditorDebtInput,
   type CreateCreditorInput,
-  type RegisterCreditorPaymentInput
+  type RegisterCreditorPaymentInput,
+  type UpdateCreditorDebtInput,
+  type UpdateCreditorPaymentInput
 } from "./creditors-service";
 
 export function useCreditors() {
@@ -88,5 +94,54 @@ export function useCreditors() {
     [branchId, loadDetail]
   );
 
-  return { branchId, creditors, loading, error, create, debts, payments, balance, detailLoading, loadDetail, addDebt, registerPayment };
+  const editDebt = useCallback(
+    async (creditorId: string, input: UpdateCreditorDebtInput) => {
+      await updateCreditorDebt(input);
+      await loadDetail(creditorId);
+    },
+    [loadDetail]
+  );
+
+  const removeDebt = useCallback(
+    async (creditorId: string, debtId: string) => {
+      await deleteCreditorDebt(debtId);
+      await loadDetail(creditorId);
+    },
+    [loadDetail]
+  );
+
+  const editPayment = useCallback(
+    async (creditorId: string, input: UpdateCreditorPaymentInput) => {
+      await updateCreditorPayment(input);
+      await loadDetail(creditorId);
+    },
+    [loadDetail]
+  );
+
+  const removePayment = useCallback(
+    async (creditorId: string, paymentId: string) => {
+      await deleteCreditorPayment(paymentId);
+      await loadDetail(creditorId);
+    },
+    [loadDetail]
+  );
+
+  return {
+    branchId,
+    creditors,
+    loading,
+    error,
+    create,
+    debts,
+    payments,
+    balance,
+    detailLoading,
+    loadDetail,
+    addDebt,
+    registerPayment,
+    editDebt,
+    removeDebt,
+    editPayment,
+    removePayment
+  };
 }

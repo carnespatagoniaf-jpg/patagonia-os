@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useCreditors } from "./useCreditors";
 import { useTreasury } from "../shifts/useTreasury";
 import { todayIso } from "../shifts/format";
@@ -10,6 +10,8 @@ function formatMoney(value: number) {
 
 interface LedgerRow {
   key: string;
+  type: "debt" | "payment";
+  id: string;
   date: string;
   detail: string;
   debit: number;
@@ -18,7 +20,23 @@ interface LedgerRow {
 }
 
 export function Creditors() {
-  const { creditors, loading, error, create, debts, payments, balance, detailLoading, loadDetail, addDebt, registerPayment } = useCreditors();
+  const {
+    creditors,
+    loading,
+    error,
+    create,
+    debts,
+    payments,
+    balance,
+    detailLoading,
+    loadDetail,
+    addDebt,
+    registerPayment,
+    editDebt,
+    removeDebt,
+    editPayment,
+    removePayment
+  } = useCreditors();
   const { accounts } = useTreasury();
 
   const [message, setMessage] = useState("");
@@ -31,11 +49,19 @@ export function Creditors() {
   const [debtDate, setDebtDate] = useState(todayIso());
   const [debtAmount, setDebtAmount] = useState("");
   const [debtReason, setDebtReason] = useState("");
+  const [debtAccountId, setDebtAccountId] = useState("");
 
   const [paymentDate, setPaymentDate] = useState(todayIso());
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentAccountId, setPaymentAccountId] = useState("");
   const [paymentNotes, setPaymentNotes] = useState("");
+
+  const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
+  const [editDate, setEditDate] = useState("");
+  const [editAmount, setEditAmount] = useState("");
+  const [editReason, setEditReason] = useState("");
+  const [editAccountId, setEditAccountId] = useState("");
+  const [editNotes, setEditNotes] = useState("");
 
   const selectedCreditor = creditors.find((c) => c.id === selectedId) ?? null;
 
@@ -45,10 +71,20 @@ export function Creditors() {
   }
 
   const ledger = useMemo<LedgerRow[]>(() => {
-    const rows = [
-      ...debts.map((d) => ({ key: `debt-${d.id}`, date: d.debtDate, detail: `Deuda · ${d.reason}`, debit: d.amount, credit: 0 })),
+    const rows: Omit<LedgerRow, "balance">[] = [
+      ...debts.map((d) => ({
+        key: `debt-${d.id}`,
+        type: "debt" as const,
+        id: d.id,
+        date: d.debtDate,
+        detail: `Deuda · ${d.reason}${d.accountName ? ` · entró a ${d.accountName}` : ""}`,
+        debit: d.amount,
+        credit: 0
+      })),
       ...payments.map((p) => ({
         key: `payment-${p.id}`,
+        type: "payment" as const,
+        id: p.id,
         date: p.paymentDate,
         detail: `Pago · ${p.accountName ?? "-"}${p.notes ? ` · ${p.notes}` : ""}`,
         debit: 0,
@@ -83,9 +119,10 @@ export function Creditors() {
       const amount = parseAmount(debtAmount);
       if (!Number.isFinite(amount) || amount <= 0) throw new Error("Ingresá un monto válido.");
       if (!debtReason.trim()) throw new Error("Ingresá un motivo (ej. préstamo, mercadería).");
-      await addDebt({ creditorId: selectedCreditor.id, debtDate, amount, reason: debtReason.trim() });
+      await addDebt({ creditorId: selectedCreditor.id, debtDate, amount, reason: debtReason.trim(), accountId: debtAccountId || undefined });
       setDebtAmount("");
       setDebtReason("");
+      setDebtAccountId("");
       setMessage("Deuda cargada.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo cargar la deuda.");
@@ -110,6 +147,69 @@ export function Creditors() {
       setMessage(`Pago registrado. Saldo restante: ${formatMoney(result.balance)}.`);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo registrar el pago.");
+    }
+  }
+
+  function startEditRow(row: LedgerRow) {
+    setEditingRowKey(row.key);
+    setEditDate(row.date);
+    if (row.type === "debt") {
+      const debt = debts.find((d) => d.id === row.id);
+      setEditAmount(String(debt?.amount ?? ""));
+      setEditReason(debt?.reason ?? "");
+      setEditAccountId(debt?.accountId ?? "");
+    } else {
+      const payment = payments.find((p) => p.id === row.id);
+      setEditAmount(String(payment?.amount ?? ""));
+      setEditAccountId(payment?.accountId ?? "");
+      setEditNotes(payment?.notes ?? "");
+    }
+  }
+
+  async function handleSaveRow(row: LedgerRow) {
+    try {
+      if (!selectedCreditor) return;
+      const amount = parseAmount(editAmount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Ingresá un monto válido.");
+
+      if (row.type === "debt") {
+        if (!editReason.trim()) throw new Error("Ingresá un motivo.");
+        await editDebt(selectedCreditor.id, {
+          id: row.id,
+          debtDate: editDate,
+          amount,
+          reason: editReason.trim(),
+          accountId: editAccountId || undefined
+        });
+      } else {
+        if (!editAccountId) throw new Error("Elegí de qué cuenta sale el pago.");
+        await editPayment(selectedCreditor.id, {
+          id: row.id,
+          paymentDate: editDate,
+          amount,
+          accountId: editAccountId,
+          notes: editNotes.trim() || undefined
+        });
+      }
+      setEditingRowKey(null);
+      setMessage(row.type === "debt" ? "Deuda actualizada." : "Pago actualizado.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo guardar el cambio.");
+    }
+  }
+
+  async function handleDeleteRow(row: LedgerRow) {
+    try {
+      if (!selectedCreditor) return;
+      if (row.type === "debt") {
+        await removeDebt(selectedCreditor.id, row.id);
+        setMessage("Deuda borrada.");
+      } else {
+        await removePayment(selectedCreditor.id, row.id);
+        setMessage("Pago borrado.");
+      }
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo borrar.");
     }
   }
 
@@ -195,18 +295,58 @@ export function Creditors() {
                   <th className="num">Debe</th>
                   <th className="num">Haber</th>
                   <th className="num">Saldo</th>
+                  <th className="no-print"></th>
                 </tr>
               </thead>
               <tbody>
-                {ledger.map((row) => (
-                  <tr key={row.key}>
-                    <td>{row.date}</td>
-                    <td>{row.detail}</td>
-                    <td className="num">{row.debit > 0 ? formatMoney(row.debit) : "-"}</td>
-                    <td className="num">{row.credit > 0 ? formatMoney(row.credit) : "-"}</td>
-                    <td className="num">{formatMoney(row.balance)}</td>
-                  </tr>
-                ))}
+                {ledger.map((row) =>
+                  editingRowKey === row.key ? (
+                    <Fragment key={row.key}>
+                      <tr className="no-print">
+                        <td><input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} /></td>
+                        <td>
+                          {row.type === "debt" ? (
+                            <input placeholder="Motivo" value={editReason} onChange={(e) => setEditReason(e.target.value)} />
+                          ) : (
+                            <input placeholder="Nota" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
+                          )}
+                        </td>
+                        <td colSpan={2}>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            className="num"
+                            value={editAmount}
+                            onChange={(e) => setEditAmount(e.target.value)}
+                            style={{ width: 100 }}
+                          />{" "}
+                          <select value={editAccountId} onChange={(e) => setEditAccountId(e.target.value)}>
+                            <option value="">{row.type === "debt" ? "Sin cuenta / no entró plata" : "Pagar desde…"}</option>
+                            {accounts.map((a) => (
+                              <option key={a.id} value={a.id}>{a.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td colSpan={2}>
+                          <button onClick={() => handleSaveRow(row)}>Guardar</button>{" "}
+                          <button className="secondary" onClick={() => setEditingRowKey(null)}>Cancelar</button>
+                        </td>
+                      </tr>
+                    </Fragment>
+                  ) : (
+                    <tr key={row.key}>
+                      <td>{row.date}</td>
+                      <td>{row.detail}</td>
+                      <td className="num">{row.debit > 0 ? formatMoney(row.debit) : "-"}</td>
+                      <td className="num">{row.credit > 0 ? formatMoney(row.credit) : "-"}</td>
+                      <td className="num">{formatMoney(row.balance)}</td>
+                      <td className="no-print">
+                        <button className="secondary" onClick={() => startEditRow(row)}>Editar</button>{" "}
+                        <button className="secondary" onClick={() => handleDeleteRow(row)}>Borrar</button>
+                      </td>
+                    </tr>
+                  )
+                )}
               </tbody>
             </table>
             {ledger.length === 0 && !detailLoading && <p className="muted">Todavía no hay movimientos para este acreedor.</p>}
@@ -220,6 +360,12 @@ export function Creditors() {
               <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10 }}>
                 <input type="date" value={debtDate} onChange={(e) => setDebtDate(e.target.value)} />
                 <input type="text" inputMode="decimal" placeholder="Monto" value={debtAmount} onChange={(e) => setDebtAmount(e.target.value)} />
+                <select value={debtAccountId} onChange={(e) => setDebtAccountId(e.target.value)}>
+                  <option value="">Sin cuenta / no entró plata</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>Entró a {a.name}</option>
+                  ))}
+                </select>
               </div>
               <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
                 <input placeholder="Motivo (ej. préstamo, mercadería)" value={debtReason} onChange={(e) => setDebtReason(e.target.value)} style={{ flex: 1, minWidth: 220 }} />

@@ -135,7 +135,7 @@ export interface RegisterSupplierPaymentInput {
   branchId: string;
   paymentDate: string;
   amount: number;
-  paymentMethod: PaymentMethod;
+  accountId: string;
   notes?: string;
 }
 
@@ -149,12 +149,40 @@ export async function registerSupplierPayment(
     p_branch_id: input.branchId,
     p_payment_date: input.paymentDate,
     p_amount: input.amount,
-    p_payment_method: input.paymentMethod,
+    p_account_id: input.accountId,
     p_notes: input.notes ?? null
   });
 
   if (error) throw error;
   return { id: data.id, balance: data.balance !== null && data.balance !== undefined ? Number(data.balance) : null };
+}
+
+export interface UpdateSupplierPaymentInput {
+  id: string;
+  paymentDate: string;
+  amount: number;
+  accountId: string;
+  notes?: string;
+}
+
+export async function updateSupplierPayment(input: UpdateSupplierPaymentInput): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("update_supplier_payment", {
+    p_payment_id: input.id,
+    p_payment_date: input.paymentDate,
+    p_amount: input.amount,
+    p_account_id: input.accountId,
+    p_notes: input.notes ?? null
+  });
+  if (error) throw error;
+}
+
+export async function deleteSupplierPayment(id: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("delete_supplier_payment", { p_payment_id: id });
+  if (error) throw error;
 }
 
 interface SupplierPaymentRow {
@@ -164,11 +192,14 @@ interface SupplierPaymentRow {
   payment_date: string;
   amount: number;
   payment_method: PaymentMethod;
+  account_id: string | null;
+  treasury_accounts: { name: string } | { name: string }[] | null;
   notes: string | null;
   created_at: string;
 }
 
 function mapSupplierPayment(row: SupplierPaymentRow): SupplierPayment {
+  const account = Array.isArray(row.treasury_accounts) ? row.treasury_accounts[0] : row.treasury_accounts;
   return {
     id: row.id,
     branchId: row.branch_id,
@@ -176,6 +207,8 @@ function mapSupplierPayment(row: SupplierPaymentRow): SupplierPayment {
     paymentDate: row.payment_date,
     amount: Number(row.amount),
     paymentMethod: row.payment_method,
+    accountId: row.account_id ?? undefined,
+    accountName: account?.name,
     notes: row.notes ?? undefined,
     createdAt: row.created_at
   };
@@ -186,7 +219,7 @@ export async function listSupplierPayments(supplierId: string): Promise<Supplier
 
   const { data, error } = await supabase
     .from("supplier_payments")
-    .select("id,branch_id,supplier_id,payment_date,amount,payment_method,notes,created_at")
+    .select("id,branch_id,supplier_id,payment_date,amount,payment_method,account_id,notes,created_at,treasury_accounts(name)")
     .eq("supplier_id", supplierId)
     .order("payment_date", { ascending: false });
 

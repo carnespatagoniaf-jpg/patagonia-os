@@ -5,14 +5,17 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
 import {
   createPurchase,
+  deleteSupplierPayment,
   listPurchaseItems,
   listPurchasesForSupplier,
   listSupplierPayments,
   registerSupplierPayment,
   updatePurchaseItem,
+  updateSupplierPayment,
   type CreatePurchaseInput,
   type PurchaseLineInput,
-  type RegisterSupplierPaymentInput
+  type RegisterSupplierPaymentInput,
+  type UpdateSupplierPaymentInput
 } from "./purchases-service";
 import { fetchSupplierBalance, type SupplierBalance } from "./suppliers-service";
 
@@ -181,7 +184,8 @@ export function usePurchases() {
           supplierId: input.supplierId,
           paymentDate: input.paymentDate,
           amount: input.amount,
-          paymentMethod: input.paymentMethod,
+          paymentMethod: "cash",
+          accountId: input.accountId,
           notes: input.notes,
           createdAt: new Date().toISOString()
         };
@@ -203,5 +207,46 @@ export function usePurchases() {
     [branchId, loadSupplier]
   );
 
-  return { purchases, items, payments, balance, loading, error, branchId, loadSupplier, create, editItem, registerPayment };
+  const updatePayment = useCallback(
+    async (supplierId: string, input: UpdateSupplierPaymentInput) => {
+      if (!isSupabaseConfigured) {
+        setDemoLedgers((current) => {
+          const ledger = current[supplierId];
+          if (!ledger) return current;
+          const nextPayments = ledger.payments.map((p) =>
+            p.id === input.id
+              ? { ...p, paymentDate: input.paymentDate, amount: input.amount, accountId: input.accountId, notes: input.notes }
+              : p
+          );
+          return { ...current, [supplierId]: { ...ledger, payments: nextPayments } };
+        });
+        await loadSupplier(supplierId);
+        return;
+      }
+
+      await updateSupplierPayment(input);
+      await loadSupplier(supplierId);
+    },
+    [loadSupplier]
+  );
+
+  const removePayment = useCallback(
+    async (supplierId: string, paymentId: string) => {
+      if (!isSupabaseConfigured) {
+        setDemoLedgers((current) => {
+          const ledger = current[supplierId];
+          if (!ledger) return current;
+          return { ...current, [supplierId]: { ...ledger, payments: ledger.payments.filter((p) => p.id !== paymentId) } };
+        });
+        await loadSupplier(supplierId);
+        return;
+      }
+
+      await deleteSupplierPayment(paymentId);
+      await loadSupplier(supplierId);
+    },
+    [loadSupplier]
+  );
+
+  return { purchases, items, payments, balance, loading, error, branchId, loadSupplier, create, editItem, registerPayment, updatePayment, removePayment };
 }

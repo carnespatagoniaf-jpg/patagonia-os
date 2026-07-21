@@ -6,6 +6,7 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { listProductsForBranch } from "../inventory/inventory-service";
 import { useSuppliers } from "./useSuppliers";
 import { usePurchases } from "./usePurchases";
+import { useTreasury } from "../shifts/useTreasury";
 import type { PurchaseLineInput } from "./purchases-service";
 import { parseAmount } from "../../lib/money";
 
@@ -61,8 +62,11 @@ export function Purchases() {
     loadSupplier,
     create: createPurchase,
     editItem,
-    registerPayment
+    registerPayment,
+    updatePayment,
+    removePayment
   } = usePurchases();
+  const { accounts } = useTreasury();
 
   const [products, setProducts] = useState<Product[]>(isSupabaseConfigured ? [] : demoProducts);
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
@@ -76,9 +80,15 @@ export function Purchases() {
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
 
   const [paymentAmount, setPaymentAmount] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
+  const [paymentAccountId, setPaymentAccountId] = useState("");
   const [paymentDate, setPaymentDate] = useState(todayIso());
   const [paymentNotes, setPaymentNotes] = useState("");
+
+  const [editingPaymentId, setEditingPaymentId] = useState<string | null>(null);
+  const [editPaymentDate, setEditPaymentDate] = useState("");
+  const [editPaymentAmount, setEditPaymentAmount] = useState("");
+  const [editPaymentAccountId, setEditPaymentAccountId] = useState("");
+  const [editPaymentNotes, setEditPaymentNotes] = useState("");
 
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editQuantity, setEditQuantity] = useState("");
@@ -173,12 +183,13 @@ export function Purchases() {
       if (!selectedSupplierId) throw new Error("Elegí un proveedor primero.");
       const amount = parseAmount(paymentAmount);
       if (!Number.isFinite(amount) || amount <= 0) throw new Error("Ingresá un monto válido.");
+      if (!paymentAccountId) throw new Error("Elegí de qué cuenta sale el pago.");
 
       await registerPayment({
         supplierId: selectedSupplierId,
         paymentDate,
         amount,
-        paymentMethod,
+        accountId: paymentAccountId,
         notes: paymentNotes.trim() || undefined
       });
       setPaymentAmount("");
@@ -186,6 +197,45 @@ export function Purchases() {
       setMessage("Pago registrado.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo registrar el pago.");
+    }
+  }
+
+  function startEditPayment(payment: { id: string; paymentDate: string; amount: number; accountId?: string; notes?: string }) {
+    setEditingPaymentId(payment.id);
+    setEditPaymentDate(payment.paymentDate);
+    setEditPaymentAmount(String(payment.amount));
+    setEditPaymentAccountId(payment.accountId ?? "");
+    setEditPaymentNotes(payment.notes ?? "");
+  }
+
+  async function handleSavePayment() {
+    try {
+      if (!selectedSupplierId || !editingPaymentId) return;
+      const amount = parseAmount(editPaymentAmount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Ingresá un monto válido.");
+      if (!editPaymentAccountId) throw new Error("Elegí de qué cuenta sale el pago.");
+
+      await updatePayment(selectedSupplierId, {
+        id: editingPaymentId,
+        paymentDate: editPaymentDate,
+        amount,
+        accountId: editPaymentAccountId,
+        notes: editPaymentNotes.trim() || undefined
+      });
+      setEditingPaymentId(null);
+      setMessage("Pago actualizado.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo actualizar el pago.");
+    }
+  }
+
+  async function handleDeletePayment(paymentId: string) {
+    try {
+      if (!selectedSupplierId) return;
+      await removePayment(selectedSupplierId, paymentId);
+      setMessage("Pago borrado.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo borrar el pago.");
     }
   }
 
@@ -203,7 +253,7 @@ export function Purchases() {
       ...payments.map((payment) => ({
         key: `payment-${payment.id}`,
         date: payment.paymentDate,
-        detail: `Pago · ${PAYMENT_METHOD_LABELS[payment.paymentMethod]}${payment.notes ? ` · ${payment.notes}` : ""}`,
+        detail: `Pago · ${payment.accountName ?? PAYMENT_METHOD_LABELS[payment.paymentMethod]}${payment.notes ? ` · ${payment.notes}` : ""}`,
         debit: 0,
         credit: payment.amount
       }))
@@ -473,13 +523,11 @@ export function Purchases() {
               <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 14 }}>
                 <input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
                 <input type="text" inputMode="decimal" placeholder="Monto" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
-                <select value={paymentMethod} onChange={(e) => setPaymentMethod(e.target.value as PaymentMethod)}>
-                  <option value="cash">Efectivo</option>
-                  <option value="qr">Mercado Pago QR</option>
-                  <option value="debit">Débito</option>
-                  <option value="credit">Crédito</option>
-                  <option value="bank_province">Banco Provincia</option>
-                  <option value="transfer">Transferencia</option>
+                <select value={paymentAccountId} onChange={(e) => setPaymentAccountId(e.target.value)}>
+                  <option value="">Pagar desde…</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
                 </select>
                 <input placeholder="Nota" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} />
                 <button onClick={handleRegisterPayment}>Registrar pago</button>
@@ -487,16 +535,49 @@ export function Purchases() {
 
               <table className="data-table">
                 <thead>
-                  <tr><th>Fecha</th><th className="num">Monto</th><th>Medio</th><th>Nota</th></tr>
+                  <tr><th>Fecha</th><th className="num">Monto</th><th>Cuenta</th><th>Nota</th><th></th></tr>
                 </thead>
                 <tbody>
                   {payments.map((payment) => (
-                    <tr key={payment.id}>
-                      <td>{payment.paymentDate}</td>
-                      <td className="num">{formatMoney(payment.amount)}</td>
-                      <td>{PAYMENT_METHOD_LABELS[payment.paymentMethod]}</td>
-                      <td>{payment.notes ?? "-"}</td>
-                    </tr>
+                    editingPaymentId === payment.id ? (
+                      <tr key={payment.id}>
+                        <td><input type="date" value={editPaymentDate} onChange={(e) => setEditPaymentDate(e.target.value)} /></td>
+                        <td>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            className="num"
+                            value={editPaymentAmount}
+                            onChange={(e) => setEditPaymentAmount(e.target.value)}
+                            style={{ width: 100 }}
+                          />
+                        </td>
+                        <td>
+                          <select value={editPaymentAccountId} onChange={(e) => setEditPaymentAccountId(e.target.value)}>
+                            <option value="">Pagar desde…</option>
+                            {accounts.map((a) => (
+                              <option key={a.id} value={a.id}>{a.name}</option>
+                            ))}
+                          </select>
+                        </td>
+                        <td><input value={editPaymentNotes} onChange={(e) => setEditPaymentNotes(e.target.value)} /></td>
+                        <td>
+                          <button onClick={handleSavePayment}>Guardar</button>{" "}
+                          <button className="secondary" onClick={() => setEditingPaymentId(null)}>Cancelar</button>
+                        </td>
+                      </tr>
+                    ) : (
+                      <tr key={payment.id}>
+                        <td>{payment.paymentDate}</td>
+                        <td className="num">{formatMoney(payment.amount)}</td>
+                        <td>{payment.accountName ?? PAYMENT_METHOD_LABELS[payment.paymentMethod]}</td>
+                        <td>{payment.notes ?? "-"}</td>
+                        <td>
+                          <button className="secondary" onClick={() => startEditPayment(payment)}>Editar</button>{" "}
+                          <button className="secondary" onClick={() => handleDeletePayment(payment.id)}>Borrar</button>
+                        </td>
+                      </tr>
+                    )
                   ))}
                 </tbody>
               </table>
