@@ -35,6 +35,7 @@ export function can(profile: UserProfile | null, permission: Permission) {
 /** Permiso requerido para cada página del menú — fuente única de verdad para el tipo Page. */
 export const PAGE_PERMISSIONS = {
   dashboard: "dashboard.view",
+  sale: "sales.create",
   shifts: "sales.create",
   inventory: "inventory.view",
   purchases: "purchases.manage",

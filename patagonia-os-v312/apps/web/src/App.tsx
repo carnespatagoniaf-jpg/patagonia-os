@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Layout, type Page } from "./components/Layout";
 import { Dashboard } from "./features/dashboard/Dashboard";
 import { Inventory } from "./features/inventory/Inventory";
+import { Sale } from "./features/sale/Sale";
 import { Purchases } from "./features/purchases/Purchases";
 import { Shifts } from "./features/shifts/Shifts";
 import { Treasury } from "./features/shifts/Treasury";
@@ -53,6 +54,7 @@ export default function App() {
           <div className="message warning">No tenés permiso para ver esta sección. Consultá con el dueño o administrador.</div>
         )}
         {allowed && page === "dashboard" && <Dashboard />}
+        {allowed && page === "sale" && <Sale />}
         {allowed && page === "inventory" && <Inventory />}
         {allowed && page === "purchases" && <Purchases />}
         {allowed && page === "shifts" && <Shifts />}
