@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import type { PayrollAdjustmentType } from "@patagonia/domain";
+import type { PayrollAdjustmentType, SalaryPeriod } from "@patagonia/domain";
 import { useEmployees } from "./useEmployees";
+import { useTreasury } from "../shifts/useTreasury";
 import { addDaysIso, formatMoney, todayIso } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
 
@@ -9,10 +10,21 @@ const ADJUSTMENT_TYPE_LABELS: Record<PayrollAdjustmentType, string> = {
   deduction: "Descuento"
 };
 
+const SALARY_PERIOD_LABELS: Record<SalaryPeriod, string> = {
+  weekly: "por semana",
+  monthly: "por mes"
+};
+
 const OUTFLOW_TYPE_LABELS: Record<string, string> = {
   vale_mercaderia: "Vale · Mercadería",
   vale_adelanto: "Vale · Adelanto"
 };
+
+function daysBetweenInclusive(start: string, end: string) {
+  const a = new Date(`${start}T00:00:00`);
+  const b = new Date(`${end}T00:00:00`);
+  return Math.round((b.getTime() - a.getTime()) / 86400000) + 1;
+}
 
 export function Employees() {
   const {
@@ -28,8 +40,10 @@ export function Employees() {
     loadDetail,
     addAdjustment,
     removeAdjustment,
-    liquidate
+    liquidate,
+    removeLiquidation
   } = useEmployees();
+  const { accounts } = useTreasury();
 
   const [message, setMessage] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -37,11 +51,15 @@ export function Employees() {
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState("");
   const [newSalary, setNewSalary] = useState("");
+  const [newSalaryPeriod, setNewSalaryPeriod] = useState<SalaryPeriod>("monthly");
 
   const [editingEmployee, setEditingEmployee] = useState(false);
   const [editName, setEditName] = useState("");
   const [editSalary, setEditSalary] = useState("");
+  const [editSalaryPeriod, setEditSalaryPeriod] = useState<SalaryPeriod>("monthly");
   const [editActive, setEditActive] = useState(true);
+
+  const [liquidationAccountId, setLiquidationAccountId] = useState("");
 
   const [adjDate, setAdjDate] = useState(todayIso());
   const [adjType, setAdjType] = useState<PayrollAdjustmentType>("bonus");
@@ -61,6 +79,7 @@ export function Employees() {
     if (selectedEmployee) {
       setEditName(selectedEmployee.fullName);
       setEditSalary(String(selectedEmployee.baseSalary));
+      setEditSalaryPeriod(selectedEmployee.salaryPeriod);
       setEditActive(selectedEmployee.active);
       setEditingEmployee(false);
     }
@@ -82,16 +101,24 @@ export function Employees() {
     [vouchers, periodEnd]
   );
 
-  const previewNet = (selectedEmployee?.baseSalary ?? 0) + periodAdjustmentsTotal - periodVouchersTotal;
+  const previewBaseSalary = useMemo(() => {
+    if (!selectedEmployee) return 0;
+    const days = daysBetweenInclusive(periodStart, periodEnd);
+    const divisor = selectedEmployee.salaryPeriod === "weekly" ? 7 : 30;
+    return Math.round((selectedEmployee.baseSalary * days) / divisor);
+  }, [selectedEmployee, periodStart, periodEnd]);
+
+  const previewNet = previewBaseSalary + periodAdjustmentsTotal - periodVouchersTotal;
 
   async function handleCreate() {
     try {
       if (!newName.trim()) throw new Error("El nombre es obligatorio.");
       const baseSalary = parseAmount(newSalary || "0");
       if (!Number.isFinite(baseSalary) || baseSalary < 0) throw new Error("El sueldo no puede ser negativo.");
-      const employee = await create({ fullName: newName.trim(), baseSalary });
+      const employee = await create({ fullName: newName.trim(), baseSalary, salaryPeriod: newSalaryPeriod });
       setNewName("");
       setNewSalary("");
+      setNewSalaryPeriod("monthly");
       setShowNewForm(false);
       setSelectedId(employee.id);
       setMessage("Empleado creado.");
@@ -106,7 +133,7 @@ export function Employees() {
       if (!editName.trim()) throw new Error("El nombre es obligatorio.");
       const baseSalary = parseAmount(editSalary);
       if (!Number.isFinite(baseSalary) || baseSalary < 0) throw new Error("El sueldo no puede ser negativo.");
-      await update({ id: selectedEmployee.id, fullName: editName.trim(), baseSalary, active: editActive });
+      await update({ id: selectedEmployee.id, fullName: editName.trim(), baseSalary, salaryPeriod: editSalaryPeriod, active: editActive });
       setEditingEmployee(false);
       setMessage("Empleado actualizado.");
     } catch (err) {
@@ -142,10 +169,22 @@ export function Employees() {
   async function handleLiquidate() {
     try {
       if (!selectedEmployee) return;
-      const result = await liquidate({ employeeId: selectedEmployee.id, periodStart, periodEnd });
+      if (!liquidationAccountId) throw new Error("Elegí de qué cuenta sale el pago del sueldo.");
+      const result = await liquidate({ employeeId: selectedEmployee.id, periodStart, periodEnd, accountId: liquidationAccountId });
+      setLiquidationAccountId("");
       setMessage(`Liquidación registrada: neto ${formatMoney(result.netAmount)}.`);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo liquidar el período.");
+    }
+  }
+
+  async function handleRemoveLiquidation(id: string) {
+    try {
+      if (!selectedEmployee) return;
+      await removeLiquidation(id, selectedEmployee.id);
+      setMessage("Liquidación eliminada.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo eliminar la liquidación.");
     }
   }
 
@@ -180,7 +219,7 @@ export function Employees() {
               {employees.map((employee) => (
                 <tr key={employee.id}>
                   <td>{employee.fullName}</td>
-                  <td className="num">{formatMoney(employee.baseSalary)}</td>
+                  <td className="num">{formatMoney(employee.baseSalary)} <span className="muted">{SALARY_PERIOD_LABELS[employee.salaryPeriod]}</span></td>
                   <td>
                     <button
                       className={employee.id === selectedId ? "" : "secondary"}
@@ -198,6 +237,10 @@ export function Employees() {
             <div className="cash-banner-form" style={{ marginTop: 16, flexWrap: "wrap" }}>
               <input placeholder="Nombre" value={newName} onChange={(e) => setNewName(e.target.value)} />
               <input type="text" inputMode="decimal" placeholder="Sueldo base" value={newSalary} onChange={(e) => setNewSalary(e.target.value)} />
+              <select value={newSalaryPeriod} onChange={(e) => setNewSalaryPeriod(e.target.value as SalaryPeriod)}>
+                <option value="monthly">Por mes</option>
+                <option value="weekly">Por semana</option>
+              </select>
               <button onClick={handleCreate}>Guardar empleado</button>
               <button className="secondary" onClick={() => setShowNewForm(false)}>Cancelar</button>
             </div>
@@ -216,7 +259,7 @@ export function Employees() {
           {selectedEmployee && !editingEmployee && (
             <div className="totals">
               <span>Nombre <b>{selectedEmployee.fullName}</b></span>
-              <span>Sueldo base <b>{formatMoney(selectedEmployee.baseSalary)}</b></span>
+              <span>Sueldo base <b>{formatMoney(selectedEmployee.baseSalary)} {SALARY_PERIOD_LABELS[selectedEmployee.salaryPeriod]}</b></span>
               <span>Estado <b>{selectedEmployee.active ? "Activo" : "Inactivo"}</b></span>
               <button className="secondary" style={{ marginTop: 10 }} onClick={() => setEditingEmployee(true)}>Editar</button>
             </div>
@@ -225,6 +268,10 @@ export function Employees() {
             <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
               <input value={editName} onChange={(e) => setEditName(e.target.value)} />
               <input type="text" inputMode="decimal" value={editSalary} onChange={(e) => setEditSalary(e.target.value)} />
+              <select value={editSalaryPeriod} onChange={(e) => setEditSalaryPeriod(e.target.value as SalaryPeriod)}>
+                <option value="monthly">Por mes</option>
+                <option value="weekly">Por semana</option>
+              </select>
               <select value={editActive ? "1" : "0"} onChange={(e) => setEditActive(e.target.value === "1")}>
                 <option value="1">Activo</option>
                 <option value="0">Inactivo (eliminado)</option>
@@ -304,7 +351,7 @@ export function Employees() {
               <button className="secondary no-print" onClick={handlePrint}>Imprimir</button>
             </div>
             <p className="muted print-only-header">
-              {selectedEmployee.fullName} · Sueldo base {formatMoney(selectedEmployee.baseSalary)}
+              {selectedEmployee.fullName} · Sueldo {formatMoney(selectedEmployee.baseSalary)} {SALARY_PERIOD_LABELS[selectedEmployee.salaryPeriod]}
             </p>
             <div className="cash-banner-form no-print" style={{ flexWrap: "wrap", marginBottom: 14 }}>
               <input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
@@ -316,8 +363,8 @@ export function Employees() {
 
             <div className="kpi-grid">
               <div className="kpi-card">
-                <span>Sueldo base</span>
-                <strong>{formatMoney(selectedEmployee.baseSalary)}</strong>
+                <span>Sueldo del período ({daysBetweenInclusive(periodStart, periodEnd)} días, {SALARY_PERIOD_LABELS[selectedEmployee.salaryPeriod]})</span>
+                <strong>{formatMoney(previewBaseSalary)}</strong>
               </div>
               <div className="kpi-card">
                 <span>Premios / descuentos</span>
@@ -333,13 +380,21 @@ export function Employees() {
               </div>
             </div>
 
-            <button className="charge-button no-print" style={{ marginTop: 14 }} onClick={handleLiquidate}>
-              Liquidar período
-            </button>
+            <div className="cash-banner-form no-print" style={{ flexWrap: "wrap", marginTop: 14 }}>
+              <select value={liquidationAccountId} onChange={(e) => setLiquidationAccountId(e.target.value)}>
+                <option value="">¿De qué cuenta sale el pago?</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
+              <button className="charge-button" onClick={handleLiquidate}>
+                Liquidar período
+              </button>
+            </div>
 
             <table className="data-table" style={{ marginTop: 18 }}>
               <thead>
-                <tr><th>Período</th><th className="num">Sueldo</th><th className="num">Ajustes</th><th className="num">Vales</th><th className="num">Neto</th></tr>
+                <tr><th>Período</th><th className="num">Sueldo</th><th className="num">Ajustes</th><th className="num">Vales</th><th className="num">Neto</th><th>Pagado desde</th><th className="no-print"></th></tr>
               </thead>
               <tbody>
                 {liquidations.map((l) => (
@@ -349,6 +404,8 @@ export function Employees() {
                     <td className="num">{formatMoney(l.adjustmentsTotal)}</td>
                     <td className="num">{formatMoney(l.vouchersTotal)}</td>
                     <td className="num">{formatMoney(l.netAmount)}</td>
+                    <td>{l.accountName ?? (l.netAmount <= 0 ? "—" : "sin registrar")}</td>
+                    <td className="no-print"><button className="danger" onClick={() => handleRemoveLiquidation(l.id)}>Borrar</button></td>
                   </tr>
                 ))}
               </tbody>

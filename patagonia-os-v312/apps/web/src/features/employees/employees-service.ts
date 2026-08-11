@@ -1,4 +1,4 @@
-import type { Employee, PayrollAdjustment, PayrollAdjustmentType, PayrollLiquidation, ShiftOutflow } from "@patagonia/domain";
+import type { Employee, PayrollAdjustment, PayrollAdjustmentType, PayrollLiquidation, SalaryPeriod, ShiftOutflow } from "@patagonia/domain";
 import { supabase } from "../../lib/supabase";
 
 interface EmployeeRow {
@@ -6,17 +6,25 @@ interface EmployeeRow {
   branch_id: string;
   full_name: string;
   base_salary: number;
+  salary_period: SalaryPeriod;
   active: boolean;
 }
 
 function mapEmployee(row: EmployeeRow): Employee {
-  return { id: row.id, branchId: row.branch_id, fullName: row.full_name, baseSalary: Number(row.base_salary), active: row.active };
+  return {
+    id: row.id,
+    branchId: row.branch_id,
+    fullName: row.full_name,
+    baseSalary: Number(row.base_salary),
+    salaryPeriod: row.salary_period,
+    active: row.active
+  };
 }
 
 export async function listEmployees(includeInactive = false): Promise<Employee[]> {
   if (!supabase) return [];
 
-  let query = supabase.from("employees").select("id,branch_id,full_name,base_salary,active").order("full_name");
+  let query = supabase.from("employees").select("id,branch_id,full_name,base_salary,salary_period,active").order("full_name");
   if (!includeInactive) query = query.eq("active", true);
 
   const { data, error } = await query;
@@ -28,6 +36,7 @@ export interface CreateEmployeeInput {
   branchId: string;
   fullName: string;
   baseSalary: number;
+  salaryPeriod: SalaryPeriod;
 }
 
 export async function createEmployee(input: CreateEmployeeInput): Promise<{ id: string }> {
@@ -36,7 +45,8 @@ export async function createEmployee(input: CreateEmployeeInput): Promise<{ id: 
   const { data, error } = await supabase.rpc("create_employee", {
     p_branch_id: input.branchId,
     p_full_name: input.fullName,
-    p_base_salary: input.baseSalary
+    p_base_salary: input.baseSalary,
+    p_salary_period: input.salaryPeriod
   });
 
   if (error) throw error;
@@ -47,6 +57,7 @@ export interface UpdateEmployeeInput {
   id: string;
   fullName: string;
   baseSalary: number;
+  salaryPeriod: SalaryPeriod;
   active: boolean;
 }
 
@@ -57,7 +68,8 @@ export async function updateEmployee(input: UpdateEmployeeInput): Promise<void> 
     p_employee_id: input.id,
     p_full_name: input.fullName,
     p_base_salary: input.baseSalary,
-    p_active: input.active
+    p_active: input.active,
+    p_salary_period: input.salaryPeriod
   });
 
   if (error) throw error;
@@ -181,10 +193,13 @@ interface PayrollLiquidationRow {
   adjustments_total: number;
   vouchers_total: number;
   net_amount: number;
+  account_id: string | null;
+  treasury_accounts: { name: string } | { name: string }[] | null;
   created_at: string;
 }
 
 function mapLiquidation(row: PayrollLiquidationRow): PayrollLiquidation {
+  const account = Array.isArray(row.treasury_accounts) ? row.treasury_accounts[0] : row.treasury_accounts;
   return {
     id: row.id,
     employeeId: row.employee_id,
@@ -195,6 +210,8 @@ function mapLiquidation(row: PayrollLiquidationRow): PayrollLiquidation {
     adjustmentsTotal: Number(row.adjustments_total),
     vouchersTotal: Number(row.vouchers_total),
     netAmount: Number(row.net_amount),
+    accountId: row.account_id ?? undefined,
+    accountName: account?.name,
     createdAt: row.created_at
   };
 }
@@ -204,12 +221,12 @@ export async function listPayrollLiquidations(employeeId: string): Promise<Payro
 
   const { data, error } = await supabase
     .from("payroll_liquidations")
-    .select("id,employee_id,branch_id,period_start,period_end,base_salary,adjustments_total,vouchers_total,net_amount,created_at")
+    .select("id,employee_id,branch_id,period_start,period_end,base_salary,adjustments_total,vouchers_total,net_amount,account_id,treasury_accounts(name),created_at")
     .eq("employee_id", employeeId)
     .order("period_start", { ascending: false });
 
   if (error) throw error;
-  return (data ?? []).map(mapLiquidation);
+  return ((data ?? []) as unknown as PayrollLiquidationRow[]).map(mapLiquidation);
 }
 
 export interface ClosePayrollLiquidationInput {
@@ -217,6 +234,7 @@ export interface ClosePayrollLiquidationInput {
   employeeId: string;
   periodStart: string;
   periodEnd: string;
+  accountId: string;
 }
 
 export async function closePayrollLiquidation(input: ClosePayrollLiquidationInput): Promise<PayrollLiquidation> {
@@ -226,7 +244,8 @@ export async function closePayrollLiquidation(input: ClosePayrollLiquidationInpu
     p_branch_id: input.branchId,
     p_employee_id: input.employeeId,
     p_period_start: input.periodStart,
-    p_period_end: input.periodEnd
+    p_period_end: input.periodEnd,
+    p_account_id: input.accountId
   });
 
   if (error) throw error;
@@ -240,6 +259,14 @@ export async function closePayrollLiquidation(input: ClosePayrollLiquidationInpu
     adjustmentsTotal: Number(data.adjustments_total),
     vouchersTotal: Number(data.vouchers_total),
     netAmount: Number(data.net_amount),
+    accountId: input.accountId,
     createdAt: new Date().toISOString()
   };
+}
+
+export async function deletePayrollLiquidation(liquidationId: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("delete_payroll_liquidation", { p_liquidation_id: liquidationId });
+  if (error) throw error;
 }

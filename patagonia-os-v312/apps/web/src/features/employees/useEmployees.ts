@@ -7,6 +7,7 @@ import {
   createPayrollAdjustment,
   closePayrollLiquidation,
   deletePayrollAdjustment,
+  deletePayrollLiquidation,
   listEmployeeVouchers,
   listEmployees,
   listPayrollAdjustments,
@@ -22,7 +23,7 @@ import {
 const DEMO_BRANCH_ID = "demo-branch";
 
 const DEMO_EMPLOYEES: Employee[] = [
-  { id: "demo-emp-1", branchId: DEMO_BRANCH_ID, fullName: "Carlos Fernández (demo)", baseSalary: 400000, active: true }
+  { id: "demo-emp-1", branchId: DEMO_BRANCH_ID, fullName: "Carlos Fernández (demo)", baseSalary: 400000, salaryPeriod: "monthly", active: true }
 ];
 
 export function useEmployees() {
@@ -59,7 +60,14 @@ export function useEmployees() {
       if (!branchId) throw new Error("Tu usuario no tiene sucursal asignada.");
 
       if (!isSupabaseConfigured) {
-        const employee: Employee = { id: crypto.randomUUID(), branchId, fullName: input.fullName, baseSalary: input.baseSalary, active: true };
+        const employee: Employee = {
+          id: crypto.randomUUID(),
+          branchId,
+          fullName: input.fullName,
+          baseSalary: input.baseSalary,
+          salaryPeriod: input.salaryPeriod,
+          active: true
+        };
         setEmployees((current) => [...current, employee]);
         return employee;
       }
@@ -74,7 +82,13 @@ export function useEmployees() {
   const update = useCallback(
     async (input: UpdateEmployeeInput) => {
       if (!isSupabaseConfigured) {
-        setEmployees((current) => current.map((e) => (e.id === input.id ? { ...e, fullName: input.fullName, baseSalary: input.baseSalary, active: input.active } : e)));
+        setEmployees((current) =>
+          current.map((e) =>
+            e.id === input.id
+              ? { ...e, fullName: input.fullName, baseSalary: input.baseSalary, salaryPeriod: input.salaryPeriod, active: input.active }
+              : e
+          )
+        );
         return;
       }
 
@@ -148,7 +162,12 @@ export function useEmployees() {
         const vouchersTotal = vouchers
           .filter((v) => v.shiftDate >= input.periodStart && v.shiftDate <= input.periodEnd)
           .reduce((sum, v) => sum + v.amount, 0);
-        const baseSalary = employee?.baseSalary ?? 0;
+        const periodDays =
+          Math.round(
+            (new Date(`${input.periodEnd}T00:00:00`).getTime() - new Date(`${input.periodStart}T00:00:00`).getTime()) / 86400000
+          ) + 1;
+        const divisor = employee?.salaryPeriod === "weekly" ? 7 : 30;
+        const baseSalary = Math.round(((employee?.baseSalary ?? 0) * periodDays) / divisor);
         const liquidation: PayrollLiquidation = {
           id: crypto.randomUUID(),
           employeeId: input.employeeId,
@@ -159,6 +178,7 @@ export function useEmployees() {
           adjustmentsTotal,
           vouchersTotal,
           netAmount: baseSalary + adjustmentsTotal - vouchersTotal,
+          accountId: input.accountId,
           createdAt: new Date().toISOString()
         };
         setLiquidations((current) => [liquidation, ...current]);
@@ -170,6 +190,19 @@ export function useEmployees() {
       return result;
     },
     [branchId, employees, adjustments, vouchers, loadDetail]
+  );
+
+  const removeLiquidation = useCallback(
+    async (liquidationId: string, employeeId: string) => {
+      if (!isSupabaseConfigured) {
+        setLiquidations((current) => current.filter((l) => l.id !== liquidationId));
+        return;
+      }
+
+      await deletePayrollLiquidation(liquidationId);
+      await loadDetail(employeeId);
+    },
+    [loadDetail]
   );
 
   return {
@@ -187,6 +220,7 @@ export function useEmployees() {
     loadDetail,
     addAdjustment,
     removeAdjustment,
-    liquidate
+    liquidate,
+    removeLiquidation
   };
 }
