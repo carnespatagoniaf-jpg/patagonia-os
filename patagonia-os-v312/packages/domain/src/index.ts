@@ -189,6 +189,8 @@ export interface Employee {
   fullName: string;
   baseSalary: Money;
   salaryPeriod: SalaryPeriod;
+  recurringBonusAmount: Money;
+  recurringBonusReason?: string;
   active: boolean;
 }
 

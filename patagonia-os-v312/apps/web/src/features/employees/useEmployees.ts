@@ -23,7 +23,15 @@ import {
 const DEMO_BRANCH_ID = "demo-branch";
 
 const DEMO_EMPLOYEES: Employee[] = [
-  { id: "demo-emp-1", branchId: DEMO_BRANCH_ID, fullName: "Carlos Fernández (demo)", baseSalary: 400000, salaryPeriod: "monthly", active: true }
+  {
+    id: "demo-emp-1",
+    branchId: DEMO_BRANCH_ID,
+    fullName: "Carlos Fernández (demo)",
+    baseSalary: 400000,
+    salaryPeriod: "monthly",
+    recurringBonusAmount: 0,
+    active: true
+  }
 ];
 
 export function useEmployees() {
@@ -66,6 +74,8 @@ export function useEmployees() {
           fullName: input.fullName,
           baseSalary: input.baseSalary,
           salaryPeriod: input.salaryPeriod,
+          recurringBonusAmount: input.recurringBonusAmount,
+          recurringBonusReason: input.recurringBonusReason,
           active: true
         };
         setEmployees((current) => [...current, employee]);
@@ -85,7 +95,15 @@ export function useEmployees() {
         setEmployees((current) =>
           current.map((e) =>
             e.id === input.id
-              ? { ...e, fullName: input.fullName, baseSalary: input.baseSalary, salaryPeriod: input.salaryPeriod, active: input.active }
+              ? {
+                  ...e,
+                  fullName: input.fullName,
+                  baseSalary: input.baseSalary,
+                  salaryPeriod: input.salaryPeriod,
+                  recurringBonusAmount: input.recurringBonusAmount,
+                  recurringBonusReason: input.recurringBonusReason,
+                  active: input.active
+                }
               : e
           )
         );
@@ -167,7 +185,7 @@ export function useEmployees() {
             (new Date(`${input.periodEnd}T00:00:00`).getTime() - new Date(`${input.periodStart}T00:00:00`).getTime()) / 86400000
           ) + 1;
         const divisor = employee?.salaryPeriod === "weekly" ? 7 : 30;
-        const baseSalary = Math.round(((employee?.baseSalary ?? 0) * periodDays) / divisor);
+        const baseSalary = Math.round((((employee?.baseSalary ?? 0) + (employee?.recurringBonusAmount ?? 0)) * periodDays) / divisor);
         const liquidation: PayrollLiquidation = {
           id: crypto.randomUUID(),
           employeeId: input.employeeId,

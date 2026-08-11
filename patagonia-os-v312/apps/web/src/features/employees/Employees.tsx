@@ -52,11 +52,15 @@ export function Employees() {
   const [newName, setNewName] = useState("");
   const [newSalary, setNewSalary] = useState("");
   const [newSalaryPeriod, setNewSalaryPeriod] = useState<SalaryPeriod>("monthly");
+  const [newBonusAmount, setNewBonusAmount] = useState("");
+  const [newBonusReason, setNewBonusReason] = useState("");
 
   const [editingEmployee, setEditingEmployee] = useState(false);
   const [editName, setEditName] = useState("");
   const [editSalary, setEditSalary] = useState("");
   const [editSalaryPeriod, setEditSalaryPeriod] = useState<SalaryPeriod>("monthly");
+  const [editBonusAmount, setEditBonusAmount] = useState("");
+  const [editBonusReason, setEditBonusReason] = useState("");
   const [editActive, setEditActive] = useState(true);
 
   const [liquidationAccountId, setLiquidationAccountId] = useState("");
@@ -80,6 +84,8 @@ export function Employees() {
       setEditName(selectedEmployee.fullName);
       setEditSalary(String(selectedEmployee.baseSalary));
       setEditSalaryPeriod(selectedEmployee.salaryPeriod);
+      setEditBonusAmount(selectedEmployee.recurringBonusAmount ? String(selectedEmployee.recurringBonusAmount) : "");
+      setEditBonusReason(selectedEmployee.recurringBonusReason ?? "");
       setEditActive(selectedEmployee.active);
       setEditingEmployee(false);
     }
@@ -105,7 +111,7 @@ export function Employees() {
     if (!selectedEmployee) return 0;
     const days = daysBetweenInclusive(periodStart, periodEnd);
     const divisor = selectedEmployee.salaryPeriod === "weekly" ? 7 : 30;
-    return Math.round((selectedEmployee.baseSalary * days) / divisor);
+    return Math.round(((selectedEmployee.baseSalary + selectedEmployee.recurringBonusAmount) * days) / divisor);
   }, [selectedEmployee, periodStart, periodEnd]);
 
   const previewNet = previewBaseSalary + periodAdjustmentsTotal - periodVouchersTotal;
@@ -115,10 +121,21 @@ export function Employees() {
       if (!newName.trim()) throw new Error("El nombre es obligatorio.");
       const baseSalary = parseAmount(newSalary || "0");
       if (!Number.isFinite(baseSalary) || baseSalary < 0) throw new Error("El sueldo no puede ser negativo.");
-      const employee = await create({ fullName: newName.trim(), baseSalary, salaryPeriod: newSalaryPeriod });
+      const bonusAmount = parseAmount(newBonusAmount || "0");
+      if (!Number.isFinite(bonusAmount) || bonusAmount < 0) throw new Error("El premio fijo no puede ser negativo.");
+      if (bonusAmount > 0 && !newBonusReason.trim()) throw new Error("El premio fijo necesita un motivo.");
+      const employee = await create({
+        fullName: newName.trim(),
+        baseSalary,
+        salaryPeriod: newSalaryPeriod,
+        recurringBonusAmount: bonusAmount,
+        recurringBonusReason: bonusAmount > 0 ? newBonusReason.trim() : undefined
+      });
       setNewName("");
       setNewSalary("");
       setNewSalaryPeriod("monthly");
+      setNewBonusAmount("");
+      setNewBonusReason("");
       setShowNewForm(false);
       setSelectedId(employee.id);
       setMessage("Empleado creado.");
@@ -133,7 +150,18 @@ export function Employees() {
       if (!editName.trim()) throw new Error("El nombre es obligatorio.");
       const baseSalary = parseAmount(editSalary);
       if (!Number.isFinite(baseSalary) || baseSalary < 0) throw new Error("El sueldo no puede ser negativo.");
-      await update({ id: selectedEmployee.id, fullName: editName.trim(), baseSalary, salaryPeriod: editSalaryPeriod, active: editActive });
+      const bonusAmount = parseAmount(editBonusAmount || "0");
+      if (!Number.isFinite(bonusAmount) || bonusAmount < 0) throw new Error("El premio fijo no puede ser negativo.");
+      if (bonusAmount > 0 && !editBonusReason.trim()) throw new Error("El premio fijo necesita un motivo.");
+      await update({
+        id: selectedEmployee.id,
+        fullName: editName.trim(),
+        baseSalary,
+        salaryPeriod: editSalaryPeriod,
+        recurringBonusAmount: bonusAmount,
+        recurringBonusReason: bonusAmount > 0 ? editBonusReason.trim() : undefined,
+        active: editActive
+      });
       setEditingEmployee(false);
       setMessage("Empleado actualizado.");
     } catch (err) {
@@ -241,6 +269,8 @@ export function Employees() {
                 <option value="monthly">Por mes</option>
                 <option value="weekly">Por semana</option>
               </select>
+              <input type="text" inputMode="decimal" placeholder="Premio fijo (opcional)" value={newBonusAmount} onChange={(e) => setNewBonusAmount(e.target.value)} />
+              <input placeholder="Motivo del premio fijo" value={newBonusReason} onChange={(e) => setNewBonusReason(e.target.value)} />
               <button onClick={handleCreate}>Guardar empleado</button>
               <button className="secondary" onClick={() => setShowNewForm(false)}>Cancelar</button>
             </div>
@@ -260,6 +290,9 @@ export function Employees() {
             <div className="totals">
               <span>Nombre <b>{selectedEmployee.fullName}</b></span>
               <span>Sueldo base <b>{formatMoney(selectedEmployee.baseSalary)} {SALARY_PERIOD_LABELS[selectedEmployee.salaryPeriod]}</b></span>
+              {selectedEmployee.recurringBonusAmount > 0 && (
+                <span>Premio fijo <b>{formatMoney(selectedEmployee.recurringBonusAmount)} {SALARY_PERIOD_LABELS[selectedEmployee.salaryPeriod]} · {selectedEmployee.recurringBonusReason}</b></span>
+              )}
               <span>Estado <b>{selectedEmployee.active ? "Activo" : "Inactivo"}</b></span>
               <button className="secondary" style={{ marginTop: 10 }} onClick={() => setEditingEmployee(true)}>Editar</button>
             </div>
@@ -272,6 +305,8 @@ export function Employees() {
                 <option value="monthly">Por mes</option>
                 <option value="weekly">Por semana</option>
               </select>
+              <input type="text" inputMode="decimal" placeholder="Premio fijo (opcional)" value={editBonusAmount} onChange={(e) => setEditBonusAmount(e.target.value)} />
+              <input placeholder="Motivo del premio fijo" value={editBonusReason} onChange={(e) => setEditBonusReason(e.target.value)} />
               <select value={editActive ? "1" : "0"} onChange={(e) => setEditActive(e.target.value === "1")}>
                 <option value="1">Activo</option>
                 <option value="0">Inactivo (eliminado)</option>

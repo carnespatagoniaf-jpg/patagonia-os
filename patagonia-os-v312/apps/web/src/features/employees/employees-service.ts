@@ -7,6 +7,8 @@ interface EmployeeRow {
   full_name: string;
   base_salary: number;
   salary_period: SalaryPeriod;
+  recurring_bonus_amount: number;
+  recurring_bonus_reason: string | null;
   active: boolean;
 }
 
@@ -17,6 +19,8 @@ function mapEmployee(row: EmployeeRow): Employee {
     fullName: row.full_name,
     baseSalary: Number(row.base_salary),
     salaryPeriod: row.salary_period,
+    recurringBonusAmount: Number(row.recurring_bonus_amount ?? 0),
+    recurringBonusReason: row.recurring_bonus_reason ?? undefined,
     active: row.active
   };
 }
@@ -24,7 +28,10 @@ function mapEmployee(row: EmployeeRow): Employee {
 export async function listEmployees(includeInactive = false): Promise<Employee[]> {
   if (!supabase) return [];
 
-  let query = supabase.from("employees").select("id,branch_id,full_name,base_salary,salary_period,active").order("full_name");
+  let query = supabase
+    .from("employees")
+    .select("id,branch_id,full_name,base_salary,salary_period,recurring_bonus_amount,recurring_bonus_reason,active")
+    .order("full_name");
   if (!includeInactive) query = query.eq("active", true);
 
   const { data, error } = await query;
@@ -37,6 +44,8 @@ export interface CreateEmployeeInput {
   fullName: string;
   baseSalary: number;
   salaryPeriod: SalaryPeriod;
+  recurringBonusAmount: number;
+  recurringBonusReason?: string;
 }
 
 export async function createEmployee(input: CreateEmployeeInput): Promise<{ id: string }> {
@@ -46,7 +55,9 @@ export async function createEmployee(input: CreateEmployeeInput): Promise<{ id: 
     p_branch_id: input.branchId,
     p_full_name: input.fullName,
     p_base_salary: input.baseSalary,
-    p_salary_period: input.salaryPeriod
+    p_salary_period: input.salaryPeriod,
+    p_recurring_bonus_amount: input.recurringBonusAmount,
+    p_recurring_bonus_reason: input.recurringBonusReason ?? null
   });
 
   if (error) throw error;
@@ -58,6 +69,8 @@ export interface UpdateEmployeeInput {
   fullName: string;
   baseSalary: number;
   salaryPeriod: SalaryPeriod;
+  recurringBonusAmount: number;
+  recurringBonusReason?: string;
   active: boolean;
 }
 
@@ -68,6 +81,8 @@ export async function updateEmployee(input: UpdateEmployeeInput): Promise<void> 
     p_employee_id: input.id,
     p_full_name: input.fullName,
     p_base_salary: input.baseSalary,
+    p_recurring_bonus_amount: input.recurringBonusAmount,
+    p_recurring_bonus_reason: input.recurringBonusReason ?? null,
     p_active: input.active,
     p_salary_period: input.salaryPeriod
   });
