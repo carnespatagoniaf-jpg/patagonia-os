@@ -12,7 +12,8 @@ button { cursor: pointer; }
 .app-shell { display: grid; grid-template-columns: 240px 1fr; min-height: 100vh; }
 .sidebar {
   background: #15191f; color: white; padding: 28px 18px; display: flex;
-  flex-direction: column; justify-content: space-between; min-height: 100vh;
+  flex-direction: column; justify-content: space-between; height: 100vh;
+  position: sticky; top: 0; overflow-y: auto;
 }
 .brand { font-size: 20px; font-weight: 900; letter-spacing: .04em; }
 .branch { color: #a7b0bd; font-size: 12px; margin-top: 5px; }
@@ -118,7 +119,7 @@ button.danger { background: white; color: #b42318; border: 1px solid #f3d0cc; }
 }
 @media (max-width: 760px) {
   .app-shell { grid-template-columns: 1fr; }
-  .sidebar { min-height: auto; padding: 14px; position: sticky; top: 0; z-index: 20; }
+  .sidebar { height: auto; padding: 14px; position: sticky; top: 0; z-index: 20; overflow-y: visible; }
   .sidebar nav { display: flex; overflow-x: auto; margin-top: 14px; }
   .sidebar-footer { display: none; }
   .nav-item { width: auto; white-space: nowrap; }
