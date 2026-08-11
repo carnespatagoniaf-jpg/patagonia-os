@@ -143,6 +143,7 @@ export function Creditors() {
         notes: paymentNotes.trim() || undefined
       });
       setPaymentAmount("");
+      setPaymentAccountId("");
       setPaymentNotes("");
       setMessage(`Pago registrado. Saldo restante: ${formatMoney(result.balance)}.`);
     } catch (err) {

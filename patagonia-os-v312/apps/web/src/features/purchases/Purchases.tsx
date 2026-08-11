@@ -193,6 +193,7 @@ export function Purchases() {
         notes: paymentNotes.trim() || undefined
       });
       setPaymentAmount("");
+      setPaymentAccountId("");
       setPaymentNotes("");
       setMessage("Pago registrado.");
     } catch (error) {
