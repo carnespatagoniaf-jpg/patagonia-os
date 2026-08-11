@@ -5,12 +5,15 @@ import { useActiveBranch } from "../branches/BranchProvider";
 import {
   adjustTreasuryAccount,
   createTreasuryAccount,
+  deleteTreasuryExpense,
   listTreasuryAccounts,
   listTreasuryBalances,
   listTreasuryMovements,
+  registerTreasuryExpense,
   transferTreasuryFunds,
   type AdjustTreasuryAccountInput,
   type CreateTreasuryAccountInput,
+  type RegisterTreasuryExpenseInput,
   type TransferTreasuryFundsInput,
   type TreasuryAccountBalance,
   type TreasuryMovementRow
@@ -96,6 +99,7 @@ export function useTreasury() {
             direction: input.direction,
             amount: input.amount,
             movementType: "ajuste",
+            category: null,
             occurredOn: new Date().toISOString().slice(0, 10),
             notes: input.reason
           },
@@ -108,6 +112,50 @@ export function useTreasury() {
       await reload();
     },
     [branchId, accounts, reload]
+  );
+
+  const registerExpense = useCallback(
+    async (input: Omit<RegisterTreasuryExpenseInput, "branchId">) => {
+      if (!branchId) throw new Error("Tu usuario no tiene sucursal asignada.");
+
+      if (!isSupabaseConfigured) {
+        setBalances((current) =>
+          current.map((b) => (b.accountId === input.accountId ? { ...b, balance: b.balance - input.amount } : b))
+        );
+        const account = accounts.find((a) => a.id === input.accountId);
+        setMovements((current) => [
+          {
+            id: crypto.randomUUID(),
+            accountName: account?.name ?? "-",
+            direction: "out",
+            amount: input.amount,
+            movementType: "gasto",
+            category: input.category,
+            occurredOn: input.expenseDate,
+            notes: input.description
+          },
+          ...current
+        ]);
+        return;
+      }
+
+      await registerTreasuryExpense({ ...input, branchId });
+      await reload();
+    },
+    [branchId, accounts, reload]
+  );
+
+  const removeExpense = useCallback(
+    async (movementId: string) => {
+      if (!isSupabaseConfigured) {
+        setMovements((current) => current.filter((m) => m.id !== movementId));
+        return;
+      }
+
+      await deleteTreasuryExpense(movementId);
+      await reload();
+    },
+    [reload]
   );
 
   const transfer = useCallback(
@@ -132,5 +180,5 @@ export function useTreasury() {
     [branchId, reload]
   );
 
-  return { accounts, balances, movements, loading, error, create, adjust, transfer, reload };
+  return { accounts, balances, movements, loading, error, create, adjust, transfer, registerExpense, removeExpense, reload };
 }

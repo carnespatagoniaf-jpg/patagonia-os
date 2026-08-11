@@ -133,6 +133,7 @@ export interface TreasuryMovementRow {
   direction: "in" | "out";
   amount: number;
   movementType: string;
+  category: string | null;
   occurredOn: string;
   notes: string | null;
 }
@@ -142,20 +143,34 @@ interface TreasuryMovementQueryRow {
   direction: "in" | "out";
   amount: number;
   movement_type: string;
+  category: string | null;
   occurred_on: string;
   notes: string | null;
   treasury_accounts: { name: string } | null;
 }
 
-export async function listTreasuryMovements(limit = 30): Promise<TreasuryMovementRow[]> {
+export interface ListTreasuryMovementsOptions {
+  from?: string;
+  to?: string;
+  accountId?: string;
+  limit?: number;
+}
+
+export async function listTreasuryMovements(options: ListTreasuryMovementsOptions = {}): Promise<TreasuryMovementRow[]> {
   if (!supabase) return [];
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("treasury_movements")
-    .select("id,direction,amount,movement_type,occurred_on,notes,treasury_accounts(name)")
+    .select("id,direction,amount,movement_type,category,occurred_on,notes,treasury_accounts(name)")
     .order("occurred_on", { ascending: false })
     .order("created_at", { ascending: false })
-    .limit(limit);
+    .limit(options.limit ?? 30);
+
+  if (options.from) query = query.gte("occurred_on", options.from);
+  if (options.to) query = query.lte("occurred_on", options.to);
+  if (options.accountId) query = query.eq("account_id", options.accountId);
+
+  const { data, error } = await query;
 
   if (error) throw error;
   return ((data ?? []) as unknown as TreasuryMovementQueryRow[]).map((row) => ({
@@ -164,7 +179,42 @@ export async function listTreasuryMovements(limit = 30): Promise<TreasuryMovemen
     direction: row.direction,
     amount: Number(row.amount),
     movementType: row.movement_type,
+    category: row.category,
     occurredOn: row.occurred_on,
     notes: row.notes
   }));
+}
+
+export type TreasuryExpenseCategory = "mantenimiento" | "servicios" | "impuestos" | "insumos" | "otro";
+
+export interface RegisterTreasuryExpenseInput {
+  branchId: string;
+  accountId: string;
+  amount: number;
+  category: TreasuryExpenseCategory;
+  description: string;
+  expenseDate: string;
+}
+
+export async function registerTreasuryExpense(input: RegisterTreasuryExpenseInput): Promise<{ id: string; balance: number }> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.rpc("register_treasury_expense", {
+    p_branch_id: input.branchId,
+    p_account_id: input.accountId,
+    p_amount: input.amount,
+    p_category: input.category,
+    p_description: input.description,
+    p_expense_date: input.expenseDate
+  });
+
+  if (error) throw error;
+  return { id: data.id, balance: Number(data.balance) };
+}
+
+export async function deleteTreasuryExpense(movementId: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("delete_treasury_expense", { p_movement_id: movementId });
+  if (error) throw error;
 }

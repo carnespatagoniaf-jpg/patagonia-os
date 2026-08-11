@@ -5,6 +5,7 @@ import { useShifts } from "./useShifts";
 import { addDaysIso, formatMoney, todayIso } from "./format";
 import { parseAmount } from "../../lib/money";
 import type { ShiftRangeRow } from "./shifts-service";
+import { listTreasuryMovements, type TreasuryExpenseCategory, type TreasuryMovementRow } from "./treasury-service";
 
 const PAYMENT_METHOD_OPTIONS: { value: PaymentMethod; label: string }[] = [
   { value: "cash", label: "Efectivo" },
@@ -22,11 +23,24 @@ const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   pago_proveedor: "Pago a proveedor",
   vale_mercaderia: "Vale · Mercadería",
   vale_adelanto: "Vale · Adelanto de sueldo",
-  gasto: "Gasto"
+  gasto: "Gasto",
+  sueldo: "Liquidación de sueldo"
 };
 
+const EXPENSE_CATEGORY_OPTIONS: { value: TreasuryExpenseCategory; label: string }[] = [
+  { value: "mantenimiento", label: "Mantenimiento / reparaciones" },
+  { value: "servicios", label: "Servicios (luz, gas, alquiler)" },
+  { value: "impuestos", label: "Impuestos" },
+  { value: "insumos", label: "Insumos varios" },
+  { value: "otro", label: "Otro" }
+];
+
+const EXPENSE_CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
+  EXPENSE_CATEGORY_OPTIONS.map((o) => [o.value, o.label])
+);
+
 export function Treasury() {
-  const { accounts, balances, movements, loading, error, create, adjust, transfer } = useTreasury();
+  const { accounts, balances, movements, loading, error, create, adjust, transfer, registerExpense, removeExpense } = useTreasury();
   const { loadRange } = useShifts();
 
   const [message, setMessage] = useState("");
@@ -79,6 +93,19 @@ export function Treasury() {
   const [transferAmount, setTransferAmount] = useState("");
   const [transferReason, setTransferReason] = useState("");
 
+  const [expenseDate, setExpenseDate] = useState(todayIso());
+  const [expenseAccountId, setExpenseAccountId] = useState("");
+  const [expenseCategory, setExpenseCategory] = useState<TreasuryExpenseCategory>("mantenimiento");
+  const [expenseAmount, setExpenseAmount] = useState("");
+  const [expenseDescription, setExpenseDescription] = useState("");
+
+  const [movementsFrom, setMovementsFrom] = useState(addDaysIso(todayIso(), -29));
+  const [movementsTo, setMovementsTo] = useState(todayIso());
+  const [movementsAccountId, setMovementsAccountId] = useState("");
+  const [movementsRows, setMovementsRows] = useState<TreasuryMovementRow[] | null>(null);
+  const [movementsLoading, setMovementsLoading] = useState(false);
+  const displayedMovements = movementsRows ?? movements;
+
   async function handleCreateAccount() {
     try {
       if (!accountName.trim()) throw new Error("El nombre de la cuenta es obligatorio.");
@@ -121,6 +148,54 @@ export function Treasury() {
       setMessage("Transferencia registrada.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo registrar la transferencia.");
+    }
+  }
+
+  async function handleRegisterExpense() {
+    try {
+      if (!expenseAccountId) throw new Error("Elegí de qué cuenta sale el gasto.");
+      const amount = parseAmount(expenseAmount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Ingresá un monto válido.");
+      if (!expenseDescription.trim()) throw new Error("Ingresá una descripción (ej. arreglo de motor).");
+      await registerExpense({
+        accountId: expenseAccountId,
+        amount,
+        category: expenseCategory,
+        description: expenseDescription.trim(),
+        expenseDate
+      });
+      setExpenseAmount("");
+      setExpenseDescription("");
+      setMessage("Gasto registrado.");
+      setMovementsRows(null);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo registrar el gasto.");
+    }
+  }
+
+  async function handleRemoveExpense(id: string) {
+    try {
+      await removeExpense(id);
+      setMessage("Gasto eliminado.");
+      setMovementsRows(null);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo eliminar el gasto.");
+    }
+  }
+
+  async function handleSearchMovements() {
+    setMovementsLoading(true);
+    try {
+      setMovementsRows(
+        await listTreasuryMovements({
+          from: movementsFrom,
+          to: movementsTo,
+          accountId: movementsAccountId || undefined,
+          limit: 300
+        })
+      );
+    } finally {
+      setMovementsLoading(false);
     }
   }
 
@@ -224,10 +299,38 @@ export function Treasury() {
       <div className="content-grid" style={{ marginTop: 18 }}>
         <section className="panel">
           <div className="panel-title">
+            <h2>Registrar gasto</h2>
+          </div>
+          <p className="muted" style={{ marginBottom: 14 }}>
+            Para plata que sale de verdad de la caja (arreglos, servicios, impuestos), sin necesidad de un turno abierto.
+          </p>
+          <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10 }}>
+            <input type="date" value={expenseDate} onChange={(e) => setExpenseDate(e.target.value)} />
+            <select value={expenseAccountId} onChange={(e) => setExpenseAccountId(e.target.value)}>
+              <option value="">¿De qué cuenta sale?</option>
+              {accounts.map((a) => (
+                <option key={a.id} value={a.id}>{a.name}</option>
+              ))}
+            </select>
+            <select value={expenseCategory} onChange={(e) => setExpenseCategory(e.target.value as TreasuryExpenseCategory)}>
+              {EXPENSE_CATEGORY_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
+            </select>
+            <input type="text" inputMode="decimal" placeholder="Monto" value={expenseAmount} onChange={(e) => setExpenseAmount(e.target.value)} />
+          </div>
+          <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
+            <input placeholder="Descripción (ej. arreglo de motor)" value={expenseDescription} onChange={(e) => setExpenseDescription(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
+            <button onClick={handleRegisterExpense}>Registrar gasto</button>
+          </div>
+        </section>
+
+        <section className="panel">
+          <div className="panel-title">
             <h2>Ajustar cuenta</h2>
           </div>
           <p className="muted" style={{ marginBottom: 14 }}>
-            Para diferencias por comisiones, errores de caja u otros detalles.
+            Solo para corregir diferencias de caja (comisiones, errores de conteo) — para gastos reales usá "Registrar gasto".
           </p>
           <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10 }}>
             <select value={adjustAccountId} onChange={(e) => setAdjustAccountId(e.target.value)}>
@@ -279,26 +382,55 @@ export function Treasury() {
 
       <section className="panel" style={{ marginTop: 18 }}>
         <div className="panel-title">
-          <h2>Movimientos recientes</h2>
+          <h2>Movimientos</h2>
         </div>
-        <table className="data-table">
-          <thead>
-            <tr><th>Fecha</th><th>Cuenta</th><th>Tipo</th><th>Dirección</th><th className="num">Monto</th><th>Nota</th></tr>
-          </thead>
-          <tbody>
-            {movements.map((m) => (
-              <tr key={m.id}>
-                <td>{m.occurredOn}</td>
-                <td>{m.accountName}</td>
-                <td>{MOVEMENT_TYPE_LABELS[m.movementType] ?? m.movementType}</td>
-                <td className={m.direction === "in" ? "num-positive" : "num-negative"}>{m.direction === "in" ? "Entrada" : "Salida"}</td>
-                <td className="num">{formatMoney(m.amount)}</td>
-                <td>{m.notes ?? "-"}</td>
-              </tr>
+        <p className="muted" style={{ marginBottom: 14 }}>
+          Por default muestra los últimos 30. Buscá por fecha y/o cuenta para encontrar algo puntual de hace tiempo.
+        </p>
+        <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 14 }}>
+          <input type="date" value={movementsFrom} onChange={(e) => setMovementsFrom(e.target.value)} />
+          <input type="date" value={movementsTo} onChange={(e) => setMovementsTo(e.target.value)} />
+          <select value={movementsAccountId} onChange={(e) => setMovementsAccountId(e.target.value)}>
+            <option value="">Todas las cuentas</option>
+            {accounts.map((a) => (
+              <option key={a.id} value={a.id}>{a.name}</option>
             ))}
-          </tbody>
-        </table>
-        {movements.length === 0 && <p className="muted">Todavía no hay movimientos.</p>}
+          </select>
+          <button onClick={handleSearchMovements}>Buscar</button>
+          {movementsRows !== null && (
+            <button className="secondary" onClick={() => setMovementsRows(null)}>Ver últimos 30</button>
+          )}
+        </div>
+        {movementsLoading ? (
+          <p className="muted">Buscando…</p>
+        ) : (
+          <table className="data-table">
+            <thead>
+              <tr><th>Fecha</th><th>Cuenta</th><th>Tipo</th><th>Dirección</th><th className="num">Monto</th><th>Nota</th><th className="no-print"></th></tr>
+            </thead>
+            <tbody>
+              {displayedMovements.map((m) => (
+                <tr key={m.id}>
+                  <td>{m.occurredOn}</td>
+                  <td>{m.accountName}</td>
+                  <td>
+                    {MOVEMENT_TYPE_LABELS[m.movementType] ?? m.movementType}
+                    {m.category ? ` · ${EXPENSE_CATEGORY_LABELS[m.category] ?? m.category}` : ""}
+                  </td>
+                  <td className={m.direction === "in" ? "num-positive" : "num-negative"}>{m.direction === "in" ? "Entrada" : "Salida"}</td>
+                  <td className="num">{formatMoney(m.amount)}</td>
+                  <td>{m.notes ?? "-"}</td>
+                  <td className="no-print">
+                    {m.movementType === "gasto" && (
+                      <button className="danger" onClick={() => handleRemoveExpense(m.id)}>Borrar</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+        {!movementsLoading && displayedMovements.length === 0 && <p className="muted">No hay movimientos para mostrar.</p>}
       </section>
     </>
   );
