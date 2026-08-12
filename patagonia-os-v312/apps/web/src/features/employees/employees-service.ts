@@ -249,7 +249,7 @@ export interface ClosePayrollLiquidationInput {
   employeeId: string;
   periodStart: string;
   periodEnd: string;
-  accountId: string;
+  accountId?: string;
 }
 
 export async function closePayrollLiquidation(input: ClosePayrollLiquidationInput): Promise<PayrollLiquidation> {
@@ -260,7 +260,7 @@ export async function closePayrollLiquidation(input: ClosePayrollLiquidationInpu
     p_employee_id: input.employeeId,
     p_period_start: input.periodStart,
     p_period_end: input.periodEnd,
-    p_account_id: input.accountId
+    p_account_id: input.accountId ?? null
   });
 
   if (error) throw error;

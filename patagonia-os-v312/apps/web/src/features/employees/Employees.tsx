@@ -197,8 +197,12 @@ export function Employees() {
   async function handleLiquidate() {
     try {
       if (!selectedEmployee) return;
-      if (!liquidationAccountId) throw new Error("Elegí de qué cuenta sale el pago del sueldo.");
-      const result = await liquidate({ employeeId: selectedEmployee.id, periodStart, periodEnd, accountId: liquidationAccountId });
+      const result = await liquidate({
+        employeeId: selectedEmployee.id,
+        periodStart,
+        periodEnd,
+        accountId: liquidationAccountId || undefined
+      });
       setLiquidationAccountId("");
       setMessage(`Liquidación registrada: neto ${formatMoney(result.netAmount)}.`);
     } catch (err) {
@@ -417,7 +421,7 @@ export function Employees() {
 
             <div className="cash-banner-form no-print" style={{ flexWrap: "wrap", marginTop: 14 }}>
               <select value={liquidationAccountId} onChange={(e) => setLiquidationAccountId(e.target.value)}>
-                <option value="">¿De qué cuenta sale el pago?</option>
+                <option value="">Sin cuenta (ya se pagó por afuera del sistema)</option>
                 {accounts.map((a) => (
                   <option key={a.id} value={a.id}>{a.name}</option>
                 ))}
@@ -426,6 +430,9 @@ export function Employees() {
                 Liquidar período
               </button>
             </div>
+            <p className="muted" style={{ marginTop: 6 }}>
+              Si elegís una cuenta y el neto da positivo, se resta de ahí. Si lo dejás sin cuenta, la liquidación queda registrada pero no mueve nada de Tesorería.
+            </p>
 
             <table className="data-table" style={{ marginTop: 18 }}>
               <thead>
@@ -439,7 +446,7 @@ export function Employees() {
                     <td className="num">{formatMoney(l.adjustmentsTotal)}</td>
                     <td className="num">{formatMoney(l.vouchersTotal)}</td>
                     <td className="num">{formatMoney(l.netAmount)}</td>
-                    <td>{l.accountName ?? (l.netAmount <= 0 ? "—" : "sin registrar")}</td>
+                    <td>{l.accountName ?? "—"}</td>
                     <td className="no-print"><button className="danger" onClick={() => handleRemoveLiquidation(l.id)}>Borrar</button></td>
                   </tr>
                 ))}
