@@ -10,10 +10,27 @@ import { MOVEMENT_TYPE_LABELS } from "../shifts/Treasury";
 interface CashSummary {
   totalIn: number;
   totalOut: number;
+  ventas: number;
+  compras: number;
+  sueldos: number;
+  gastos: number;
+  otros: number;
   byType: { type: string; in: number; out: number }[];
 }
 
-const EMPTY_CASH_SUMMARY: CashSummary = { totalIn: 0, totalOut: 0, byType: [] };
+const EMPTY_CASH_SUMMARY: CashSummary = {
+  totalIn: 0,
+  totalOut: 0,
+  ventas: 0,
+  compras: 0,
+  sueldos: 0,
+  gastos: 0,
+  otros: 0,
+  byType: []
+};
+
+const SUELDOS_TYPES = new Set(["sueldo", "vale_adelanto", "vale_mercaderia"]);
+const GASTOS_TYPES = new Set(["gasto", "ajuste", "pago_acreedor"]);
 
 const CATEGORY_LABELS: Record<string, string> = {
   achura: "Achura",
@@ -111,7 +128,15 @@ export function Profitability() {
       const byTypeMap = new Map<string, { in: number; out: number }>();
       let totalIn = 0;
       let totalOut = 0;
+      let ventas = 0;
+      let compras = 0;
+      let sueldos = 0;
+      let gastos = 0;
+      let otros = 0;
       for (const m of movements) {
+        // Transferencias entre cuentas propias no son plata real entrando/saliendo del negocio.
+        if (m.movementType === "transferencia") continue;
+
         const entry = byTypeMap.get(m.movementType) ?? { in: 0, out: 0 };
         if (m.direction === "in") {
           entry.in += m.amount;
@@ -121,11 +146,17 @@ export function Profitability() {
           totalOut += m.amount;
         }
         byTypeMap.set(m.movementType, entry);
+
+        if (m.movementType === "venta") ventas += m.amount;
+        else if (m.movementType === "pago_proveedor") compras += m.amount;
+        else if (SUELDOS_TYPES.has(m.movementType)) sueldos += m.amount;
+        else if (GASTOS_TYPES.has(m.movementType) && m.direction === "out") gastos += m.amount;
+        else otros += m.direction === "in" ? -m.amount : m.amount;
       }
       const byType = Array.from(byTypeMap.entries())
         .map(([type, sums]) => ({ type, ...sums }))
         .sort((a, b) => b.in + b.out - (a.in + a.out));
-      setCashSummary({ totalIn, totalOut, byType });
+      setCashSummary({ totalIn, totalOut, ventas, compras, sueldos, gastos, otros, byType });
     } finally {
       setCashSummaryLoading(false);
     }
@@ -352,13 +383,27 @@ export function Profitability() {
         </p>
         <div className="kpi-grid">
           <div className="kpi-card">
-            <span>Total entradas</span>
-            <strong className="num-positive">{formatMoney(cashSummary.totalIn)}</strong>
+            <span>Ventas</span>
+            <strong className="num-positive">{formatMoney(cashSummary.ventas)}</strong>
           </div>
           <div className="kpi-card">
-            <span>Total salidas</span>
-            <strong className="num-negative">{formatMoney(cashSummary.totalOut)}</strong>
+            <span>Compras (pagos a proveedores)</span>
+            <strong className="num-negative">{formatMoney(cashSummary.compras)}</strong>
           </div>
+          <div className="kpi-card">
+            <span>Sueldos (liquidaciones + vales)</span>
+            <strong className="num-negative">{formatMoney(cashSummary.sueldos)}</strong>
+          </div>
+          <div className="kpi-card">
+            <span>Gastos (+ajustes)</span>
+            <strong className="num-negative">{formatMoney(cashSummary.gastos)}</strong>
+          </div>
+          {cashSummary.otros !== 0 && (
+            <div className="kpi-card">
+              <span>Otros</span>
+              <strong className={cashSummary.otros < 0 ? "num-positive" : "num-negative"}>{formatMoney(cashSummary.otros)}</strong>
+            </div>
+          )}
           <div className="kpi-card">
             <span>Diferencia (cuánto te dejó)</span>
             <strong className={cashSummary.totalIn - cashSummary.totalOut < 0 ? "num-negative" : "num-positive"}>
@@ -366,6 +411,9 @@ export function Profitability() {
             </strong>
           </div>
         </div>
+        <p className="muted" style={{ marginTop: 10 }}>
+          Total entradas {formatMoney(cashSummary.totalIn)} − Total salidas {formatMoney(cashSummary.totalOut)} = Diferencia. Las transferencias entre tus propias cuentas no cuentan acá.
+        </p>
         <table className="data-table" style={{ marginTop: 14 }}>
           <thead>
             <tr><th>Tipo de movimiento</th><th className="num">Entradas</th><th className="num">Salidas</th></tr>
