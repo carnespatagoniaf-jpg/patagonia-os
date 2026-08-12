@@ -18,11 +18,13 @@ const PAYMENT_METHOD_OPTIONS: { value: PaymentMethod; label: string }[] = [
 
 const MOVEMENTS_SEARCH_LIMIT = 3000;
 
-const MOVEMENT_TYPE_LABELS: Record<string, string> = {
+export const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   venta: "Venta",
   ajuste: "Ajuste",
   transferencia: "Transferencia",
   pago_proveedor: "Pago a proveedor",
+  pago_acreedor: "Pago a acreedor",
+  creditor_debt: "Préstamo recibido",
   vale_mercaderia: "Vale · Mercadería",
   vale_adelanto: "Vale · Adelanto de sueldo",
   gasto: "Gasto",

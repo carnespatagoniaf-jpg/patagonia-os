@@ -4,6 +4,16 @@ import { useProfitability } from "./useProfitability";
 import { useShifts } from "../shifts/useShifts";
 import { addDaysIso, endOfMonthIso, endOfWeekIso, formatMoney, startOfMonthIso, startOfWeekIso, todayIso } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
+import { listTreasuryMovements } from "../shifts/treasury-service";
+import { MOVEMENT_TYPE_LABELS } from "../shifts/Treasury";
+
+interface CashSummary {
+  totalIn: number;
+  totalOut: number;
+  byType: { type: string; in: number; out: number }[];
+}
+
+const EMPTY_CASH_SUMMARY: CashSummary = { totalIn: 0, totalOut: 0, byType: [] };
 
 const CATEGORY_LABELS: Record<string, string> = {
   achura: "Achura",
@@ -12,6 +22,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   vacuno: "Vacuno",
   embutidos: "Embutidos",
   preparados: "Preparados",
+  proveeduria: "Proveeduría",
   varios: "Varios"
 };
 
@@ -53,6 +64,9 @@ export function Profitability() {
   const [purchasesTotal, setPurchasesTotal] = useState(0);
   const [previewLoading, setPreviewLoading] = useState(false);
 
+  const [cashSummary, setCashSummary] = useState<CashSummary>(EMPTY_CASH_SUMMARY);
+  const [cashSummaryLoading, setCashSummaryLoading] = useState(false);
+
   const [countDate, setCountDate] = useState(todayIso());
   const [countValues, setCountValues] = useState<Record<string, string>>({});
 
@@ -60,6 +74,7 @@ export function Profitability() {
     void loadPurchasedProducts(periodStart, periodEnd);
     void runPreview(periodStart, periodEnd);
     void runStockLookup(periodStart, periodEnd);
+    void runCashSummary(periodStart, periodEnd);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [periodStart, periodEnd, branchId]);
 
@@ -87,6 +102,33 @@ export function Profitability() {
     setStockStartDate(start ? start.date : null);
     setStockEnd(end ? String(end.total) : "");
     setStockEndDate(end ? end.date : null);
+  }
+
+  async function runCashSummary(from: string, to: string) {
+    setCashSummaryLoading(true);
+    try {
+      const movements = await listTreasuryMovements({ from, to, limit: 3000 });
+      const byTypeMap = new Map<string, { in: number; out: number }>();
+      let totalIn = 0;
+      let totalOut = 0;
+      for (const m of movements) {
+        const entry = byTypeMap.get(m.movementType) ?? { in: 0, out: 0 };
+        if (m.direction === "in") {
+          entry.in += m.amount;
+          totalIn += m.amount;
+        } else {
+          entry.out += m.amount;
+          totalOut += m.amount;
+        }
+        byTypeMap.set(m.movementType, entry);
+      }
+      const byType = Array.from(byTypeMap.entries())
+        .map(([type, sums]) => ({ type, ...sums }))
+        .sort((a, b) => b.in + b.out - (a.in + a.out));
+      setCashSummary({ totalIn, totalOut, byType });
+    } finally {
+      setCashSummaryLoading(false);
+    }
   }
 
   const fixedCostsMonthly = fixedCosts.reduce((sum, f) => sum + f.monthlyAmount, 0);
@@ -298,6 +340,47 @@ export function Profitability() {
           <button className="secondary" onClick={() => { setPeriodStart(startOfMonthIso(addDaysIso(startOfMonthIso(todayIso()), -1))); setPeriodEnd(endOfMonthIso(addDaysIso(startOfMonthIso(todayIso()), -1))); }}>Mes pasado</button>
         </div>
         <p className="muted">Semana de lunes a domingo. {daysInPeriod} día{daysInPeriod !== 1 ? "s" : ""} en el período elegido.</p>
+      </section>
+
+      <section className="panel" style={{ marginTop: 18 }}>
+        <div className="panel-title">
+          <h2>Resumen de caja (Tesorería)</h2>
+          <span>{cashSummaryLoading ? "Cargando…" : null}</span>
+        </div>
+        <p className="muted" style={{ marginBottom: 14 }}>
+          Cuánto entró y salió de tus cuentas en el período — ventas, sueldos, pagos a proveedores, gastos, todo. No es lo mismo que la Ganancia de abajo (que es margen de mercadería); esto es la plata real que se movió.
+        </p>
+        <div className="kpi-grid">
+          <div className="kpi-card">
+            <span>Total entradas</span>
+            <strong className="num-positive">{formatMoney(cashSummary.totalIn)}</strong>
+          </div>
+          <div className="kpi-card">
+            <span>Total salidas</span>
+            <strong className="num-negative">{formatMoney(cashSummary.totalOut)}</strong>
+          </div>
+          <div className="kpi-card">
+            <span>Diferencia (cuánto te dejó)</span>
+            <strong className={cashSummary.totalIn - cashSummary.totalOut < 0 ? "num-negative" : "num-positive"}>
+              {formatMoney(cashSummary.totalIn - cashSummary.totalOut)}
+            </strong>
+          </div>
+        </div>
+        <table className="data-table" style={{ marginTop: 14 }}>
+          <thead>
+            <tr><th>Tipo de movimiento</th><th className="num">Entradas</th><th className="num">Salidas</th></tr>
+          </thead>
+          <tbody>
+            {cashSummary.byType.map((row) => (
+              <tr key={row.type}>
+                <td>{MOVEMENT_TYPE_LABELS[row.type] ?? row.type}</td>
+                <td className="num">{row.in ? formatMoney(row.in) : "-"}</td>
+                <td className="num">{row.out ? formatMoney(row.out) : "-"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {!cashSummaryLoading && cashSummary.byType.length === 0 && <p className="muted">No hay movimientos de Tesorería en este período.</p>}
       </section>
 
       <div className="content-grid" style={{ marginTop: 18 }}>

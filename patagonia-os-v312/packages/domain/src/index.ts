@@ -228,7 +228,7 @@ export interface FixedCost {
   active: boolean;
 }
 
-export const STOCK_COUNT_CATEGORIES = ["achura", "cerdo", "pollo", "vacuno", "embutidos", "preparados", "varios"] as const;
+export const STOCK_COUNT_CATEGORIES = ["achura", "cerdo", "pollo", "vacuno", "embutidos", "preparados", "proveeduria", "varios"] as const;
 
 export interface StockCount {
   id: string;
