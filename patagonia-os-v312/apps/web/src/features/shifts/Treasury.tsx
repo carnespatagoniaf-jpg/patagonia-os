@@ -16,6 +16,8 @@ const PAYMENT_METHOD_OPTIONS: { value: PaymentMethod; label: string }[] = [
   { value: "transfer", label: "Transferencia" }
 ];
 
+const MOVEMENTS_SEARCH_LIMIT = 3000;
+
 const MOVEMENT_TYPE_LABELS: Record<string, string> = {
   venta: "Venta",
   ajuste: "Ajuste",
@@ -191,7 +193,7 @@ export function Treasury() {
           from: movementsFrom,
           to: movementsTo,
           accountId: movementsAccountId || undefined,
-          limit: 300
+          limit: MOVEMENTS_SEARCH_LIMIT
         })
       );
     } finally {
@@ -431,6 +433,11 @@ export function Treasury() {
           </table>
         )}
         {!movementsLoading && displayedMovements.length === 0 && <p className="muted">No hay movimientos para mostrar.</p>}
+        {!movementsLoading && movementsRows !== null && movementsRows.length === MOVEMENTS_SEARCH_LIMIT && (
+          <p className="message warning">
+            Hay {MOVEMENTS_SEARCH_LIMIT} o más movimientos en ese rango — puede que falten los más viejos. Achicá el rango de fechas o filtrá por cuenta para verlos todos.
+          </p>
+        )}
       </section>
     </>
   );
