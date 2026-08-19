@@ -22,13 +22,18 @@ export type Permission =
 // herramientas todavía en prueba (Auditoría) antes de decidir si pasan a
 // formar parte de lo que se le vende a un cliente.
 // "admin" es el techo de lo que tiene un cliente real: todo el paquete
-// comercial. Mostrador (pos.sell) pasó a admin cuando Carnes Patagonia
-// empezó a usarlo de verdad en el local. Usuarios (users.manage) pasó a
-// admin para que un cliente con varias sucursales pueda dar de alta sus
-// propios cajeros/encargados sin depender de nosotros — la pantalla ya
-// limita los roles asignables a no-owner (ver ASSIGNABLE_ROLES en
-// features/users/Users.tsx) y el RPC/Edge Function del lado del servidor
-// también lo validan. Auditoría sigue reservada a "owner".
+// comercial. Usuarios (users.manage) pasó a admin para que un cliente con
+// varias sucursales pueda dar de alta sus propios cajeros/encargados sin
+// depender de nosotros — la pantalla ya limita los roles asignables a
+// no-owner (ver ASSIGNABLE_ROLES en features/users/Users.tsx) y el
+// RPC/Edge Function del lado del servidor también lo validan. Auditoría
+// sigue reservada a "owner".
+// "cashier" también tiene pos.sell: es justamente el rol pensado para el
+// empleado que atiende el mostrador. Como no tiene treasury.manage,
+// purchases.manage ni employees.manage, ese usuario nunca ve Tesorería,
+// Compras ni Empleados en el menú — no hace falta una pantalla aparte para
+// ocultárselo, alcanza con darle de alta como "Cajero" (no "Admin") en
+// Usuarios.
 const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> = {
   owner: ["*"],
   admin: [
@@ -49,7 +54,7 @@ const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> = {
     "users.manage"
   ],
   manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view"],
-  cashier: ["dashboard.view", "sales.create", "inventory.view"],
+  cashier: ["dashboard.view", "pos.sell", "sales.create", "inventory.view"],
   production: ["dashboard.view", "inventory.view", "inventory.adjust"],
   readonly: ["dashboard.view", "inventory.view", "reports.view"]
 };
