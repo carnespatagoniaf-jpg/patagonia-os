@@ -5,8 +5,10 @@ import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { listProductsForBranch } from "../inventory/inventory-service";
+import { useTreasury } from "../shifts/useTreasury";
 import { createPosSale } from "./sale-service";
 import { formatMoney } from "../shifts/format";
+import { parseAmount } from "../../lib/money";
 
 const UNIT_LABELS: Record<Product["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
 
@@ -14,10 +16,14 @@ interface ReceiptState {
   items: CartItem[];
   total: number;
   soldAt: string;
+  accountName: string;
+  amountTendered: number | null;
+  change: number | null;
 }
 
 export function Sale() {
   const { branchId } = useActiveBranch();
+  const { accounts } = useTreasury();
 
   const [products, setProducts] = useState<Product[]>(isSupabaseConfigured ? [] : demoProducts);
   const [loading, setLoading] = useState(isSupabaseConfigured);
@@ -27,6 +33,15 @@ export function Sale() {
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [cart, setCart] = useState<CartItem[]>([]);
   const [receipt, setReceipt] = useState<ReceiptState | null>(null);
+
+  const [paymentAccountId, setPaymentAccountId] = useState("");
+  const [amountTendered, setAmountTendered] = useState("");
+
+  const total = cartTotal(cart);
+  const selectedAccount = accounts.find((a) => a.id === paymentAccountId) ?? null;
+  const isCash = selectedAccount?.paymentMethod === "cash";
+  const tenderedValue = amountTendered ? parseAmount(amountTendered) : null;
+  const change = isCash && tenderedValue !== null && Number.isFinite(tenderedValue) ? tenderedValue - total : null;
 
   async function reload() {
     if (!isSupabaseConfigured || !branchId) return;
@@ -67,12 +82,29 @@ export function Sale() {
 
   async function checkout() {
     if (cart.length === 0) return;
+    if (!paymentAccountId) {
+      setMessage("Elegí de qué cuenta cobrás.");
+      return;
+    }
+    if (isCash && (tenderedValue === null || !Number.isFinite(tenderedValue) || tenderedValue < total)) {
+      setMessage("Ingresá cuánto te dio el cliente (tiene que alcanzar para el total).");
+      return;
+    }
     setBusy(true);
     setMessage("");
     try {
       if (!isSupabaseConfigured) {
-        setReceipt({ items: cart, total: cartTotal(cart), soldAt: new Date().toISOString() });
+        setReceipt({
+          items: cart,
+          total: cartTotal(cart),
+          soldAt: new Date().toISOString(),
+          accountName: selectedAccount?.name ?? "-",
+          amountTendered: tenderedValue,
+          change
+        });
         setCart([]);
+        setPaymentAccountId("");
+        setAmountTendered("");
         setMessage("Venta registrada (modo demo, no se descuenta stock real).");
         return;
       }
@@ -80,10 +112,20 @@ export function Sale() {
 
       const result = await createPosSale({
         branchId,
-        items: cart.map((c) => ({ productId: c.product.id, quantity: c.quantity }))
+        items: cart.map((c) => ({ productId: c.product.id, quantity: c.quantity })),
+        accountId: paymentAccountId
       });
-      setReceipt({ items: cart, total: result.total, soldAt: new Date().toISOString() });
+      setReceipt({
+        items: cart,
+        total: result.total,
+        soldAt: new Date().toISOString(),
+        accountName: selectedAccount?.name ?? "-",
+        amountTendered: tenderedValue,
+        change
+      });
       setCart([]);
+      setPaymentAccountId("");
+      setAmountTendered("");
       await reload();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo registrar la venta.");
@@ -173,8 +215,37 @@ export function Sale() {
           </table>
           {cart.length === 0 && <p className="muted">Todavía no agregaste productos.</p>}
 
-          <div style={{ marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <strong>Total {formatMoney(cartTotal(cart))}</strong>
+          <div style={{ marginTop: 16 }}>
+            <strong style={{ fontSize: 20 }}>Total {formatMoney(total)}</strong>
+          </div>
+
+          {cart.length > 0 && (
+            <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 12 }}>
+              <select value={paymentAccountId} onChange={(e) => setPaymentAccountId(e.target.value)}>
+                <option value="">¿Con qué te paga?</option>
+                {accounts.map((a) => (
+                  <option key={a.id} value={a.id}>{a.name}</option>
+                ))}
+              </select>
+              {isCash && (
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Recibiste ($)"
+                  value={amountTendered}
+                  onChange={(e) => setAmountTendered(e.target.value)}
+                  style={{ width: 130 }}
+                />
+              )}
+              {isCash && change !== null && (
+                <strong className={change < 0 ? "num-negative" : "num-positive"}>
+                  Vuelto {formatMoney(Math.max(change, 0))}
+                </strong>
+              )}
+            </div>
+          )}
+
+          <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end" }}>
             <button className="charge-button" disabled={busy || cart.length === 0} onClick={checkout}>
               {busy ? "Cobrando…" : "Cobrar"}
             </button>
@@ -188,7 +259,7 @@ export function Sale() {
             <h2>Último comprobante</h2>
             <button className="secondary no-print" onClick={handlePrint}>Imprimir</button>
           </div>
-          <p className="muted print-only-header">{new Date(receipt.soldAt).toLocaleString("es-AR")}</p>
+          <p className="muted print-only-header">{new Date(receipt.soldAt).toLocaleString("es-AR")} · {receipt.accountName}</p>
           <table className="data-table">
             <thead>
               <tr>
@@ -210,6 +281,11 @@ export function Sale() {
             </tbody>
           </table>
           <p style={{ textAlign: "right", marginTop: 10 }}><strong>Total {formatMoney(receipt.total)}</strong></p>
+          {receipt.amountTendered !== null && (
+            <p style={{ textAlign: "right" }} className="muted">
+              Recibido {formatMoney(receipt.amountTendered)} · Vuelto {formatMoney(Math.max(receipt.change ?? 0, 0))}
+            </p>
+          )}
         </section>
       )}
     </>

@@ -19,14 +19,21 @@ export type Permission =
   | "audit.view";
 
 // "owner" es interno nuestro (el equipo de Patagonia OS): ve todo, incluidas
-// herramientas todavía en prueba (Mostrador, Usuarios, Auditoría) antes de
-// decidir si pasan a formar parte de lo que se le vende a un cliente.
+// herramientas todavía en prueba (Auditoría) antes de decidir si pasan a
+// formar parte de lo que se le vende a un cliente.
 // "admin" es el techo de lo que tiene un cliente real: todo el paquete
-// comercial, sin las herramientas internas de arriba.
+// comercial. Mostrador (pos.sell) pasó a admin cuando Carnes Patagonia
+// empezó a usarlo de verdad en el local. Usuarios (users.manage) pasó a
+// admin para que un cliente con varias sucursales pueda dar de alta sus
+// propios cajeros/encargados sin depender de nosotros — la pantalla ya
+// limita los roles asignables a no-owner (ver ASSIGNABLE_ROLES en
+// features/users/Users.tsx) y el RPC/Edge Function del lado del servidor
+// también lo validan. Auditoría sigue reservada a "owner".
 const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> = {
   owner: ["*"],
   admin: [
     "dashboard.view",
+    "pos.sell",
     "sales.create",
     "sales.cancel",
     "inventory.view",
@@ -38,7 +45,8 @@ const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> = {
     "carcass.manage",
     "creditors.manage",
     "reports.view",
-    "branches.manage"
+    "branches.manage",
+    "users.manage"
   ],
   manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view"],
   cashier: ["dashboard.view", "sales.create", "inventory.view"],
