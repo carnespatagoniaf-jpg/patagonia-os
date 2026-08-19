@@ -44,7 +44,7 @@ const EXPENSE_CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
 );
 
 export function Treasury() {
-  const { accounts, balances, movements, loading, error, create, adjust, transfer, registerExpense, removeExpense } = useTreasury();
+  const { accounts, allAccounts, balances, movements, loading, error, create, adjust, transfer, registerExpense, removeExpense, setActive } = useTreasury();
   const { loadRange } = useShifts();
 
   const [message, setMessage] = useState("");
@@ -187,6 +187,15 @@ export function Treasury() {
     }
   }
 
+  async function handleToggleActive(accountId: string, active: boolean) {
+    try {
+      await setActive(accountId, active);
+      setMessage(active ? "Cuenta reactivada." : "Cuenta desactivada — sigue en el historial, pero ya no aparece para cobrar, ajustar ni transferir.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo cambiar el estado de la cuenta.");
+    }
+  }
+
   async function handleSearchMovements() {
     setMovementsLoading(true);
     try {
@@ -219,15 +228,24 @@ export function Treasury() {
       <section className="panel">
         <div className="panel-title">
           <h2>Saldos</h2>
-          <span>{loading ? "Cargando…" : `${accounts.length} cuentas`}</span>
+          <span>{loading ? "Cargando…" : `${allAccounts.length} cuentas`}</span>
         </div>
         <div className="kpi-grid">
-          {balances.map((balance) => (
-            <div className="kpi-card" key={balance.accountId}>
-              <span>{balance.name}</span>
-              <strong>{formatMoney(balance.balance)}</strong>
-            </div>
-          ))}
+          {balances.map((balance) => {
+            const account = allAccounts.find((a) => a.id === balance.accountId);
+            const isActive = account?.active ?? true;
+            return (
+              <div className="kpi-card" key={balance.accountId}>
+                <span>{balance.name}{!isActive ? " (inactiva)" : ""}</span>
+                <strong>{formatMoney(balance.balance)}</strong>
+                {account && (
+                  <button className="secondary" style={{ marginTop: 8 }} onClick={() => handleToggleActive(account.id, !isActive)}>
+                    {isActive ? "Desactivar" : "Activar"}
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
         {showNewAccountForm ? (
           <div className="cash-banner-form" style={{ marginTop: 16, flexWrap: "wrap" }}>

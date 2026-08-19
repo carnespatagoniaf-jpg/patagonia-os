@@ -6,10 +6,12 @@ import {
   adjustTreasuryAccount,
   createTreasuryAccount,
   deleteTreasuryExpense,
+  listAllTreasuryAccounts,
   listTreasuryAccounts,
   listTreasuryBalances,
   listTreasuryMovements,
   registerTreasuryExpense,
+  setTreasuryAccountActive,
   transferTreasuryFunds,
   type AdjustTreasuryAccountInput,
   type CreateTreasuryAccountInput,
@@ -29,6 +31,7 @@ export function useTreasury() {
   const { branchId } = useActiveBranch();
 
   const [accounts, setAccounts] = useState<TreasuryAccount[]>(isSupabaseConfigured ? [] : DEMO_ACCOUNTS);
+  const [allAccounts, setAllAccounts] = useState<TreasuryAccount[]>(isSupabaseConfigured ? [] : DEMO_ACCOUNTS);
   const [balances, setBalances] = useState<TreasuryAccountBalance[]>(
     isSupabaseConfigured
       ? []
@@ -44,12 +47,14 @@ export function useTreasury() {
     setLoading(true);
     setError(null);
     try {
-      const [accountList, balanceList, movementList] = await Promise.all([
+      const [accountList, allAccountList, balanceList, movementList] = await Promise.all([
         listTreasuryAccounts(),
+        listAllTreasuryAccounts(),
         listTreasuryBalances(),
         listTreasuryMovements()
       ]);
       setAccounts(accountList);
+      setAllAccounts(allAccountList);
       setBalances(balanceList);
       setMovements(movementList);
     } catch (err) {
@@ -68,6 +73,7 @@ export function useTreasury() {
       if (!isSupabaseConfigured) {
         const account: TreasuryAccount = { id: crypto.randomUUID(), active: true, ...input };
         setAccounts((current) => [...current, account]);
+        setAllAccounts((current) => [...current, account]);
         setBalances((current) => [
           ...current,
           { accountId: account.id, name: account.name, initialBalance: account.initialBalance, balance: account.initialBalance }
@@ -180,5 +186,21 @@ export function useTreasury() {
     [branchId, reload]
   );
 
-  return { accounts, balances, movements, loading, error, create, adjust, transfer, registerExpense, removeExpense, reload };
+  const setActive = useCallback(
+    async (accountId: string, active: boolean) => {
+      if (!isSupabaseConfigured) {
+        setAccounts((current) =>
+          active ? current : current.filter((a) => a.id !== accountId)
+        );
+        setAllAccounts((current) => current.map((a) => (a.id === accountId ? { ...a, active } : a)));
+        return;
+      }
+
+      await setTreasuryAccountActive(accountId, active);
+      await reload();
+    },
+    [reload]
+  );
+
+  return { accounts, allAccounts, balances, movements, loading, error, create, adjust, transfer, registerExpense, removeExpense, setActive, reload };
 }

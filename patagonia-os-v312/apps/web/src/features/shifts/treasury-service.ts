@@ -32,6 +32,19 @@ export async function listTreasuryAccounts(): Promise<TreasuryAccount[]> {
   return (data ?? []).map(mapAccount);
 }
 
+/** Incluye cuentas inactivas — se usa solo para el listado de Saldos en Tesorería (activar/desactivar), no para los selectores de cobro/ajuste/transferencia. */
+export async function listAllTreasuryAccounts(): Promise<TreasuryAccount[]> {
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from("treasury_accounts")
+    .select("id,name,payment_method,initial_balance,active")
+    .order("name");
+
+  if (error) throw error;
+  return (data ?? []).map(mapAccount);
+}
+
 export interface CreateTreasuryAccountInput {
   name: string;
   paymentMethod?: PaymentMethod;
@@ -79,6 +92,13 @@ export async function listTreasuryBalances(): Promise<TreasuryAccountBalance[]> 
     initialBalance: Number(row.initial_balance),
     balance: Number(row.balance)
   }));
+}
+
+export async function setTreasuryAccountActive(accountId: string, active: boolean): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("set_treasury_account_active", { p_account_id: accountId, p_active: active });
+  if (error) throw error;
 }
 
 export interface AdjustTreasuryAccountInput {
