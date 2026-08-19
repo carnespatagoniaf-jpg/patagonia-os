@@ -93,7 +93,12 @@ Deno.serve(async (req) => {
       company_id: company.id,
       branch_id: branch.id,
       full_name: ownerFullName,
-      role: "owner",
+      // "owner" queda reservado al equipo de Patagonia OS (ve Usuarios y
+      // Auditoría, herramientas internas). El dueño de un cliente real
+      // arranca en "admin", el techo comercial — ve todo el paquete que se
+      // vende, incluida esta pantalla de Usuarios para dar de alta a sus
+      // propios cajeros/encargados.
+      role: "admin",
       active: true
     });
     if (insertErr) {
