@@ -17,7 +17,7 @@ import { Login } from "./features/auth/Login";
 import { ResetPassword } from "./features/auth/ResetPassword";
 import { AdminCreateClient } from "./features/admin/AdminCreateClient";
 import { useAuth } from "./features/auth/AuthProvider";
-import { canAccessPage } from "./features/auth/permissions";
+import { canAccessPage, firstAccessiblePage } from "./features/auth/permissions";
 import { BranchProvider } from "./features/branches/BranchProvider";
 import { isSupabaseConfigured } from "./lib/supabase";
 
@@ -26,8 +26,8 @@ export default function App() {
   const { loading, session, profile, passwordRecovery, isPlatformAdmin } = useAuth();
 
   useEffect(() => {
-    if (page !== "dashboard" && !canAccessPage(profile, page)) {
-      setPage("dashboard");
+    if (profile && !canAccessPage(profile, page)) {
+      setPage(firstAccessiblePage(profile));
     }
   }, [profile, page]);
 

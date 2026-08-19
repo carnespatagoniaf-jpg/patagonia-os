@@ -28,12 +28,11 @@ export type Permission =
 // no-owner (ver ASSIGNABLE_ROLES en features/users/Users.tsx) y el
 // RPC/Edge Function del lado del servidor también lo validan. Auditoría
 // sigue reservada a "owner".
-// "cashier" también tiene pos.sell: es justamente el rol pensado para el
-// empleado que atiende el mostrador. Como no tiene treasury.manage,
-// purchases.manage ni employees.manage, ese usuario nunca ve Tesorería,
-// Compras ni Empleados en el menú — no hace falta una pantalla aparte para
-// ocultárselo, alcanza con darle de alta como "Cajero" (no "Admin") en
-// Usuarios.
+// "cashier" es justamente el rol pensado para el empleado que atiende el
+// mostrador: solo ve Mostrador y Ventas, nada más — ni Inicio, ni Stock, ni
+// (por supuesto) Tesorería/Compras/Empleados. No hace falta una pantalla
+// aparte para ocultarle el resto, alcanza con darle de alta como "Cajero"
+// (no "Admin") en Usuarios.
 const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> = {
   owner: ["*"],
   admin: [
@@ -54,7 +53,7 @@ const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> = {
     "users.manage"
   ],
   manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view"],
-  cashier: ["dashboard.view", "pos.sell", "sales.create", "inventory.view"],
+  cashier: ["pos.sell", "sales.create"],
   production: ["dashboard.view", "inventory.view", "inventory.adjust"],
   readonly: ["dashboard.view", "inventory.view", "reports.view"]
 };
@@ -86,4 +85,10 @@ export type Page = keyof typeof PAGE_PERMISSIONS;
 
 export function canAccessPage(profile: UserProfile | null, page: Page) {
   return can(profile, PAGE_PERMISSIONS[page]);
+}
+
+/** Primera página del menú a la que el perfil tiene acceso — para no aterrizar a un rol como "cashier" en Inicio, que ya no ve. */
+export function firstAccessiblePage(profile: UserProfile | null): Page {
+  const order = Object.keys(PAGE_PERMISSIONS) as Page[];
+  return order.find((page) => canAccessPage(profile, page)) ?? "dashboard";
 }
