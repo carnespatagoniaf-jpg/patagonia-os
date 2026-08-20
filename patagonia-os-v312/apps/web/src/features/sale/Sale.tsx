@@ -355,7 +355,7 @@ export function Sale() {
         : singleAccount?.name ?? "-";
 
       if (!isSupabaseConfigured) {
-        setReceipt({
+        const demoReceipt: ReceiptState = {
           items: receiptLines,
           saleDiscount: saleDiscountValue,
           saleSurcharge: saleSurchargeValue,
@@ -364,9 +364,11 @@ export function Sale() {
           paymentSummary,
           amountTendered: tenderedValue,
           change
-        });
+        };
+        setReceipt(demoReceipt);
         clearTicket();
         setMessage("Venta registrada (modo demo, no se descuenta stock real).");
+        await autoPrintReceipt(demoReceipt);
         return;
       }
       if (!branchId) throw new Error("Tu usuario no tiene sucursal asignada.");
@@ -390,7 +392,7 @@ export function Sale() {
         discountAmount: saleDiscountValue,
         surchargeAmount: saleSurchargeValue
       });
-      setReceipt({
+      const newReceipt: ReceiptState = {
         items: receiptLines,
         saleDiscount: saleDiscountValue,
         saleSurcharge: saleSurchargeValue,
@@ -399,10 +401,12 @@ export function Sale() {
         paymentSummary,
         amountTendered: tenderedValue,
         change
-      });
+      };
+      setReceipt(newReceipt);
       clearTicket();
       await reloadProducts();
       await reloadShift();
+      await autoPrintReceipt(newReceipt);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo registrar la venta.");
     } finally {
@@ -493,6 +497,19 @@ export function Sale() {
       setMessage(err instanceof Error ? err.message : "No se pudo imprimir en la impresora térmica.");
     } finally {
       setThermalPrintBusy(false);
+    }
+  }
+
+  /** Se imprime solo al cobrar -- el ticket que se le da al cliente. Si falla
+   * (impresora sin emparejar todavía, apagada, etc.) no corta la venta: ya
+   * quedó cobrada, y el botón "Imprimir en impresora térmica" de al lado
+   * sirve para reintentar o sacar copias de más. */
+  async function autoPrintReceipt(r: ReceiptState) {
+    if (!isThermalPrintSupported()) return;
+    try {
+      await printBytes(buildReceiptTicket(r));
+    } catch (err) {
+      setMessage(err instanceof Error ? `Venta cobrada, pero no se pudo imprimir: ${err.message}` : "Venta cobrada, pero no se pudo imprimir el ticket.");
     }
   }
 
