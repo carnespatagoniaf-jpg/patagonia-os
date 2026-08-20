@@ -75,7 +75,9 @@ export function Sale() {
   const [cart, setCart] = useState<TicketLine[]>([]);
   const [itemDiscounts, setItemDiscounts] = useState<Record<string, string>>({});
   const [saleDiscount, setSaleDiscount] = useState("");
+  const [saleDiscountMode, setSaleDiscountMode] = useState<"amount" | "percent">("amount");
   const [saleSurcharge, setSaleSurcharge] = useState("");
+  const [saleSurchargeMode, setSaleSurchargeMode] = useState<"amount" | "percent">("amount");
   const [receipt, setReceipt] = useState<ReceiptState | null>(null);
 
   const [showManualForm, setShowManualForm] = useState(false);
@@ -88,8 +90,10 @@ export function Sale() {
 
   const grossTotal = cart.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
   const itemDiscountTotal = cart.reduce((sum, line) => sum + (parseAmount(itemDiscounts[line.key] || "0") || 0), 0);
-  const saleDiscountValue = parseAmount(saleDiscount || "0") || 0;
-  const saleSurchargeValue = parseAmount(saleSurcharge || "0") || 0;
+  const saleDiscountRaw = parseAmount(saleDiscount || "0") || 0;
+  const saleDiscountValue = saleDiscountMode === "percent" ? Math.round((grossTotal * saleDiscountRaw) / 100) : saleDiscountRaw;
+  const saleSurchargeRaw = parseAmount(saleSurcharge || "0") || 0;
+  const saleSurchargeValue = saleSurchargeMode === "percent" ? Math.round((grossTotal * saleSurchargeRaw) / 100) : saleSurchargeRaw;
   // Redondeado a pesos enteros -- el resto de la app no maneja centavos, y
   // si no se redondea acá el total que se ve en pantalla no coincide con el
   // que exige el servidor al dividir el pago a mano.
@@ -251,7 +255,9 @@ export function Sale() {
     setCart([]);
     setItemDiscounts({});
     setSaleDiscount("");
+    setSaleDiscountMode("amount");
     setSaleSurcharge("");
+    setSaleSurchargeMode("amount");
     setPayments([{ accountId: "", amount: "" }]);
     setCashTendered("");
     setMessage("");
@@ -586,24 +592,32 @@ export function Sale() {
             {cart.length > 0 && (
               <>
                 <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 14 }}>
-                  <label className="muted">Descuento total $</label>
+                  <label className="muted">Descuento</label>
                   <input
                     type="text"
                     inputMode="decimal"
                     placeholder="0"
                     value={saleDiscount}
                     onChange={(e) => setSaleDiscount(e.target.value)}
-                    style={{ width: 100 }}
+                    style={{ width: 90 }}
                   />
-                  <label className="muted">Recargo total $</label>
+                  <select value={saleDiscountMode} onChange={(e) => setSaleDiscountMode(e.target.value as "amount" | "percent")}>
+                    <option value="amount">$</option>
+                    <option value="percent">%</option>
+                  </select>
+                  <label className="muted">Recargo</label>
                   <input
                     type="text"
                     inputMode="decimal"
                     placeholder="0"
                     value={saleSurcharge}
                     onChange={(e) => setSaleSurcharge(e.target.value)}
-                    style={{ width: 100 }}
+                    style={{ width: 90 }}
                   />
+                  <select value={saleSurchargeMode} onChange={(e) => setSaleSurchargeMode(e.target.value as "amount" | "percent")}>
+                    <option value="amount">$</option>
+                    <option value="percent">%</option>
+                  </select>
                   <button className="secondary" onClick={clearTicket}>Cancelar ticket</button>
                 </div>
 
