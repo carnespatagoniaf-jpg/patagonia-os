@@ -153,9 +153,12 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .print-only-header { display: none; }
 
 @media print {
-  body * { visibility: hidden; }
-  .print-area, .print-area * { visibility: visible; }
+  /* display:none (no solo visibility:hidden) para que lo que no se
+     imprime no siga ocupando alto de pagina -- si no, una tabla larga
+     detras del print-area generaba varias hojas casi en blanco. */
+  body * { display: none !important; }
+  .print-area, .print-area * { display: revert !important; }
   .print-area { position: absolute; top: 0; left: 0; width: 100%; box-shadow: none; border: 0; }
   .no-print { display: none !important; }
-  .print-only-header { display: block; }
+  .print-only-header { display: block !important; }
 }
