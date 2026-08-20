@@ -153,12 +153,31 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .print-only-header { display: none; }
 
 @media print {
-  /* display:none (no solo visibility:hidden) para que lo que no se
-     imprime no siga ocupando alto de pagina -- si no, una tabla larga
-     detras del print-area generaba varias hojas casi en blanco. */
-  body * { display: none !important; }
-  .print-area, .print-area * { display: revert !important; }
+  /* visibility (no display) para esconder todo -- a diferencia de
+     display:none, un hijo puede "reaparecer" con visibility:visible
+     aunque el padre este oculto, que es justo lo que necesita
+     .print-area. */
+  body * { visibility: hidden; }
+  .print-area, .print-area * { visibility: visible; }
   .print-area { position: absolute; top: 0; left: 0; width: 100%; box-shadow: none; border: 0; }
+  /* .main-content ya tiene overflow:hidden fuera de impresión (para el
+     layout normal) -- probado en vivo que eso recorta a .print-area
+     aunque sea position:absolute, aunque no sea descendiente "real" de
+     su contenedor de posicionamiento. Por eso hay que sacarle el
+     overflow:hidden acá, y en cambio colapsar la altura de sus hijos
+     directos (menos print-area) para evitar las hojas de mas. */
+  .main-content { overflow: visible !important; }
+  .main-content > *:not(.print-area) {
+    max-height: 0 !important;
+    overflow: hidden !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    border: 0 !important;
+  }
+  .sidebar {
+    max-height: 0 !important;
+    overflow: hidden !important;
+  }
   .no-print { display: none !important; }
   .print-only-header { display: block !important; }
 }
