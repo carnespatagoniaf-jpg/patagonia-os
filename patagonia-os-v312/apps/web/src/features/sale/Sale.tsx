@@ -3,6 +3,8 @@ import type { Product } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
+import { useAuth } from "../auth/AuthProvider";
+import { can } from "../auth/permissions";
 import { listProductsForBranch } from "../inventory/inventory-service";
 import { useTreasury } from "../shifts/useTreasury";
 import { createPosSale } from "./sale-service";
@@ -57,7 +59,9 @@ interface ReceiptState {
 
 export function Sale() {
   const { branchId } = useActiveBranch();
-  const { accounts } = useTreasury();
+  const { profile } = useAuth();
+  const { accounts, adjust } = useTreasury();
+  const canManageTreasury = can(profile, "treasury.manage");
 
   const [products, setProducts] = useState<Product[]>(isSupabaseConfigured ? [] : demoProducts);
   const [loading, setLoading] = useState(isSupabaseConfigured);
@@ -72,6 +76,7 @@ export function Sale() {
   const [closeDetail, setCloseDetail] = useState<PosShiftSale[]>([]);
 
   const [search, setSearch] = useState("");
+  const [showProductTable, setShowProductTable] = useState(false);
   const [cart, setCart] = useState<TicketLine[]>([]);
   const [itemDiscounts, setItemDiscounts] = useState<Record<string, string>>({});
   const [saleDiscount, setSaleDiscount] = useState("");
@@ -87,6 +92,13 @@ export function Sale() {
 
   const [payments, setPayments] = useState<PaymentRow[]>([{ accountId: "", amount: "" }]);
   const [cashTendered, setCashTendered] = useState("");
+
+  const [showCajaForm, setShowCajaForm] = useState(false);
+  const [cajaDirection, setCajaDirection] = useState<"in" | "out">("out");
+  const [cajaAccountId, setCajaAccountId] = useState("");
+  const [cajaAmount, setCajaAmount] = useState("");
+  const [cajaReason, setCajaReason] = useState("");
+  const [cajaBusy, setCajaBusy] = useState(false);
 
   const grossTotal = cart.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
   const itemDiscountTotal = cart.reduce((sum, line) => sum + (parseAmount(itemDiscounts[line.key] || "0") || 0), 0);
@@ -142,6 +154,26 @@ export function Sale() {
     setCloseDetail([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId]);
+
+  async function handleCajaMovement() {
+    setMessage("");
+    if (!cajaAccountId) { setMessage("Elegí una cuenta."); return; }
+    const amount = parseAmount(cajaAmount || "0") || 0;
+    if (!(amount > 0)) { setMessage("El monto debe ser mayor que cero."); return; }
+    if (!cajaReason.trim()) { setMessage("Ingresá un motivo."); return; }
+    setCajaBusy(true);
+    try {
+      await adjust({ accountId: cajaAccountId, amount, direction: cajaDirection, reason: cajaReason.trim() });
+      setCajaAccountId("");
+      setCajaAmount("");
+      setCajaReason("");
+      setShowCajaForm(false);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo registrar el movimiento de caja.");
+    } finally {
+      setCajaBusy(false);
+    }
+  }
 
   async function handleOpenShift() {
     setMessage("");
@@ -469,6 +501,43 @@ export function Sale() {
               </table>
             )}
 
+            {canManageTreasury && (
+              <div style={{ marginTop: 10 }}>
+                {!showCajaForm ? (
+                  <button className="secondary" onClick={() => setShowCajaForm(true)}>+ Movimiento de caja</button>
+                ) : (
+                  <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
+                    <select value={cajaDirection} onChange={(e) => setCajaDirection(e.target.value as "in" | "out")}>
+                      <option value="out">Egreso</option>
+                      <option value="in">Ingreso</option>
+                    </select>
+                    <select value={cajaAccountId} onChange={(e) => setCajaAccountId(e.target.value)}>
+                      <option value="">Cuenta…</option>
+                      {accounts.map((a) => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </select>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="Monto"
+                      value={cajaAmount}
+                      onChange={(e) => setCajaAmount(e.target.value)}
+                      style={{ width: 110 }}
+                    />
+                    <input
+                      placeholder="Motivo"
+                      value={cajaReason}
+                      onChange={(e) => setCajaReason(e.target.value)}
+                      style={{ flex: 1, minWidth: 160 }}
+                    />
+                    <button disabled={cajaBusy} onClick={handleCajaMovement}>{cajaBusy ? "Guardando…" : "Registrar"}</button>
+                    <button className="secondary" onClick={() => setShowCajaForm(false)}>Cancelar</button>
+                  </div>
+                )}
+              </div>
+            )}
+
             {!showCloseConfirm ? (
               <button className="secondary" style={{ marginTop: 10 }} onClick={() => setShowCloseConfirm(true)}>Cerrar turno</button>
             ) : (
@@ -543,6 +612,38 @@ export function Sale() {
                 </div>
               )}
             </div>
+
+            <div style={{ marginTop: 10 }}>
+              <button className="secondary" onClick={() => setShowProductTable((v) => !v)}>
+                {showProductTable ? "Ocultar tabla de productos" : "Ver tabla de productos"}
+              </button>
+            </div>
+
+            {showProductTable && (
+              <table className="data-table" style={{ marginTop: 10 }}>
+                <thead>
+                  <tr>
+                    <th>Código</th>
+                    <th>Producto</th>
+                    <th className="num">Precio</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filteredProducts.map((product) => (
+                    <tr key={product.id}>
+                      <td>{product.code}</td>
+                      <td>{product.name} <span className="muted">({UNIT_LABELS[product.unit]})</span></td>
+                      <td className="num">{formatMoney(product.priceRetail)}</td>
+                      <td><button className="secondary" onClick={() => quickAdd(product)}>+ Agregar</button></td>
+                    </tr>
+                  ))}
+                  {filteredProducts.length === 0 && (
+                    <tr><td colSpan={4} className="muted">No hay productos que coincidan.</td></tr>
+                  )}
+                </tbody>
+              </table>
+            )}
 
             <table className="data-table" style={{ marginTop: 18 }}>
               <thead>
