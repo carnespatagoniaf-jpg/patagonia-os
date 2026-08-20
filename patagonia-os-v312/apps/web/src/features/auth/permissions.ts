@@ -14,6 +14,7 @@ export type Permission =
   | "profitability.view"
   | "carcass.manage"
   | "creditors.manage"
+  | "customers.manage"
   | "reports.view"
   | "users.manage"
   | "branches.manage"
@@ -55,6 +56,7 @@ const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> = {
     "profitability.view",
     "carcass.manage",
     "creditors.manage",
+    "customers.manage",
     "reports.view",
     "branches.manage",
     "users.manage"
@@ -84,6 +86,7 @@ export const PAGE_PERMISSIONS = {
   profitability: "profitability.view",
   carcass: "carcass.manage",
   creditors: "creditors.manage",
+  customers: "customers.manage",
   reports: "reports.view",
   users: "users.manage",
   audit: "audit.view"

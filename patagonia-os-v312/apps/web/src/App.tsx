@@ -12,6 +12,7 @@ import { Employees } from "./features/employees/Employees";
 import { Profitability } from "./features/profitability/Profitability";
 import { Carcass } from "./features/carcass/Carcass";
 import { Creditors } from "./features/creditors/Creditors";
+import { Customers } from "./features/customers/Customers";
 import { Users } from "./features/users/Users";
 import { AuditLog } from "./features/audit/AuditLog";
 import { Login } from "./features/auth/Login";
@@ -65,6 +66,7 @@ export default function App() {
         {allowed && page === "profitability" && <Profitability />}
         {allowed && page === "carcass" && <Carcass />}
         {allowed && page === "creditors" && <Creditors />}
+        {allowed && page === "customers" && <Customers />}
         {allowed && page === "reports" && <Reports />}
         {allowed && page === "users" && <Users />}
         {allowed && page === "audit" && <AuditLog />}

@@ -303,6 +303,42 @@ export interface CreditorBalance {
   balance: Money;
 }
 
+export interface Customer {
+  id: string;
+  branchId: string;
+  name: string;
+  phone?: string;
+  notes?: string;
+  active: boolean;
+}
+
+export interface CustomerCharge {
+  id: string;
+  customerId: string;
+  chargeDate: string;
+  amount: Money;
+  reason: string;
+  createdAt: string;
+}
+
+export interface CustomerPayment {
+  id: string;
+  customerId: string;
+  paymentDate: string;
+  amount: Money;
+  accountId: string;
+  accountName?: string;
+  notes?: string;
+  createdAt: string;
+}
+
+export interface CustomerBalance {
+  customerId: string;
+  totalCharged: Money;
+  totalPaid: Money;
+  balance: Money;
+}
+
 export interface ProfitabilityPeriod {
   id: string;
   branchId: string;
