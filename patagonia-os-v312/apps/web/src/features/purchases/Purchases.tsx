@@ -409,8 +409,8 @@ export function Purchases() {
                     )}
                     <input
                       type="number"
-                      min="0"
-                      step="0.001"
+                      min={line.unit === "kg" ? "0.001" : "1"}
+                      step={line.unit === "kg" ? "0.001" : "1"}
                       placeholder="Cantidad"
                       value={line.quantity}
                       onChange={(e) => updateLine(line.key, { quantity: e.target.value })}
@@ -478,7 +478,14 @@ export function Purchases() {
                           {editingItemId === item.id ? (
                             <>
                               <td>
-                                <input type="number" step="0.001" value={editQuantity} onChange={(e) => setEditQuantity(e.target.value)} style={{ width: 80 }} />
+                                <input
+                                  type="number"
+                                  min={item.unit === "kg" ? "0.001" : "1"}
+                                  step={item.unit === "kg" ? "0.001" : "1"}
+                                  value={editQuantity}
+                                  onChange={(e) => setEditQuantity(e.target.value)}
+                                  style={{ width: 80 }}
+                                />
                                 {" "}{item.unit}
                               </td>
                               <td className="num">

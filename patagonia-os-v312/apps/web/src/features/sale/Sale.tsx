@@ -282,8 +282,16 @@ export function Sale() {
   }
 
   function updateCartQuantity(key: string, raw: string) {
-    const quantity = Number(raw);
-    setCart((current) => current.map((l) => (l.key === key ? { ...l, quantity } : l)));
+    const parsed = Number(raw);
+    setCart((current) =>
+      current.map((l) => {
+        if (l.key !== key) return l;
+        // Los productos por kg se cargan con precisión de gramos (0.001); los
+        // que son por unidad o caja no tienen sentido en fracciones.
+        const quantity = l.unit === "kg" ? parsed : Math.round(parsed);
+        return { ...l, quantity };
+      })
+    );
   }
 
   function clearTicket() {
@@ -704,8 +712,8 @@ export function Sale() {
                     <td className="num">
                       <input
                         type="number"
-                        min="0.001"
-                        step="0.001"
+                        min={line.unit === "kg" ? "0.001" : "1"}
+                        step={line.unit === "kg" ? "0.001" : "1"}
                         value={line.quantity}
                         onChange={(e) => updateCartQuantity(line.key, e.target.value)}
                         style={{ width: 80 }}

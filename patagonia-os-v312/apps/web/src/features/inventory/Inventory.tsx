@@ -288,7 +288,7 @@ export function Inventory() {
                       <input
                         type="number"
                         min="0"
-                        step="0.001"
+                        step={product.unit === "kg" ? "0.001" : "1"}
                         className="num"
                         value={adjustCounted}
                         onChange={(e) => setAdjustCounted(e.target.value)}
