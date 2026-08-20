@@ -72,7 +72,9 @@ export function Sale() {
   const [shift, setShift] = useState<PosShift | null>(null);
   const [shiftLoading, setShiftLoading] = useState(isSupabaseConfigured);
   const [shiftSales, setShiftSales] = useState<PosShiftSale[]>([]);
+  const [openingCashInput, setOpeningCashInput] = useState("");
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
+  const [closingCountedCashInput, setClosingCountedCashInput] = useState("");
   const [closeSummary, setCloseSummary] = useState<CloseShiftResult | null>(null);
   const [closeDetail, setCloseDetail] = useState<PosShiftSale[]>([]);
 
@@ -166,7 +168,10 @@ export function Sale() {
     if (!cajaReason.trim()) { setMessage("Ingresá un motivo."); return; }
     setCajaBusy(true);
     try {
-      await adjust({ accountId: cajaAccountId, amount, direction: cajaDirection, reason: cajaReason.trim() });
+      const accountName = accounts.find((a) => a.id === cajaAccountId)?.name ?? "-";
+      const posShiftId = shift && isSupabaseConfigured ? shift.id : undefined;
+      await adjust({ accountId: cajaAccountId, amount, direction: cajaDirection, reason: cajaReason.trim(), posShiftId });
+      await autoPrintCajaMovement({ direction: cajaDirection, amount, accountName, reason: cajaReason.trim() });
       setCajaAccountId("");
       setCajaAmount("");
       setCajaReason("");
@@ -180,16 +185,19 @@ export function Sale() {
 
   async function handleOpenShift() {
     setMessage("");
+    const openingCash = parseAmount(openingCashInput || "0") || 0;
     if (!isSupabaseConfigured) {
-      setShift({ id: "demo-shift", openedAt: new Date().toISOString() });
+      setShift({ id: "demo-shift", openedAt: new Date().toISOString(), openingCash });
       setShiftSales([]);
+      setOpeningCashInput("");
       return;
     }
     if (!branchId) return;
     setBusy(true);
     try {
-      setShift(await openPosShift(branchId));
+      setShift(await openPosShift(branchId, openingCash));
       setShiftSales([]);
+      setOpeningCashInput("");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo abrir el turno.");
     } finally {
@@ -436,19 +444,30 @@ export function Sale() {
     setBusy(true);
     setMessage("");
     try {
+      const countedCash = closingCountedCashInput ? parseAmount(closingCountedCashInput) : undefined;
       if (!isSupabaseConfigured) {
-        setCloseSummary({ total: shiftTotal, byAccount: [] });
+        const cashSalesDemo = activeShiftSales.reduce((sum, s) => sum + s.total, 0);
+        const expectedCash = shift.openingCash + cashSalesDemo;
+        setCloseSummary({
+          total: shiftTotal,
+          byAccount: [],
+          expectedCash,
+          countedCash: countedCash ?? null,
+          difference: countedCash !== undefined ? countedCash - expectedCash : null
+        });
         setCloseDetail(activeShiftSales);
         setShift(null);
         setShiftSales([]);
         setShowCloseConfirm(false);
+        setClosingCountedCashInput("");
         return;
       }
       const detailSnapshot = activeShiftSales;
-      const result = await closePosShift(shift.id);
+      const result = await closePosShift(shift.id, countedCash);
       setCloseSummary(result);
       setCloseDetail(detailSnapshot);
       setShowCloseConfirm(false);
+      setClosingCountedCashInput("");
       await reloadShift();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo cerrar el turno.");
@@ -513,6 +532,25 @@ export function Sale() {
     }
   }
 
+  /** Comprobante chico para cada Ingreso/Egreso de caja -- así queda algo en
+   * papel cada vez que entra o sale plata del cajón, no solo al cerrar. */
+  async function autoPrintCajaMovement(mov: { direction: "in" | "out"; amount: number; accountName: string; reason: string }) {
+    if (!isThermalPrintSupported()) return;
+    try {
+      const t = new TicketBuilder();
+      t.align("center").bold(true).line(mov.direction === "in" ? "INGRESO DE CAJA" : "EGRESO DE CAJA").bold(false);
+      t.align("left").separator();
+      t.line(new Date().toLocaleString("es-AR"));
+      t.line(`Cuenta: ${mov.accountName}`);
+      t.bold(true).doubleSize(true).line(`${mov.direction === "in" ? "+" : "-"} ${formatMoney(mov.amount)}`).doubleSize(false).bold(false);
+      t.line(`Motivo: ${mov.reason}`);
+      t.cut();
+      await printBytes(t.build());
+    } catch (err) {
+      setMessage(err instanceof Error ? `Movimiento registrado, pero no se pudo imprimir: ${err.message}` : "Movimiento registrado, pero no se pudo imprimir el ticket.");
+    }
+  }
+
   return (
     <>
       <header className="page-header">
@@ -535,7 +573,18 @@ export function Sale() {
           <p className="muted" style={{ marginBottom: 14 }}>
             Abrí un turno para empezar a cobrar. Las ventas se van sumando y recién se cargan a Tesorería cuando cerrás el turno.
           </p>
-          <button disabled={busy} onClick={handleOpenShift}>{busy ? "Abriendo…" : "Abrir turno"}</button>
+          <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
+            <label className="muted">Fondo inicial de caja $</label>
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="0"
+              value={openingCashInput}
+              onChange={(e) => setOpeningCashInput(e.target.value)}
+              style={{ width: 110 }}
+            />
+            <button disabled={busy} onClick={handleOpenShift}>{busy ? "Abriendo…" : "Abrir turno"}</button>
+          </div>
         </section>
       ) : (
         <>
@@ -610,6 +659,17 @@ export function Sale() {
             ) : (
               <div style={{ marginTop: 10 }}>
                 <p className="muted">¿Cerrar el turno y cargar {formatMoney(shiftTotal)} a Tesorería? No se puede deshacer.</p>
+                <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10 }}>
+                  <label className="muted">Efectivo contado (arqueo) $</label>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="0"
+                    value={closingCountedCashInput}
+                    onChange={(e) => setClosingCountedCashInput(e.target.value)}
+                    style={{ width: 110 }}
+                  />
+                </div>
                 <button disabled={busy} onClick={handleCloseShift}>{busy ? "Cerrando…" : "Confirmar cierre"}</button>{" "}
                 <button className="secondary" onClick={() => setShowCloseConfirm(false)}>Cancelar</button>
               </div>
@@ -925,6 +985,23 @@ export function Sale() {
           </div>
           <p className="muted print-only-header">Cerrado {new Date().toLocaleString("es-AR")}</p>
           <p><strong>Total del turno: {formatMoney(closeSummary.total)}</strong></p>
+          <div className="panel" style={{ padding: 14, marginBottom: 16 }}>
+            <p className="muted" style={{ margin: 0, marginBottom: 6, fontWeight: 800, textTransform: "uppercase", fontSize: 12 }}>Arqueo de caja</p>
+            <p style={{ margin: "4px 0" }}>Efectivo esperado: <strong>{formatMoney(closeSummary.expectedCash)}</strong></p>
+            {closeSummary.countedCash !== null ? (
+              <>
+                <p style={{ margin: "4px 0" }}>Efectivo contado: <strong>{formatMoney(closeSummary.countedCash)}</strong></p>
+                <p style={{ margin: "4px 0" }}>
+                  Diferencia:{" "}
+                  <strong className={(closeSummary.difference ?? 0) < 0 ? "num-negative" : (closeSummary.difference ?? 0) > 0 ? "num-positive" : undefined}>
+                    {formatMoney(closeSummary.difference ?? 0)}
+                  </strong>
+                </p>
+              </>
+            ) : (
+              <p className="muted" style={{ margin: "4px 0" }}>No se cargó el conteo de efectivo al cerrar.</p>
+            )}
+          </div>
           {closeSummary.byAccount.length > 0 && (
             <table className="data-table" style={{ marginBottom: 16 }}>
               <thead>

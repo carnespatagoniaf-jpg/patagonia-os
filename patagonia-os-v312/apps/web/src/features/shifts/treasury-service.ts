@@ -107,6 +107,7 @@ export interface AdjustTreasuryAccountInput {
   amount: number;
   direction: "in" | "out";
   reason: string;
+  posShiftId?: string;
 }
 
 export async function adjustTreasuryAccount(input: AdjustTreasuryAccountInput): Promise<{ id: string; balance: number }> {
@@ -117,7 +118,8 @@ export async function adjustTreasuryAccount(input: AdjustTreasuryAccountInput): 
     p_branch_id: input.branchId,
     p_amount: input.amount,
     p_direction: input.direction,
-    p_reason: input.reason
+    p_reason: input.reason,
+    p_pos_shift_id: input.posShiftId ?? null
   });
 
   if (error) throw error;

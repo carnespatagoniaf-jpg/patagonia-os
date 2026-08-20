@@ -3,6 +3,7 @@ import { supabase } from "../../lib/supabase";
 export interface PosShift {
   id: string;
   openedAt: string;
+  openingCash: number;
 }
 
 export async function getOpenPosShift(branchId: string): Promise<PosShift | null> {
@@ -10,22 +11,22 @@ export async function getOpenPosShift(branchId: string): Promise<PosShift | null
 
   const { data, error } = await supabase
     .from("pos_shifts")
-    .select("id,opened_at")
+    .select("id,opened_at,opening_cash")
     .eq("branch_id", branchId)
     .eq("status", "open")
     .maybeSingle();
 
   if (error) throw error;
   if (!data) return null;
-  return { id: data.id, openedAt: data.opened_at };
+  return { id: data.id, openedAt: data.opened_at, openingCash: Number(data.opening_cash ?? 0) };
 }
 
-export async function openPosShift(branchId: string): Promise<PosShift> {
+export async function openPosShift(branchId: string, openingCash = 0): Promise<PosShift> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
-  const { data, error } = await supabase.rpc("open_pos_shift", { p_branch_id: branchId });
+  const { data, error } = await supabase.rpc("open_pos_shift", { p_branch_id: branchId, p_opening_cash: openingCash });
   if (error) throw error;
-  return { id: data.id, openedAt: new Date().toISOString() };
+  return { id: data.id, openedAt: new Date().toISOString(), openingCash };
 }
 
 export interface CloseShiftAccountSummary {
@@ -37,12 +38,18 @@ export interface CloseShiftAccountSummary {
 export interface CloseShiftResult {
   total: number;
   byAccount: CloseShiftAccountSummary[];
+  expectedCash: number;
+  countedCash: number | null;
+  difference: number | null;
 }
 
-export async function closePosShift(shiftId: string): Promise<CloseShiftResult> {
+export async function closePosShift(shiftId: string, closingCountedCash?: number): Promise<CloseShiftResult> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
-  const { data, error } = await supabase.rpc("close_pos_shift", { p_pos_shift_id: shiftId });
+  const { data, error } = await supabase.rpc("close_pos_shift", {
+    p_pos_shift_id: shiftId,
+    p_closing_counted_cash: closingCountedCash ?? null
+  });
   if (error) throw error;
   return {
     total: Number(data.total),
@@ -50,7 +57,10 @@ export async function closePosShift(shiftId: string): Promise<CloseShiftResult> 
       accountId: row.account_id,
       amount: Number(row.amount),
       salesCount: Number(row.sales_count)
-    }))
+    })),
+    expectedCash: Number(data.expected_cash ?? 0),
+    countedCash: data.counted_cash !== null && data.counted_cash !== undefined ? Number(data.counted_cash) : null,
+    difference: data.difference !== null && data.difference !== undefined ? Number(data.difference) : null
   };
 }
 
