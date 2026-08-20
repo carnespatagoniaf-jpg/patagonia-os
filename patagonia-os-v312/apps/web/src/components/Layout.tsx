@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { BarChart3, Beef, Boxes, FileText, HandCoins, History, KeyRound, LogOut, PackagePlus, Receipt, ShoppingCart, TrendingUp, Users, Wallet } from "lucide-react";
+import { BarChart3, Beef, Boxes, FileText, HandCoins, History, KeyRound, LogOut, PackagePlus, Receipt, ShoppingCart, Tag, TrendingUp, Users, Wallet } from "lucide-react";
 import { useAuth } from "../features/auth/AuthProvider";
 import { canAccessPage, type Page } from "../features/auth/permissions";
 import { useActiveBranch } from "../features/branches/BranchProvider";
@@ -15,6 +15,7 @@ interface Props {
 const items: Array<{ page: Page; label: string; icon: typeof BarChart3 }> = [
   { page: "dashboard", label: "Inicio", icon: BarChart3 },
   { page: "sale", label: "Mostrador", icon: Receipt },
+  { page: "products", label: "Productos", icon: Tag },
   { page: "shifts", label: "Ventas", icon: ShoppingCart },
   { page: "inventory", label: "Stock", icon: Boxes },
   { page: "purchases", label: "Compras", icon: PackagePlus },

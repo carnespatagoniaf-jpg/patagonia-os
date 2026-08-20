@@ -3,6 +3,7 @@ import type { UserProfile } from "./AuthProvider";
 export type Permission =
   | "dashboard.view"
   | "pos.sell"
+  | "products.view"
   | "sales.create"
   | "sales.cancel"
   | "inventory.view"
@@ -29,15 +30,21 @@ export type Permission =
 // RPC/Edge Function del lado del servidor también lo validan. Auditoría
 // sigue reservada a "owner".
 // "cashier" es justamente el rol pensado para el empleado que atiende el
-// mostrador: solo ve Mostrador y Ventas, nada más — ni Inicio, ni Stock, ni
-// (por supuesto) Tesorería/Compras/Empleados. No hace falta una pantalla
-// aparte para ocultarle el resto, alcanza con darle de alta como "Cajero"
-// (no "Admin") en Usuarios.
+// mostrador: solo ve Mostrador, Ventas y Productos, nada más — ni Inicio,
+// ni Stock, ni (por supuesto) Tesorería/Compras/Empleados. No hace falta
+// una pantalla aparte para ocultarle el resto, alcanza con darle de alta
+// como "Cajero" (no "Admin") en Usuarios.
+// "products.view" es distinto de "inventory.view" (Stock): Productos es de
+// solo lectura y nunca muestra costo/margen (solo nombre y precio de
+// venta, con opción de imprimir una etiqueta para la góndola) — pensada
+// para que el cajero conteste "¿cuánto sale esto?" sin pasar por Mostrador
+// ni ver información sensible de costos.
 const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> = {
   owner: ["*"],
   admin: [
     "dashboard.view",
     "pos.sell",
+    "products.view",
     "sales.create",
     "sales.cancel",
     "inventory.view",
@@ -53,7 +60,7 @@ const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> = {
     "users.manage"
   ],
   manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view"],
-  cashier: ["pos.sell", "sales.create"],
+  cashier: ["pos.sell", "products.view", "sales.create"],
   production: ["dashboard.view", "inventory.view", "inventory.adjust"],
   readonly: ["dashboard.view", "inventory.view", "reports.view"]
 };
@@ -68,6 +75,7 @@ export function can(profile: UserProfile | null, permission: Permission) {
 export const PAGE_PERMISSIONS = {
   dashboard: "dashboard.view",
   sale: "pos.sell",
+  products: "products.view",
   shifts: "sales.create",
   inventory: "inventory.view",
   purchases: "purchases.manage",

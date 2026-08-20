@@ -3,6 +3,7 @@ import { Layout, type Page } from "./components/Layout";
 import { Dashboard } from "./features/dashboard/Dashboard";
 import { Inventory } from "./features/inventory/Inventory";
 import { Sale } from "./features/sale/Sale";
+import { ProductsLookup } from "./features/products/ProductsLookup";
 import { Purchases } from "./features/purchases/Purchases";
 import { Shifts } from "./features/shifts/Shifts";
 import { Treasury } from "./features/shifts/Treasury";
@@ -55,6 +56,7 @@ export default function App() {
         )}
         {allowed && page === "dashboard" && <Dashboard />}
         {allowed && page === "sale" && <Sale />}
+        {allowed && page === "products" && <ProductsLookup />}
         {allowed && page === "inventory" && <Inventory />}
         {allowed && page === "purchases" && <Purchases />}
         {allowed && page === "shifts" && <Shifts />}
