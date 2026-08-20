@@ -72,6 +72,7 @@ export function Sale() {
   const [shift, setShift] = useState<PosShift | null>(null);
   const [shiftLoading, setShiftLoading] = useState(isSupabaseConfigured);
   const [shiftSales, setShiftSales] = useState<PosShiftSale[]>([]);
+  const [showShiftMovements, setShowShiftMovements] = useState(false);
   const [openingCashInput, setOpeningCashInput] = useState("");
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [closingCountedCashInput, setClosingCountedCashInput] = useState("");
@@ -588,76 +589,88 @@ export function Sale() {
         </section>
       ) : (
         <>
-          <section className="panel">
-            <div className="panel-title">
-              <h2>Turno abierto</h2>
-              <span>desde {new Date(shift.openedAt).toLocaleTimeString("es-AR")}</span>
+          <section className="panel" style={{ padding: "14px 18px" }}>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10 }}>
+              <div>
+                <strong>Turno abierto</strong>{" "}
+                <span className="muted">
+                  desde {new Date(shift.openedAt).toLocaleTimeString("es-AR")} · {activeShiftSales.length} ventas · {formatMoney(shiftTotal)} acumulado
+                </span>
+              </div>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button className="secondary" onClick={() => setShowShiftMovements((v) => !v)}>
+                  {showShiftMovements ? "Ocultar movimientos" : "Ver movimientos"}
+                </button>
+                {canManageTreasury && !showCajaForm && (
+                  <button className="secondary" onClick={() => setShowCajaForm(true)}>+ Movimiento de caja</button>
+                )}
+                {!showCloseConfirm && (
+                  <button className="secondary" onClick={() => setShowCloseConfirm(true)}>Cerrar turno</button>
+                )}
+              </div>
             </div>
-            <p className="muted">{activeShiftSales.length} ventas · {formatMoney(shiftTotal)} acumulado</p>
 
-            {shiftSales.length > 0 && (
-              <table className="data-table" style={{ marginTop: 10 }}>
-                <thead>
-                  <tr><th>Hora</th><th className="num">Total</th><th></th><th></th></tr>
-                </thead>
-                <tbody>
-                  {shiftSales.map((s) => (
-                    <tr key={s.id} style={s.voidedAt ? { opacity: 0.5, textDecoration: "line-through" } : undefined}>
-                      <td>{new Date(s.createdAt).toLocaleTimeString("es-AR")}</td>
-                      <td className="num">{formatMoney(s.total)}</td>
-                      <td>{s.voidedAt ? "Anulada" : ""}</td>
-                      <td>
-                        {!s.voidedAt && (
-                          <button className="secondary" disabled={busy} onClick={() => handleVoidSale(s.id)}>Anular</button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+            {showShiftMovements && (
+              shiftSales.length > 0 ? (
+                <table className="data-table" style={{ marginTop: 14 }}>
+                  <thead>
+                    <tr><th>Hora</th><th className="num">Total</th><th></th><th></th></tr>
+                  </thead>
+                  <tbody>
+                    {shiftSales.map((s) => (
+                      <tr key={s.id} style={s.voidedAt ? { opacity: 0.5, textDecoration: "line-through" } : undefined}>
+                        <td>{new Date(s.createdAt).toLocaleTimeString("es-AR")}</td>
+                        <td className="num">{formatMoney(s.total)}</td>
+                        <td>{s.voidedAt ? "Anulada" : ""}</td>
+                        <td>
+                          {!s.voidedAt && (
+                            <button className="secondary" disabled={busy} onClick={() => handleVoidSale(s.id)}>Anular</button>
+                          )}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <p className="muted" style={{ marginTop: 14 }}>Todavía no hay ventas en este turno.</p>
+              )
             )}
 
-            {canManageTreasury && (
-              <div style={{ marginTop: 10 }}>
-                {!showCajaForm ? (
-                  <button className="secondary" onClick={() => setShowCajaForm(true)}>+ Movimiento de caja</button>
-                ) : (
-                  <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
-                    <select value={cajaDirection} onChange={(e) => setCajaDirection(e.target.value as "in" | "out")}>
-                      <option value="out">Egreso</option>
-                      <option value="in">Ingreso</option>
-                    </select>
-                    <select value={cajaAccountId} onChange={(e) => setCajaAccountId(e.target.value)}>
-                      <option value="">Cuenta…</option>
-                      {accounts.map((a) => (
-                        <option key={a.id} value={a.id}>{a.name}</option>
-                      ))}
-                    </select>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      placeholder="Monto"
-                      value={cajaAmount}
-                      onChange={(e) => setCajaAmount(e.target.value)}
-                      style={{ width: 110 }}
-                    />
-                    <input
-                      placeholder="Motivo"
-                      value={cajaReason}
-                      onChange={(e) => setCajaReason(e.target.value)}
-                      style={{ flex: 1, minWidth: 160 }}
-                    />
-                    <button disabled={cajaBusy} onClick={handleCajaMovement}>{cajaBusy ? "Guardando…" : "Registrar"}</button>
-                    <button className="secondary" onClick={() => setShowCajaForm(false)}>Cancelar</button>
-                  </div>
-                )}
+            {canManageTreasury && showCajaForm && (
+              <div style={{ marginTop: 14 }}>
+                <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
+                  <select value={cajaDirection} onChange={(e) => setCajaDirection(e.target.value as "in" | "out")}>
+                    <option value="out">Egreso</option>
+                    <option value="in">Ingreso</option>
+                  </select>
+                  <select value={cajaAccountId} onChange={(e) => setCajaAccountId(e.target.value)}>
+                    <option value="">Cuenta…</option>
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder="Monto"
+                    value={cajaAmount}
+                    onChange={(e) => setCajaAmount(e.target.value)}
+                    style={{ width: 110 }}
+                  />
+                  <input
+                    placeholder="Motivo"
+                    value={cajaReason}
+                    onChange={(e) => setCajaReason(e.target.value)}
+                    style={{ flex: 1, minWidth: 160 }}
+                  />
+                  <button disabled={cajaBusy} onClick={handleCajaMovement}>{cajaBusy ? "Guardando…" : "Registrar"}</button>
+                  <button className="secondary" onClick={() => setShowCajaForm(false)}>Cancelar</button>
+                </div>
               </div>
             )}
 
-            {!showCloseConfirm ? (
-              <button className="secondary" style={{ marginTop: 10 }} onClick={() => setShowCloseConfirm(true)}>Cerrar turno</button>
-            ) : (
-              <div style={{ marginTop: 10 }}>
+            {showCloseConfirm && (
+              <div style={{ marginTop: 14 }}>
                 <p className="muted">¿Cerrar el turno y cargar {formatMoney(shiftTotal)} a Tesorería? No se puede deshacer.</p>
                 <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10 }}>
                   <label className="muted">Efectivo contado (arqueo) $</label>
