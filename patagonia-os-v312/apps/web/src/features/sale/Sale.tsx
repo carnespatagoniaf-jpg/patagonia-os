@@ -20,6 +20,7 @@ import {
 } from "./pos-shift-service";
 import { formatMoney } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
+import { isThermalPrintSupported, printBytes, TicketBuilder } from "./thermal-printer";
 
 const UNIT_LABELS: Record<Product["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
 
@@ -58,7 +59,7 @@ interface ReceiptState {
 }
 
 export function Sale() {
-  const { branchId } = useActiveBranch();
+  const { branchId, branches } = useActiveBranch();
   const { profile } = useAuth();
   const { accounts, adjust } = useTreasury();
   const canManageTreasury = can(profile, "treasury.manage");
@@ -99,6 +100,8 @@ export function Sale() {
   const [cajaAmount, setCajaAmount] = useState("");
   const [cajaReason, setCajaReason] = useState("");
   const [cajaBusy, setCajaBusy] = useState(false);
+
+  const [thermalPrintBusy, setThermalPrintBusy] = useState(false);
 
   const grossTotal = cart.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
   const itemDiscountTotal = cart.reduce((sum, line) => sum + (parseAmount(itemDiscounts[line.key] || "0") || 0), 0);
@@ -444,6 +447,45 @@ export function Sale() {
 
   function handlePrint() {
     window.print();
+  }
+
+  function buildReceiptTicket(receiptToPrint: ReceiptState): Uint8Array {
+    const branchName = branches.find((b) => b.id === branchId)?.name;
+    const t = new TicketBuilder();
+    t.align("center").bold(true).line("COMPROBANTE INTERNO").bold(false);
+    if (branchName) t.line(branchName);
+    t.align("left").separator();
+    t.line(new Date(receiptToPrint.soldAt).toLocaleString("es-AR"));
+    t.separator();
+    for (const item of receiptToPrint.items) {
+      const lineTotal = item.quantity * item.unitPrice - item.discountAmount;
+      t.line(item.name);
+      t.line(`  ${item.quantity} ${UNIT_LABELS[item.unit]} x ${formatMoney(item.unitPrice)} = ${formatMoney(lineTotal)}`);
+    }
+    t.separator();
+    if (receiptToPrint.saleDiscount > 0) t.line(`Descuento: -${formatMoney(receiptToPrint.saleDiscount)}`);
+    if (receiptToPrint.saleSurcharge > 0) t.line(`Recargo: +${formatMoney(receiptToPrint.saleSurcharge)}`);
+    t.bold(true).doubleSize(true).line(`TOTAL ${formatMoney(receiptToPrint.total)}`).doubleSize(false).bold(false);
+    t.line(`Pago: ${receiptToPrint.paymentSummary}`);
+    if (receiptToPrint.amountTendered !== null) {
+      t.line(`Recibido: ${formatMoney(receiptToPrint.amountTendered)}  Vuelto: ${formatMoney(Math.max(receiptToPrint.change ?? 0, 0))}`);
+    }
+    t.feed(1).align("center").line("Gracias por su compra");
+    t.cut();
+    return t.build();
+  }
+
+  async function handleThermalPrint() {
+    if (!receipt) return;
+    setMessage("");
+    setThermalPrintBusy(true);
+    try {
+      await printBytes(buildReceiptTicket(receipt));
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo imprimir en la impresora térmica.");
+    } finally {
+      setThermalPrintBusy(false);
+    }
   }
 
   return (
@@ -805,7 +847,14 @@ export function Sale() {
         <section className="panel print-area" style={{ marginTop: 18 }}>
           <div className="panel-title">
             <h2>Último comprobante</h2>
-            <button className="secondary no-print" onClick={handlePrint}>Imprimir</button>
+            <div className="no-print">
+              {isThermalPrintSupported() && (
+                <button className="secondary" disabled={thermalPrintBusy} onClick={handleThermalPrint} style={{ marginRight: 8 }}>
+                  {thermalPrintBusy ? "Imprimiendo…" : "Imprimir en impresora térmica"}
+                </button>
+              )}
+              <button className="secondary" onClick={handlePrint}>Imprimir</button>
+            </div>
           </div>
           <p className="muted print-only-header">{new Date(receipt.soldAt).toLocaleString("es-AR")} · {receipt.paymentSummary}</p>
           <table className="data-table">
