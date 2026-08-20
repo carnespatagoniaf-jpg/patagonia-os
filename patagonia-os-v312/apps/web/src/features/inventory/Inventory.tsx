@@ -5,6 +5,13 @@ import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { adjustProductStock, createProduct, listProductsForBranch, updateProduct } from "./inventory-service";
+import {
+  createProductCategory,
+  deleteProductCategory,
+  listProductCategories,
+  updateProductCategory,
+  type ProductCategory
+} from "./product-categories-service";
 import { parseAmount } from "../../lib/money";
 
 function formatMoney(value: number) {
@@ -22,10 +29,11 @@ interface DraftProduct {
   priceRetail: string;
   minStock: string;
   active: boolean;
+  categoryId: string;
 }
 
 function emptyDraft(): DraftProduct {
-  return { code: "", name: "", unit: "kg", cost: "", margin: "", priceRetail: "", minStock: "", active: true };
+  return { code: "", name: "", unit: "kg", cost: "", margin: "", priceRetail: "", minStock: "", active: true, categoryId: "" };
 }
 
 function draftFromProduct(p: Product): DraftProduct {
@@ -37,7 +45,8 @@ function draftFromProduct(p: Product): DraftProduct {
     margin: String(marginPercent(p.cost, p.priceRetail)),
     priceRetail: String(p.priceRetail),
     minStock: String(p.minStock),
-    active: p.active ?? true
+    active: p.active ?? true,
+    categoryId: p.categoryId ?? ""
   };
 }
 
@@ -58,6 +67,13 @@ export function Inventory() {
   const [adjustCounted, setAdjustCounted] = useState("");
   const [adjustReason, setAdjustReason] = useState("");
 
+  const [categories, setCategories] = useState<ProductCategory[]>([]);
+  const [categoryFilter, setCategoryFilter] = useState("");
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
+  const [newCategoryName, setNewCategoryName] = useState("");
+  const [renamingCategoryId, setRenamingCategoryId] = useState<string | null>(null);
+  const [renameCategoryName, setRenameCategoryName] = useState("");
+
   async function reload() {
     if (!isSupabaseConfigured || !branchId) return;
     setLoading(true);
@@ -68,10 +84,60 @@ export function Inventory() {
     }
   }
 
+  async function reloadCategories() {
+    if (!isSupabaseConfigured) return;
+    setCategories(await listProductCategories());
+  }
+
   useEffect(() => {
     void reload();
+    void reloadCategories();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId]);
+
+  function categoryName(categoryId: string | undefined) {
+    if (!categoryId) return "—";
+    return categories.find((c) => c.id === categoryId)?.name ?? "—";
+  }
+
+  const visibleProducts = categoryFilter ? products.filter((p) => p.categoryId === categoryFilter) : products;
+
+  async function handleCreateCategory() {
+    try {
+      if (!newCategoryName.trim()) throw new Error("Ingresá un nombre.");
+      await createProductCategory(newCategoryName.trim());
+      setNewCategoryName("");
+      await reloadCategories();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo crear la categoría.");
+    }
+  }
+
+  function startRenameCategory(category: ProductCategory) {
+    setRenamingCategoryId(category.id);
+    setRenameCategoryName(category.name);
+  }
+
+  async function handleRenameCategory() {
+    try {
+      if (!renamingCategoryId || !renameCategoryName.trim()) return;
+      await updateProductCategory(renamingCategoryId, renameCategoryName.trim());
+      setRenamingCategoryId(null);
+      await reloadCategories();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo renombrar la categoría.");
+    }
+  }
+
+  async function handleDeleteCategory(category: ProductCategory) {
+    try {
+      await deleteProductCategory(category.id);
+      await reloadCategories();
+      await reload();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo borrar la categoría.");
+    }
+  }
 
   function onCostOrMarginChange(draft: DraftProduct, setDraft: (d: DraftProduct) => void, field: "cost" | "margin") {
     return (value: string) => {
@@ -107,7 +173,16 @@ export function Inventory() {
       if (!Number.isFinite(cost) || cost < 0) throw new Error("El costo no puede ser negativo.");
       if (!Number.isFinite(priceRetail) || priceRetail < 0) throw new Error("El precio no puede ser negativo.");
 
-      await createProduct({ branchId, code: newDraft.code.trim(), name: newDraft.name.trim(), unit: newDraft.unit, cost, priceRetail, minStock });
+      await createProduct({
+        branchId,
+        code: newDraft.code.trim(),
+        name: newDraft.name.trim(),
+        unit: newDraft.unit,
+        cost,
+        priceRetail,
+        minStock,
+        categoryId: newDraft.categoryId || undefined
+      });
       setNewDraft(emptyDraft());
       setShowNewForm(false);
       setMessage("Producto creado.");
@@ -141,7 +216,8 @@ export function Inventory() {
         cost,
         priceRetail,
         minStock,
-        active: editDraft.active
+        active: editDraft.active,
+        categoryId: editDraft.categoryId || undefined
       });
       setEditingId(null);
       setMessage("Producto actualizado.");
@@ -192,14 +268,58 @@ export function Inventory() {
       <section className="panel">
         <div className="panel-title">
           <h2>Productos</h2>
-          <span>{loading ? "Cargando…" : `${products.length} productos`}</span>
+          <span>{loading ? "Cargando…" : `${visibleProducts.length} productos`}</span>
         </div>
+
+        <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 14 }}>
+          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+            <option value="">Todas las categorías</option>
+            {categories.map((c) => (
+              <option key={c.id} value={c.id}>{c.name}</option>
+            ))}
+          </select>
+          <button className="secondary" onClick={() => setShowCategoryManager((v) => !v)}>
+            {showCategoryManager ? "Ocultar categorías" : "Gestionar categorías"}
+          </button>
+        </div>
+
+        {showCategoryManager && (
+          <div className="panel" style={{ marginBottom: 16, padding: 14 }}>
+            {categories.map((category) => (
+              <div key={category.id} className="list-row">
+                {renamingCategoryId === category.id ? (
+                  <>
+                    <input value={renameCategoryName} onChange={(e) => setRenameCategoryName(e.target.value)} style={{ flex: 1, marginRight: 8 }} />
+                    <span>
+                      <button onClick={handleRenameCategory}>Guardar</button>{" "}
+                      <button className="secondary" onClick={() => setRenamingCategoryId(null)}>Cancelar</button>
+                    </span>
+                  </>
+                ) : (
+                  <>
+                    <span>{category.name}</span>
+                    <span>
+                      <button className="secondary" onClick={() => startRenameCategory(category)}>Renombrar</button>{" "}
+                      <button className="danger" onClick={() => handleDeleteCategory(category)}>Borrar</button>
+                    </span>
+                  </>
+                )}
+              </div>
+            ))}
+            {categories.length === 0 && <p className="muted">Todavía no hay categorías.</p>}
+            <div className="cash-banner-form" style={{ marginTop: 10 }}>
+              <input placeholder="Nueva categoría" value={newCategoryName} onChange={(e) => setNewCategoryName(e.target.value)} />
+              <button onClick={handleCreateCategory}>+ Agregar categoría</button>
+            </div>
+          </div>
+        )}
 
         <table className="data-table">
           <thead>
             <tr>
               <th>Código</th>
               <th>Producto</th>
+              <th>Categoría</th>
               <th>Unidad</th>
               <th className="num">Costo</th>
               <th className="num">Margen</th>
@@ -211,12 +331,20 @@ export function Inventory() {
             </tr>
           </thead>
           <tbody>
-            {products.map((product) => (
+            {visibleProducts.map((product) => (
               <tr key={product.id}>
                 {editingId === product.id ? (
                   <>
                     <td><input value={editDraft.code} onChange={(e) => setEditDraft({ ...editDraft, code: e.target.value })} style={{ width: 90 }} /></td>
                     <td><input value={editDraft.name} onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} /></td>
+                    <td>
+                      <select value={editDraft.categoryId} onChange={(e) => setEditDraft({ ...editDraft, categoryId: e.target.value })}>
+                        <option value="">Sin categoría</option>
+                        {categories.map((c) => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    </td>
                     <td>
                       <select value={editDraft.unit} onChange={(e) => setEditDraft({ ...editDraft, unit: e.target.value as Product["unit"] })}>
                         <option value="kg">kg</option>
@@ -280,6 +408,7 @@ export function Inventory() {
                   <>
                     <td>{product.code}</td>
                     <td>{product.name}</td>
+                    <td>{categoryName(product.categoryId)}</td>
                     <td>{UNIT_LABELS[product.unit]}</td>
                     <td className="num">{formatMoney(product.cost)}</td>
                     <td className="num">{marginPercent(product.cost, product.priceRetail)}%</td>
@@ -312,6 +441,7 @@ export function Inventory() {
                   <>
                     <td>{product.code}</td>
                     <td>{product.name}</td>
+                    <td>{categoryName(product.categoryId)}</td>
                     <td>{UNIT_LABELS[product.unit]}</td>
                     <td className="num">{formatMoney(product.cost)}</td>
                     <td className="num">{marginPercent(product.cost, product.priceRetail)}%</td>
@@ -329,12 +459,18 @@ export function Inventory() {
             ))}
           </tbody>
         </table>
-        {products.length === 0 && !loading && <p className="muted">Todavía no cargaste productos.</p>}
+        {visibleProducts.length === 0 && !loading && <p className="muted">No hay productos para mostrar.</p>}
 
         {showNewForm ? (
           <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 16 }}>
             <input placeholder="Código" value={newDraft.code} onChange={(e) => setNewDraft({ ...newDraft, code: e.target.value })} style={{ width: 100 }} />
             <input placeholder="Nombre" value={newDraft.name} onChange={(e) => setNewDraft({ ...newDraft, name: e.target.value })} />
+            <select value={newDraft.categoryId} onChange={(e) => setNewDraft({ ...newDraft, categoryId: e.target.value })}>
+              <option value="">Sin categoría</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
             <select value={newDraft.unit} onChange={(e) => setNewDraft({ ...newDraft, unit: e.target.value as Product["unit"] })}>
               <option value="kg">kg</option>
               <option value="unit">unidad</option>

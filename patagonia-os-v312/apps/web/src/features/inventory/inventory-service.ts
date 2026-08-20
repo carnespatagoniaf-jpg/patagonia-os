@@ -6,7 +6,7 @@ export async function listProductsForBranch(branchId: string, includeInactive = 
 
   let query = supabase
     .from("products_with_stock")
-    .select("id,code,name,unit,cost,price_retail,min_stock,stock,active")
+    .select("id,code,name,unit,cost,price_retail,min_stock,stock,active,category_id")
     .eq("branch_id", branchId)
     .order("name");
   if (!includeInactive) query = query.eq("active", true);
@@ -23,7 +23,8 @@ export async function listProductsForBranch(branchId: string, includeInactive = 
     priceRetail: Number(row.price_retail),
     stock: Number(row.stock),
     minStock: Number(row.min_stock),
-    active: row.active
+    active: row.active,
+    categoryId: row.category_id ?? undefined
   }));
 }
 
@@ -35,6 +36,7 @@ export interface CreateProductInput {
   cost: number;
   priceRetail: number;
   minStock: number;
+  categoryId?: string;
 }
 
 export async function createProduct(input: CreateProductInput): Promise<{ id: string }> {
@@ -47,7 +49,8 @@ export async function createProduct(input: CreateProductInput): Promise<{ id: st
     p_unit: input.unit,
     p_cost: input.cost,
     p_price_retail: input.priceRetail,
-    p_min_stock: input.minStock
+    p_min_stock: input.minStock,
+    p_category_id: input.categoryId ?? null
   });
 
   if (error) throw error;
@@ -64,6 +67,7 @@ export interface UpdateProductInput {
   priceRetail: number;
   minStock: number;
   active: boolean;
+  categoryId?: string;
 }
 
 export async function updateProduct(input: UpdateProductInput): Promise<void> {
@@ -78,7 +82,8 @@ export async function updateProduct(input: UpdateProductInput): Promise<void> {
     p_cost: input.cost,
     p_price_retail: input.priceRetail,
     p_min_stock: input.minStock,
-    p_active: input.active
+    p_active: input.active,
+    p_category_id: input.categoryId ?? null
   });
 
   if (error) throw error;

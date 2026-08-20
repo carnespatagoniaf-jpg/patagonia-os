@@ -19,6 +19,7 @@ export interface Product {
   stock: Quantity;
   minStock: Quantity;
   active?: boolean;
+  categoryId?: string;
 }
 
 export interface CartItem {
