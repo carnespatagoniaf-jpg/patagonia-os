@@ -222,3 +222,16 @@ export async function getCustomerBalance(customerId: string): Promise<CustomerBa
   if (!data) return null;
   return { customerId: data.customer_id, totalCharged: Number(data.total_charged), totalPaid: Number(data.total_paid), balance: Number(data.balance) };
 }
+
+export async function listCustomersWithBalance(includeInactive = false): Promise<(Customer & { balance: number })[]> {
+  if (!supabase) return [];
+
+  const [customers, { data: balanceRows, error }] = await Promise.all([
+    listCustomers(includeInactive),
+    supabase.from("customer_balance").select("customer_id,balance")
+  ]);
+  if (error) throw error;
+
+  const balanceByCustomer = new Map((balanceRows ?? []).map((row) => [row.customer_id, Number(row.balance)]));
+  return customers.map((customer) => ({ ...customer, balance: balanceByCustomer.get(customer.id) ?? 0 }));
+}

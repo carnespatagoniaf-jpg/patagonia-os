@@ -88,6 +88,7 @@ export const PAGE_PERMISSIONS = {
   creditors: "creditors.manage",
   customers: "customers.manage",
   reports: "reports.view",
+  export: "reports.view",
   users: "users.manage",
   audit: "audit.view"
 } as const satisfies Record<string, Permission>;
