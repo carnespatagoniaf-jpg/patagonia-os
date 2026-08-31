@@ -12,29 +12,61 @@ interface Props {
   children: ReactNode;
 }
 
-const items: Array<{ page: Page; label: string; icon: typeof BarChart3 }> = [
-  { page: "dashboard", label: "Inicio", icon: BarChart3 },
-  { page: "sale", label: "Mostrador", icon: Receipt },
-  { page: "products", label: "Productos", icon: Tag },
-  { page: "shifts", label: "Ventas", icon: ShoppingCart },
-  { page: "inventory", label: "Stock", icon: Boxes },
-  { page: "purchases", label: "Compras", icon: PackagePlus },
-  { page: "treasury", label: "Tesorería", icon: Wallet },
-  { page: "employees", label: "Empleados", icon: Users },
-  { page: "profitability", label: "Rentabilidad", icon: TrendingUp },
-  { page: "carcass", label: "Despiece", icon: Beef },
-  { page: "creditors", label: "Deudas", icon: HandCoins },
-  { page: "customers", label: "Clientes", icon: Handshake },
-  { page: "reports", label: "Reportes", icon: FileText },
-  { page: "users", label: "Usuarios", icon: KeyRound },
-  { page: "audit", label: "Auditoría", icon: History }
+type NavItem = { page: Page; label: string; icon: typeof BarChart3 };
+
+/** Agrupado por tarea (no por tabla/permiso) para que el menú no sea una
+ * lista plana de 15 ítems -- las tres pantallas de venta (Mostrador, Turnos,
+ * Clientes) quedan juntas en vez de dispersas, etc. "Inicio" va suelto,
+ * sin encabezado de grupo. */
+const navGroups: Array<{ heading: string | null; items: NavItem[] }> = [
+  { heading: null, items: [{ page: "dashboard", label: "Inicio", icon: BarChart3 }] },
+  {
+    heading: "Ventas",
+    items: [
+      { page: "sale", label: "Mostrador", icon: Receipt },
+      { page: "shifts", label: "Turnos", icon: ShoppingCart },
+      { page: "customers", label: "Clientes", icon: Handshake }
+    ]
+  },
+  {
+    heading: "Producto y stock",
+    items: [
+      { page: "products", label: "Productos", icon: Tag },
+      { page: "inventory", label: "Stock", icon: Boxes },
+      { page: "purchases", label: "Compras", icon: PackagePlus },
+      { page: "carcass", label: "Despiece", icon: Beef }
+    ]
+  },
+  {
+    heading: "Finanzas",
+    items: [
+      { page: "treasury", label: "Tesorería", icon: Wallet },
+      { page: "creditors", label: "Deudas", icon: HandCoins },
+      { page: "profitability", label: "Rentabilidad", icon: TrendingUp }
+    ]
+  },
+  {
+    heading: "Equipo",
+    items: [
+      { page: "employees", label: "Empleados", icon: Users },
+      { page: "users", label: "Usuarios", icon: KeyRound }
+    ]
+  },
+  {
+    heading: "Reportes",
+    items: [
+      { page: "reports", label: "Reportes", icon: FileText },
+      { page: "audit", label: "Auditoría", icon: History }
+    ]
+  }
 ];
 
 function BranchSwitcher() {
-  const { branchId, branches, canSwitch, setBranchId, addBranch } = useActiveBranch();
+  const { branchId, branches, activeBranch, canSwitch, setBranchId, addBranch, setSalesMode } = useActiveBranch();
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState("");
   const [error, setError] = useState("");
+  const [modeBusy, setModeBusy] = useState(false);
 
   const currentName = branches.find((b) => b.id === branchId)?.name;
 
@@ -54,6 +86,16 @@ function BranchSwitcher() {
     }
   }
 
+  async function handleModeChange(mode: "" | "turnos" | "mostrador") {
+    if (!branchId) return;
+    setModeBusy(true);
+    try {
+      await setSalesMode(branchId, mode === "" ? null : mode);
+    } finally {
+      setModeBusy(false);
+    }
+  }
+
   return (
     <div className="branch-switcher">
       <select value={branchId ?? ""} onChange={(e) => setBranchId(e.target.value)}>
@@ -61,6 +103,14 @@ function BranchSwitcher() {
           <option key={b.id} value={b.id}>{b.name}</option>
         ))}
       </select>
+
+      <div className="branch-switcher-label" style={{ marginTop: 10 }}>Modo de venta de esta sucursal</div>
+      <select disabled={modeBusy} value={activeBranch?.sales_mode ?? ""} onChange={(e) => void handleModeChange(e.target.value as "" | "turnos" | "mostrador")}>
+        <option value="">Sin definir</option>
+        <option value="turnos">Turnos (carga manual)</option>
+        <option value="mostrador">Mostrador (venta ítem a ítem)</option>
+      </select>
+
       {showNewForm ? (
         <div className="branch-switcher-new">
           <input placeholder="Nombre de la sucursal" value={newName} onChange={(e) => setNewName(e.target.value)} />
@@ -119,7 +169,9 @@ function ChangePasswordForm() {
 
 export function Layout({ page, onPageChange, children }: Props) {
   const { profile, signOut } = useAuth();
-  const visibleItems = items.filter((item) => canAccessPage(profile, item.page));
+  const visibleGroups = navGroups
+    .map((group) => ({ ...group, items: group.items.filter((item) => canAccessPage(profile, item.page)) }))
+    .filter((group) => group.items.length > 0);
 
   return (
     <div className="app-shell">
@@ -133,15 +185,20 @@ export function Layout({ page, onPageChange, children }: Props) {
         </div>
 
         <nav>
-          {visibleItems.map(({ page: target, label, icon: Icon }) => (
-            <button
-              key={target}
-              className={page === target ? "nav-item active" : "nav-item"}
-              onClick={() => onPageChange(target)}
-            >
-              <Icon size={19} />
-              {label}
-            </button>
+          {visibleGroups.map((group) => (
+            <div key={group.heading ?? "root"} className="nav-group">
+              {group.heading && <p className="nav-heading">{group.heading}</p>}
+              {group.items.map(({ page: target, label, icon: Icon }) => (
+                <button
+                  key={target}
+                  className={page === target ? "nav-item active" : "nav-item"}
+                  onClick={() => onPageChange(target)}
+                >
+                  <Icon size={19} />
+                  {label}
+                </button>
+              ))}
+            </div>
           ))}
         </nav>
 

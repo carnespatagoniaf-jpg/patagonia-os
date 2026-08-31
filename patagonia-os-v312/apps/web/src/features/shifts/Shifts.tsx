@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import type { ShiftOutflowType, ShiftPeriod } from "@patagonia/domain";
 import { useSuppliers } from "../purchases/useSuppliers";
 import { useEmployees } from "../employees/useEmployees";
+import { useActiveBranch } from "../branches/BranchProvider";
 import { useTreasury } from "./useTreasury";
 import { useShifts } from "./useShifts";
 import { formatMoney, todayIso } from "./format";
@@ -15,6 +16,7 @@ const OUTFLOW_TYPE_LABELS: Record<ShiftOutflowType, string> = {
 };
 
 export function Shifts() {
+  const { activeBranch } = useActiveBranch();
   const { accounts, loading: treasuryLoading, error: treasuryError } = useTreasury();
   const { suppliers } = useSuppliers();
   const { employees } = useEmployees();
@@ -98,6 +100,13 @@ export function Shifts() {
       if (!saleAccountId) throw new Error("Elegí una cuenta.");
       const amount = parseAmount(saleAmount);
       if (!Number.isFinite(amount) || amount <= 0) throw new Error("Ingresá un monto válido.");
+
+      if (!editingSaleId && activeBranch?.sales_mode === "mostrador") {
+        const confirmed = window.confirm(
+          "Esta sucursal está configurada para vender por Mostrador. ¿Seguro que querés cargar una venta manual acá también?"
+        );
+        if (!confirmed) return;
+      }
 
       await saveSale(
         { id: editingSaleId ?? undefined, shiftId: shift.id, accountId: saleAccountId, amount },

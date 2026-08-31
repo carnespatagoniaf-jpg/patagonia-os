@@ -2,17 +2,19 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 import { can } from "../auth/permissions";
-import { createBranch, listBranches, type Branch } from "./branches-service";
+import { createBranch, listBranches, setBranchSalesMode, type Branch, type SalesMode } from "./branches-service";
 
 const DEMO_BRANCH_ID = "demo-branch";
 
 interface BranchContextValue {
   branchId: string | null;
   branches: Branch[];
+  activeBranch: Branch | null;
   canSwitch: boolean;
   loading: boolean;
   setBranchId(id: string): void;
   addBranch(name: string): Promise<Branch>;
+  setSalesMode(branchId: string, mode: SalesMode): Promise<void>;
 }
 
 const BranchContext = createContext<BranchContextValue | null>(null);
@@ -69,10 +71,17 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     const result = await createBranch(name);
     await reload();
     setBranchId(result.id);
-    return { id: result.id, name };
+    return { id: result.id, name, sales_mode: null };
   }
 
-  const value: BranchContextValue = { branchId, branches, canSwitch, loading, setBranchId, addBranch };
+  async function setSalesMode(id: string, mode: SalesMode) {
+    await setBranchSalesMode(id, mode);
+    await reload();
+  }
+
+  const activeBranch = branches.find((b) => b.id === branchId) ?? null;
+
+  const value: BranchContextValue = { branchId, branches, activeBranch, canSwitch, loading, setBranchId, addBranch, setSalesMode };
 
   return <BranchContext.Provider value={value}>{children}</BranchContext.Provider>;
 }
