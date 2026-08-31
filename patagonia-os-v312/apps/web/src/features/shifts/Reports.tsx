@@ -3,14 +3,16 @@ import { useShifts } from "./useShifts";
 import { useTreasury } from "./useTreasury";
 import { addDaysIso, formatMoney, todayIso } from "./format";
 import type { ShiftRangeRow } from "./shifts-service";
+import { listPosSalesInRange, type MostradorSaleEntry } from "../sale/pos-shift-service";
 
 export function Reports() {
-  const { loadRange } = useShifts();
+  const { branchId, loadRange } = useShifts();
   const { accounts } = useTreasury();
 
   const [from, setFrom] = useState(todayIso());
   const [to, setTo] = useState(todayIso());
   const [rows, setRows] = useState<ShiftRangeRow[]>([]);
+  const [mostradorSales, setMostradorSales] = useState<MostradorSaleEntry[]>([]);
   const [loading, setLoading] = useState(false);
   const [ranOnce, setRanOnce] = useState(false);
 
@@ -19,14 +21,21 @@ export function Reports() {
     setTo(nextTo);
     setLoading(true);
     try {
-      setRows(await loadRange(nextFrom, nextTo));
+      const [shiftRows, mostrador] = await Promise.all([
+        loadRange(nextFrom, nextTo),
+        branchId ? listPosSalesInRange(branchId, nextFrom, nextTo) : Promise.resolve([])
+      ]);
+      setRows(shiftRows);
+      setMostradorSales(mostrador);
       setRanOnce(true);
     } finally {
       setLoading(false);
     }
   }
 
-  const salesTotal = rows.reduce((sum, row) => sum + row.sales.reduce((s, r) => s + r.amount, 0), 0);
+  const turnosTotal = rows.reduce((sum, row) => sum + row.sales.reduce((s, r) => s + r.amount, 0), 0);
+  const mostradorTotal = mostradorSales.reduce((sum, s) => sum + s.amount, 0);
+  const salesTotal = turnosTotal + mostradorTotal;
   const outflowsTotal = rows.reduce((sum, row) => sum + row.outflows.reduce((s, r) => s + r.amount, 0), 0);
 
   const salesByDate = [...rows].sort((a, b) => a.shift.shiftDate.localeCompare(b.shift.shiftDate));
@@ -34,34 +43,40 @@ export function Reports() {
   const byAccount = useMemo(
     () =>
       accounts.map((account) => {
-        const sales = rows.reduce(
+        const turnos = rows.reduce(
           (sum, row) => sum + row.sales.filter((s) => s.accountId === account.id).reduce((s, r) => s + r.amount, 0),
           0
         );
+        const mostrador = mostradorSales.filter((s) => s.accountId === account.id).reduce((sum, s) => sum + s.amount, 0);
         const outflows = rows.reduce(
           (sum, row) => sum + row.outflows.filter((o) => o.accountId === account.id).reduce((s, r) => s + r.amount, 0),
           0
         );
+        const sales = turnos + mostrador;
         return { accountId: account.id, name: account.name, sales, outflows, difference: sales - outflows };
       }),
-    [accounts, rows]
+    [accounts, rows, mostradorSales]
   );
 
   const salesByDay = useMemo(() => {
-    const dates = Array.from(new Set(rows.map((row) => row.shift.shiftDate))).sort();
+    const dates = Array.from(
+      new Set([...rows.map((row) => row.shift.shiftDate), ...mostradorSales.map((s) => s.date)])
+    ).sort();
     return dates.map((date) => {
       const dayRows = rows.filter((row) => row.shift.shiftDate === date);
+      const dayMostrador = mostradorSales.filter((s) => s.date === date);
       const perAccount = accounts.map((account) => ({
         accountId: account.id,
-        amount: dayRows.reduce(
-          (sum, row) => sum + row.sales.filter((s) => s.accountId === account.id).reduce((s, r) => s + r.amount, 0),
-          0
-        )
+        amount:
+          dayRows.reduce(
+            (sum, row) => sum + row.sales.filter((s) => s.accountId === account.id).reduce((s, r) => s + r.amount, 0),
+            0
+          ) + dayMostrador.filter((s) => s.accountId === account.id).reduce((sum, s) => sum + s.amount, 0)
       }));
       const total = perAccount.reduce((sum, a) => sum + a.amount, 0);
       return { date, perAccount, total };
     });
-  }, [rows, accounts]);
+  }, [rows, mostradorSales, accounts]);
 
   return (
     <>
@@ -69,7 +84,7 @@ export function Reports() {
         <div>
           <p className="eyebrow">REPORTES</p>
           <h1>Reportes</h1>
-          <p className="muted">Ventas y salidas por rango de fechas. Con el tiempo se suman más reportes acá.</p>
+          <p className="muted">Ventas (Turnos + Mostrador) y salidas por rango de fechas. Con el tiempo se suman más reportes acá.</p>
         </div>
       </header>
 
@@ -93,12 +108,13 @@ export function Reports() {
         ) : (
           <div className="kpi-grid" style={{ marginBottom: 0 }}>
             <div className="kpi-card">
-              <span>Turnos en el rango</span>
-              <strong>{rows.length}</strong>
-            </div>
-            <div className="kpi-card">
               <span>Ventas totales</span>
               <strong>{formatMoney(salesTotal)}</strong>
+              <small>Turnos {formatMoney(turnosTotal)} · Mostrador {formatMoney(mostradorTotal)}</small>
+            </div>
+            <div className="kpi-card">
+              <span>Turnos en el rango</span>
+              <strong>{rows.length}</strong>
             </div>
             <div className="kpi-card">
               <span>Salidas totales</span>
@@ -168,6 +184,7 @@ export function Reports() {
           <section className="panel" style={{ marginTop: 18 }}>
             <div className="panel-title">
               <h2>Por turno</h2>
+              <span className="muted" style={{ fontSize: 12 }}>Solo Turnos — Mostrador no se carga por turno mañana/tarde</span>
             </div>
             <table className="data-table">
               <thead>

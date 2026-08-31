@@ -114,6 +114,41 @@ interface PosShiftSaleRow {
   }[];
 }
 
+export interface MostradorSaleEntry {
+  date: string;
+  accountId: string;
+  amount: number;
+}
+
+interface PosSaleRangeRow {
+  amount: number;
+  account_id: string;
+  pos_sales: { created_at: string; voided_at: string | null; branch_id: string };
+}
+
+/** Ventas de Mostrador (no Turnos) para reportes/dashboard, en la misma
+ * forma (fecha, cuenta, monto) que las ventas de Turnos, para poder
+ * sumarlas juntas -- ver 049 y la discusión de "Ventas hoy" incompleto
+ * porque solo miraba Turnos. */
+export async function listPosSalesInRange(branchId: string, fromDate: string, toDate: string): Promise<MostradorSaleEntry[]> {
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from("pos_sale_payments")
+    .select("amount,account_id,pos_sales!inner(created_at,voided_at,branch_id)")
+    .eq("pos_sales.branch_id", branchId)
+    .is("pos_sales.voided_at", null)
+    .gte("pos_sales.created_at", `${fromDate}T00:00:00.000Z`)
+    .lte("pos_sales.created_at", `${toDate}T23:59:59.999Z`);
+
+  if (error) throw error;
+  return ((data ?? []) as unknown as PosSaleRangeRow[]).map((row) => ({
+    date: row.pos_sales.created_at.slice(0, 10),
+    accountId: row.account_id,
+    amount: Number(row.amount)
+  }));
+}
+
 export async function listPosShiftSales(shiftId: string): Promise<PosShiftSale[]> {
   if (!supabase) return [];
 
