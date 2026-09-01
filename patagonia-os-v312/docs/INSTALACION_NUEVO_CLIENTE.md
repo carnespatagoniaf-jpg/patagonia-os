@@ -103,6 +103,35 @@ compartida del Camino A, donde un mismo proyecto aloja más de un cliente.)
 Si alguno tira error, no sigas con el siguiente hasta resolverlo — están
 pensados para depender de que todo lo anterior haya quedado bien.
 
+Si el archivo es muy grande para pegarlo de una sola vez (el SQL Editor
+puede fallar silenciosamente con archivos grandes -- dice "Success" pero
+no crea nada), partilo en pedazos más chicos e ir confirmando con
+`select count(*) from information_schema.tables where table_schema = 'public';`
+después de cada uno.
+
+**Paso extra, fácil de olvidar:** en un proyecto Supabase nuevo, el rol
+`authenticated` a veces no tiene los permisos base (`SELECT`/`INSERT`/etc.)
+sobre las tablas -- estas migraciones nunca los otorgan explícitamente
+porque asumen que el propio Supabase ya los configuró al crear el
+proyecto. Si no fue así, el login del dueño va a fallar con un
+"Invalid login credentials" enganoso (en realidad el login funciona, pero
+la siguiente consulta a `profiles` da 403 y el sistema te desloguea
+solo). Antes de seguir al paso 3, corré esto una vez en el SQL Editor
+para curarlo de raíz:
+
+```sql
+grant usage on schema public to authenticated, anon, service_role;
+grant all on all tables in schema public to authenticated, anon, service_role;
+grant all on all sequences in schema public to authenticated, anon, service_role;
+grant all on all functions in schema public to authenticated, anon, service_role;
+alter default privileges in schema public grant all on tables to authenticated, anon, service_role;
+alter default privileges in schema public grant all on sequences to authenticated, anon, service_role;
+alter default privileges in schema public grant all on functions to authenticated, anon, service_role;
+```
+
+(No afecta la seguridad entre empresas -- eso lo sigue controlando RLS,
+que las migraciones sí activan correctamente.)
+
 ## 3. Crear la empresa y su primera sucursal
 
 Abrí `supabase/seed/new_client_bootstrap.sql`, reemplazá:
