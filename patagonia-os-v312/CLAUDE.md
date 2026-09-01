@@ -62,6 +62,8 @@ Key invariants (see `docs/ARCHITECTURE.md`, though it predates several modules b
 
 ## Deployment
 
-This "Carnes Patagonia" instance: Netlify, manual drag-and-drop of `apps/web/dist` after `npm run build` (this project's Netlify site is **not** connected to the GitHub repo, so pushing to `main` does not deploy it — the dist folder has to be built and dragged in by hand each time). `netlify.toml` still declares the normal git-based build (`npm run build` → publish `apps/web/dist`, `/api/*` → Netlify functions) for when/if it's reconnected. Requires `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` set in Netlify env.
+This "Carnes Patagonia" instance (`patagoniasystem.com.ar`): as of 2026-09-01, Netlify's site is connected to this GitHub repo (`carnespatagoniaf-jpg/patagonia-os`) with auto-deploy on push to `main` — a plain `git push` is enough, no more manual drag-and-drop of `apps/web/dist`. Requires `VITE_SUPABASE_URL` and `VITE_SUPABASE_ANON_KEY` set in Netlify env.
 
-For a **new client**, connecting Netlify to their own GitHub repo (auto-deploy on push) is the recommended default instead of manual drag-and-drop — see `docs/INSTALACION_NUEVO_CLIENTE.md`.
+**Repo layout gotcha:** the actual git repo root (`C:\Users\g\Documents\GitHub\patagonia-os\` on the owner's machine) is **one level above** this `patagonia-os-v312/` folder — `package.json`, `netlify.toml`, etc. all live inside `patagonia-os-v312/`, not at the repo root. Netlify's **Base directory** setting must be `patagonia-os-v312` or the build fails immediately (it did, the first time this was connected) because it can't find `package.json`. Keep this in mind for any other repo-root-relative tooling (CI, other deploy targets) — this is not a normal single-project repo root.
+
+For a **new client** getting their own isolated Supabase+Netlify instance (Camino B), connecting Netlify to their own GitHub repo (auto-deploy on push) is the recommended default instead of manual drag-and-drop — see `docs/INSTALACION_NUEVO_CLIENTE.md`.
