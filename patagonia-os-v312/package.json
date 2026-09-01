@@ -9,6 +9,7 @@
   ],
   "scripts": {
     "dev": "npm run dev -w @patagonia/web",
+    "dev:staging": "npm run dev:staging -w @patagonia/web",
     "build": "npm run build -w @patagonia/domain && npm run build -w @patagonia/web && npm run build -w @patagonia/api",
     "test": "npm run test -w @patagonia/domain",
     "test:e2e": "node tests/e2e/smoke.mjs",
