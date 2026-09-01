@@ -3,6 +3,18 @@ import { LockKeyhole } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import { createClient, listCompanies, setCompanyActive, type CompanySummary, type CreateClientResult } from "./admin-service";
 
+/** Mensaje listo para pegar en WhatsApp/mail y mandarle al dueño nuevo --
+ * evita tener que copiar el usuario y la contraseña por separado a mano. */
+function buildWelcomeMessage(companyName: string, result: CreateClientResult) {
+  return `¡Hola! Ya está listo el acceso a Patagonia OS para ${companyName}.
+
+Entrá en: https://patagoniasystem.com.ar
+Usuario: ${result.email}
+Contraseña temporal: ${result.tempPassword}
+
+Te recomendamos cambiarla la primera vez que entres (arriba a la izquierda, "Cambiar contraseña").`;
+}
+
 function formatDate(iso: string) {
   return new Date(iso).toLocaleDateString("es-AR");
 }
@@ -24,6 +36,8 @@ export function AdminCreateClient() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [result, setResult] = useState<CreateClientResult | null>(null);
+  const [resultCompanyName, setResultCompanyName] = useState("");
+  const [copied, setCopied] = useState(false);
 
   const [companies, setCompanies] = useState<CompanySummary[]>([]);
   const [companiesLoading, setCompaniesLoading] = useState(true);
@@ -71,6 +85,8 @@ export function AdminCreateClient() {
         ownerEmail: draft.ownerEmail.trim()
       });
       setResult(created);
+      setResultCompanyName(draft.companyName.trim());
+      setCopied(false);
       setDraft(emptyDraft());
       await reloadCompanies();
     } catch (error) {
@@ -95,8 +111,17 @@ export function AdminCreateClient() {
             <br />
             Contraseña temporal (copiala ahora, no se vuelve a mostrar):{" "}
             <code style={{ fontSize: 16, fontWeight: 700 }}>{result.tempPassword}</code>
-            <br />
-            <button className="secondary" style={{ marginTop: 10 }} onClick={() => setResult(null)}>Crear otro cliente</button>
+            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+              <button
+                onClick={() => {
+                  void navigator.clipboard.writeText(buildWelcomeMessage(resultCompanyName, result));
+                  setCopied(true);
+                }}
+              >
+                {copied ? "¡Copiado!" : "Copiar mensaje para el cliente"}
+              </button>
+              <button className="secondary" onClick={() => setResult(null)}>Crear otro cliente</button>
+            </div>
           </div>
         ) : (
           <form onSubmit={submit}>
