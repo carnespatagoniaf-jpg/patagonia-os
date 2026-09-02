@@ -13,7 +13,7 @@ export async function listProductPrices(): Promise<ProductPriceRow[]> {
   if (!supabase) return [];
 
   const { data, error } = await supabase
-    .from("products")
+    .from("products_price_list")
     .select("id,code,name,unit,price_retail")
     .eq("active", true)
     .order("name");
