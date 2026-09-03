@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import type { PayrollAdjustmentType, SalaryPeriod } from "@patagonia/domain";
+import type { PayrollAdjustmentType, PayrollLiquidation, SalaryPeriod } from "@patagonia/domain";
 import { useEmployees } from "./useEmployees";
 import { useTreasury } from "../shifts/useTreasury";
 import { addDaysIso, formatMoney, todayIso } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
+import { isSupabaseConfigured } from "../../lib/supabase";
+import { listPayrollLiquidationDetail, type PayrollLiquidationLineItem } from "./employees-service";
 
 const ADJUSTMENT_TYPE_LABELS: Record<PayrollAdjustmentType, string> = {
   bonus: "Premio",
@@ -11,7 +13,9 @@ const ADJUSTMENT_TYPE_LABELS: Record<PayrollAdjustmentType, string> = {
 };
 
 const SALARY_PERIOD_LABELS: Record<SalaryPeriod, string> = {
+  daily: "por día",
   weekly: "por semana",
+  biweekly: "por quincena",
   monthly: "por mes"
 };
 
@@ -19,6 +23,18 @@ const OUTFLOW_TYPE_LABELS: Record<string, string> = {
   vale_mercaderia: "Vale · Mercadería",
   vale_adelanto: "Vale · Adelanto"
 };
+
+const SALARY_PERIOD_DIVISOR: Record<SalaryPeriod, number> = {
+  daily: 1,
+  weekly: 7,
+  biweekly: 14,
+  monthly: 30
+};
+
+interface PaymentRow {
+  accountId: string;
+  amount: string;
+}
 
 function daysBetweenInclusive(start: string, end: string) {
   const a = new Date(`${start}T00:00:00`);
@@ -63,7 +79,7 @@ export function Employees() {
   const [editBonusReason, setEditBonusReason] = useState("");
   const [editActive, setEditActive] = useState(true);
 
-  const [liquidationAccountId, setLiquidationAccountId] = useState("");
+  const [paymentRows, setPaymentRows] = useState<PaymentRow[]>([{ accountId: "", amount: "" }]);
 
   const [adjDate, setAdjDate] = useState(todayIso());
   const [adjType, setAdjType] = useState<PayrollAdjustmentType>("bonus");
@@ -72,6 +88,9 @@ export function Employees() {
 
   const [periodStart, setPeriodStart] = useState(addDaysIso(todayIso(), -6));
   const [periodEnd, setPeriodEnd] = useState(todayIso());
+
+  const [receipt, setReceipt] = useState<{ liquidation: PayrollLiquidation; items: PayrollLiquidationLineItem[] } | null>(null);
+  const [receiptLoading, setReceiptLoading] = useState(false);
 
   useEffect(() => {
     if (selectedId) void loadDetail(selectedId);
@@ -91,30 +110,58 @@ export function Employees() {
     }
   }, [selectedEmployee]);
 
-  const periodAdjustmentsTotal = useMemo(
-    () =>
-      adjustments
-        .filter((a) => a.adjustmentDate >= periodStart && a.adjustmentDate <= periodEnd)
-        .reduce((sum, a) => sum + (a.type === "bonus" ? a.amount : -a.amount), 0),
+  const periodAdjustments = useMemo(
+    () => adjustments.filter((a) => a.adjustmentDate >= periodStart && a.adjustmentDate <= periodEnd),
     [adjustments, periodStart, periodEnd]
+  );
+
+  const periodAdjustmentsTotal = useMemo(
+    () => periodAdjustments.reduce((sum, a) => sum + (a.type === "bonus" ? a.amount : -a.amount), 0),
+    [periodAdjustments]
   );
 
   // Un vale queda "pendiente" hasta que una liquidación lo cubre explícitamente
   // (marcado en el backend), sin importar fechas: así ningún vale se pierde ni
   // se descuenta dos veces, sin importar qué rango esté elegido en pantalla.
-  const periodVouchersTotal = useMemo(
-    () => vouchers.filter((v) => !v.liquidated && v.shiftDate <= periodEnd).reduce((sum, v) => sum + v.amount, 0),
+  const periodPendingVouchers = useMemo(
+    () => vouchers.filter((v) => !v.liquidated && v.shiftDate <= periodEnd),
     [vouchers, periodEnd]
+  );
+
+  const periodVouchersTotal = useMemo(
+    () => periodPendingVouchers.reduce((sum, v) => sum + v.amount, 0),
+    [periodPendingVouchers]
   );
 
   const previewBaseSalary = useMemo(() => {
     if (!selectedEmployee) return 0;
     const days = daysBetweenInclusive(periodStart, periodEnd);
-    const divisor = selectedEmployee.salaryPeriod === "weekly" ? 7 : 30;
+    const divisor = SALARY_PERIOD_DIVISOR[selectedEmployee.salaryPeriod];
     return Math.round(((selectedEmployee.baseSalary + selectedEmployee.recurringBonusAmount) * days) / divisor);
   }, [selectedEmployee, periodStart, periodEnd]);
 
   const previewNet = previewBaseSalary + periodAdjustmentsTotal - periodVouchersTotal;
+
+  const isSplit = paymentRows.length > 1;
+  const paymentsTotal = paymentRows.reduce((sum, p) => sum + (parseAmount(p.amount || "0") || 0), 0);
+  const paymentsRemaining = previewNet - paymentsTotal;
+
+  useEffect(() => {
+    setPaymentRows([{ accountId: "", amount: previewNet > 0 ? String(previewNet) : "" }]);
+    setReceipt(null);
+  }, [selectedId, periodStart, periodEnd]);
+
+  function addPaymentRow() {
+    setPaymentRows((current) => [...current, { accountId: "", amount: "" }]);
+  }
+
+  function removePaymentRow(index: number) {
+    setPaymentRows((current) => (current.length > 1 ? current.filter((_, i) => i !== index) : current));
+  }
+
+  function updatePaymentRow(index: number, field: "accountId" | "amount", value: string) {
+    setPaymentRows((current) => current.map((p, i) => (i === index ? { ...p, [field]: value } : p)));
+  }
 
   async function handleCreate() {
     try {
@@ -197,16 +244,57 @@ export function Employees() {
   async function handleLiquidate() {
     try {
       if (!selectedEmployee) return;
+
+      const rowsWithAccount = paymentRows.filter((p) => p.accountId);
+      if (rowsWithAccount.length > 0) {
+        if (rowsWithAccount.length !== paymentRows.length) {
+          throw new Error("Elegí una cuenta para cada pago, o dejalos todos vacíos.");
+        }
+        if (previewNet <= 0) {
+          throw new Error("El neto no es positivo, no hay nada que pagar desde Tesorería.");
+        }
+        if (Math.abs(paymentsRemaining) > 0.01) {
+          throw new Error(`Los pagos no suman el neto: faltan ${formatMoney(paymentsRemaining)}.`);
+        }
+      }
+
+      const payments = rowsWithAccount.map((p) => ({ accountId: p.accountId, amount: parseAmount(p.amount || "0") || 0 }));
+
       const result = await liquidate({
         employeeId: selectedEmployee.id,
         periodStart,
         periodEnd,
-        accountId: liquidationAccountId || undefined
+        payments
       });
-      setLiquidationAccountId("");
+      setPaymentRows([{ accountId: "", amount: "" }]);
       setMessage(`Liquidación registrada: neto ${formatMoney(result.netAmount)}.`);
+      await handleViewReceipt({
+        ...result,
+        payments: payments.map((p, i) => ({ id: `local-${i}`, accountId: p.accountId, accountName: accounts.find((a) => a.id === p.accountId)?.name, amount: p.amount }))
+      });
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo liquidar el período.");
+    }
+  }
+
+  async function handleViewReceipt(liquidation: PayrollLiquidation) {
+    if (!isSupabaseConfigured) {
+      const items: PayrollLiquidationLineItem[] = [
+        ...periodAdjustments.map((a) => ({ date: a.adjustmentDate, label: a.reason, amount: a.amount, kind: a.type as "bonus" | "deduction" })),
+        ...periodPendingVouchers.map((v) => ({ date: v.shiftDate, label: v.detail, amount: v.amount, kind: "voucher" as const }))
+      ].sort((a, b) => a.date.localeCompare(b.date));
+      setReceipt({ liquidation, items });
+      return;
+    }
+
+    setReceiptLoading(true);
+    try {
+      const items = await listPayrollLiquidationDetail(liquidation.id);
+      setReceipt({ liquidation, items });
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo cargar el detalle de la liquidación.");
+    } finally {
+      setReceiptLoading(false);
     }
   }
 
@@ -271,7 +359,9 @@ export function Employees() {
               <input type="text" inputMode="decimal" placeholder="Sueldo base" value={newSalary} onChange={(e) => setNewSalary(e.target.value)} />
               <select value={newSalaryPeriod} onChange={(e) => setNewSalaryPeriod(e.target.value as SalaryPeriod)}>
                 <option value="monthly">Por mes</option>
+                <option value="biweekly">Por quincena</option>
                 <option value="weekly">Por semana</option>
+                <option value="daily">Por día</option>
               </select>
               <input type="text" inputMode="decimal" placeholder="Premio fijo (opcional)" value={newBonusAmount} onChange={(e) => setNewBonusAmount(e.target.value)} />
               <input placeholder="Motivo del premio fijo" value={newBonusReason} onChange={(e) => setNewBonusReason(e.target.value)} />
@@ -307,7 +397,9 @@ export function Employees() {
               <input type="text" inputMode="decimal" value={editSalary} onChange={(e) => setEditSalary(e.target.value)} />
               <select value={editSalaryPeriod} onChange={(e) => setEditSalaryPeriod(e.target.value as SalaryPeriod)}>
                 <option value="monthly">Por mes</option>
+                <option value="biweekly">Por quincena</option>
                 <option value="weekly">Por semana</option>
+                <option value="daily">Por día</option>
               </select>
               <input type="text" inputMode="decimal" placeholder="Premio fijo (opcional)" value={editBonusAmount} onChange={(e) => setEditBonusAmount(e.target.value)} />
               <input placeholder="Motivo del premio fijo" value={editBonusReason} onChange={(e) => setEditBonusReason(e.target.value)} />
@@ -386,57 +478,165 @@ export function Employees() {
 
           <section className="panel print-area" style={{ marginTop: 18 }}>
             <div className="panel-title">
-              <h2>Liquidación</h2>
-              <button className="secondary no-print" onClick={handlePrint}>Imprimir</button>
+              <h2>{receipt ? "Recibo de liquidación" : "Liquidación"}</h2>
+              <div className="no-print" style={{ display: "flex", gap: 8 }}>
+                {receipt && <button className="secondary" onClick={() => setReceipt(null)}>Liquidar otro período</button>}
+                <button className="secondary" onClick={handlePrint}>Imprimir</button>
+              </div>
             </div>
             <p className="muted print-only-header">
               {selectedEmployee.fullName} · Sueldo {formatMoney(selectedEmployee.baseSalary)} {SALARY_PERIOD_LABELS[selectedEmployee.salaryPeriod]}
             </p>
-            <div className="cash-banner-form no-print" style={{ flexWrap: "wrap", marginBottom: 14 }}>
-              <input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
-              <input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
-              <button className="secondary" onClick={() => { setPeriodStart(addDaysIso(todayIso(), -6)); setPeriodEnd(todayIso()); }}>Semana</button>
-              <button className="secondary" onClick={() => { setPeriodStart(addDaysIso(todayIso(), -14)); setPeriodEnd(todayIso()); }}>Quincena</button>
-              <button className="secondary" onClick={() => { setPeriodStart(addDaysIso(todayIso(), -29)); setPeriodEnd(todayIso()); }}>Mes</button>
-            </div>
 
-            <div className="kpi-grid">
-              <div className="kpi-card">
-                <span>Sueldo del período ({daysBetweenInclusive(periodStart, periodEnd)} días, {SALARY_PERIOD_LABELS[selectedEmployee.salaryPeriod]})</span>
-                <strong>{formatMoney(previewBaseSalary)}</strong>
-              </div>
-              <div className="kpi-card">
-                <span>Premios / descuentos</span>
-                <strong>{formatMoney(periodAdjustmentsTotal)}</strong>
-              </div>
-              <div className="kpi-card">
-                <span>Vales del período</span>
-                <strong>{formatMoney(periodVouchersTotal)}</strong>
-              </div>
-              <div className="kpi-card">
-                <span>Neto a pagar</span>
-                <strong>{formatMoney(previewNet)}</strong>
-              </div>
-            </div>
+            {receipt ? (
+              <>
+                <p className="muted">
+                  Período {receipt.liquidation.periodStart} — {receipt.liquidation.periodEnd}
+                  {receiptLoading && " · Cargando detalle…"}
+                </p>
+                <div className="kpi-grid">
+                  <div className="kpi-card">
+                    <span>Sueldo del período</span>
+                    <strong>{formatMoney(receipt.liquidation.baseSalary)}</strong>
+                  </div>
+                  <div className="kpi-card">
+                    <span>Premios / descuentos</span>
+                    <strong>{formatMoney(receipt.liquidation.adjustmentsTotal)}</strong>
+                  </div>
+                  <div className="kpi-card">
+                    <span>Vales</span>
+                    <strong>{formatMoney(receipt.liquidation.vouchersTotal)}</strong>
+                  </div>
+                  <div className="kpi-card">
+                    <span>Neto pagado</span>
+                    <strong>{formatMoney(receipt.liquidation.netAmount)}</strong>
+                  </div>
+                </div>
 
-            <div className="cash-banner-form no-print" style={{ flexWrap: "wrap", marginTop: 14 }}>
-              <select value={liquidationAccountId} onChange={(e) => setLiquidationAccountId(e.target.value)}>
-                <option value="">Sin cuenta (ya se pagó por afuera del sistema)</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.name}</option>
-                ))}
-              </select>
-              <button className="charge-button" onClick={handleLiquidate}>
-                Liquidar período
-              </button>
-            </div>
-            <p className="muted" style={{ marginTop: 6 }}>
-              Si elegís una cuenta y el neto da positivo, se resta de ahí. Si lo dejás sin cuenta, la liquidación queda registrada pero no mueve nada de Tesorería.
-            </p>
+                {receipt.items.length > 0 && (
+                  <table className="data-table" style={{ marginTop: 14 }}>
+                    <thead>
+                      <tr><th>Fecha</th><th>Concepto</th><th className="num">Monto</th></tr>
+                    </thead>
+                    <tbody>
+                      {receipt.items.map((item, i) => (
+                        <tr key={i}>
+                          <td>{item.date}</td>
+                          <td>{item.kind === "voucher" ? `Vale · ${item.label}` : `${ADJUSTMENT_TYPE_LABELS[item.kind]} · ${item.label}`}</td>
+                          <td className={`num ${item.kind === "bonus" ? "num-positive" : "num-negative"}`}>
+                            {item.kind === "bonus" ? "+" : "-"}{formatMoney(item.amount)}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
 
-            <table className="data-table" style={{ marginTop: 18 }}>
+                <p style={{ marginTop: 14 }}>
+                  <b>Forma de pago: </b>
+                  {receipt.liquidation.payments.length === 0
+                    ? "Sin cuenta (ya se pagó por afuera del sistema)"
+                    : receipt.liquidation.payments.map((p) => `${p.accountName ?? "Cuenta"}: ${formatMoney(p.amount)}`).join(" + ")}
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="cash-banner-form no-print" style={{ flexWrap: "wrap", marginBottom: 14 }}>
+                  <input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
+                  <input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
+                  <button className="secondary" onClick={() => { setPeriodStart(addDaysIso(todayIso(), -6)); setPeriodEnd(todayIso()); }}>Semana</button>
+                  <button className="secondary" onClick={() => { setPeriodStart(addDaysIso(todayIso(), -14)); setPeriodEnd(todayIso()); }}>Quincena</button>
+                  <button className="secondary" onClick={() => { setPeriodStart(addDaysIso(todayIso(), -29)); setPeriodEnd(todayIso()); }}>Mes</button>
+                </div>
+
+                <div className="kpi-grid">
+                  <div className="kpi-card">
+                    <span>Sueldo del período ({daysBetweenInclusive(periodStart, periodEnd)} días, {SALARY_PERIOD_LABELS[selectedEmployee.salaryPeriod]})</span>
+                    <strong>{formatMoney(previewBaseSalary)}</strong>
+                  </div>
+                  <div className="kpi-card">
+                    <span>Premios / descuentos</span>
+                    <strong>{formatMoney(periodAdjustmentsTotal)}</strong>
+                  </div>
+                  <div className="kpi-card">
+                    <span>Vales del período</span>
+                    <strong>{formatMoney(periodVouchersTotal)}</strong>
+                  </div>
+                  <div className="kpi-card">
+                    <span>Neto a pagar</span>
+                    <strong>{formatMoney(previewNet)}</strong>
+                  </div>
+                </div>
+
+                {(periodAdjustments.length > 0 || periodPendingVouchers.length > 0) && (
+                  <table className="data-table" style={{ marginTop: 14 }}>
+                    <thead>
+                      <tr><th>Fecha</th><th>Concepto</th><th className="num">Monto</th></tr>
+                    </thead>
+                    <tbody>
+                      {periodAdjustments.map((a) => (
+                        <tr key={a.id}>
+                          <td>{a.adjustmentDate}</td>
+                          <td>{ADJUSTMENT_TYPE_LABELS[a.type]} · {a.reason}</td>
+                          <td className={`num ${a.type === "bonus" ? "num-positive" : "num-negative"}`}>{a.type === "bonus" ? "+" : "-"}{formatMoney(a.amount)}</td>
+                        </tr>
+                      ))}
+                      {periodPendingVouchers.map((v) => (
+                        <tr key={v.id}>
+                          <td>{v.shiftDate}</td>
+                          <td>Vale · {v.detail}</td>
+                          <td className="num num-negative">-{formatMoney(v.amount)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+
+                <div className="no-print" style={{ marginTop: 14 }}>
+                  {paymentRows.map((p, i) => (
+                    <div key={i} className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 8 }}>
+                      <select value={p.accountId} onChange={(e) => updatePaymentRow(i, "accountId", e.target.value)}>
+                        <option value="">Sin cuenta (ya se pagó por afuera del sistema)</option>
+                        {accounts.map((a) => (
+                          <option key={a.id} value={a.id}>{a.name}</option>
+                        ))}
+                      </select>
+                      {isSplit && (
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="Monto"
+                          value={p.amount}
+                          onChange={(e) => updatePaymentRow(i, "amount", e.target.value)}
+                          style={{ width: 130 }}
+                        />
+                      )}
+                      {isSplit && (
+                        <button className="secondary" onClick={() => removePaymentRow(i)}>Quitar cuenta</button>
+                      )}
+                    </div>
+                  ))}
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {paymentRows[0]?.accountId && (
+                      <button className="secondary" onClick={addPaymentRow}>+ Dividir el pago en más de una cuenta</button>
+                    )}
+                    <button className="charge-button" onClick={handleLiquidate}>
+                      Liquidar período
+                    </button>
+                  </div>
+                </div>
+                {isSplit && Math.abs(paymentsRemaining) > 0.01 && (
+                  <p className="message warning" style={{ marginTop: 6 }}>Faltan {formatMoney(paymentsRemaining)} para cubrir el neto entre las cuentas.</p>
+                )}
+                <p className="muted" style={{ marginTop: 6 }}>
+                  Si elegís cuenta(s), el neto se descuenta de ahí al liquidar (podés dividirlo en más de una). Si dejás la cuenta sin elegir, la liquidación queda registrada pero no mueve nada de Tesorería.
+                </p>
+              </>
+            )}
+
+            <table className="data-table no-print" style={{ marginTop: 18 }}>
               <thead>
-                <tr><th>Período</th><th className="num">Sueldo</th><th className="num">Ajustes</th><th className="num">Vales</th><th className="num">Neto</th><th>Pagado desde</th><th className="no-print"></th></tr>
+                <tr><th>Período</th><th className="num">Sueldo</th><th className="num">Ajustes</th><th className="num">Vales</th><th className="num">Neto</th><th>Pagado desde</th><th></th></tr>
               </thead>
               <tbody>
                 {liquidations.map((l) => (
@@ -446,8 +646,11 @@ export function Employees() {
                     <td className="num">{formatMoney(l.adjustmentsTotal)}</td>
                     <td className="num">{formatMoney(l.vouchersTotal)}</td>
                     <td className="num">{formatMoney(l.netAmount)}</td>
-                    <td>{l.accountName ?? "—"}</td>
-                    <td className="no-print"><button className="danger" onClick={() => handleRemoveLiquidation(l.id)}>Borrar</button></td>
+                    <td>{l.payments.length > 0 ? l.payments.map((p) => p.accountName ?? "Cuenta").join(" + ") : "—"}</td>
+                    <td style={{ display: "flex", gap: 6 }}>
+                      <button className="secondary" onClick={() => handleViewReceipt(l)}>Ver / Imprimir</button>
+                      <button className="danger" onClick={() => handleRemoveLiquidation(l.id)}>Borrar</button>
+                    </td>
                   </tr>
                 ))}
               </tbody>

@@ -183,7 +183,7 @@ export interface ShiftOutflow {
   createdAt: string;
 }
 
-export type SalaryPeriod = "weekly" | "monthly";
+export type SalaryPeriod = "daily" | "weekly" | "biweekly" | "monthly";
 
 export interface Employee {
   id: string;
@@ -207,6 +207,13 @@ export interface PayrollAdjustment {
   reason: string;
 }
 
+export interface PayrollLiquidationPayment {
+  id: string;
+  accountId: string;
+  accountName?: string;
+  amount: Money;
+}
+
 export interface PayrollLiquidation {
   id: string;
   employeeId: string;
@@ -219,6 +226,7 @@ export interface PayrollLiquidation {
   netAmount: Money;
   accountId?: string;
   accountName?: string;
+  payments: PayrollLiquidationPayment[];
   createdAt: string;
 }
 

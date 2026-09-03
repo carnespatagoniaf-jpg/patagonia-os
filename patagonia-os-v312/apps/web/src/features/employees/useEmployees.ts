@@ -184,7 +184,8 @@ export function useEmployees() {
           Math.round(
             (new Date(`${input.periodEnd}T00:00:00`).getTime() - new Date(`${input.periodStart}T00:00:00`).getTime()) / 86400000
           ) + 1;
-        const divisor = employee?.salaryPeriod === "weekly" ? 7 : 30;
+        const divisor =
+          employee?.salaryPeriod === "daily" ? 1 : employee?.salaryPeriod === "weekly" ? 7 : employee?.salaryPeriod === "biweekly" ? 14 : 30;
         const baseSalary = Math.round((((employee?.baseSalary ?? 0) + (employee?.recurringBonusAmount ?? 0)) * periodDays) / divisor);
         const liquidation: PayrollLiquidation = {
           id: crypto.randomUUID(),
@@ -196,7 +197,7 @@ export function useEmployees() {
           adjustmentsTotal,
           vouchersTotal,
           netAmount: baseSalary + adjustmentsTotal - vouchersTotal,
-          accountId: input.accountId,
+          payments: input.payments.map((p, i) => ({ id: `demo-${i}`, accountId: p.accountId, amount: p.amount })),
           createdAt: new Date().toISOString()
         };
         setLiquidations((current) => [liquidation, ...current]);

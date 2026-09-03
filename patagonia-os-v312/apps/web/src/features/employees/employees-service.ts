@@ -1,4 +1,4 @@
-import type { Employee, PayrollAdjustment, PayrollAdjustmentType, PayrollLiquidation, SalaryPeriod, ShiftOutflow } from "@patagonia/domain";
+import type { Employee, PayrollAdjustment, PayrollAdjustmentType, PayrollLiquidation, PayrollLiquidationPayment, SalaryPeriod, ShiftOutflow } from "@patagonia/domain";
 import { supabase } from "../../lib/supabase";
 
 interface EmployeeRow {
@@ -198,6 +198,23 @@ export async function listEmployeeVouchers(employeeId: string): Promise<Employee
   }));
 }
 
+interface PayrollLiquidationPaymentRow {
+  id: string;
+  account_id: string;
+  amount: number;
+  treasury_accounts: { name: string } | { name: string }[] | null;
+}
+
+function mapLiquidationPayment(row: PayrollLiquidationPaymentRow): PayrollLiquidationPayment {
+  const account = Array.isArray(row.treasury_accounts) ? row.treasury_accounts[0] : row.treasury_accounts;
+  return {
+    id: row.id,
+    accountId: row.account_id,
+    accountName: account?.name,
+    amount: Number(row.amount)
+  };
+}
+
 interface PayrollLiquidationRow {
   id: string;
   employee_id: string;
@@ -210,6 +227,7 @@ interface PayrollLiquidationRow {
   net_amount: number;
   account_id: string | null;
   treasury_accounts: { name: string } | { name: string }[] | null;
+  payroll_liquidation_payments: PayrollLiquidationPaymentRow[] | null;
   created_at: string;
 }
 
@@ -227,6 +245,7 @@ function mapLiquidation(row: PayrollLiquidationRow): PayrollLiquidation {
     netAmount: Number(row.net_amount),
     accountId: row.account_id ?? undefined,
     accountName: account?.name,
+    payments: (row.payroll_liquidation_payments ?? []).map(mapLiquidationPayment),
     createdAt: row.created_at
   };
 }
@@ -236,7 +255,9 @@ export async function listPayrollLiquidations(employeeId: string): Promise<Payro
 
   const { data, error } = await supabase
     .from("payroll_liquidations")
-    .select("id,employee_id,branch_id,period_start,period_end,base_salary,adjustments_total,vouchers_total,net_amount,account_id,treasury_accounts(name),created_at")
+    .select(
+      "id,employee_id,branch_id,period_start,period_end,base_salary,adjustments_total,vouchers_total,net_amount,account_id,treasury_accounts(name),created_at,payroll_liquidation_payments(id,account_id,amount,treasury_accounts(name))"
+    )
     .eq("employee_id", employeeId)
     .order("period_start", { ascending: false });
 
@@ -244,12 +265,17 @@ export async function listPayrollLiquidations(employeeId: string): Promise<Payro
   return ((data ?? []) as unknown as PayrollLiquidationRow[]).map(mapLiquidation);
 }
 
+export interface ClosePayrollLiquidationPaymentInput {
+  accountId: string;
+  amount: number;
+}
+
 export interface ClosePayrollLiquidationInput {
   branchId: string;
   employeeId: string;
   periodStart: string;
   periodEnd: string;
-  accountId?: string;
+  payments: ClosePayrollLiquidationPaymentInput[];
 }
 
 export async function closePayrollLiquidation(input: ClosePayrollLiquidationInput): Promise<PayrollLiquidation> {
@@ -260,7 +286,7 @@ export async function closePayrollLiquidation(input: ClosePayrollLiquidationInpu
     p_employee_id: input.employeeId,
     p_period_start: input.periodStart,
     p_period_end: input.periodEnd,
-    p_account_id: input.accountId ?? null
+    p_payments: input.payments.map((p) => ({ account_id: p.accountId, amount: p.amount }))
   });
 
   if (error) throw error;
@@ -274,7 +300,7 @@ export async function closePayrollLiquidation(input: ClosePayrollLiquidationInpu
     adjustmentsTotal: Number(data.adjustments_total),
     vouchersTotal: Number(data.vouchers_total),
     netAmount: Number(data.net_amount),
-    accountId: input.accountId,
+    payments: input.payments.map((p, i) => ({ id: `pending-${i}`, accountId: p.accountId, amount: p.amount })),
     createdAt: new Date().toISOString()
   };
 }
@@ -284,4 +310,53 @@ export async function deletePayrollLiquidation(liquidationId: string): Promise<v
 
   const { error } = await supabase.rpc("delete_payroll_liquidation", { p_liquidation_id: liquidationId });
   if (error) throw error;
+}
+
+export interface PayrollLiquidationLineItem {
+  date: string;
+  label: string;
+  amount: number;
+  kind: "bonus" | "deduction" | "voucher";
+}
+
+export async function listPayrollLiquidationDetail(liquidationId: string): Promise<PayrollLiquidationLineItem[]> {
+  if (!supabase) return [];
+
+  const [adjResult, voucherResult] = await Promise.all([
+    supabase
+      .from("payroll_adjustments")
+      .select("adjustment_date,type,amount,reason")
+      .eq("payroll_liquidation_id", liquidationId),
+    supabase
+      .from("shift_outflows")
+      .select("amount,type,detail,shift_registers(shift_date)")
+      .eq("payroll_liquidation_id", liquidationId)
+  ]);
+
+  if (adjResult.error) throw adjResult.error;
+  if (voucherResult.error) throw voucherResult.error;
+
+  const adjustmentItems: PayrollLiquidationLineItem[] = (adjResult.data ?? []).map((row) => ({
+    date: row.adjustment_date as string,
+    label: row.reason as string,
+    amount: Number(row.amount),
+    kind: row.type as "bonus" | "deduction"
+  }));
+
+  const voucherItems: PayrollLiquidationLineItem[] = ((voucherResult.data ?? []) as unknown as Array<{
+    amount: number;
+    type: ShiftOutflow["type"];
+    detail: string;
+    shift_registers: { shift_date: string } | { shift_date: string }[] | null;
+  }>).map((row) => {
+    const shift = Array.isArray(row.shift_registers) ? row.shift_registers[0] : row.shift_registers;
+    return {
+      date: shift?.shift_date ?? "-",
+      label: row.detail,
+      amount: Number(row.amount),
+      kind: "voucher"
+    };
+  });
+
+  return [...adjustmentItems, ...voucherItems].sort((a, b) => a.date.localeCompare(b.date));
 }
