@@ -64,7 +64,8 @@ export function Purchases() {
     editItem,
     registerPayment,
     updatePayment,
-    removePayment
+    removePayment,
+    voidPurchase
   } = usePurchases();
   const { accounts } = useTreasury();
 
@@ -74,6 +75,7 @@ export function Purchases() {
   const [supplierCategory, setSupplierCategory] = useState("");
   const [supplierPhone, setSupplierPhone] = useState("");
   const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
 
   const [purchaseDate, setPurchaseDate] = useState(todayIso());
   const [invoiceNumber, setInvoiceNumber] = useState("");
@@ -111,6 +113,8 @@ export function Purchases() {
   }, [lines]);
 
   async function handleCreateSupplier() {
+    if (busy) return;
+    setBusy(true);
     try {
       if (!supplierName.trim()) throw new Error("El nombre del proveedor es obligatorio.");
       const supplier = await createSupplier({
@@ -125,6 +129,8 @@ export function Purchases() {
       setMessage("Proveedor creado.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo crear el proveedor.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -141,6 +147,8 @@ export function Purchases() {
   }
 
   async function handleCreatePurchase() {
+    if (busy) return;
+    setBusy(true);
     try {
       if (!selectedSupplierId) throw new Error("Elegí un proveedor primero.");
 
@@ -160,10 +168,14 @@ export function Purchases() {
       setMessage("Compra registrada.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo registrar la compra.");
+    } finally {
+      setBusy(false);
     }
   }
 
   async function handleSaveEdit(itemId: string) {
+    if (busy) return;
+    setBusy(true);
     try {
       if (!selectedSupplierId) return;
       const quantity = Number(editQuantity);
@@ -175,10 +187,14 @@ export function Purchases() {
       setMessage("Ítem actualizado.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo editar el ítem.");
+    } finally {
+      setBusy(false);
     }
   }
 
   async function handleRegisterPayment() {
+    if (busy) return;
+    setBusy(true);
     try {
       if (!selectedSupplierId) throw new Error("Elegí un proveedor primero.");
       const amount = parseAmount(paymentAmount);
@@ -198,6 +214,8 @@ export function Purchases() {
       setMessage("Pago registrado.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo registrar el pago.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -210,6 +228,8 @@ export function Purchases() {
   }
 
   async function handleSavePayment() {
+    if (busy) return;
+    setBusy(true);
     try {
       if (!selectedSupplierId || !editingPaymentId) return;
       const amount = parseAmount(editPaymentAmount);
@@ -227,16 +247,36 @@ export function Purchases() {
       setMessage("Pago actualizado.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo actualizar el pago.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleVoidPurchase(purchaseId: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (!selectedSupplierId) return;
+      await voidPurchase(selectedSupplierId, purchaseId);
+      setMessage("Compra anulada — se revirtió el stock que había sumado.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo anular la compra.");
+    } finally {
+      setBusy(false);
     }
   }
 
   async function handleDeletePayment(paymentId: string) {
+    if (busy) return;
+    setBusy(true);
     try {
       if (!selectedSupplierId) return;
       await removePayment(selectedSupplierId, paymentId);
       setMessage("Pago borrado.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo borrar el pago.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -244,7 +284,7 @@ export function Purchases() {
 
   const ledger = useMemo<LedgerRow[]>(() => {
     const rows = [
-      ...purchases.map((purchase) => ({
+      ...purchases.filter((purchase) => purchase.status === "active").map((purchase) => ({
         key: `purchase-${purchase.id}`,
         date: purchase.purchaseDate,
         detail: purchase.invoiceNumber ? `Compra · Fact. ${purchase.invoiceNumber}` : "Compra",
@@ -322,7 +362,7 @@ export function Purchases() {
             <input placeholder="Nombre" value={supplierName} onChange={(e) => setSupplierName(e.target.value)} />
             <input placeholder="Rubro (pollo, carne...)" value={supplierCategory} onChange={(e) => setSupplierCategory(e.target.value)} />
             <input placeholder="Teléfono" value={supplierPhone} onChange={(e) => setSupplierPhone(e.target.value)} />
-            <button onClick={handleCreateSupplier}>Agregar proveedor</button>
+            <button disabled={busy} onClick={handleCreateSupplier}>Agregar proveedor</button>
           </div>
         </section>
 
@@ -445,8 +485,8 @@ export function Purchases() {
               <strong>Total <b>{formatMoney(draftTotal)}</b></strong>
             </div>
 
-            <button className="charge-button" style={{ marginTop: 14 }} onClick={handleCreatePurchase}>
-              Registrar compra
+            <button className="charge-button" style={{ marginTop: 14 }} disabled={busy} onClick={handleCreatePurchase}>
+              {busy ? "Registrando…" : "Registrar compra"}
             </button>
           </section>
 
@@ -457,10 +497,18 @@ export function Purchases() {
                 <span>{purchasesLoading ? "Cargando…" : `${purchases.length} facturas`}</span>
               </div>
               {purchases.map((purchase) => (
-                <div key={purchase.id} style={{ marginBottom: 16 }}>
+                <div key={purchase.id} style={{ marginBottom: 16, opacity: purchase.status === "voided" ? 0.5 : 1 }}>
                   <div className="list-row">
-                    <strong>{purchase.purchaseDate}{purchase.invoiceNumber ? ` · Fact. ${purchase.invoiceNumber}` : ""}</strong>
-                    <span className="num">Total {formatMoney(purchase.total)}</span>
+                    <strong style={{ textDecoration: purchase.status === "voided" ? "line-through" : undefined }}>
+                      {purchase.purchaseDate}{purchase.invoiceNumber ? ` · Fact. ${purchase.invoiceNumber}` : ""}
+                      {purchase.status === "voided" && " · Anulada"}
+                    </strong>
+                    <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                      <span className="num">Total {formatMoney(purchase.total)}</span>
+                      {purchase.status === "active" && (
+                        <button className="secondary" disabled={busy} onClick={() => handleVoidPurchase(purchase.id)}>Anular</button>
+                      )}
+                    </span>
                   </div>
                   <table className="data-table">
                     <thead>
@@ -492,8 +540,8 @@ export function Purchases() {
                                 <input type="text" inputMode="decimal" value={editUnitPrice} onChange={(e) => setEditUnitPrice(e.target.value)} style={{ width: 90 }} />
                               </td>
                               <td className="num">
-                                <button onClick={() => handleSaveEdit(item.id)}>Guardar</button>
-                                <button className="secondary" onClick={() => setEditingItemId(null)}>Cancelar</button>
+                                <button disabled={busy} onClick={() => handleSaveEdit(item.id)}>Guardar</button>
+                                <button className="secondary" disabled={busy} onClick={() => setEditingItemId(null)}>Cancelar</button>
                               </td>
                             </>
                           ) : (
@@ -538,7 +586,7 @@ export function Purchases() {
                   ))}
                 </select>
                 <input placeholder="Nota" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} />
-                <button onClick={handleRegisterPayment}>Registrar pago</button>
+                <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
               </div>
 
               <table className="data-table">
@@ -570,8 +618,8 @@ export function Purchases() {
                         </td>
                         <td><input value={editPaymentNotes} onChange={(e) => setEditPaymentNotes(e.target.value)} /></td>
                         <td>
-                          <button onClick={handleSavePayment}>Guardar</button>{" "}
-                          <button className="secondary" onClick={() => setEditingPaymentId(null)}>Cancelar</button>
+                          <button disabled={busy} onClick={handleSavePayment}>Guardar</button>{" "}
+                          <button className="secondary" disabled={busy} onClick={() => setEditingPaymentId(null)}>Cancelar</button>
                         </td>
                       </tr>
                     ) : (
@@ -581,8 +629,8 @@ export function Purchases() {
                         <td>{payment.accountName ?? PAYMENT_METHOD_LABELS[payment.paymentMethod]}</td>
                         <td>{payment.notes ?? "-"}</td>
                         <td>
-                          <button className="secondary" onClick={() => startEditPayment(payment)}>Editar</button>{" "}
-                          <button className="secondary" onClick={() => handleDeletePayment(payment.id)}>Borrar</button>
+                          <button className="secondary" disabled={busy} onClick={() => startEditPayment(payment)}>Editar</button>{" "}
+                          <button className="secondary" disabled={busy} onClick={() => handleDeletePayment(payment.id)}>Borrar</button>
                         </td>
                       </tr>
                     )

@@ -40,6 +40,7 @@ export function Customers() {
   const { accounts } = useTreasury();
 
   const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const [name, setName] = useState("");
@@ -99,6 +100,8 @@ export function Customers() {
   }, [charges, payments]);
 
   async function handleCreateCustomer() {
+    if (busy) return;
+    setBusy(true);
     try {
       if (!name.trim()) throw new Error("El nombre es obligatorio.");
       const result = await create({ name: name.trim(), phone: phone.trim() || undefined, notes: notes.trim() || undefined });
@@ -109,10 +112,14 @@ export function Customers() {
       setMessage("Cliente creado.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo crear el cliente.");
+    } finally {
+      setBusy(false);
     }
   }
 
   async function handleAddCharge() {
+    if (busy) return;
+    setBusy(true);
     try {
       if (!selectedCustomer) return;
       const amount = parseAmount(chargeAmount);
@@ -124,10 +131,14 @@ export function Customers() {
       setMessage("Entrega cargada.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo cargar la entrega.");
+    } finally {
+      setBusy(false);
     }
   }
 
   async function handleRegisterPayment() {
+    if (busy) return;
+    setBusy(true);
     try {
       if (!selectedCustomer) return;
       const amount = parseAmount(paymentAmount);
@@ -146,6 +157,8 @@ export function Customers() {
       setMessage(`Pago registrado. Saldo restante: ${formatMoney(result.balance)}.`);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo registrar el pago.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -165,6 +178,8 @@ export function Customers() {
   }
 
   async function handleSaveRow(row: LedgerRow) {
+    if (busy) return;
+    setBusy(true);
     try {
       if (!selectedCustomer) return;
       const amount = parseAmount(editAmount);
@@ -187,10 +202,14 @@ export function Customers() {
       setMessage(row.type === "charge" ? "Entrega actualizada." : "Pago actualizado.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo guardar el cambio.");
+    } finally {
+      setBusy(false);
     }
   }
 
   async function handleDeleteRow(row: LedgerRow) {
+    if (busy) return;
+    setBusy(true);
     try {
       if (!selectedCustomer) return;
       if (row.type === "charge") {
@@ -202,6 +221,8 @@ export function Customers() {
       }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo borrar.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -251,7 +272,7 @@ export function Customers() {
             <input placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} />
             <input placeholder="Teléfono (opcional)" value={phone} onChange={(e) => setPhone(e.target.value)} />
             <input placeholder="Nota (opcional)" value={notes} onChange={(e) => setNotes(e.target.value)} />
-            <button onClick={handleCreateCustomer}>Agregar cliente</button>
+            <button disabled={busy} onClick={handleCreateCustomer}>Agregar cliente</button>
           </div>
         </section>
 
@@ -322,8 +343,8 @@ export function Customers() {
                           )}
                         </td>
                         <td colSpan={2}>
-                          <button onClick={() => handleSaveRow(row)}>Guardar</button>{" "}
-                          <button className="secondary" onClick={() => setEditingRowKey(null)}>Cancelar</button>
+                          <button disabled={busy} onClick={() => handleSaveRow(row)}>Guardar</button>{" "}
+                          <button className="secondary" disabled={busy} onClick={() => setEditingRowKey(null)}>Cancelar</button>
                         </td>
                       </tr>
                     </Fragment>
@@ -335,8 +356,8 @@ export function Customers() {
                       <td className="num">{row.credit > 0 ? formatMoney(row.credit) : "-"}</td>
                       <td className="num">{formatMoney(row.balance)}</td>
                       <td className="no-print">
-                        <button className="secondary" onClick={() => startEditRow(row)}>Editar</button>{" "}
-                        <button className="secondary" onClick={() => handleDeleteRow(row)}>Borrar</button>
+                        <button className="secondary" disabled={busy} onClick={() => startEditRow(row)}>Editar</button>{" "}
+                        <button className="secondary" disabled={busy} onClick={() => handleDeleteRow(row)}>Borrar</button>
                       </td>
                     </tr>
                   )
@@ -357,7 +378,7 @@ export function Customers() {
               </div>
               <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
                 <input placeholder="Detalle (ej. 20kg asado, factura #123)" value={chargeReason} onChange={(e) => setChargeReason(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
-                <button onClick={handleAddCharge}>Cargar entrega</button>
+                <button disabled={busy} onClick={handleAddCharge}>{busy ? "Cargando…" : "Cargar entrega"}</button>
               </div>
             </section>
 
@@ -377,7 +398,7 @@ export function Customers() {
               </div>
               <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
                 <input placeholder="Nota (opcional)" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
-                <button onClick={handleRegisterPayment}>Registrar pago</button>
+                <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
               </div>
             </section>
           </div>

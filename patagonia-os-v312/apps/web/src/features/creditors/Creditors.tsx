@@ -40,6 +40,7 @@ export function Creditors() {
   const { accounts } = useTreasury();
 
   const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   const [name, setName] = useState("");
@@ -100,6 +101,8 @@ export function Creditors() {
   }, [debts, payments]);
 
   async function handleCreateCreditor() {
+    if (busy) return;
+    setBusy(true);
     try {
       if (!name.trim()) throw new Error("El nombre es obligatorio.");
       const result = await create({ name: name.trim(), phone: phone.trim() || undefined, notes: notes.trim() || undefined });
@@ -110,10 +113,14 @@ export function Creditors() {
       setMessage("Acreedor creado.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo crear el acreedor.");
+    } finally {
+      setBusy(false);
     }
   }
 
   async function handleAddDebt() {
+    if (busy) return;
+    setBusy(true);
     try {
       if (!selectedCreditor) return;
       const amount = parseAmount(debtAmount);
@@ -126,10 +133,14 @@ export function Creditors() {
       setMessage("Deuda cargada.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo cargar la deuda.");
+    } finally {
+      setBusy(false);
     }
   }
 
   async function handleRegisterPayment() {
+    if (busy) return;
+    setBusy(true);
     try {
       if (!selectedCreditor) return;
       const amount = parseAmount(paymentAmount);
@@ -148,6 +159,8 @@ export function Creditors() {
       setMessage(`Pago registrado. Saldo restante: ${formatMoney(result.balance)}.`);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo registrar el pago.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -168,6 +181,8 @@ export function Creditors() {
   }
 
   async function handleSaveRow(row: LedgerRow) {
+    if (busy) return;
+    setBusy(true);
     try {
       if (!selectedCreditor) return;
       const amount = parseAmount(editAmount);
@@ -196,10 +211,14 @@ export function Creditors() {
       setMessage(row.type === "debt" ? "Deuda actualizada." : "Pago actualizado.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo guardar el cambio.");
+    } finally {
+      setBusy(false);
     }
   }
 
   async function handleDeleteRow(row: LedgerRow) {
+    if (busy) return;
+    setBusy(true);
     try {
       if (!selectedCreditor) return;
       if (row.type === "debt") {
@@ -211,6 +230,8 @@ export function Creditors() {
       }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo borrar.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -260,7 +281,7 @@ export function Creditors() {
             <input placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} />
             <input placeholder="Teléfono (opcional)" value={phone} onChange={(e) => setPhone(e.target.value)} />
             <input placeholder="Nota (opcional)" value={notes} onChange={(e) => setNotes(e.target.value)} />
-            <button onClick={handleCreateCreditor}>Agregar acreedor</button>
+            <button disabled={busy} onClick={handleCreateCreditor}>Agregar acreedor</button>
           </div>
         </section>
 
@@ -329,8 +350,8 @@ export function Creditors() {
                           </select>
                         </td>
                         <td colSpan={2}>
-                          <button onClick={() => handleSaveRow(row)}>Guardar</button>{" "}
-                          <button className="secondary" onClick={() => setEditingRowKey(null)}>Cancelar</button>
+                          <button disabled={busy} onClick={() => handleSaveRow(row)}>Guardar</button>{" "}
+                          <button className="secondary" disabled={busy} onClick={() => setEditingRowKey(null)}>Cancelar</button>
                         </td>
                       </tr>
                     </Fragment>
@@ -342,8 +363,8 @@ export function Creditors() {
                       <td className="num">{row.credit > 0 ? formatMoney(row.credit) : "-"}</td>
                       <td className="num">{formatMoney(row.balance)}</td>
                       <td className="no-print">
-                        <button className="secondary" onClick={() => startEditRow(row)}>Editar</button>{" "}
-                        <button className="secondary" onClick={() => handleDeleteRow(row)}>Borrar</button>
+                        <button className="secondary" disabled={busy} onClick={() => startEditRow(row)}>Editar</button>{" "}
+                        <button className="secondary" disabled={busy} onClick={() => handleDeleteRow(row)}>Borrar</button>
                       </td>
                     </tr>
                   )
@@ -370,7 +391,7 @@ export function Creditors() {
               </div>
               <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
                 <input placeholder="Motivo (ej. préstamo, mercadería)" value={debtReason} onChange={(e) => setDebtReason(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
-                <button onClick={handleAddDebt}>Cargar deuda</button>
+                <button disabled={busy} onClick={handleAddDebt}>{busy ? "Cargando…" : "Cargar deuda"}</button>
               </div>
             </section>
 
@@ -390,7 +411,7 @@ export function Creditors() {
               </div>
               <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
                 <input placeholder="Nota (opcional)" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
-                <button onClick={handleRegisterPayment}>Registrar pago</button>
+                <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
               </div>
             </section>
           </div>

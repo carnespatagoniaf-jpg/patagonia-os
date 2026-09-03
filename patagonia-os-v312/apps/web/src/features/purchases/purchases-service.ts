@@ -47,6 +47,7 @@ interface PurchaseRow {
   purchase_date: string;
   invoice_number: string | null;
   total: number;
+  status: "active" | "voided";
   created_by: string;
   created_at: string;
 }
@@ -59,6 +60,7 @@ function mapPurchase(row: PurchaseRow): Purchase {
     purchaseDate: row.purchase_date,
     invoiceNumber: row.invoice_number ?? undefined,
     total: Number(row.total),
+    status: row.status,
     createdBy: row.created_by,
     createdAt: row.created_at
   };
@@ -69,12 +71,19 @@ export async function listPurchasesForSupplier(supplierId: string): Promise<Purc
 
   const { data, error } = await supabase
     .from("purchases")
-    .select("id,branch_id,supplier_id,purchase_date,invoice_number,total,created_by,created_at")
+    .select("id,branch_id,supplier_id,purchase_date,invoice_number,total,status,created_by,created_at")
     .eq("supplier_id", supplierId)
     .order("purchase_date", { ascending: false });
 
   if (error) throw error;
   return (data ?? []).map(mapPurchase);
+}
+
+export async function voidPurchase(purchaseId: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("void_purchase", { p_purchase_id: purchaseId });
+  if (error) throw error;
 }
 
 interface PurchaseItemRow {

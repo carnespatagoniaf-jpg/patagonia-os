@@ -12,6 +12,7 @@ import {
   registerSupplierPayment,
   updatePurchaseItem,
   updateSupplierPayment,
+  voidPurchase,
   type CreatePurchaseInput,
   type PurchaseLineInput,
   type RegisterSupplierPaymentInput,
@@ -105,6 +106,7 @@ export function usePurchases() {
           purchaseDate,
           invoiceNumber,
           total,
+          status: "active",
           createdBy: "demo",
           createdAt: new Date().toISOString()
         };
@@ -230,6 +232,25 @@ export function usePurchases() {
     [loadSupplier]
   );
 
+  const voidPurchaseEntry = useCallback(
+    async (supplierId: string, purchaseId: string) => {
+      if (!isSupabaseConfigured) {
+        setDemoLedgers((current) => {
+          const ledger = current[supplierId];
+          if (!ledger) return current;
+          const nextPurchases = ledger.purchases.map((p) => (p.id === purchaseId ? { ...p, status: "voided" as const } : p));
+          return { ...current, [supplierId]: { ...ledger, purchases: nextPurchases } };
+        });
+        await loadSupplier(supplierId);
+        return;
+      }
+
+      await voidPurchase(purchaseId);
+      await loadSupplier(supplierId);
+    },
+    [loadSupplier]
+  );
+
   const removePayment = useCallback(
     async (supplierId: string, paymentId: string) => {
       if (!isSupabaseConfigured) {
@@ -248,5 +269,5 @@ export function usePurchases() {
     [loadSupplier]
   );
 
-  return { purchases, items, payments, balance, loading, error, branchId, loadSupplier, create, editItem, registerPayment, updatePayment, removePayment };
+  return { purchases, items, payments, balance, loading, error, branchId, loadSupplier, create, editItem, registerPayment, updatePayment, removePayment, voidPurchase: voidPurchaseEntry };
 }

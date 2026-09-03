@@ -108,6 +108,7 @@ export interface Purchase {
   purchaseDate: string;
   invoiceNumber?: string;
   total: Money;
+  status: "active" | "voided";
   createdBy: string;
   createdAt: string;
 }
