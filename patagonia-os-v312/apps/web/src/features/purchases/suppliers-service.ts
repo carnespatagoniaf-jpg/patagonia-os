@@ -21,15 +21,16 @@ function mapSupplier(row: SupplierRow): Supplier {
   };
 }
 
-export async function listSuppliers(): Promise<Supplier[]> {
+export async function listSuppliers(includeInactive = false): Promise<Supplier[]> {
   if (!supabase) return [];
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("suppliers")
     .select("id,name,category,phone,notes,active")
-    .eq("active", true)
     .order("name");
+  if (!includeInactive) query = query.eq("active", true);
 
+  const { data, error } = await query;
   if (error) throw error;
   return (data ?? []).map(mapSupplier);
 }
@@ -53,6 +54,30 @@ export async function createSupplier(input: CreateSupplierInput): Promise<Suppli
 
   if (error) throw error;
   return { id: data.id, name: data.name, category: data.category, active: true };
+}
+
+export interface UpdateSupplierInput {
+  id: string;
+  name: string;
+  category: string;
+  phone?: string;
+  notes?: string;
+  active: boolean;
+}
+
+export async function updateSupplier(input: UpdateSupplierInput): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("update_supplier", {
+    p_supplier_id: input.id,
+    p_name: input.name,
+    p_category: input.category,
+    p_phone: input.phone ?? null,
+    p_notes: input.notes ?? null,
+    p_active: input.active
+  });
+
+  if (error) throw error;
 }
 
 export interface SupplierBalance {

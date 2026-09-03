@@ -50,7 +50,7 @@ interface LedgerRow {
 }
 
 export function Purchases() {
-  const { suppliers, loading: suppliersLoading, error: suppliersError, create: createSupplier } = useSuppliers();
+  const { suppliers, loading: suppliersLoading, error: suppliersError, create: createSupplier, update: updateSupplier } = useSuppliers();
   const {
     purchases,
     items,
@@ -96,6 +96,13 @@ export function Purchases() {
   const [editQuantity, setEditQuantity] = useState("");
   const [editUnitPrice, setEditUnitPrice] = useState("");
 
+  const [editingSupplier, setEditingSupplier] = useState(false);
+  const [editSupplierName, setEditSupplierName] = useState("");
+  const [editSupplierCategory, setEditSupplierCategory] = useState("");
+  const [editSupplierPhone, setEditSupplierPhone] = useState("");
+  const [editSupplierNotes, setEditSupplierNotes] = useState("");
+  const [editSupplierActive, setEditSupplierActive] = useState(true);
+
   useEffect(() => {
     if (!isSupabaseConfigured || !branchId) return;
     listProductsForBranch(branchId).then(setProducts).catch(() => setProducts([]));
@@ -129,6 +136,29 @@ export function Purchases() {
       setMessage("Proveedor creado.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo crear el proveedor.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleUpdateSupplier() {
+    if (busy || !selectedSupplierId) return;
+    setBusy(true);
+    try {
+      if (!editSupplierName.trim()) throw new Error("El nombre del proveedor es obligatorio.");
+      await updateSupplier({
+        id: selectedSupplierId,
+        name: editSupplierName.trim(),
+        category: editSupplierCategory.trim() || "general",
+        phone: editSupplierPhone.trim() || undefined,
+        notes: editSupplierNotes.trim() || undefined,
+        active: editSupplierActive
+      });
+      setEditingSupplier(false);
+      if (!editSupplierActive) setSelectedSupplierId(null);
+      setMessage(editSupplierActive ? "Proveedor actualizado." : "Proveedor eliminado.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo actualizar el proveedor.");
     } finally {
       setBusy(false);
     }
@@ -282,6 +312,17 @@ export function Purchases() {
 
   const selectedSupplier = suppliers.find((s) => s.id === selectedSupplierId) ?? null;
 
+  useEffect(() => {
+    if (selectedSupplier) {
+      setEditSupplierName(selectedSupplier.name);
+      setEditSupplierCategory(selectedSupplier.category);
+      setEditSupplierPhone(selectedSupplier.phone ?? "");
+      setEditSupplierNotes(selectedSupplier.notes ?? "");
+      setEditSupplierActive(selectedSupplier.active);
+      setEditingSupplier(false);
+    }
+  }, [selectedSupplier]);
+
   const ledger = useMemo<LedgerRow[]>(() => {
     const rows = [
       ...purchases.filter((purchase) => purchase.status === "active").map((purchase) => ({
@@ -371,12 +412,27 @@ export function Purchases() {
             <h2>Cuenta corriente</h2>
           </div>
           {!selectedSupplier && <p className="muted">Elegí un proveedor para ver su cuenta.</p>}
-          {selectedSupplier && (
+          {selectedSupplier && !editingSupplier && (
             <div className="totals">
               <span>Proveedor <b>{selectedSupplier.name}</b></span>
               <span>Compras <b>{formatMoney(balance?.totalPurchases ?? 0)}</b></span>
               <span>Pagos <b>{formatMoney(balance?.totalPayments ?? 0)}</b></span>
               <strong>Saldo <b>{formatMoney(balance?.balance ?? 0)}</b></strong>
+              <button className="secondary" style={{ marginTop: 10 }} onClick={() => setEditingSupplier(true)}>Editar</button>
+            </div>
+          )}
+          {selectedSupplier && editingSupplier && (
+            <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
+              <input placeholder="Nombre" value={editSupplierName} onChange={(e) => setEditSupplierName(e.target.value)} />
+              <input placeholder="Rubro (pollo, carne...)" value={editSupplierCategory} onChange={(e) => setEditSupplierCategory(e.target.value)} />
+              <input placeholder="Teléfono" value={editSupplierPhone} onChange={(e) => setEditSupplierPhone(e.target.value)} />
+              <input placeholder="Notas" value={editSupplierNotes} onChange={(e) => setEditSupplierNotes(e.target.value)} />
+              <select value={editSupplierActive ? "1" : "0"} onChange={(e) => setEditSupplierActive(e.target.value === "1")}>
+                <option value="1">Activo</option>
+                <option value="0">Inactivo (eliminado)</option>
+              </select>
+              <button disabled={busy} onClick={handleUpdateSupplier}>Guardar</button>
+              <button className="secondary" disabled={busy} onClick={() => setEditingSupplier(false)}>Cancelar</button>
             </div>
           )}
         </section>
