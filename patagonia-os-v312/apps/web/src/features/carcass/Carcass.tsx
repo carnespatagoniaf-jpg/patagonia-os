@@ -45,6 +45,10 @@ export function Carcass() {
   const [newTplYield, setNewTplYield] = useState("");
   const [newTplProductId, setNewTplProductId] = useState("");
   const [generatingCuts, setGeneratingCuts] = useState(false);
+  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
+  const [editTplCutName, setEditTplCutName] = useState("");
+  const [editTplYield, setEditTplYield] = useState("");
+  const [editTplProductId, setEditTplProductId] = useState("");
 
   useEffect(() => {
     if (selectedId) void loadCuts(selectedId);
@@ -241,6 +245,33 @@ export function Carcass() {
     }
   }
 
+  function startEditTemplateCut(t: (typeof templatesForType)[number]) {
+    setEditingTemplateId(t.id);
+    setEditTplCutName(t.cutName);
+    setEditTplYield(String(t.yieldPercent));
+    setEditTplProductId(t.productId ?? "");
+  }
+
+  async function handleSaveTemplateEdit(id: string, sortOrder: number) {
+    try {
+      if (!editTplCutName.trim()) throw new Error("Ingresá el nombre del corte.");
+      const yieldPercent = Number(editTplYield);
+      if (!Number.isFinite(yieldPercent) || yieldPercent <= 0 || yieldPercent > 100) throw new Error("Ingresá un % de rendimiento válido.");
+      await saveTemplate({
+        id,
+        animalType: templateAnimalType,
+        cutName: editTplCutName.trim(),
+        yieldPercent,
+        productId: editTplProductId || undefined,
+        sortOrder
+      });
+      setEditingTemplateId(null);
+      setMessage("Corte de la plantilla actualizado.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo guardar el cambio.");
+    }
+  }
+
   async function handleDeleteTemplateCut(id: string) {
     if (!window.confirm("¿Seguro que querés quitar este corte de la plantilla?")) return;
     try {
@@ -298,14 +329,38 @@ export function Carcass() {
               <tr><th>Corte</th><th className="num">% del peso</th><th>Producto (stock)</th><th></th></tr>
             </thead>
             <tbody>
-              {templatesForType.map((t) => (
-                <tr key={t.id}>
-                  <td>{t.cutName}</td>
-                  <td className="num">{t.yieldPercent}%</td>
-                  <td>{t.productId ? (products.find((p) => p.id === t.productId)?.name ?? "Sí") : "-"}</td>
-                  <td><button className="danger" onClick={() => handleDeleteTemplateCut(t.id)}>Quitar</button></td>
-                </tr>
-              ))}
+              {templatesForType.map((t) =>
+                editingTemplateId === t.id ? (
+                  <tr key={t.id}>
+                    <td><input value={editTplCutName} onChange={(e) => setEditTplCutName(e.target.value)} /></td>
+                    <td className="num">
+                      <input type="number" min="0" max="100" step="0.1" value={editTplYield} onChange={(e) => setEditTplYield(e.target.value)} style={{ width: 80, textAlign: "right" }} />
+                    </td>
+                    <td>
+                      <select value={editTplProductId} onChange={(e) => setEditTplProductId(e.target.value)}>
+                        <option value="">Sin producto (no suma stock)</option>
+                        {products.map((product) => (
+                          <option key={product.id} value={product.id}>{product.name}</option>
+                        ))}
+                      </select>
+                    </td>
+                    <td>
+                      <button onClick={() => handleSaveTemplateEdit(t.id, t.sortOrder)}>Guardar</button>{" "}
+                      <button className="secondary" onClick={() => setEditingTemplateId(null)}>Cancelar</button>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr key={t.id}>
+                    <td>{t.cutName}</td>
+                    <td className="num">{t.yieldPercent}%</td>
+                    <td>{t.productId ? (products.find((p) => p.id === t.productId)?.name ?? "Sí") : "-"}</td>
+                    <td>
+                      <button className="secondary" onClick={() => startEditTemplateCut(t)}>Editar</button>{" "}
+                      <button className="danger" onClick={() => handleDeleteTemplateCut(t.id)}>Quitar</button>
+                    </td>
+                  </tr>
+                )
+              )}
             </tbody>
           </table>
           {templatesForType.length === 0 && <p className="muted">Todavía no hay cortes en la plantilla de "{templateAnimalType}".</p>}
