@@ -9,6 +9,7 @@ export interface UserProfile {
   full_name: string;
   role: "owner" | "admin" | "manager" | "cashier" | "production" | "readonly";
   active: boolean;
+  denied_permissions?: string[];
 }
 
 interface AuthContextValue {
@@ -43,7 +44,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!supabase) return;
     const { data, error } = await supabase
       .from("profiles")
-      .select("id,company_id,branch_id,full_name,role,active,companies(active)")
+      .select("id,company_id,branch_id,full_name,role,active,denied_permissions,companies(active)")
       .eq("id", userId)
       .maybeSingle();
 

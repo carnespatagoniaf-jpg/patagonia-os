@@ -40,7 +40,7 @@ export type Permission =
 // venta, con opción de imprimir una etiqueta para la góndola) — pensada
 // para que el cajero conteste "¿cuánto sale esto?" sin pasar por Mostrador
 // ni ver información sensible de costos.
-const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> = {
+export const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> = {
   owner: ["*"],
   admin: [
     "dashboard.view",
@@ -67,10 +67,35 @@ const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> = {
   readonly: ["dashboard.view", "inventory.view", "reports.view"]
 };
 
+/** Etiqueta en español para cada permiso — usada en Usuarios para armar los tildes de "qué puede ver esta persona en particular". */
+export const PERMISSION_LABELS: Record<Permission, string> = {
+  "dashboard.view": "Inicio",
+  "pos.sell": "Mostrador",
+  "products.view": "Productos",
+  "sales.create": "Turnos / Ventas",
+  "sales.cancel": "Anular ventas",
+  "inventory.view": "Stock",
+  "inventory.adjust": "Ajustar stock",
+  "purchases.manage": "Compras y proveedores",
+  "treasury.manage": "Tesorería",
+  "employees.manage": "Empleados",
+  "profitability.view": "Rentabilidad",
+  "carcass.manage": "Despiece",
+  "creditors.manage": "Deudas (deudores)",
+  "customers.manage": "Clientes",
+  "reports.view": "Reportes",
+  "users.manage": "Usuarios",
+  "branches.manage": "Sucursales",
+  "audit.view": "Auditoría"
+};
+
 export function can(profile: UserProfile | null, permission: Permission) {
   if (!profile) return false;
   const permissions = rolePermissions[profile.role];
-  return permissions.includes("*") || permissions.includes(permission);
+  const grantedByRole = permissions.includes("*") || permissions.includes(permission);
+  if (!grantedByRole) return false;
+  // denied_permissions solo puede sacar permisos que el rol ya daba, nunca agregar.
+  return !profile.denied_permissions?.includes(permission);
 }
 
 /** Permiso requerido para cada página del menú — fuente única de verdad para el tipo Page. */

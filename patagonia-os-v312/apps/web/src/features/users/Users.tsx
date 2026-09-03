@@ -1,5 +1,6 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import { useActiveBranch } from "../branches/BranchProvider";
+import { PERMISSION_LABELS, rolePermissions, type Permission } from "../auth/permissions";
 import { useUsers } from "./useUsers";
 import type { CompanyUser, CreateStaffUserResult, StaffRole } from "./users-service";
 
@@ -35,7 +36,11 @@ export function Users() {
   const [lastCreated, setLastCreated] = useState<CreateStaffUserResult | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<Draft & { active: boolean }>({ ...emptyDraft(""), active: true });
+  const [editDraft, setEditDraft] = useState<Draft & { active: boolean; deniedPermissions: string[] }>({
+    ...emptyDraft(""),
+    active: true,
+    deniedPermissions: []
+  });
 
   function openNewForm() {
     setNewDraft(emptyDraft(branches[0]?.id ?? ""));
@@ -70,8 +75,18 @@ export function Users() {
       fullName: user.fullName,
       role: (user.role === "owner" ? "admin" : user.role) as StaffRole,
       branchId: user.branchId ?? branches[0]?.id ?? "",
-      active: user.active
+      active: user.active,
+      deniedPermissions: user.deniedPermissions
     });
+  }
+
+  function toggleDeniedPermission(permission: Permission, allowed: boolean) {
+    setEditDraft((current) => ({
+      ...current,
+      deniedPermissions: allowed
+        ? current.deniedPermissions.filter((p) => p !== permission)
+        : [...current.deniedPermissions, permission]
+    }));
   }
 
   async function handleUpdate() {
@@ -85,7 +100,8 @@ export function Users() {
         fullName: editDraft.fullName.trim(),
         role: editDraft.role,
         branchId: editDraft.branchId,
-        active: editDraft.active
+        active: editDraft.active,
+        deniedPermissions: editDraft.deniedPermissions
       });
       setEditingId(null);
       setMessage("Usuario actualizado.");
@@ -134,49 +150,74 @@ export function Users() {
           </thead>
           <tbody>
             {users.map((user) => (
-              <tr key={user.id}>
-                {editingId === user.id ? (
-                  <>
-                    <td><input value={editDraft.fullName} onChange={(e) => setEditDraft({ ...editDraft, fullName: e.target.value })} /></td>
-                    <td>
-                      <select value={editDraft.role} onChange={(e) => setEditDraft({ ...editDraft, role: e.target.value as StaffRole })}>
-                        {ASSIGNABLE_ROLES.map((r) => (
-                          <option key={r} value={r}>{ROLE_LABELS[r]}</option>
-                        ))}
-                      </select>
+              <Fragment key={user.id}>
+                <tr>
+                  {editingId === user.id ? (
+                    <>
+                      <td><input value={editDraft.fullName} onChange={(e) => setEditDraft({ ...editDraft, fullName: e.target.value })} /></td>
+                      <td>
+                        <select value={editDraft.role} onChange={(e) => setEditDraft({ ...editDraft, role: e.target.value as StaffRole })}>
+                          {ASSIGNABLE_ROLES.map((r) => (
+                            <option key={r} value={r}>{ROLE_LABELS[r]}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select value={editDraft.branchId} onChange={(e) => setEditDraft({ ...editDraft, branchId: e.target.value })}>
+                          {branches.map((b) => (
+                            <option key={b.id} value={b.id}>{b.name}</option>
+                          ))}
+                        </select>
+                      </td>
+                      <td>
+                        <select value={editDraft.active ? "1" : "0"} onChange={(e) => setEditDraft({ ...editDraft, active: e.target.value === "1" })}>
+                          <option value="1">Activo</option>
+                          <option value="0">Inactivo</option>
+                        </select>
+                      </td>
+                      <td>
+                        <button onClick={handleUpdate}>Guardar</button>{" "}
+                        <button className="secondary" onClick={() => setEditingId(null)}>Cancelar</button>
+                      </td>
+                    </>
+                  ) : (
+                    <>
+                      <td>{user.fullName}</td>
+                      <td>{ROLE_LABELS[user.role]}</td>
+                      <td>{user.branchName ?? "—"}</td>
+                      <td>{user.active ? "Activo" : "Inactivo"}</td>
+                      <td>
+                        {user.role !== "owner" && (
+                          <button className="secondary" onClick={() => startEdit(user)}>Editar</button>
+                        )}
+                      </td>
+                    </>
+                  )}
+                </tr>
+                {editingId === user.id && (
+                  <tr>
+                    <td colSpan={5} style={{ background: "#f8f5f2" }}>
+                      <p className="muted" style={{ margin: "4px 0 8px" }}>
+                        Qué puede ver {editDraft.fullName || "esta persona"} (destildá para ocultarle algo puntual, sin cambiarle el rol):
+                      </p>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 18px" }}>
+                        {rolePermissions[editDraft.role]
+                          .filter((p): p is Permission => p !== "*")
+                          .map((permission) => (
+                            <label key={permission} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                              <input
+                                type="checkbox"
+                                checked={!editDraft.deniedPermissions.includes(permission)}
+                                onChange={(e) => toggleDeniedPermission(permission, e.target.checked)}
+                              />
+                              {PERMISSION_LABELS[permission]}
+                            </label>
+                          ))}
+                      </div>
                     </td>
-                    <td>
-                      <select value={editDraft.branchId} onChange={(e) => setEditDraft({ ...editDraft, branchId: e.target.value })}>
-                        {branches.map((b) => (
-                          <option key={b.id} value={b.id}>{b.name}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <select value={editDraft.active ? "1" : "0"} onChange={(e) => setEditDraft({ ...editDraft, active: e.target.value === "1" })}>
-                        <option value="1">Activo</option>
-                        <option value="0">Inactivo</option>
-                      </select>
-                    </td>
-                    <td>
-                      <button onClick={handleUpdate}>Guardar</button>{" "}
-                      <button className="secondary" onClick={() => setEditingId(null)}>Cancelar</button>
-                    </td>
-                  </>
-                ) : (
-                  <>
-                    <td>{user.fullName}</td>
-                    <td>{ROLE_LABELS[user.role]}</td>
-                    <td>{user.branchName ?? "—"}</td>
-                    <td>{user.active ? "Activo" : "Inactivo"}</td>
-                    <td>
-                      {user.role !== "owner" && (
-                        <button className="secondary" onClick={() => startEdit(user)}>Editar</button>
-                      )}
-                    </td>
-                  </>
+                  </tr>
                 )}
-              </tr>
+              </Fragment>
             ))}
           </tbody>
         </table>

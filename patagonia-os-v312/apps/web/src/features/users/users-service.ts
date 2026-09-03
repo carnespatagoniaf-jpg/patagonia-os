@@ -9,6 +9,7 @@ export interface CompanyUser {
   branchId: string | null;
   branchName: string | null;
   active: boolean;
+  deniedPermissions: string[];
 }
 
 export async function listCompanyUsers(): Promise<CompanyUser[]> {
@@ -16,7 +17,7 @@ export async function listCompanyUsers(): Promise<CompanyUser[]> {
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("id,full_name,role,active,branch_id,branches(name)")
+    .select("id,full_name,role,active,branch_id,denied_permissions,branches(name)")
     .order("full_name");
   if (error) throw error;
 
@@ -29,7 +30,8 @@ export async function listCompanyUsers(): Promise<CompanyUser[]> {
       role: row.role,
       branchId: row.branch_id,
       branchName,
-      active: row.active
+      active: row.active,
+      deniedPermissions: row.denied_permissions ?? []
     };
   });
 }
@@ -76,6 +78,7 @@ export interface UpdateStaffUserInput {
   role: StaffRole;
   branchId: string;
   active: boolean;
+  deniedPermissions: string[];
 }
 
 export async function updateStaffUser(input: UpdateStaffUserInput): Promise<void> {
@@ -86,7 +89,8 @@ export async function updateStaffUser(input: UpdateStaffUserInput): Promise<void
     p_full_name: input.fullName,
     p_role: input.role,
     p_branch_id: input.branchId,
-    p_active: input.active
+    p_active: input.active,
+    p_denied_permissions: input.deniedPermissions
   });
   if (error) throw error;
 }
