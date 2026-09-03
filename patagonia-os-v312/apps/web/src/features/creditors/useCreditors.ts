@@ -10,21 +10,25 @@ import {
   getCreditorBalance,
   listCreditorDebts,
   listCreditorPayments,
-  listCreditors,
+  listCreditorsWithBalance,
   registerCreditorPayment,
+  updateCreditor,
   updateCreditorDebt,
   updateCreditorPayment,
   type CreateCreditorDebtInput,
   type CreateCreditorInput,
   type RegisterCreditorPaymentInput,
   type UpdateCreditorDebtInput,
+  type UpdateCreditorInput,
   type UpdateCreditorPaymentInput
 } from "./creditors-service";
+
+export type CreditorWithBalance = Creditor & { balance: number; lastActivityDate?: string };
 
 export function useCreditors() {
   const { branchId } = useActiveBranch();
 
-  const [creditors, setCreditors] = useState<Creditor[]>([]);
+  const [creditors, setCreditors] = useState<CreditorWithBalance[]>([]);
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [error, setError] = useState<string | null>(null);
 
@@ -38,7 +42,7 @@ export function useCreditors() {
     setLoading(true);
     setError(null);
     try {
-      setCreditors(await listCreditors());
+      setCreditors(await listCreditorsWithBalance());
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudieron cargar los acreedores.");
     } finally {
@@ -58,6 +62,14 @@ export function useCreditors() {
       return result;
     },
     [branchId, reload]
+  );
+
+  const update = useCallback(
+    async (input: UpdateCreditorInput) => {
+      await updateCreditor(input);
+      await reload();
+    },
+    [reload]
   );
 
   const loadDetail = useCallback(async (creditorId: string) => {
@@ -132,6 +144,7 @@ export function useCreditors() {
     loading,
     error,
     create,
+    update,
     debts,
     payments,
     balance,

@@ -26,7 +26,7 @@ const DEMO_EMPLOYEES: Employee[] = [
   {
     id: "demo-emp-1",
     branchId: DEMO_BRANCH_ID,
-    fullName: "Carlos Fernández (demo)",
+    fullName: "Carlos Fernández",
     baseSalary: 400000,
     salaryPeriod: "monthly",
     recurringBonusAmount: 0,

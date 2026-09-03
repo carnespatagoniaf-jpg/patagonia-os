@@ -7,17 +7,26 @@ interface CustomerRow {
   name: string;
   phone: string | null;
   notes: string | null;
+  payment_term_days: number | null;
   active: boolean;
 }
 
 function mapCustomer(row: CustomerRow): Customer {
-  return { id: row.id, branchId: row.branch_id, name: row.name, phone: row.phone ?? undefined, notes: row.notes ?? undefined, active: row.active };
+  return {
+    id: row.id,
+    branchId: row.branch_id,
+    name: row.name,
+    phone: row.phone ?? undefined,
+    notes: row.notes ?? undefined,
+    paymentTermDays: row.payment_term_days ?? undefined,
+    active: row.active
+  };
 }
 
 export async function listCustomers(includeInactive = false): Promise<Customer[]> {
   if (!supabase) return [];
 
-  let query = supabase.from("customers").select("id,branch_id,name,phone,notes,active").order("name");
+  let query = supabase.from("customers").select("id,branch_id,name,phone,notes,payment_term_days,active").order("name");
   if (!includeInactive) query = query.eq("active", true);
 
   const { data, error } = await query;
@@ -44,6 +53,30 @@ export async function createCustomer(input: CreateCustomerInput): Promise<{ id: 
 
   if (error) throw error;
   return { id: data.id };
+}
+
+export interface UpdateCustomerInput {
+  id: string;
+  name: string;
+  phone?: string;
+  notes?: string;
+  paymentTermDays?: number;
+  active: boolean;
+}
+
+export async function updateCustomer(input: UpdateCustomerInput): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("update_customer", {
+    p_customer_id: input.id,
+    p_name: input.name,
+    p_phone: input.phone ?? null,
+    p_notes: input.notes ?? null,
+    p_payment_term_days: input.paymentTermDays ?? null,
+    p_active: input.active
+  });
+
+  if (error) throw error;
 }
 
 interface CustomerChargeRow {
@@ -214,24 +247,30 @@ export async function getCustomerBalance(customerId: string): Promise<CustomerBa
 
   const { data, error } = await supabase
     .from("customer_balance")
-    .select("customer_id,total_charged,total_paid,balance")
+    .select("customer_id,total_charged,total_paid,balance,last_activity_date")
     .eq("customer_id", customerId)
     .maybeSingle();
 
   if (error) throw error;
   if (!data) return null;
-  return { customerId: data.customer_id, totalCharged: Number(data.total_charged), totalPaid: Number(data.total_paid), balance: Number(data.balance) };
+  return {
+    customerId: data.customer_id,
+    totalCharged: Number(data.total_charged),
+    totalPaid: Number(data.total_paid),
+    balance: Number(data.balance),
+    lastActivityDate: data.last_activity_date ?? undefined
+  };
 }
 
-export async function listCustomersWithBalance(includeInactive = false): Promise<(Customer & { balance: number })[]> {
+export async function listCustomersWithBalance(includeInactive = false): Promise<(Customer & { balance: number; lastActivityDate?: string })[]> {
   if (!supabase) return [];
 
   const [customers, { data: balanceRows, error }] = await Promise.all([
     listCustomers(includeInactive),
-    supabase.from("customer_balance").select("customer_id,balance")
+    supabase.from("customer_balance").select("customer_id,balance,last_activity_date")
   ]);
   if (error) throw error;
 
-  const balanceByCustomer = new Map((balanceRows ?? []).map((row) => [row.customer_id, Number(row.balance)]));
-  return customers.map((customer) => ({ ...customer, balance: balanceByCustomer.get(customer.id) ?? 0 }));
+  const balanceByCustomer = new Map((balanceRows ?? []).map((row) => [row.customer_id, { balance: Number(row.balance), lastActivityDate: row.last_activity_date ?? undefined }]));
+  return customers.map((customer) => ({ ...customer, ...(balanceByCustomer.get(customer.id) ?? { balance: 0, lastActivityDate: undefined }) }));
 }

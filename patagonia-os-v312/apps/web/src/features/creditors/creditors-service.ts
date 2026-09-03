@@ -7,22 +7,44 @@ interface CreditorRow {
   name: string;
   phone: string | null;
   notes: string | null;
+  payment_term_days: number | null;
   active: boolean;
 }
 
 function mapCreditor(row: CreditorRow): Creditor {
-  return { id: row.id, branchId: row.branch_id, name: row.name, phone: row.phone ?? undefined, notes: row.notes ?? undefined, active: row.active };
+  return {
+    id: row.id,
+    branchId: row.branch_id,
+    name: row.name,
+    phone: row.phone ?? undefined,
+    notes: row.notes ?? undefined,
+    paymentTermDays: row.payment_term_days ?? undefined,
+    active: row.active
+  };
 }
 
 export async function listCreditors(includeInactive = false): Promise<Creditor[]> {
   if (!supabase) return [];
 
-  let query = supabase.from("creditors").select("id,branch_id,name,phone,notes,active").order("name");
+  let query = supabase.from("creditors").select("id,branch_id,name,phone,notes,payment_term_days,active").order("name");
   if (!includeInactive) query = query.eq("active", true);
 
   const { data, error } = await query;
   if (error) throw error;
   return (data ?? []).map(mapCreditor);
+}
+
+export async function listCreditorsWithBalance(includeInactive = false): Promise<(Creditor & { balance: number; lastActivityDate?: string })[]> {
+  if (!supabase) return [];
+
+  const [creditors, { data: balanceRows, error }] = await Promise.all([
+    listCreditors(includeInactive),
+    supabase.from("creditor_balance").select("creditor_id,balance,last_activity_date")
+  ]);
+  if (error) throw error;
+
+  const balanceByCreditor = new Map((balanceRows ?? []).map((row) => [row.creditor_id, { balance: Number(row.balance), lastActivityDate: row.last_activity_date ?? undefined }]));
+  return creditors.map((creditor) => ({ ...creditor, ...(balanceByCreditor.get(creditor.id) ?? { balance: 0, lastActivityDate: undefined }) }));
 }
 
 export interface CreateCreditorInput {
@@ -44,6 +66,30 @@ export async function createCreditor(input: CreateCreditorInput): Promise<{ id: 
 
   if (error) throw error;
   return { id: data.id };
+}
+
+export interface UpdateCreditorInput {
+  id: string;
+  name: string;
+  phone?: string;
+  notes?: string;
+  paymentTermDays?: number;
+  active: boolean;
+}
+
+export async function updateCreditor(input: UpdateCreditorInput): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("update_creditor", {
+    p_creditor_id: input.id,
+    p_name: input.name,
+    p_phone: input.phone ?? null,
+    p_notes: input.notes ?? null,
+    p_payment_term_days: input.paymentTermDays ?? null,
+    p_active: input.active
+  });
+
+  if (error) throw error;
 }
 
 interface CreditorDebtRow {
@@ -229,11 +275,17 @@ export async function getCreditorBalance(creditorId: string): Promise<CreditorBa
 
   const { data, error } = await supabase
     .from("creditor_balance")
-    .select("creditor_id,total_debt,total_paid,balance")
+    .select("creditor_id,total_debt,total_paid,balance,last_activity_date")
     .eq("creditor_id", creditorId)
     .maybeSingle();
 
   if (error) throw error;
   if (!data) return null;
-  return { creditorId: data.creditor_id, totalDebt: Number(data.total_debt), totalPaid: Number(data.total_paid), balance: Number(data.balance) };
+  return {
+    creditorId: data.creditor_id,
+    totalDebt: Number(data.total_debt),
+    totalPaid: Number(data.total_paid),
+    balance: Number(data.balance),
+    lastActivityDate: data.last_activity_date ?? undefined
+  };
 }

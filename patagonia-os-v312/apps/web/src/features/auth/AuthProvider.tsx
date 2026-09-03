@@ -27,10 +27,19 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+const DEMO_PROFILE: UserProfile = {
+  id: "demo-user",
+  company_id: "demo-company",
+  branch_id: "demo-branch",
+  full_name: "Demo",
+  role: "owner",
+  active: true
+};
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
-  const [profile, setProfile] = useState<UserProfile | null>(null);
+  const [profile, setProfile] = useState<UserProfile | null>(isSupabaseConfigured ? null : DEMO_PROFILE);
   const [passwordRecovery, setPasswordRecovery] = useState(false);
   const [isPlatformAdmin, setIsPlatformAdmin] = useState(false);
   // signIn() ya llama a loadProfile() directamente; sin esto, el evento

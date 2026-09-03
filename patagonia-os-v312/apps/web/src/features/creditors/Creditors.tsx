@@ -1,4 +1,5 @@
-import { Fragment, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
+import { isOverdueDebt } from "@patagonia/domain";
 import { useCreditors } from "./useCreditors";
 import { useTreasury } from "../shifts/useTreasury";
 import { todayIso } from "../shifts/format";
@@ -25,6 +26,7 @@ export function Creditors() {
     loading,
     error,
     create,
+    update,
     debts,
     payments,
     balance,
@@ -47,6 +49,13 @@ export function Creditors() {
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
 
+  const [editingCreditor, setEditingCreditor] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editPhone, setEditPhone] = useState("");
+  const [editNotesField, setEditNotesField] = useState("");
+  const [editTermDays, setEditTermDays] = useState("");
+  const [editActive, setEditActive] = useState(true);
+
   const [debtDate, setDebtDate] = useState(todayIso());
   const [debtAmount, setDebtAmount] = useState("");
   const [debtReason, setDebtReason] = useState("");
@@ -66,9 +75,45 @@ export function Creditors() {
 
   const selectedCreditor = creditors.find((c) => c.id === selectedId) ?? null;
 
+  useEffect(() => {
+    if (selectedCreditor) {
+      setEditName(selectedCreditor.name);
+      setEditPhone(selectedCreditor.phone ?? "");
+      setEditNotesField(selectedCreditor.notes ?? "");
+      setEditTermDays(selectedCreditor.paymentTermDays ? String(selectedCreditor.paymentTermDays) : "");
+      setEditActive(selectedCreditor.active);
+      setEditingCreditor(false);
+    }
+  }, [selectedCreditor]);
+
   function selectCreditor(id: string) {
     setSelectedId(id);
     void loadDetail(id);
+  }
+
+  async function handleUpdateCreditor() {
+    if (busy || !selectedCreditor) return;
+    setBusy(true);
+    try {
+      if (!editName.trim()) throw new Error("El nombre es obligatorio.");
+      const termDays = editTermDays.trim() ? Number(editTermDays) : undefined;
+      if (termDays !== undefined && (!Number.isFinite(termDays) || termDays <= 0)) throw new Error("El plazo tiene que ser un número mayor que cero.");
+      await update({
+        id: selectedCreditor.id,
+        name: editName.trim(),
+        phone: editPhone.trim() || undefined,
+        notes: editNotesField.trim() || undefined,
+        paymentTermDays: termDays,
+        active: editActive
+      });
+      setEditingCreditor(false);
+      if (!editActive) setSelectedId(null);
+      setMessage(editActive ? "Acreedor actualizado." : "Acreedor eliminado.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo actualizar el acreedor.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   const ledger = useMemo<LedgerRow[]>(() => {
@@ -260,19 +305,26 @@ export function Creditors() {
           </div>
           <table className="data-table">
             <thead>
-              <tr><th>Nombre</th><th></th></tr>
+              <tr><th>Nombre</th><th className="num">Saldo</th><th></th></tr>
             </thead>
             <tbody>
-              {creditors.map((c) => (
-                <tr key={c.id}>
-                  <td>{c.name}</td>
-                  <td>
-                    <button className={c.id === selectedId ? "" : "secondary"} onClick={() => selectCreditor(c.id)}>
-                      {c.id === selectedId ? "Seleccionado" : "Ver cuenta"}
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {creditors.map((c) => {
+                const overdue = isOverdueDebt(c, todayIso());
+                return (
+                  <tr key={c.id} style={overdue ? { background: "#fdecea" } : undefined}>
+                    <td>
+                      {c.name}
+                      {overdue && <span className="message warning" style={{ display: "inline-block", marginLeft: 8, padding: "1px 8px", fontSize: 11 }}>Atrasado</span>}
+                    </td>
+                    <td className="num">{formatMoney(c.balance)}</td>
+                    <td>
+                      <button className={c.id === selectedId ? "" : "secondary"} onClick={() => selectCreditor(c.id)}>
+                        {c.id === selectedId ? "Seleccionado" : "Ver cuenta"}
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
           {creditors.length === 0 && !loading && <p className="muted">Todavía no cargaste ningún acreedor.</p>}
@@ -290,12 +342,34 @@ export function Creditors() {
             <h2>Cuenta corriente</h2>
           </div>
           {!selectedCreditor && <p className="muted">Elegí un acreedor para ver su cuenta.</p>}
-          {selectedCreditor && (
+          {selectedCreditor && !editingCreditor && (
             <div className="totals">
               <span>Acreedor <b>{selectedCreditor.name}</b></span>
               <span>Deuda total <b>{formatMoney(balance?.totalDebt ?? 0)}</b></span>
               <span>Pagado <b>{formatMoney(balance?.totalPaid ?? 0)}</b></span>
               <strong>Saldo <b>{formatMoney(balance?.balance ?? 0)}</b></strong>
+              <span>Plazo de pago <b>{selectedCreditor.paymentTermDays ? `${selectedCreditor.paymentTermDays} días` : "sin definir"}</b></span>
+              <button className="secondary" style={{ marginTop: 10 }} onClick={() => setEditingCreditor(true)}>Editar</button>
+            </div>
+          )}
+          {selectedCreditor && editingCreditor && (
+            <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
+              <input placeholder="Nombre" value={editName} onChange={(e) => setEditName(e.target.value)} />
+              <input placeholder="Teléfono" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} />
+              <input placeholder="Nota" value={editNotesField} onChange={(e) => setEditNotesField(e.target.value)} />
+              <input
+                type="number"
+                placeholder="Plazo de pago (días)"
+                value={editTermDays}
+                onChange={(e) => setEditTermDays(e.target.value)}
+                style={{ width: 170 }}
+              />
+              <select value={editActive ? "1" : "0"} onChange={(e) => setEditActive(e.target.value === "1")}>
+                <option value="1">Activo</option>
+                <option value="0">Inactivo (eliminado)</option>
+              </select>
+              <button disabled={busy} onClick={handleUpdateCreditor}>Guardar</button>
+              <button className="secondary" disabled={busy} onClick={() => setEditingCreditor(false)}>Cancelar</button>
             </div>
           )}
         </section>

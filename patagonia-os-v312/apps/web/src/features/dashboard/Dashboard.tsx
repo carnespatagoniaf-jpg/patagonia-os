@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import type { Product } from "@patagonia/domain";
+import { isOverdueDebt } from "@patagonia/domain";
 import { AlertTriangle, Boxes, CircleDollarSign, ReceiptText, TrendingUp } from "lucide-react";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
+import { can } from "../auth/permissions";
 import { useAuth } from "../auth/AuthProvider";
 import { useActiveBranch } from "../branches/BranchProvider";
+import { listCustomersWithBalance } from "../customers/customers-service";
 import { listProductsForBranch } from "../inventory/inventory-service";
 import { listProfitabilityPeriods } from "../profitability/profitability-service";
 import { listPosSalesInRange } from "../sale/pos-shift-service";
@@ -28,6 +31,7 @@ export function Dashboard() {
   const [salesSeries, setSalesSeries] = useState<DaySales[]>([]);
   const [grossProfit, setGrossProfit] = useState<number | null>(null);
   const [loading, setLoading] = useState(isSupabaseConfigured);
+  const [overdueCustomers, setOverdueCustomers] = useState<{ name: string; balance: number }[]>([]);
 
   useEffect(() => {
     if (!isSupabaseConfigured || !branchId) return;
@@ -41,11 +45,15 @@ export function Dashboard() {
       listProductsForBranch(branchId),
       loadRange(weekAgo, today),
       listProfitabilityPeriods(branchId),
-      listPosSalesInRange(branchId, weekAgo, today)
+      listPosSalesInRange(branchId, weekAgo, today),
+      can(profile, "customers.manage") ? listCustomersWithBalance() : Promise.resolve([])
     ])
-      .then(([productList, shiftRows, periods, mostradorSales]) => {
+      .then(([productList, shiftRows, periods, mostradorSales, customers]) => {
         if (cancelled) return;
         setProducts(productList);
+        setOverdueCustomers(
+          customers.filter((c) => isOverdueDebt(c, today)).map((c) => ({ name: c.name, balance: c.balance }))
+        );
 
         const turnosByDate = new Map<string, number>();
         for (const row of shiftRows) {
@@ -73,7 +81,7 @@ export function Dashboard() {
     return () => {
       cancelled = true;
     };
-  }, [branchId, loadRange]);
+  }, [branchId, loadRange, profile]);
 
   const cashOnHand = balances.reduce((sum, balance) => sum + balance.balance, 0);
   const stockValue = products.reduce((sum, p) => sum + p.stock * p.cost, 0);
@@ -127,18 +135,29 @@ export function Dashboard() {
             <h2>Alertas</h2>
             <AlertTriangle size={20} />
           </div>
-          {alerts.length === 0 ? (
+          {alerts.length === 0 && overdueCustomers.length === 0 ? (
             <p className="muted">Sin alertas.</p>
           ) : (
-            alerts.map((product) => (
-              <div className="alert-row" key={product.id}>
-                <AlertTriangle size={18} />
-                <div>
-                  <strong>{product.name}</strong>
-                  <span>Stock: {product.stock} {product.unit}</span>
+            <>
+              {overdueCustomers.map((c) => (
+                <div className="alert-row" key={`overdue-${c.name}`}>
+                  <AlertTriangle size={18} />
+                  <div>
+                    <strong>{c.name} está atrasado</strong>
+                    <span>Te debe {formatMoney(c.balance)} y ya pasó su plazo</span>
+                  </div>
                 </div>
-              </div>
-            ))
+              ))}
+              {alerts.map((product) => (
+                <div className="alert-row" key={product.id}>
+                  <AlertTriangle size={18} />
+                  <div>
+                    <strong>{product.name}</strong>
+                    <span>Stock: {product.stock} {product.unit}</span>
+                  </div>
+                </div>
+              ))}
+            </>
           )}
         </div>
       </section>

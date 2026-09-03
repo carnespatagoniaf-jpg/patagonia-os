@@ -280,6 +280,7 @@ export interface Creditor {
   name: string;
   phone?: string;
   notes?: string;
+  paymentTermDays?: number;
   active: boolean;
 }
 
@@ -310,6 +311,7 @@ export interface CreditorBalance {
   totalDebt: Money;
   totalPaid: Money;
   balance: Money;
+  lastActivityDate?: string;
 }
 
 export interface Customer {
@@ -318,6 +320,7 @@ export interface Customer {
   name: string;
   phone?: string;
   notes?: string;
+  paymentTermDays?: number;
   active: boolean;
 }
 
@@ -346,6 +349,26 @@ export interface CustomerBalance {
   totalCharged: Money;
   totalPaid: Money;
   balance: Money;
+  lastActivityDate?: string;
+}
+
+/**
+ * Un deudor/acreedor está atrasado si tiene saldo pendiente y pasó su
+ * propio plazo (paymentTermDays, distinto para cada uno) desde su último
+ * pago -- o, si nunca pagó nada, desde su deuda/entrega más vieja
+ * (lastActivityDate cubre ambos casos, calculado en la vista SQL). Sin
+ * plazo cargado, no se puede saber si está atrasado: no se marca.
+ */
+export function isOverdueDebt(
+  info: { balance: Money; paymentTermDays?: number; lastActivityDate?: string },
+  todayIso: string
+): boolean {
+  if (info.balance <= 0) return false;
+  if (!info.paymentTermDays || !info.lastActivityDate) return false;
+  const days = Math.floor(
+    (new Date(`${todayIso}T00:00:00`).getTime() - new Date(`${info.lastActivityDate}T00:00:00`).getTime()) / 86400000
+  );
+  return days > info.paymentTermDays;
 }
 
 export interface ProfitabilityPeriod {
