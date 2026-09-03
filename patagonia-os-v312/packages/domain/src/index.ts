@@ -274,6 +274,20 @@ export function carcassCutLineTotal(cut: { weight: Quantity; unitPrice: Money })
   return roundMoney(cut.weight * cut.unitPrice);
 }
 
+export interface CarcassCutTemplate {
+  id: string;
+  animalType: string;
+  cutName: string;
+  yieldPercent: number;
+  productId?: string;
+  sortOrder: number;
+}
+
+/** Peso esperado de un corte según su % de rendimiento sobre el peso total de la res. */
+export function carcassTemplateCutWeight(totalWeight: Quantity, yieldPercent: number): Quantity {
+  return Math.round(totalWeight * (yieldPercent / 100) * 1000) / 1000;
+}
+
 export interface Creditor {
   id: string;
   branchId: string;

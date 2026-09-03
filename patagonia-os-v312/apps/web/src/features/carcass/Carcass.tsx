@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Product } from "@patagonia/domain";
-import { carcassCutLineTotal, marginPercent } from "@patagonia/domain";
+import { carcassCutLineTotal, carcassTemplateCutWeight, marginPercent } from "@patagonia/domain";
 import { useCarcass } from "./useCarcass";
+import { useCarcassTemplates } from "./useCarcassTemplates";
 import { useSuppliers } from "../purchases/useSuppliers";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { listProductsForBranch } from "../inventory/inventory-service";
@@ -16,6 +17,7 @@ const ANIMAL_TYPES = ["Vaca / media res", "Cerdo", "Pollo", "Mocho", "Otro"];
 
 export function Carcass() {
   const { batches, loading, error, saveBatch, removeBatch, cuts, cutsLoading, loadCuts, saveCut, removeCut } = useCarcass();
+  const { templates, save: saveTemplate, remove: removeTemplate } = useCarcassTemplates();
   const { suppliers } = useSuppliers();
   const { branchId } = useActiveBranch();
   const [products, setProducts] = useState<Product[]>([]);
@@ -36,6 +38,13 @@ export function Carcass() {
   const [cutPrice, setCutPrice] = useState("");
   const [cutProductId, setCutProductId] = useState("");
   const [editingCutId, setEditingCutId] = useState<string | null>(null);
+
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [templateAnimalType, setTemplateAnimalType] = useState(ANIMAL_TYPES[0]);
+  const [newTplCutName, setNewTplCutName] = useState("");
+  const [newTplYield, setNewTplYield] = useState("");
+  const [newTplProductId, setNewTplProductId] = useState("");
+  const [generatingCuts, setGeneratingCuts] = useState(false);
 
   useEffect(() => {
     if (selectedId) void loadCuts(selectedId);
@@ -81,6 +90,28 @@ export function Carcass() {
     setShowBatchForm(true);
   }
 
+  async function generateCutsFromTemplate(batchId: string, forAnimalType: string, forTotalWeight: number) {
+    const templateRows = templates.filter((t) => t.animalType === forAnimalType);
+    if (templateRows.length === 0) return 0;
+
+    setGeneratingCuts(true);
+    try {
+      for (const t of templateRows) {
+        const product = t.productId ? products.find((p) => p.id === t.productId) : undefined;
+        await saveCut({
+          batchId,
+          cutName: t.cutName,
+          productId: t.productId,
+          weight: carcassTemplateCutWeight(forTotalWeight, t.yieldPercent),
+          unitPrice: product?.priceRetail ?? 0
+        });
+      }
+      return templateRows.length;
+    } finally {
+      setGeneratingCuts(false);
+    }
+  }
+
   async function handleSaveBatch() {
     try {
       if (!Number.isFinite(weightValue) || weightValue <= 0) throw new Error("Ingresá el peso total.");
@@ -96,7 +127,18 @@ export function Carcass() {
       const wasEditing = !!editingBatchId;
       resetBatchForm();
       setSelectedId(result.id);
-      setMessage(wasEditing ? "Res actualizada." : "Res cargada.");
+
+      if (!wasEditing) {
+        const generated = await generateCutsFromTemplate(result.id, animalType, weightValue);
+        await loadCuts(result.id);
+        setMessage(
+          generated > 0
+            ? `Res cargada y ${generated} cortes generados desde la plantilla de "${animalType}" — revisá los pesos con la balanza real.`
+            : `Res cargada. No hay plantilla de cortes para "${animalType}" todavía (podés cargar una en "Plantillas de despiece").`
+        );
+      } else {
+        setMessage("Res actualizada.");
+      }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo guardar la res.");
     }
@@ -162,6 +204,56 @@ export function Carcass() {
     }
   }
 
+  async function handleGenerateCutsForSelectedBatch() {
+    if (!selectedBatch) return;
+    if (cuts.length > 0) {
+      if (!window.confirm("Esta res ya tiene cortes cargados. ¿Agregar igual los de la plantilla? Puede duplicar cortes.")) return;
+    }
+    const generated = await generateCutsFromTemplate(selectedBatch.id, selectedBatch.animalType, selectedBatch.totalWeight);
+    setMessage(
+      generated > 0
+        ? `${generated} cortes generados desde la plantilla — revisá los pesos con la balanza real.`
+        : `No hay plantilla de cortes para "${selectedBatch.animalType}" todavía.`
+    );
+  }
+
+  const templatesForType = templates.filter((t) => t.animalType === templateAnimalType);
+  const templateYieldSum = templatesForType.reduce((sum, t) => sum + t.yieldPercent, 0);
+
+  async function handleAddTemplateCut() {
+    try {
+      if (!newTplCutName.trim()) throw new Error("Ingresá el nombre del corte.");
+      const yieldPercent = Number(newTplYield);
+      if (!Number.isFinite(yieldPercent) || yieldPercent <= 0 || yieldPercent > 100) throw new Error("Ingresá un % de rendimiento válido.");
+      await saveTemplate({
+        animalType: templateAnimalType,
+        cutName: newTplCutName.trim(),
+        yieldPercent,
+        productId: newTplProductId || undefined,
+        sortOrder: templatesForType.length
+      });
+      setNewTplCutName("");
+      setNewTplYield("");
+      setNewTplProductId("");
+      setMessage("Corte agregado a la plantilla.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo agregar el corte a la plantilla.");
+    }
+  }
+
+  async function handleDeleteTemplateCut(id: string) {
+    if (!window.confirm("¿Seguro que querés quitar este corte de la plantilla?")) return;
+    try {
+      await removeTemplate(id);
+      setMessage("Corte quitado de la plantilla.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo quitar.");
+    }
+  }
+
+  const cutsWeightTotal = cuts.reduce((sum, c) => sum + c.weight, 0);
+  const yieldSoFar = selectedBatch && selectedBatch.totalWeight > 0 ? Math.round((cutsWeightTotal / selectedBatch.totalWeight) * 1000) / 10 : 0;
+
   const gananciaTotal = selectedBatch ? cutsTotal - selectedBatch.totalCost : 0;
   const margenTotal = selectedBatch ? marginPercent(selectedBatch.totalCost, cutsTotal) : 0;
 
@@ -177,10 +269,65 @@ export function Carcass() {
           <h1>Despiece y rendimiento</h1>
           <p className="muted">Cargá el peso y precio por kg de la res completa, y el peso/precio de venta de cada corte, para ver la ganancia real de esa compra.</p>
         </div>
+        <button className="secondary" onClick={() => setShowTemplates((v) => !v)}>
+          {showTemplates ? "Ocultar plantillas" : "Plantillas de despiece"}
+        </button>
       </header>
 
       {message && <div className="message">{message}</div>}
       {error && <div className="message warning">{error}</div>}
+
+      {showTemplates && (
+        <section className="panel" style={{ marginBottom: 18 }}>
+          <div className="panel-title">
+            <h2>Plantilla de cortes esperados</h2>
+          </div>
+          <p className="muted" style={{ marginTop: -8, marginBottom: 14 }}>
+            Cargá una vez, por tipo de animal, qué cortes esperás y qué % del peso total representa cada uno. Al cargar una res nueva de ese tipo, se generan solos con el peso proporcional — vos después los ajustás con la balanza real. El % no tiene que sumar 100: el resto es hueso, grasa y merma normal.
+          </p>
+          <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 14 }}>
+            <select value={templateAnimalType} onChange={(e) => setTemplateAnimalType(e.target.value)}>
+              {ANIMAL_TYPES.map((t) => (
+                <option key={t} value={t}>{t}</option>
+              ))}
+            </select>
+          </div>
+
+          <table className="data-table">
+            <thead>
+              <tr><th>Corte</th><th className="num">% del peso</th><th>Producto (stock)</th><th></th></tr>
+            </thead>
+            <tbody>
+              {templatesForType.map((t) => (
+                <tr key={t.id}>
+                  <td>{t.cutName}</td>
+                  <td className="num">{t.yieldPercent}%</td>
+                  <td>{t.productId ? (products.find((p) => p.id === t.productId)?.name ?? "Sí") : "-"}</td>
+                  <td><button className="danger" onClick={() => handleDeleteTemplateCut(t.id)}>Quitar</button></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          {templatesForType.length === 0 && <p className="muted">Todavía no hay cortes en la plantilla de "{templateAnimalType}".</p>}
+          {templatesForType.length > 0 && (
+            <p className="muted" style={{ marginTop: 8 }}>
+              Suma de la plantilla: {templateYieldSum}% del peso total — el {Math.round((100 - templateYieldSum) * 10) / 10}% restante queda como merma esperada (hueso, grasa, descarte).
+            </p>
+          )}
+
+          <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 16 }}>
+            <input placeholder="Corte (ej. Bola de lomo)" value={newTplCutName} onChange={(e) => setNewTplCutName(e.target.value)} />
+            <input type="number" min="0" max="100" step="0.1" placeholder="% del peso" value={newTplYield} onChange={(e) => setNewTplYield(e.target.value)} style={{ width: 120 }} />
+            <select value={newTplProductId} onChange={(e) => setNewTplProductId(e.target.value)}>
+              <option value="">Sin producto (no suma stock)</option>
+              {products.map((product) => (
+                <option key={product.id} value={product.id}>{product.name}</option>
+              ))}
+            </select>
+            <button onClick={handleAddTemplateCut}>Agregar a la plantilla</button>
+          </div>
+        </section>
+      )}
 
       <div className="content-grid">
         <section className="panel">
@@ -267,6 +414,10 @@ export function Carcass() {
                 <span>Margen</span>
                 <strong className={margenTotal < 0 ? "num-negative" : "num-positive"}>{margenTotal}%</strong>
               </div>
+              <div className="kpi-card">
+                <span>Rendimiento cargado</span>
+                <strong>{cutsWeightTotal} kg de {selectedBatch.totalWeight} kg ({yieldSoFar}%)</strong>
+              </div>
             </div>
           )}
         </section>
@@ -276,7 +427,12 @@ export function Carcass() {
         <section className="panel print-area" style={{ marginTop: 18 }}>
           <div className="panel-title">
             <h2>Cortes de {selectedBatch.animalType} — {selectedBatch.batchDate}</h2>
-            <button className="secondary no-print" onClick={handlePrint}>Imprimir</button>
+            <div className="no-print" style={{ display: "flex", gap: 8 }}>
+              <button className="secondary" disabled={generatingCuts} onClick={handleGenerateCutsForSelectedBatch}>
+                {generatingCuts ? "Generando…" : "Generar cortes desde plantilla"}
+              </button>
+              <button className="secondary" onClick={handlePrint}>Imprimir</button>
+            </div>
           </div>
           <p className="muted print-only-header">
             Compra {formatMoney(selectedBatch.totalCost)} · Venta {formatMoney(cutsTotal)} · Ganancia {formatMoney(gananciaTotal)} ({margenTotal}%)
