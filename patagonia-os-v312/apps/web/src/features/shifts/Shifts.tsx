@@ -123,6 +123,7 @@ export function Shifts() {
   }
 
   async function handleRemoveSale(saleId: string) {
+    if (!window.confirm("¿Seguro que querés quitar esta venta del turno? No se puede deshacer.")) return;
     try {
       if (!shift) return;
       await removeSale(saleId, shift.id, shiftDate, shiftPeriod);
@@ -167,6 +168,7 @@ export function Shifts() {
   }
 
   async function handleRemoveOutflow(outflowId: string) {
+    if (!window.confirm("¿Seguro que querés quitar esta salida? No se puede deshacer.")) return;
     try {
       if (!shift) return;
       await removeOutflow(outflowId, shift.id, shiftDate, shiftPeriod);

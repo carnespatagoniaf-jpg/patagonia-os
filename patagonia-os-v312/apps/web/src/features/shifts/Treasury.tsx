@@ -178,6 +178,7 @@ export function Treasury() {
   }
 
   async function handleRemoveExpense(id: string) {
+    if (!window.confirm("¿Seguro que querés borrar este gasto? No se puede deshacer.")) return;
     try {
       await removeExpense(id);
       setMessage("Gasto eliminado.");

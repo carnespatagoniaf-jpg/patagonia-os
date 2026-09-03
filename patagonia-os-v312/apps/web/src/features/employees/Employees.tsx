@@ -234,6 +234,7 @@ export function Employees() {
   }
 
   async function handleRemoveAdjustment(id: string) {
+    if (!window.confirm("¿Seguro que querés quitar este premio/descuento? No se puede deshacer.")) return;
     try {
       if (!selectedEmployee) return;
       await removeAdjustment(id, selectedEmployee.id);
@@ -301,6 +302,7 @@ export function Employees() {
   }
 
   async function handleRemoveLiquidation(id: string) {
+    if (!window.confirm("¿Seguro que querés borrar esta liquidación? Los vales y ajustes que cubría vuelven a quedar pendientes. No se puede deshacer.")) return;
     try {
       if (!selectedEmployee) return;
       await removeLiquidation(id, selectedEmployee.id);

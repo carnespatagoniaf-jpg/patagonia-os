@@ -263,6 +263,8 @@ export function Creditors() {
 
   async function handleDeleteRow(row: LedgerRow) {
     if (busy) return;
+    const label = row.type === "debt" ? "esta deuda" : "este pago";
+    if (!window.confirm(`¿Seguro que querés borrar ${label}? No se puede deshacer.`)) return;
     setBusy(true);
     try {
       if (!selectedCreditor) return;

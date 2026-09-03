@@ -103,6 +103,7 @@ export function Carcass() {
   }
 
   async function handleDeleteBatch(id: string) {
+    if (!window.confirm("¿Seguro que querés eliminar esta res? Se borran también sus cortes cargados. No se puede deshacer.")) return;
     try {
       await removeBatch(id);
       if (selectedId === id) setSelectedId(null);
@@ -151,6 +152,7 @@ export function Carcass() {
   }
 
   async function handleDeleteCut(cutId: string) {
+    if (!window.confirm("¿Seguro que querés eliminar este corte? No se puede deshacer.")) return;
     try {
       if (!selectedBatch) return;
       await removeCut(cutId, selectedBatch.id);

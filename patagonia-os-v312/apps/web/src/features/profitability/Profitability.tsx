@@ -211,6 +211,7 @@ export function Profitability() {
   async function handleDeactivateFixedCost(id: string) {
     const fc = fixedCosts.find((f) => f.id === id);
     if (!fc) return;
+    if (!window.confirm(`¿Seguro que querés desactivar "${fc.name}"? Deja de contar en la rentabilidad.`)) return;
     try {
       await editFixedCost({ id, name: fc.name, monthlyAmount: fc.monthlyAmount, active: false });
       setMessage("Costo fijo desactivado.");
@@ -238,6 +239,7 @@ export function Profitability() {
   }
 
   async function handleDeleteStockCountRow(ids: string[]) {
+    if (!window.confirm("¿Seguro que querés eliminar este conteo de stock? No se puede deshacer.")) return;
     try {
       for (const id of ids) await removeStockCount(id);
       await loadStockCounts(addDaysIso(todayIso(), -180), todayIso());

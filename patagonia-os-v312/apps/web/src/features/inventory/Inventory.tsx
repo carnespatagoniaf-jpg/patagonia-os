@@ -130,6 +130,7 @@ export function Inventory() {
   }
 
   async function handleDeleteCategory(category: ProductCategory) {
+    if (!window.confirm(`¿Seguro que querés borrar la categoría "${category.name}"?`)) return;
     try {
       await deleteProductCategory(category.id);
       await reloadCategories();

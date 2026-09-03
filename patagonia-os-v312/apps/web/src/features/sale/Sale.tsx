@@ -431,6 +431,7 @@ export function Sale() {
   }
 
   async function handleVoidSale(saleId: string) {
+    if (!window.confirm("¿Seguro que querés anular esta venta? Se revierte el stock y no se puede deshacer.")) return;
     setMessage("");
     setBusy(true);
     try {

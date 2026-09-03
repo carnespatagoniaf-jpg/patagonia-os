@@ -254,6 +254,8 @@ export function Customers() {
 
   async function handleDeleteRow(row: LedgerRow) {
     if (busy) return;
+    const label = row.type === "charge" ? "esta entrega" : "este pago";
+    if (!window.confirm(`¿Seguro que querés borrar ${label}? No se puede deshacer.`)) return;
     setBusy(true);
     try {
       if (!selectedCustomer) return;

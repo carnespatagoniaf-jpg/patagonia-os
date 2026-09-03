@@ -284,6 +284,7 @@ export function Purchases() {
 
   async function handleVoidPurchase(purchaseId: string) {
     if (busy) return;
+    if (!window.confirm("¿Seguro que querés anular esta compra? Se revierte el stock que había sumado y no se puede deshacer.")) return;
     setBusy(true);
     try {
       if (!selectedSupplierId) return;
@@ -298,6 +299,7 @@ export function Purchases() {
 
   async function handleDeletePayment(paymentId: string) {
     if (busy) return;
+    if (!window.confirm("¿Seguro que querés borrar este pago? No se puede deshacer.")) return;
     setBusy(true);
     try {
       if (!selectedSupplierId) return;
