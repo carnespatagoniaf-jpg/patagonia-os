@@ -112,7 +112,7 @@ export function Users() {
         deniedPermissions: editDraft.deniedPermissions
       });
       setEditingId(null);
-      setMessage("Usuario actualizado.");
+      setMessage(editDraft.active ? "Usuario actualizado." : "Usuario eliminado.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo actualizar el usuario.");
     }
@@ -179,7 +179,7 @@ export function Users() {
                       <td>
                         <select value={editDraft.active ? "1" : "0"} onChange={(e) => setEditDraft({ ...editDraft, active: e.target.value === "1" })}>
                           <option value="1">Activo</option>
-                          <option value="0">Inactivo</option>
+                          <option value="0">Inactivo (eliminado)</option>
                         </select>
                       </td>
                       <td>
