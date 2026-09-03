@@ -26,6 +26,10 @@ function emptyDraft(defaultBranchId: string): Draft {
   return { email: "", fullName: "", role: "cashier", branchId: defaultBranchId };
 }
 
+function randomPassword() {
+  return crypto.randomUUID().slice(0, 10);
+}
+
 export function Users() {
   const { branches } = useActiveBranch();
   const { users, loading, error, create, update } = useUsers();
@@ -33,6 +37,7 @@ export function Users() {
   const [message, setMessage] = useState("");
   const [showNewForm, setShowNewForm] = useState(false);
   const [newDraft, setNewDraft] = useState<Draft>(emptyDraft(branches[0]?.id ?? ""));
+  const [newPassword, setNewPassword] = useState(randomPassword());
   const [lastCreated, setLastCreated] = useState<CreateStaffUserResult | null>(null);
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -44,6 +49,7 @@ export function Users() {
 
   function openNewForm() {
     setNewDraft(emptyDraft(branches[0]?.id ?? ""));
+    setNewPassword(randomPassword());
     setShowNewForm(true);
     setLastCreated(null);
   }
@@ -53,12 +59,14 @@ export function Users() {
       if (!newDraft.email.trim()) throw new Error("Ingresá un email.");
       if (!newDraft.fullName.trim()) throw new Error("Ingresá un nombre.");
       if (!newDraft.branchId) throw new Error("Elegí una sucursal.");
+      if (newPassword.length < 8) throw new Error("La contraseña tiene que tener al menos 8 caracteres.");
 
       const result = await create({
         email: newDraft.email.trim(),
         fullName: newDraft.fullName.trim(),
         role: newDraft.role,
-        branchId: newDraft.branchId
+        branchId: newDraft.branchId,
+        password: newPassword
       });
       setLastCreated(result);
       setShowNewForm(false);
@@ -125,8 +133,7 @@ export function Users() {
 
       {lastCreated && (
         <div className="message" style={{ borderColor: "#2f9e44" }}>
-          Usuario creado para <strong>{lastCreated.email}</strong>. Contraseña temporal (copiala ahora, no se vuelve a mostrar):{" "}
-          <code style={{ fontSize: 16, fontWeight: 700 }}>{lastCreated.tempPassword}</code>
+          Usuario creado para <strong>{lastCreated.email}</strong>. Pasale ese email y la contraseña que le pusiste para que entre.
           {" "}
           <button className="secondary" onClick={() => setLastCreated(null)}>Listo</button>
         </div>
@@ -227,6 +234,7 @@ export function Users() {
           <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 16 }}>
             <input placeholder="Email" value={newDraft.email} onChange={(e) => setNewDraft({ ...newDraft, email: e.target.value })} />
             <input placeholder="Nombre" value={newDraft.fullName} onChange={(e) => setNewDraft({ ...newDraft, fullName: e.target.value })} />
+            <input placeholder="Contraseña (mínimo 8 caracteres)" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} style={{ width: 220 }} />
             <select value={newDraft.role} onChange={(e) => setNewDraft({ ...newDraft, role: e.target.value as StaffRole })}>
               {ASSIGNABLE_ROLES.map((r) => (
                 <option key={r} value={r}>{ROLE_LABELS[r]}</option>

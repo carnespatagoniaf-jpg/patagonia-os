@@ -41,12 +41,12 @@ export interface CreateStaffUserInput {
   fullName: string;
   role: StaffRole;
   branchId: string;
+  password: string;
 }
 
 export interface CreateStaffUserResult {
   id: string;
   email: string;
-  tempPassword: string;
 }
 
 export async function createStaffUser(input: CreateStaffUserInput): Promise<CreateStaffUserResult> {

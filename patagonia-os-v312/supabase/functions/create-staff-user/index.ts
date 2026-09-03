@@ -28,10 +28,6 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
-function randomTempPassword() {
-  return `Pat${crypto.randomUUID().slice(0, 8)}!`;
-}
-
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse({ error: "Método no permitido" }, 405);
@@ -61,11 +57,13 @@ Deno.serve(async (req) => {
     const fullName = String(body.fullName ?? "").trim();
     const role = String(body.role ?? "");
     const branchId = String(body.branchId ?? "");
+    const password = String(body.password ?? "");
 
     if (!email || !email.includes("@")) throw new Error("Ingresá un email válido");
     if (!fullName) throw new Error("El nombre es obligatorio");
     if (!ALLOWED_ROLES.includes(role)) throw new Error("Rol inválido");
     if (!branchId) throw new Error("La sucursal es obligatoria");
+    if (password.length < 8) throw new Error("La contraseña tiene que tener al menos 8 caracteres");
 
     const { data: branch, error: branchErr } = await admin
       .from("branches")
@@ -75,11 +73,9 @@ Deno.serve(async (req) => {
       .maybeSingle();
     if (branchErr || !branch) throw new Error("Sucursal inválida");
 
-    const tempPassword = randomTempPassword();
-
     const { data: created, error: createErr } = await admin.auth.admin.createUser({
       email,
-      password: tempPassword,
+      password,
       email_confirm: true
     });
     if (createErr || !created.user) throw new Error(createErr?.message ?? "No se pudo crear el usuario");
@@ -107,7 +103,7 @@ Deno.serve(async (req) => {
       new_data: { email, full_name: fullName, role }
     });
 
-    return jsonResponse({ id: created.user.id, email, tempPassword });
+    return jsonResponse({ id: created.user.id, email });
   } catch (err) {
     return jsonResponse({ error: err instanceof Error ? err.message : "Error inesperado" }, 400);
   }
