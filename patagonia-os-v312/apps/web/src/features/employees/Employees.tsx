@@ -120,12 +120,14 @@ export function Employees() {
     [periodAdjustments]
   );
 
-  // Un vale queda "pendiente" hasta que una liquidación lo cubre explícitamente
-  // (marcado en el backend), sin importar fechas: así ningún vale se pierde ni
-  // se descuenta dos veces, sin importar qué rango esté elegido en pantalla.
+  // Acotado a [periodStart, periodEnd], igual que los premios/descuentos y
+  // que la RPC en el backend: un vale pendiente de una semana anterior que
+  // quedó sin liquidar no se cuela acá, para no inflar el descuento de esta
+  // liquidación. Sigue viéndose como "Pendiente" en la tabla de abajo hasta
+  // que se elija un rango que lo cubra.
   const periodPendingVouchers = useMemo(
-    () => vouchers.filter((v) => !v.liquidated && v.shiftDate <= periodEnd),
-    [vouchers, periodEnd]
+    () => vouchers.filter((v) => !v.liquidated && v.shiftDate >= periodStart && v.shiftDate <= periodEnd),
+    [vouchers, periodStart, periodEnd]
   );
 
   const periodVouchersTotal = useMemo(
