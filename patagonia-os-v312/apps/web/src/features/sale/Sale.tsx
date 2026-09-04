@@ -96,6 +96,7 @@ export function Sale() {
   const [manualDesc, setManualDesc] = useState("");
   const [manualPrice, setManualPrice] = useState("");
   const [manualQty, setManualQty] = useState("1");
+  const [manualUnit, setManualUnit] = useState<Product["unit"]>("unit");
 
   const [payments, setPayments] = useState<PaymentRow[]>([{ accountId: "", amount: "" }]);
   const [cashTendered, setCashTendered] = useState("");
@@ -273,10 +274,11 @@ export function Sale() {
     if (!(price >= 0)) { setMessage("Precio inválido."); return; }
     if (!(qty > 0)) { setMessage("Cantidad inválida."); return; }
     const key = `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-    setCart((current) => [...current, { key, kind: "manual", name: desc, unit: "unit", quantity: qty, unitPrice: price }]);
+    setCart((current) => [...current, { key, kind: "manual", name: desc, unit: manualUnit, quantity: qty, unitPrice: price }]);
     setManualDesc("");
     setManualPrice("");
     setManualQty("1");
+    setManualUnit("unit");
     setShowManualForm(false);
   }
 
@@ -490,9 +492,19 @@ export function Sale() {
       };
       setReceipt(newReceipt);
       clearTicket();
-      await reloadProducts();
-      await reloadShift();
+      // El ticket tiene que salir sí o sí -- se imprime antes de refrescar
+      // stock/turno, y esos dos refrescos van en su propio try/catch para
+      // que un problema de red ahí (la venta ya está guardada) no tape el
+      // ticket ni dispare el mensaje de "no se pudo registrar la venta"
+      // sobre una venta que en realidad sí se cobró.
       await autoPrintReceipt();
+      try {
+        await reloadProducts();
+        await reloadShift();
+      } catch {
+        // no crítico -- la venta y el ticket ya están hechos, se van a
+        // refrescar solos la próxima vez que cambie algo.
+      }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo registrar la venta.");
     } finally {
@@ -715,8 +727,27 @@ export function Sale() {
             {showManualForm && (
               <div className="pos-manual-card">
                 <input placeholder="Descripción" value={manualDesc} onChange={(e) => setManualDesc(e.target.value)} style={{ flex: 1, minWidth: 160 }} />
-                <input type="text" inputMode="decimal" placeholder="Precio" value={manualPrice} onChange={(e) => setManualPrice(e.target.value)} style={{ width: 100 }} />
-                <input type="number" min="0.001" step="0.001" placeholder="Cant." value={manualQty} onChange={(e) => setManualQty(e.target.value)} style={{ width: 70 }} />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder={manualUnit === "kg" ? "Precio /kg" : "Precio"}
+                  value={manualPrice}
+                  onChange={(e) => setManualPrice(e.target.value)}
+                  style={{ width: 100 }}
+                />
+                <input
+                  type="number"
+                  min={manualUnit === "kg" ? "0.001" : "1"}
+                  step={manualUnit === "kg" ? "0.001" : "1"}
+                  placeholder="Cant."
+                  value={manualQty}
+                  onChange={(e) => setManualQty(e.target.value)}
+                  style={{ width: 70 }}
+                />
+                <select value={manualUnit} onChange={(e) => setManualUnit(e.target.value as Product["unit"])}>
+                  <option value="unit">Unidad</option>
+                  <option value="kg">Kg</option>
+                </select>
                 <button onClick={addManualItem}>Agregar</button>
                 <button className="secondary" onClick={() => setShowManualForm(false)}>Cancelar</button>
               </div>
@@ -759,7 +790,7 @@ export function Sale() {
                     <div className="name">
                       {line.name}
                       <small>
-                        {line.kind === "manual" ? "Manual" : `${formatMoney(line.unitPrice)}${line.unit === "kg" ? " /kg" : ` /${UNIT_LABELS[line.unit]}`}`}
+                        {line.kind === "manual" ? "Manual · " : ""}{formatMoney(line.unitPrice)}{line.unit === "kg" ? " /kg" : ` /${UNIT_LABELS[line.unit]}`}
                       </small>
                     </div>
                     <input
@@ -879,7 +910,7 @@ export function Sale() {
                         />
                       )}
                       {isSplit && payments.length > 1 && (
-                        <button className="secondary" onClick={() => removePaymentRow(i)}>Quitar medio</button>
+                        <button className="pos-toolbar-btn" onClick={() => removePaymentRow(i)}>Quitar medio</button>
                       )}
                     </div>
                   ))}
@@ -909,13 +940,13 @@ export function Sale() {
 
                   <div style={{ marginTop: 10, textAlign: "right" }}>
                     {!isSplit ? (
-                      <button className="secondary" onClick={addPaymentRow}>+ Dividir el pago en más de un medio</button>
+                      <button className="pos-toolbar-btn" onClick={addPaymentRow}>+ Dividir el pago en más de un medio</button>
                     ) : (
                       <>
                         <p className="muted" style={{ margin: "0 0 8px" }}>
                           {Math.abs(splitRemaining) <= 0.5 ? "Los medios de pago cubren el total." : `Falta pagar ${formatMoney(splitRemaining)}`}
                         </p>
-                        <button className="secondary" onClick={addPaymentRow}>+ Agregar otro medio de pago</button>
+                        <button className="pos-toolbar-btn" onClick={addPaymentRow}>+ Agregar otro medio de pago</button>
                       </>
                     )}
                   </div>
@@ -958,16 +989,16 @@ export function Sale() {
             </div>
 
             <div style={{ display: "grid", gap: 8 }}>
-              <button className="secondary" onClick={() => setShowShiftMovements((v) => !v)}>
+              <button className="pos-toolbar-btn" onClick={() => setShowShiftMovements((v) => !v)}>
                 {showShiftMovements ? "Ocultar movimientos" : "Ver movimientos"}
               </button>
               {canManageTreasury && (
-                <button className="secondary" onClick={() => setShowCajaForm((v) => !v)}>
+                <button className="pos-toolbar-btn" onClick={() => setShowCajaForm((v) => !v)}>
                   {showCajaForm ? "Cancelar movimiento de caja" : "+ Movimiento de caja"}
                 </button>
               )}
               {!showCloseConfirm && (
-                <button className="secondary" onClick={() => setShowCloseConfirm(true)}>Cerrar turno</button>
+                <button className="pos-toolbar-btn" onClick={() => setShowCloseConfirm(true)}>Cerrar turno</button>
               )}
             </div>
 

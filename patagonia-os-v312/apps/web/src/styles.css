@@ -319,9 +319,25 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   .print-only-header { display: block !important; }
 
   @page { margin: 8mm; }
-  .receipt-ticket { max-width: 300px; margin: 0 auto; font-family: "Courier New", Courier, monospace; }
+  /* La impresora de ticket real es un rollo angosto de 6cm -- una página
+     nombrada (CSS Paged Media, soportado en Chrome) para que el
+     comprobante pida ese ancho en vez del tamaño de página normal (A4/Carta)
+     que usa el resto de lo que se imprime en la app (ej. el cierre de
+     turno, que sigue usando el @page de arriba). */
+  @page ticket { size: 60mm auto; margin: 2mm; }
+  .receipt-ticket {
+    page: ticket; max-width: 56mm; margin: 0 auto; font-family: "Courier New", Courier, monospace; font-size: 11px;
+  }
   .receipt-ticket .panel-title { display: none; }
-  .receipt-ticket .ticket-rule { border-top: 1px dashed #000; }
+  .receipt-ticket .ticket-header strong { font-size: 13px; }
+  .receipt-ticket .ticket-header p { font-size: 10px; }
+  .receipt-ticket .ticket-item-name { font-size: 11px; }
+  .receipt-ticket .ticket-item-detail { font-size: 10px; }
+  .receipt-ticket .ticket-line-sm { font-size: 10px; }
+  .receipt-ticket .ticket-total { font-size: 12px; }
+  .receipt-ticket .ticket-total strong { font-size: 15px; }
+  .receipt-ticket .ticket-footer { font-size: 9px; }
+  .receipt-ticket .ticket-rule { border-top: 1px dashed #000; margin: 8px 0; }
   .receipt-ticket .ticket-total { border-top: 2px solid #000; }
   .receipt-ticket .ticket-item-detail b { color: #000; }
 }
