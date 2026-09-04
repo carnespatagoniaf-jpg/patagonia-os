@@ -536,8 +536,11 @@ export function Sale() {
     }
   }
 
-  function handlePrint() {
-    window.print();
+  /** window.print() abre un diálogo modal en la mayoría de los navegadores
+   * -- se queda esperando ahí hasta que el cajero lo cierra -- así que
+   * pedirlo dos veces seguidas imprime dos copias, una por diálogo. */
+  function handlePrint(copies = 1) {
+    for (let i = 0; i < copies; i++) window.print();
   }
 
   function buildReceiptTicket(receiptToPrint: ReceiptState): Uint8Array {
@@ -579,17 +582,26 @@ export function Sale() {
     }
   }
 
-  /** Se imprime solo al cobrar -- el ticket que se le da al cliente. Si falla
-   * (impresora sin emparejar todavía, apagada, etc.) no corta la venta: ya
-   * quedó cobrada, y el botón "Imprimir en impresora térmica" de al lado
-   * sirve para reintentar o sacar copias de más. */
+  /** Se imprime solo al cobrar -- el ticket para el cliente tiene que salir
+   * sí o sí, sin depender de que el cajero se acuerde de apretar
+   * "Imprimir". Si hay impresora térmica emparejada se usa esa; si no hay
+   * (o falla -- apagada, sin emparejar, etc.) cae al diálogo de impresión
+   * normal del navegador, a la impresora de siempre. `isThermalPrintSupported`
+   * solo dice si el navegador tiene la API, no si hay un equipo real
+   * conectado, por eso el fallback cubre también el caso "API sí, impresora
+   * no" y no sólo "sin la API". */
   async function autoPrintReceipt(r: ReceiptState) {
-    if (!isThermalPrintSupported()) return;
-    try {
-      await printBytes(buildReceiptTicket(r));
-    } catch (err) {
-      setMessage(err instanceof Error ? `Venta cobrada, pero no se pudo imprimir: ${err.message}` : "Venta cobrada, pero no se pudo imprimir el ticket.");
+    if (isThermalPrintSupported()) {
+      try {
+        await printBytes(buildReceiptTicket(r));
+        return;
+      } catch (err) {
+        setMessage(err instanceof Error ? `Venta cobrada, pero no se pudo imprimir por la térmica: ${err.message}` : "Venta cobrada, pero no se pudo imprimir por la térmica.");
+      }
     }
+    // Pequeña espera para que el DOM termine de pintar el comprobante nuevo
+    // antes de que el navegador lo capture para imprimir.
+    setTimeout(() => window.print(), 150);
   }
 
   /** Comprobante chico para cada Ingreso/Egreso de caja -- así queda algo en
@@ -1014,7 +1026,7 @@ export function Sale() {
       )}
 
       {receipt && (
-        <section className="panel print-area" style={{ marginTop: 18 }}>
+        <section className="panel print-area receipt-ticket" style={{ marginTop: 18 }}>
           <div className="panel-title">
             <h2>Último comprobante</h2>
             <div className="no-print">
@@ -1023,42 +1035,45 @@ export function Sale() {
                   {thermalPrintBusy ? "Imprimiendo…" : "Imprimir en impresora térmica"}
                 </button>
               )}
-              <button className="secondary" onClick={handlePrint}>Imprimir</button>
+              <button className="secondary" onClick={() => handlePrint()} style={{ marginRight: 8 }}>Imprimir</button>
+              <button className="secondary" onClick={() => handlePrint(2)}>Imprimir 2 copias</button>
             </div>
           </div>
-          <p className="muted print-only-header">{new Date(receipt.soldAt).toLocaleString("es-AR")} · {receipt.paymentSummary}</p>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Producto</th>
-                <th className="num">Cant.</th>
-                <th className="num">Precio</th>
-                <th className="num">Subtotal</th>
-              </tr>
-            </thead>
-            <tbody>
-              {receipt.items.map((item, idx) => (
-                <tr key={idx}>
-                  <td>{item.name}</td>
-                  <td className="num">{item.quantity} {UNIT_LABELS[item.unit]}</td>
-                  <td className="num">{formatMoney(item.unitPrice)}</td>
-                  <td className="num">{formatMoney(item.quantity * item.unitPrice - item.discountAmount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+
+          <div className="ticket-header">
+            <strong>{branches.find((b) => b.id === branchId)?.name ?? "Patagonia OS"}</strong>
+            <p>Comprobante interno · no válido como factura</p>
+            <p>{new Date(receipt.soldAt).toLocaleString("es-AR")}</p>
+          </div>
+
+          <div className="ticket-rule" />
+          <div className="ticket-items">
+            {receipt.items.map((item, idx) => (
+              <div className="ticket-item" key={idx}>
+                <span className="ticket-item-name">{item.name}</span>
+                <span className="ticket-item-detail">
+                  <span>{item.quantity} {UNIT_LABELS[item.unit]} x {formatMoney(item.unitPrice)}</span>
+                  <b>{formatMoney(item.quantity * item.unitPrice - item.discountAmount)}</b>
+                </span>
+              </div>
+            ))}
+          </div>
+          <div className="ticket-rule" />
+
           {(receipt.saleDiscount > 0 || receipt.saleSurcharge > 0) && (
-            <p style={{ textAlign: "right" }} className="muted">
+            <p className="ticket-line-sm">
               {receipt.saleDiscount > 0 && `Descuento -${formatMoney(receipt.saleDiscount)} `}
               {receipt.saleSurcharge > 0 && `Recargo +${formatMoney(receipt.saleSurcharge)}`}
             </p>
           )}
-          <p style={{ textAlign: "right", marginTop: 10 }}><strong>Total {formatMoney(receipt.total)}</strong></p>
+          <div className="ticket-total"><span>TOTAL</span><strong>{formatMoney(receipt.total)}</strong></div>
+          <p className="ticket-line-sm">Pago: {receipt.paymentSummary}</p>
           {receipt.amountTendered !== null && (
-            <p style={{ textAlign: "right" }} className="muted">
+            <p className="ticket-line-sm">
               Recibido {formatMoney(receipt.amountTendered)} · Vuelto {formatMoney(Math.max(receipt.change ?? 0, 0))}
             </p>
           )}
+          <p className="ticket-footer print-only-header">Gracias por su compra</p>
         </section>
       )}
 
@@ -1066,7 +1081,7 @@ export function Sale() {
         <section className="panel print-area" style={{ marginTop: 18 }}>
           <div className="panel-title">
             <h2>Detalle del turno cerrado</h2>
-            <button className="secondary no-print" onClick={handlePrint}>Imprimir</button>
+            <button className="secondary no-print" onClick={() => handlePrint()}>Imprimir</button>
           </div>
           <p className="muted print-only-header">Cerrado {new Date().toLocaleString("es-AR")}</p>
           <p><strong>Total del turno: {formatMoney(closeSummary.total)}</strong></p>

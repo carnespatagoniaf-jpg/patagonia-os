@@ -246,6 +246,28 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 
 .print-only-header { display: none; }
 
+/* Comprobante de Mostrador -- formateado como un ticket real (encabezado
+   centrado, renglones alineados, total grande) en vez de una tabla
+   genérica, tanto en pantalla como al imprimir. Sigue siendo un
+   comprobante interno, no una factura fiscal -- de eso se ocupa el
+   sistema fiscal aparte que ya tiene el local. */
+.ticket-header { text-align: center; margin-bottom: 4px; }
+.ticket-header strong { display: block; font-size: 16px; }
+.ticket-header p { margin: 3px 0 0; color: #697386; font-size: 12.5px; }
+.ticket-rule { border-top: 1px dashed #d6dce5; margin: 14px 0; }
+.ticket-items { display: grid; gap: 12px; }
+.ticket-item { display: grid; gap: 3px; }
+.ticket-item-name { font-weight: 700; }
+.ticket-item-detail { display: flex; justify-content: space-between; gap: 10px; color: #697386; font-size: 13px; font-variant-numeric: tabular-nums; }
+.ticket-item-detail b { color: #18202b; font-weight: 800; }
+.ticket-line-sm { text-align: right; color: #697386; font-size: 13px; margin: 6px 0 0; font-variant-numeric: tabular-nums; }
+.ticket-total {
+  display: flex; justify-content: space-between; align-items: baseline; margin-top: 12px;
+  padding-top: 12px; border-top: 2px solid #18202b; font-size: 14px; font-weight: 800; letter-spacing: .04em;
+}
+.ticket-total strong { font-size: 24px; font-variant-numeric: tabular-nums; }
+.ticket-footer { text-align: center; color: #8b95a5; font-size: 12px; margin-top: 16px; }
+
 @media print {
   /* visibility (no display) para esconder todo -- a diferencia de
      display:none, un hijo puede "reaparecer" con visibility:visible
@@ -274,4 +296,11 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   }
   .no-print { display: none !important; }
   .print-only-header { display: block !important; }
+
+  @page { margin: 8mm; }
+  .receipt-ticket { max-width: 300px; margin: 0 auto; font-family: "Courier New", Courier, monospace; }
+  .receipt-ticket .panel-title { display: none; }
+  .receipt-ticket .ticket-rule { border-top: 1px dashed #000; }
+  .receipt-ticket .ticket-total { border-top: 2px solid #000; }
+  .receipt-ticket .ticket-item-detail b { color: #000; }
 }
