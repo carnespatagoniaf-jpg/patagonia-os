@@ -20,7 +20,7 @@ import {
 } from "./pos-shift-service";
 import { formatMoney } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
-import { isThermalPrintSupported, printBytes, TicketBuilder } from "./thermal-printer";
+import { isThermalPrinterPaired, isThermalPrintSupported, printBytes, TicketBuilder } from "./thermal-printer";
 
 const UNIT_LABELS: Record<Product["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
 
@@ -456,7 +456,7 @@ export function Sale() {
         setReceipt(demoReceipt);
         clearTicket();
         setMessage("Venta registrada (modo demo, no se descuenta stock real).");
-        await autoPrintReceipt();
+        await autoPrintReceipt(demoReceipt);
         return;
       }
       if (!branchId) throw new Error("Tu usuario no tiene sucursal asignada.");
@@ -497,7 +497,7 @@ export function Sale() {
       // que un problema de red ahí (la venta ya está guardada) no tape el
       // ticket ni dispare el mensaje de "no se pudo registrar la venta"
       // sobre una venta que en realidad sí se cobró.
-      await autoPrintReceipt();
+      await autoPrintReceipt(newReceipt);
       try {
         await reloadProducts();
         await reloadShift();
@@ -577,6 +577,11 @@ export function Sale() {
   function buildReceiptTicket(receiptToPrint: ReceiptState): Uint8Array {
     const branchName = branches.find((b) => b.id === branchId)?.name;
     const t = new TicketBuilder();
+    // Letra más grande en todo el cuerpo (doble alto, no doble ancho, para
+    // que las líneas más largas no se corten ni envuelvan raro) -- el
+    // ticket de referencia del local usa una letra bastante más grande que
+    // el tamaño chico "de fábrica" que traía este ticket antes.
+    t.tall(true);
     t.align("center").bold(true).line("COMPROBANTE INTERNO").bold(false);
     if (branchName) t.line(branchName);
     t.align("left").separator();
@@ -590,12 +595,13 @@ export function Sale() {
     t.separator();
     if (receiptToPrint.saleDiscount > 0) t.line(`Descuento: -${formatMoney(receiptToPrint.saleDiscount)}`);
     if (receiptToPrint.saleSurcharge > 0) t.line(`Recargo: +${formatMoney(receiptToPrint.saleSurcharge)}`);
-    t.bold(true).doubleSize(true).line(`TOTAL ${formatMoney(receiptToPrint.total)}`).doubleSize(false).bold(false);
+    t.bold(true).doubleSize(true).line(`TOTAL ${formatMoney(receiptToPrint.total)}`).doubleSize(false).tall(true).bold(false);
     t.line(`Pago: ${receiptToPrint.paymentSummary}`);
     if (receiptToPrint.amountTendered !== null) {
       t.line(`Recibido: ${formatMoney(receiptToPrint.amountTendered)}  Vuelto: ${formatMoney(Math.max(receiptToPrint.change ?? 0, 0))}`);
     }
     t.feed(1).align("center").line("Gracias por su compra");
+    t.tall(false);
     t.cut();
     return t.build();
   }
@@ -623,7 +629,22 @@ export function Sale() {
    * camino automático es siempre el diálogo de impresión normal del
    * navegador; la impresora térmica queda como acción manual aparte (botón
    * "Imprimir en impresora térmica", para quien la tenga emparejada). */
-  async function autoPrintReceipt() {
+  async function autoPrintReceipt(r: ReceiptState) {
+    // Si ya emparejaste una impresora térmica (aunque sea una vez, con el
+    // botón "Imprimir en impresora térmica" de abajo) se usa esa: manda
+    // los bytes ESC/POS directo, con el ancho exacto de esa impresora, sin
+    // depender de qué tamaño de papel entienda el navegador/Windows. Si
+    // todavía no la emparejaste, pedirle el dispositivo sin que el cajero
+    // haya tocado nada fallaría (Chrome exige un gesto del usuario para el
+    // selector de USB), así que ahí cae al diálogo de impresión normal.
+    if (await isThermalPrinterPaired()) {
+      try {
+        await printBytes(buildReceiptTicket(r));
+        return;
+      } catch (err) {
+        setMessage(err instanceof Error ? `Venta cobrada, pero no se pudo imprimir por la térmica: ${err.message}` : "Venta cobrada, pero no se pudo imprimir por la térmica.");
+      }
+    }
     // Pequeña espera para que el DOM termine de pintar el comprobante nuevo
     // antes de que el navegador lo capture para imprimir.
     setTimeout(() => window.print(), 150);
@@ -632,7 +653,11 @@ export function Sale() {
   /** Comprobante chico para cada Ingreso/Egreso de caja -- así queda algo en
    * papel cada vez que entra o sale plata del cajón, no solo al cerrar. */
   async function autoPrintCajaMovement(mov: { direction: "in" | "out"; amount: number; accountName: string; reason: string }) {
-    if (!isThermalPrintSupported()) return;
+    // Esto no tiene un comprobante en pantalla para caer al diálogo del
+    // navegador como el ticket de venta -- si no hay térmica emparejada
+    // directamente no hay dónde imprimir, así que no tiene sentido
+    // intentar (y menos mostrar un error cada vez que no está emparejada).
+    if (!(await isThermalPrinterPaired())) return;
     try {
       const t = new TicketBuilder();
       t.align("center").bold(true).line(mov.direction === "in" ? "INGRESO DE CAJA" : "EGRESO DE CAJA").bold(false);

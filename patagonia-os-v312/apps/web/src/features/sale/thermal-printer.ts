@@ -16,6 +16,19 @@ export function isThermalPrintSupported(): boolean {
   return typeof navigator !== "undefined" && "usb" in navigator;
 }
 
+/** A diferencia de isThermalPrintSupported (que solo dice si el navegador
+ * tiene la API WebUSB, la tenga Chrome entero o no), esto dice si ESTE
+ * usuario ya autorizó una impresora real -- navigator.usb.getDevices()
+ * devuelve los dispositivos ya emparejados sin pedir permiso de nuevo, así
+ * que se puede llamar sin gesto del usuario (por ejemplo, para decidir
+ * solo si el auto-print va por la térmica o cae al diálogo del navegador). */
+export async function isThermalPrinterPaired(): Promise<boolean> {
+  if (!isThermalPrintSupported()) return false;
+  if (cachedDevice) return true;
+  const known = await navigator.usb.getDevices();
+  return known.length > 0;
+}
+
 /** Reemplaza acentos/ñ por su equivalente simple -- la mayoría de estas impresoras no soportan UTF-8. */
 function toPrinterText(text: string): string {
   return text
@@ -74,6 +87,14 @@ class TicketBuilder {
 
   doubleSize(on: boolean) {
     this.bytes.push(GS, 0x21, on ? 0x11 : 0x00);
+    return this;
+  }
+
+  /** Solo el doble de alto (no de ancho) -- para agrandar el cuerpo del
+   * ticket sin que las líneas más largas se corten o envuelvan raro, cosa
+   * que sí pasaría con doubleSize (dobla ancho y alto juntos). */
+  tall(on: boolean) {
+    this.bytes.push(GS, 0x21, on ? 0x01 : 0x00);
     return this;
   }
 
