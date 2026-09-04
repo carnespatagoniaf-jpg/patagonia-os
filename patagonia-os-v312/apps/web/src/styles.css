@@ -143,6 +143,21 @@ button.danger { background: white; color: #b42318; border: 1px solid #f3d0cc; }
 .pos-dropdown-item strong { font-variant-numeric: tabular-nums; white-space: nowrap; }
 .pos-section-label { color: #8b95a5; font-size: 11px; font-weight: 800; letter-spacing: .07em; text-transform: uppercase; margin: 0 0 10px; }
 
+.pos-toolbar { display: flex; gap: 10px; margin-top: 12px; flex-wrap: wrap; }
+.pos-toolbar-btn {
+  background: #f8f9fb; border: 1px solid #e5e7eb; color: #47505c; border-radius: 999px;
+  padding: 9px 16px; font-size: 13px; font-weight: 700;
+}
+.pos-toolbar-btn:hover { background: #f0f2f5; }
+.pos-toolbar-btn.active { background: #fff1f1; border-color: #f3d0cc; color: #8b1e1e; }
+.pos-manual-card, .pos-browse-card {
+  background: #f8f9fb; border-radius: 14px; padding: 14px 16px; margin-top: 12px;
+}
+.pos-manual-card { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.pos-manual-card input { padding: 10px 12px; border: 1px solid #d6dce5; border-radius: 9px; }
+.pos-browse-card { padding: 6px 10px; max-height: 340px; overflow-y: auto; }
+.pos-browse-card .data-table { margin: 0; }
+
 .pos-cart { display: grid; margin-top: 20px; }
 .pos-cart-empty {
   margin-top: 20px; padding: 40px 20px; text-align: center; border: 1.5px dashed #d5dbe4;

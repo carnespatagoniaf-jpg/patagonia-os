@@ -86,7 +86,7 @@ export function Sale() {
   const [cart, setCart] = useState<TicketLine[]>([]);
   const [itemDiscounts, setItemDiscounts] = useState<Record<string, string>>({});
   const [saleDiscount, setSaleDiscount] = useState("");
-  const [saleDiscountMode, setSaleDiscountMode] = useState<"amount" | "percent">("amount");
+  const [saleDiscountMode, setSaleDiscountMode] = useState<"amount" | "percent" | "final">("amount");
   const [saleSurcharge, setSaleSurcharge] = useState("");
   const [saleSurchargeMode, setSaleSurchargeMode] = useState<"amount" | "percent">("amount");
   const [receipt, setReceipt] = useState<ReceiptState | null>(null);
@@ -115,10 +115,19 @@ export function Sale() {
 
   const grossTotal = cart.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
   const itemDiscountTotal = cart.reduce((sum, line) => sum + (parseAmount(itemDiscounts[line.key] || "0") || 0), 0);
-  const saleDiscountRaw = parseAmount(saleDiscount || "0") || 0;
-  const saleDiscountValue = saleDiscountMode === "percent" ? Math.round((grossTotal * saleDiscountRaw) / 100) : saleDiscountRaw;
   const saleSurchargeRaw = parseAmount(saleSurcharge || "0") || 0;
   const saleSurchargeValue = saleSurchargeMode === "percent" ? Math.round((grossTotal * saleSurchargeRaw) / 100) : saleSurchargeRaw;
+  const saleDiscountRaw = parseAmount(saleDiscount || "0") || 0;
+  // "final": en vez de calcular qué % o qué $ de descuento hace falta, se
+  // escribe directo el precio final al que hay que dejar la venta (p. ej.
+  // "cobrale 4000") y el descuento se calcula solo para llegar justo ahí --
+  // así no hay que adivinar el % como pasaba antes.
+  const saleDiscountValue =
+    saleDiscountMode === "percent"
+      ? Math.round((grossTotal * saleDiscountRaw) / 100)
+      : saleDiscountMode === "final"
+        ? Math.max(grossTotal - itemDiscountTotal + saleSurchargeValue - saleDiscountRaw, 0)
+        : saleDiscountRaw;
   // Redondeado a pesos enteros -- el resto de la app no maneja centavos, y
   // si no se redondea acá el total que se ve en pantalla no coincide con el
   // que exige el servidor al dividir el pago a mano.
@@ -691,50 +700,51 @@ export function Sale() {
               )}
             </div>
 
-            <div style={{ marginTop: 10 }}>
-              {!showManualForm ? (
-                <button className="secondary" onClick={() => setShowManualForm(true)}>+ Vender algo sin código</button>
-              ) : (
-                <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
-                  <input placeholder="Descripción" value={manualDesc} onChange={(e) => setManualDesc(e.target.value)} style={{ flex: 1, minWidth: 160 }} />
-                  <input type="text" inputMode="decimal" placeholder="Precio" value={manualPrice} onChange={(e) => setManualPrice(e.target.value)} style={{ width: 100 }} />
-                  <input type="number" min="0.001" step="0.001" placeholder="Cant." value={manualQty} onChange={(e) => setManualQty(e.target.value)} style={{ width: 70 }} />
-                  <button onClick={addManualItem}>Agregar</button>
-                  <button className="secondary" onClick={() => setShowManualForm(false)}>Cancelar</button>
-                </div>
-              )}
-            </div>
-
-            <div style={{ marginTop: 10 }}>
-              <button className="secondary" onClick={() => setShowProductTable((v) => !v)}>
+            <div className="pos-toolbar">
+              <button className={`pos-toolbar-btn${showManualForm ? " active" : ""}`} onClick={() => setShowManualForm((v) => !v)}>
+                + Vender algo sin código
+              </button>
+              <button className={`pos-toolbar-btn${showProductTable ? " active" : ""}`} onClick={() => setShowProductTable((v) => !v)}>
                 {showProductTable ? "Ocultar tabla de productos" : "Ver tabla de productos"}
               </button>
             </div>
 
+            {showManualForm && (
+              <div className="pos-manual-card">
+                <input placeholder="Descripción" value={manualDesc} onChange={(e) => setManualDesc(e.target.value)} style={{ flex: 1, minWidth: 160 }} />
+                <input type="text" inputMode="decimal" placeholder="Precio" value={manualPrice} onChange={(e) => setManualPrice(e.target.value)} style={{ width: 100 }} />
+                <input type="number" min="0.001" step="0.001" placeholder="Cant." value={manualQty} onChange={(e) => setManualQty(e.target.value)} style={{ width: 70 }} />
+                <button onClick={addManualItem}>Agregar</button>
+                <button className="secondary" onClick={() => setShowManualForm(false)}>Cancelar</button>
+              </div>
+            )}
+
             {showProductTable && (
-              <table className="data-table" style={{ marginTop: 10 }}>
-                <thead>
-                  <tr>
-                    <th>Código</th>
-                    <th>Producto</th>
-                    <th className="num">Precio</th>
-                    <th></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredProducts.map((product) => (
-                    <tr key={product.id}>
-                      <td>{product.code}</td>
-                      <td>{product.name} <span className="muted">({UNIT_LABELS[product.unit]})</span></td>
-                      <td className="num">{formatMoney(product.priceRetail)}</td>
-                      <td><button className="secondary" onClick={() => quickAdd(product)}>+ Agregar</button></td>
+              <div className="pos-browse-card">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Código</th>
+                      <th>Producto</th>
+                      <th className="num">Precio</th>
+                      <th></th>
                     </tr>
-                  ))}
-                  {filteredProducts.length === 0 && (
-                    <tr><td colSpan={4} className="muted">No hay productos que coincidan.</td></tr>
-                  )}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {filteredProducts.map((product) => (
+                      <tr key={product.id}>
+                        <td>{product.code}</td>
+                        <td>{product.name} <span className="muted">({UNIT_LABELS[product.unit]})</span></td>
+                        <td className="num">{formatMoney(product.priceRetail)}</td>
+                        <td><button className="secondary" onClick={() => quickAdd(product)}>+ Agregar</button></td>
+                      </tr>
+                    ))}
+                    {filteredProducts.length === 0 && (
+                      <tr><td colSpan={4} className="muted">No hay productos que coincidan.</td></tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
             )}
 
             {cart.length === 0 ? (
@@ -782,13 +792,14 @@ export function Sale() {
                     <input
                       type="text"
                       inputMode="decimal"
-                      placeholder="0"
+                      placeholder={saleDiscountMode === "final" ? "Precio final" : "0"}
                       value={saleDiscount}
                       onChange={(e) => setSaleDiscount(e.target.value)}
                     />
-                    <select value={saleDiscountMode} onChange={(e) => setSaleDiscountMode(e.target.value as "amount" | "percent")}>
-                      <option value="amount">$</option>
-                      <option value="percent">%</option>
+                    <select value={saleDiscountMode} onChange={(e) => setSaleDiscountMode(e.target.value as "amount" | "percent" | "final")}>
+                      <option value="amount">$ off</option>
+                      <option value="percent">% off</option>
+                      <option value="final">Dejarlo en $</option>
                     </select>
                     <label>Recargo</label>
                     <input
