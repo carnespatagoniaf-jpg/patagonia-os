@@ -44,6 +44,41 @@ export async function getPairedPrinterInfo(): Promise<{ productName: string; man
   };
 }
 
+/** Cada cliente tiene una impresora distinta (térmica genérica, fiscal
+ * Hasar, etc.) que responde distinto a los mismos comandos ESC/POS -- no
+ * hay una sola configuración que funcione para todos. Se guarda por
+ * navegador/equipo (no por empresa) porque la impresora está físicamente
+ * conectada a esa caja puntual, no es algo que tenga sentido compartir
+ * entre sucursales. */
+export interface ThermalPrintSettings {
+  bodySize: "normal" | "tall" | "double";
+  font: "auto" | "a" | "b";
+  lineWidth: number;
+}
+
+const SETTINGS_KEY = "patagonia-thermal-print-settings";
+
+export const DEFAULT_THERMAL_PRINT_SETTINGS: ThermalPrintSettings = { bodySize: "tall", font: "a", lineWidth: 32 };
+
+export function getThermalPrintSettings(): ThermalPrintSettings {
+  try {
+    const raw = localStorage.getItem(SETTINGS_KEY);
+    if (!raw) return DEFAULT_THERMAL_PRINT_SETTINGS;
+    return { ...DEFAULT_THERMAL_PRINT_SETTINGS, ...JSON.parse(raw) };
+  } catch {
+    return DEFAULT_THERMAL_PRINT_SETTINGS;
+  }
+}
+
+export function saveThermalPrintSettings(settings: ThermalPrintSettings): void {
+  try {
+    localStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  } catch {
+    // localStorage lleno o bloqueado -- no es crítico, se pierde la
+    // configuración guardada pero no rompe la impresión.
+  }
+}
+
 /** Reemplaza acentos/ñ por su equivalente simple -- la mayoría de estas impresoras no soportan UTF-8. */
 function toPrinterText(text: string): string {
   return text
@@ -127,6 +162,15 @@ class TicketBuilder {
     return this;
   }
 
+  /** Aplica la configuración de tamaño elegida por el usuario para ESTA
+   * impresora (ver ThermalPrintSettings) -- normal/tall/double -- en vez de
+   * un tamaño fijo en el código. on=false vuelve a tamaño normal. */
+  bodySize(settings: ThermalPrintSettings, on: boolean) {
+    if (settings.bodySize === "normal") return this;
+    if (!on) return this.tall(false);
+    return settings.bodySize === "double" ? this.doubleSize(true) : this.tall(true);
+  }
+
   line(text = "") {
     const encoded = new TextEncoder().encode(toPrinterText(text));
     this.bytes.push(...encoded, LF);
@@ -154,6 +198,29 @@ class TicketBuilder {
 }
 
 export { TicketBuilder };
+
+/** Ticket chico con datos de ejemplo para probar una configuración de
+ * tamaño/fuente/ancho de línea al toque, sin necesitar una venta real --
+ * así cada cliente puede ir probando combinaciones contra su propia
+ * impresora hasta que se vea bien, en vez de depender de un redeploy por
+ * cada intento. */
+export function buildTestTicket(settings: ThermalPrintSettings): Uint8Array {
+  const t = new TicketBuilder();
+  if (settings.font !== "auto") t.font(settings.font);
+  t.bodySize(settings, true);
+  t.align("center").bold(true).line("TICKET DE PRUEBA").bold(false);
+  t.align("left").separator("-", settings.lineWidth);
+  t.line("Producto de ejemplo");
+  t.line("  1 kg x $9.900 = $9.900");
+  t.separator("-", settings.lineWidth);
+  t.bodySize(settings, false);
+  t.bold(true).doubleSize(true).line("TOTAL $9.900").doubleSize(false).bold(false);
+  t.bodySize(settings, true);
+  t.line("Así se ve con esta configuración.");
+  t.bodySize(settings, false);
+  t.cut();
+  return t.build();
+}
 
 export async function printBytes(bytes: Uint8Array): Promise<void> {
   if (!isThermalPrintSupported()) {

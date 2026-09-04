@@ -20,7 +20,17 @@ import {
 } from "./pos-shift-service";
 import { formatMoney } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
-import { getPairedPrinterInfo, isThermalPrinterPaired, isThermalPrintSupported, printBytes, TicketBuilder } from "./thermal-printer";
+import {
+  buildTestTicket,
+  getPairedPrinterInfo,
+  getThermalPrintSettings,
+  isThermalPrinterPaired,
+  isThermalPrintSupported,
+  printBytes,
+  saveThermalPrintSettings,
+  TicketBuilder,
+  type ThermalPrintSettings
+} from "./thermal-printer";
 
 const UNIT_LABELS: Record<Product["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
 
@@ -114,6 +124,10 @@ export function Sale() {
   const [cajaBusy, setCajaBusy] = useState(false);
 
   const [thermalPrintBusy, setThermalPrintBusy] = useState(false);
+  const [showPrinterSettings, setShowPrinterSettings] = useState(false);
+  const [printSettings, setPrintSettings] = useState<ThermalPrintSettings>(() => getThermalPrintSettings());
+  const [printerInfo, setPrinterInfo] = useState<string | null>(null);
+  const [testPrintBusy, setTestPrintBusy] = useState(false);
 
   const grossTotal = cart.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
   const itemDiscountTotal = cart.reduce((sum, line) => sum + (parseAmount(itemDiscounts[line.key] || "0") || 0), 0);
@@ -575,34 +589,33 @@ export function Sale() {
   }
 
   function buildReceiptTicket(receiptToPrint: ReceiptState): Uint8Array {
+    const settings = getThermalPrintSettings();
     const branchName = branches.find((b) => b.id === branchId)?.name;
     const t = new TicketBuilder();
-    // Letra más grande en todo el cuerpo -- Font A es la tipografía grande
-    // de fábrica de la impresora (Font B, la chica, parece ser la que
-    // estaba activa). tall() (doble alto vía GS !) queda puesto también
-    // por si acaso, pero en la prueba real no tuvo ningún efecto solo.
-    t.font("a");
-    t.tall(true);
+    if (settings.font !== "auto") t.font(settings.font);
+    t.bodySize(settings, true);
     t.align("center").bold(true).line("COMPROBANTE INTERNO").bold(false);
     if (branchName) t.line(branchName);
-    t.align("left").separator();
+    t.align("left").separator("-", settings.lineWidth);
     t.line(new Date(receiptToPrint.soldAt).toLocaleString("es-AR"));
-    t.separator();
+    t.separator("-", settings.lineWidth);
     for (const item of receiptToPrint.items) {
       const lineTotal = item.quantity * item.unitPrice - item.discountAmount;
       t.line(item.name);
       t.line(`  ${item.quantity} ${UNIT_LABELS[item.unit]} x ${formatMoney(item.unitPrice)} = ${formatMoney(lineTotal)}`);
     }
-    t.separator();
+    t.separator("-", settings.lineWidth);
     if (receiptToPrint.saleDiscount > 0) t.line(`Descuento: -${formatMoney(receiptToPrint.saleDiscount)}`);
     if (receiptToPrint.saleSurcharge > 0) t.line(`Recargo: +${formatMoney(receiptToPrint.saleSurcharge)}`);
-    t.bold(true).doubleSize(true).line(`TOTAL ${formatMoney(receiptToPrint.total)}`).doubleSize(false).tall(true).bold(false);
+    t.bodySize(settings, false);
+    t.bold(true).doubleSize(true).line(`TOTAL ${formatMoney(receiptToPrint.total)}`).doubleSize(false).bold(false);
+    t.bodySize(settings, true);
     t.line(`Pago: ${receiptToPrint.paymentSummary}`);
     if (receiptToPrint.amountTendered !== null) {
       t.line(`Recibido: ${formatMoney(receiptToPrint.amountTendered)}  Vuelto: ${formatMoney(Math.max(receiptToPrint.change ?? 0, 0))}`);
     }
     t.feed(1).align("center").line("Gracias por su compra");
-    t.tall(false);
+    t.bodySize(settings, false);
     t.cut();
     return t.build();
   }
@@ -620,18 +633,35 @@ export function Sale() {
     }
   }
 
-  /** Para diagnosticar por qué los comandos de tamaño de letra no hacen
-   * nada en un equipo puntual -- mejor saber el modelo exacto que seguir
-   * probando comandos ESC/POS a ciegas. */
+  /** Cada impresora responde distinto a los mismos comandos ESC/POS -- en
+   * vez de que el tamaño de letra quede fijo en el código (y haya que
+   * pedirme un cambio y un redeploy por cada equipo distinto), esto deja
+   * probar combinaciones acá mismo hasta que se vea bien en la impresora
+   * real, e imprime un ticket de prueba al toque para ver el resultado sin
+   * necesitar una venta real. */
+  function updatePrintSettings(patch: Partial<ThermalPrintSettings>) {
+    setPrintSettings((current) => {
+      const next = { ...current, ...patch };
+      saveThermalPrintSettings(next);
+      return next;
+    });
+  }
+
   async function handleShowPrinterInfo() {
     const info = await getPairedPrinterInfo();
-    if (!info) {
-      setMessage("No hay ninguna impresora térmica emparejada todavía.");
-      return;
+    setPrinterInfo(info ? `${info.productName} · ${info.manufacturerName} · vendorId ${info.vendorId} · productId ${info.productId}` : "No hay ninguna impresora térmica emparejada todavía.");
+  }
+
+  async function handleTestPrint() {
+    setMessage("");
+    setTestPrintBusy(true);
+    try {
+      await printBytes(buildTestTicket(printSettings));
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo imprimir el ticket de prueba.");
+    } finally {
+      setTestPrintBusy(false);
     }
-    setMessage(
-      `Impresora: ${info.productName} · Fabricante: ${info.manufacturerName} · vendorId: ${info.vendorId} · productId: ${info.productId}`
-    );
   }
 
   /** Se imprime solo al cobrar -- el ticket para el cliente tiene que salir
@@ -762,7 +792,44 @@ export function Sale() {
               <button className={`pos-toolbar-btn${showProductTable ? " active" : ""}`} onClick={() => setShowProductTable((v) => !v)}>
                 {showProductTable ? "Ocultar tabla de productos" : "Ver tabla de productos"}
               </button>
+              {isThermalPrintSupported() && (
+                <button className={`pos-toolbar-btn${showPrinterSettings ? " active" : ""}`} onClick={() => setShowPrinterSettings((v) => !v)}>
+                  {showPrinterSettings ? "Ocultar config. impresora" : "Config. impresora"}
+                </button>
+              )}
             </div>
+
+            {showPrinterSettings && (
+              <div className="pos-manual-card" style={{ flexDirection: "column", alignItems: "stretch", gap: 10 }}>
+                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                  Cada impresora responde distinto -- probá combinaciones e imprimí el ticket de prueba hasta que se vea bien en la tuya.
+                </p>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                  <select value={printSettings.bodySize} onChange={(e) => updatePrintSettings({ bodySize: e.target.value as ThermalPrintSettings["bodySize"] })}>
+                    <option value="normal">Letra normal</option>
+                    <option value="tall">Más grande (doble alto)</option>
+                    <option value="double">Más grande (doble alto y ancho)</option>
+                  </select>
+                  <select value={printSettings.font} onChange={(e) => updatePrintSettings({ font: e.target.value as ThermalPrintSettings["font"] })}>
+                    <option value="auto">Fuente: la que tenga puesta</option>
+                    <option value="a">Fuente: grande (Font A)</option>
+                    <option value="b">Fuente: chica (Font B)</option>
+                  </select>
+                  <input
+                    type="number"
+                    min="16"
+                    max="64"
+                    value={printSettings.lineWidth}
+                    onChange={(e) => updatePrintSettings({ lineWidth: Number(e.target.value) || 32 })}
+                    style={{ width: 70 }}
+                    title="Caracteres por línea (separadores)"
+                  />
+                  <button disabled={testPrintBusy} onClick={handleTestPrint}>{testPrintBusy ? "Imprimiendo…" : "Imprimir ticket de prueba"}</button>
+                  <button className="secondary" onClick={handleShowPrinterInfo}>Ver modelo de la impresora</button>
+                </div>
+                {printerInfo && <p className="muted" style={{ margin: 0, fontSize: 13 }}>{printerInfo}</p>}
+              </div>
+            )}
 
             {showManualForm && (
               <div className="pos-manual-card">
@@ -1130,9 +1197,6 @@ export function Sale() {
                 <button className="ticket-action-btn" disabled={thermalPrintBusy} onClick={handleThermalPrint}>
                   {thermalPrintBusy ? "Imprimiendo…" : "Térmica"}
                 </button>
-              )}
-              {isThermalPrintSupported() && (
-                <button className="ticket-action-btn" onClick={handleShowPrinterInfo}>Info impresora</button>
               )}
             </div>
           </div>
