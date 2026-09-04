@@ -577,10 +577,11 @@ export function Sale() {
   function buildReceiptTicket(receiptToPrint: ReceiptState): Uint8Array {
     const branchName = branches.find((b) => b.id === branchId)?.name;
     const t = new TicketBuilder();
-    // Letra más grande en todo el cuerpo (doble alto, no doble ancho, para
-    // que las líneas más largas no se corten ni envuelvan raro) -- el
-    // ticket de referencia del local usa una letra bastante más grande que
-    // el tamaño chico "de fábrica" que traía este ticket antes.
+    // Letra más grande en todo el cuerpo -- Font A es la tipografía grande
+    // de fábrica de la impresora (Font B, la chica, parece ser la que
+    // estaba activa). tall() (doble alto vía GS !) queda puesto también
+    // por si acaso, pero en la prueba real no tuvo ningún efecto solo.
+    t.font("a");
     t.tall(true);
     t.align("center").bold(true).line("COMPROBANTE INTERNO").bold(false);
     if (branchName) t.line(branchName);

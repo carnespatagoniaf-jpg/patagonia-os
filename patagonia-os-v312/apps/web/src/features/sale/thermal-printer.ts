@@ -74,6 +74,20 @@ class TicketBuilder {
     this.bytes.push(ESC, 0x40); // ESC @ -- inicializar
   }
 
+  /** La mayoría de las impresoras ESC/POS traen dos tipografías internas:
+   * Font A (12x24, la grande, la de "tamaño normal" de un ticket) y Font B
+   * (9x17, chica y condensada -- pensada para entrar más texto por línea,
+   * no para leerse bien). Si el equipo arranca en Font B por default, todo
+   * sale chico aunque el resto del formato esté bien -- por eso se fija
+   * Font A acá antes de imprimir nada. GS ! (doubleSize/tall) no tuvo
+   * ningún efecto visible en el equipo real de Carnes Patagonia -- puede
+   * que esa impresora no soporte ese comando, así que esto es la otra
+   * palanca disponible para agrandar la letra. */
+  font(mode: "a" | "b") {
+    this.bytes.push(ESC, 0x4d, mode === "a" ? 0 : 1);
+    return this;
+  }
+
   align(mode: "left" | "center" | "right") {
     const n = mode === "left" ? 0 : mode === "center" ? 1 : 2;
     this.bytes.push(ESC, 0x61, n);
