@@ -204,12 +204,11 @@ button.danger { background: white; color: #b42318; border: 1px solid #f3d0cc; }
 .pos-total-label { color: #a7b0bd; font-size: 12px; font-weight: 800; letter-spacing: .08em; text-transform: uppercase; margin: 0 0 4px; }
 .pos-total-value { font-size: 42px; font-weight: 900; font-variant-numeric: tabular-nums; }
 .pos-total-sub { color: #a7b0bd; font-size: 12.5px; margin: 4px 0 0; }
-.pos-charge-btn { padding: 19px 38px; font-size: 18px; border-radius: 13px; }
+.pos-charge-btn { padding: 19px 38px; font-size: 18px; border-radius: 13px; display: flex; align-items: center; gap: 10px; justify-content: center; }
 .pos-charge-btn:hover:not(:disabled) { background: #a52424; }
-.pos-charge-hint { color: #8fd19e; font-size: 12px; margin-top: 8px; text-align: right; }
-.pos-charge-hint kbd {
-  background: rgba(255,255,255,.12); border: 1px solid rgba(255,255,255,.25); border-radius: 5px;
-  padding: 1px 6px; font-size: 11px; font-family: inherit;
+.pos-charge-btn kbd {
+  background: rgba(255,255,255,.22); border: 1px solid rgba(255,255,255,.4); border-radius: 6px;
+  padding: 2px 8px; font-size: 13px; font-family: inherit; font-weight: 700;
 }
 
 @media (max-width: 1050px) {

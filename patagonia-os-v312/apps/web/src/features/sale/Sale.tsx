@@ -89,6 +89,7 @@ export function Sale() {
   const [saleDiscountMode, setSaleDiscountMode] = useState<"amount" | "percent" | "final">("amount");
   const [saleSurcharge, setSaleSurcharge] = useState("");
   const [saleSurchargeMode, setSaleSurchargeMode] = useState<"amount" | "percent">("amount");
+  const [showDiscountForm, setShowDiscountForm] = useState(false);
   const [receipt, setReceipt] = useState<ReceiptState | null>(null);
 
   const [showManualForm, setShowManualForm] = useState(false);
@@ -132,6 +133,7 @@ export function Sale() {
   // si no se redondea acá el total que se ve en pantalla no coincide con el
   // que exige el servidor al dividir el pago a mano.
   const total = Math.round(Math.max(grossTotal - itemDiscountTotal - saleDiscountValue + saleSurchargeValue, 0));
+  const hasAdjustment = itemDiscountTotal > 0 || saleDiscountValue > 0 || saleSurchargeValue > 0;
 
   const isSplit = payments.length > 1;
   const singleAccount = !isSplit ? accounts.find((a) => a.id === payments[0]?.accountId) ?? null : null;
@@ -373,6 +375,7 @@ export function Sale() {
     setSaleDiscountMode("amount");
     setSaleSurcharge("");
     setSaleSurchargeMode("amount");
+    setShowDiscountForm(false);
     setPayments([{ accountId: "", amount: "" }]);
     setCashTendered("");
     setMessage("");
@@ -786,43 +789,54 @@ export function Sale() {
 
             {cart.length > 0 && (
               <>
-                <div className="pos-adjust-card">
-                  <div className="pos-adjust-row">
-                    <label>Descuento</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      placeholder={saleDiscountMode === "final" ? "Precio final" : "0"}
-                      value={saleDiscount}
-                      onChange={(e) => setSaleDiscount(e.target.value)}
-                    />
-                    <select value={saleDiscountMode} onChange={(e) => setSaleDiscountMode(e.target.value as "amount" | "percent" | "final")}>
-                      <option value="amount">$ off</option>
-                      <option value="percent">% off</option>
-                      <option value="final">Dejarlo en $</option>
-                    </select>
-                    <label>Recargo</label>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      placeholder="0"
-                      value={saleSurcharge}
-                      onChange={(e) => setSaleSurcharge(e.target.value)}
-                    />
-                    <select value={saleSurchargeMode} onChange={(e) => setSaleSurchargeMode(e.target.value as "amount" | "percent")}>
-                      <option value="amount">$</option>
-                      <option value="percent">%</option>
-                    </select>
-                    <button className="secondary" onClick={clearTicket}>Cancelar ticket</button>
-                  </div>
-                  {(itemDiscountTotal > 0 || saleDiscountValue > 0 || saleSurchargeValue > 0) && (
-                    <p className="pos-subtotal-line">
-                      Subtotal {formatMoney(grossTotal)}
-                      {(itemDiscountTotal > 0 || saleDiscountValue > 0) && ` · Descuentos -${formatMoney(itemDiscountTotal + saleDiscountValue)}`}
-                      {saleSurchargeValue > 0 && ` · Recargo +${formatMoney(saleSurchargeValue)}`}
-                    </p>
-                  )}
+                <div className="pos-toolbar" style={{ marginTop: 16 }}>
+                  <button
+                    className={`pos-toolbar-btn${showDiscountForm || hasAdjustment ? " active" : ""}`}
+                    onClick={() => setShowDiscountForm((v) => !v)}
+                  >
+                    {hasAdjustment ? "Descuento / recargo" : "+ Descuento o recargo"}
+                  </button>
+                  <button className="pos-toolbar-btn" onClick={clearTicket}>Cancelar ticket</button>
                 </div>
+
+                {showDiscountForm && (
+                  <div className="pos-adjust-card">
+                    <div className="pos-adjust-row">
+                      <label>Descuento</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder={saleDiscountMode === "final" ? "Precio final" : "0"}
+                        value={saleDiscount}
+                        onChange={(e) => setSaleDiscount(e.target.value)}
+                      />
+                      <select value={saleDiscountMode} onChange={(e) => setSaleDiscountMode(e.target.value as "amount" | "percent" | "final")}>
+                        <option value="amount">$ off</option>
+                        <option value="percent">% off</option>
+                        <option value="final">Dejarlo en $</option>
+                      </select>
+                      <label>Recargo</label>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="0"
+                        value={saleSurcharge}
+                        onChange={(e) => setSaleSurcharge(e.target.value)}
+                      />
+                      <select value={saleSurchargeMode} onChange={(e) => setSaleSurchargeMode(e.target.value as "amount" | "percent")}>
+                        <option value="amount">$</option>
+                        <option value="percent">%</option>
+                      </select>
+                    </div>
+                  </div>
+                )}
+                {hasAdjustment && (
+                  <p className="pos-subtotal-line" style={{ marginTop: showDiscountForm ? 0 : 10 }}>
+                    Subtotal {formatMoney(grossTotal)}
+                    {(itemDiscountTotal > 0 || saleDiscountValue > 0) && ` · Descuentos -${formatMoney(itemDiscountTotal + saleDiscountValue)}`}
+                    {saleSurchargeValue > 0 && ` · Recargo +${formatMoney(saleSurchargeValue)}`}
+                  </p>
+                )}
 
                 <div className="pos-payment-card">
                   <p className="pos-section-label">Forma de pago</p>
@@ -912,18 +926,15 @@ export function Sale() {
                     <p className="pos-total-label">Total a cobrar</p>
                     <strong className="pos-total-value">{formatMoney(total)}</strong>
                   </div>
-                  <div>
-                    <button
-                      ref={chargeButtonRef}
-                      className="charge-button pos-charge-btn"
-                      disabled={busy}
-                      onClick={checkout}
-                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); checkout(); } }}
-                    >
-                      {busy ? "Cobrando…" : "Cobrar"}
-                    </button>
-                    <p className="pos-charge-hint">Confirmá con <kbd>Enter</kbd></p>
-                  </div>
+                  <button
+                    ref={chargeButtonRef}
+                    className="charge-button pos-charge-btn"
+                    disabled={busy}
+                    onClick={checkout}
+                    onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); checkout(); } }}
+                  >
+                    {busy ? "Cobrando…" : (<>Cobrar <kbd>Enter</kbd></>)}
+                  </button>
                 </div>
               </>
             )}
