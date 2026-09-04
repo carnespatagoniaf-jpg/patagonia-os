@@ -29,6 +29,21 @@ export async function isThermalPrinterPaired(): Promise<boolean> {
   return known.length > 0;
 }
 
+/** Para saber contra qué impresora real se está probando cada comando ESC/POS
+ * -- después de que "Font A" y "doble alto" no cambiaron nada visible, hace
+ * falta el modelo exacto en vez de seguir probando a ciegas. */
+export async function getPairedPrinterInfo(): Promise<{ productName: string; manufacturerName: string; vendorId: number; productId: number } | null> {
+  if (!isThermalPrintSupported()) return null;
+  const device = cachedDevice ?? (await navigator.usb.getDevices())[0];
+  if (!device) return null;
+  return {
+    productName: device.productName || "(sin nombre)",
+    manufacturerName: (device as unknown as { manufacturerName?: string }).manufacturerName || "(sin fabricante)",
+    vendorId: device.vendorId,
+    productId: device.productId
+  };
+}
+
 /** Reemplaza acentos/ñ por su equivalente simple -- la mayoría de estas impresoras no soportan UTF-8. */
 function toPrinterText(text: string): string {
   return text

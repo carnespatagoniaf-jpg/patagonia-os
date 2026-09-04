@@ -20,7 +20,7 @@ import {
 } from "./pos-shift-service";
 import { formatMoney } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
-import { isThermalPrinterPaired, isThermalPrintSupported, printBytes, TicketBuilder } from "./thermal-printer";
+import { getPairedPrinterInfo, isThermalPrinterPaired, isThermalPrintSupported, printBytes, TicketBuilder } from "./thermal-printer";
 
 const UNIT_LABELS: Record<Product["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
 
@@ -620,6 +620,20 @@ export function Sale() {
     }
   }
 
+  /** Para diagnosticar por qué los comandos de tamaño de letra no hacen
+   * nada en un equipo puntual -- mejor saber el modelo exacto que seguir
+   * probando comandos ESC/POS a ciegas. */
+  async function handleShowPrinterInfo() {
+    const info = await getPairedPrinterInfo();
+    if (!info) {
+      setMessage("No hay ninguna impresora térmica emparejada todavía.");
+      return;
+    }
+    setMessage(
+      `Impresora: ${info.productName} · Fabricante: ${info.manufacturerName} · vendorId: ${info.vendorId} · productId: ${info.productId}`
+    );
+  }
+
   /** Se imprime solo al cobrar -- el ticket para el cliente tiene que salir
    * sí o sí, sin depender de que el cajero se acuerde de apretar
    * "Imprimir". Antes este camino automático probaba primero la impresora
@@ -1116,6 +1130,9 @@ export function Sale() {
                 <button className="ticket-action-btn" disabled={thermalPrintBusy} onClick={handleThermalPrint}>
                   {thermalPrintBusy ? "Imprimiendo…" : "Térmica"}
                 </button>
+              )}
+              {isThermalPrintSupported() && (
+                <button className="ticket-action-btn" onClick={handleShowPrinterInfo}>Info impresora</button>
               )}
             </div>
           </div>
