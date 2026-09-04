@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { Product } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
@@ -80,6 +80,8 @@ export function Sale() {
   const [closeDetail, setCloseDetail] = useState<PosShiftSale[]>([]);
 
   const [search, setSearch] = useState("");
+  const [highlightedIndex, setHighlightedIndex] = useState(-1);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [showProductTable, setShowProductTable] = useState(false);
   const [cart, setCart] = useState<TicketLine[]>([]);
   const [itemDiscounts, setItemDiscounts] = useState<Record<string, string>>({});
@@ -96,6 +98,11 @@ export function Sale() {
 
   const [payments, setPayments] = useState<PaymentRow[]>([{ accountId: "", amount: "" }]);
   const [cashTendered, setCashTendered] = useState("");
+  const [focusRowIndex, setFocusRowIndex] = useState<number | null>(null);
+  const accountSelectRefs = useRef<Array<HTMLSelectElement | null>>([]);
+  const amountInputRefs = useRef<Array<HTMLInputElement | null>>([]);
+  const cashTenderedRef = useRef<HTMLInputElement | null>(null);
+  const chargeButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const [showCajaForm, setShowCajaForm] = useState(false);
   const [cajaDirection, setCajaDirection] = useState<"in" | "out">("out");
@@ -161,6 +168,15 @@ export function Sale() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId]);
 
+  /** Cuando se agrega una fila de pago (botón "+"), el foco salta directo a
+   * su selector de cuenta -- así se puede elegir con las flechas y Enter
+   * sin tocar el mouse. */
+  useEffect(() => {
+    if (focusRowIndex === null) return;
+    accountSelectRefs.current[focusRowIndex]?.focus();
+    setFocusRowIndex(null);
+  }, [focusRowIndex]);
+
   async function handleCajaMovement() {
     setMessage("");
     if (!cajaAccountId) { setMessage("Elegí una cuenta."); return; }
@@ -224,6 +240,10 @@ export function Sale() {
       return [...current, { key: product.id, kind: "product", productId: product.id, name: product.name, unit: product.unit, quantity, unitPrice: product.priceRetail }];
     });
     setSearch("");
+    setHighlightedIndex(-1);
+    // Después de agregar (con el mouse o el teclado) el foco vuelve solo al
+    // buscador, para poder escanear o tipear el siguiente producto seguido.
+    searchInputRef.current?.focus();
   }
 
   function addManualItem() {
@@ -256,10 +276,33 @@ export function Sale() {
     return { plu, weightKg: weightGrams / 1000 };
   }
 
-  /** El lector de código de barra "tipea" el código y Enter en este mismo buscador. */
+  const searchMatches = search.trim() ? filteredProducts.slice(0, 8) : [];
+  // Con texto buscado siempre queda un renglón resaltado (el primero, salvo
+  // que se haya navegado con las flechas) para que Enter agregue directo.
+  const activeMatchIndex = searchMatches.length === 0 ? -1 : highlightedIndex >= 0 ? highlightedIndex : 0;
+
+  /** El lector de código de barra "tipea" el código y Enter en este mismo
+   * buscador. Las flechas ↑↓ navegan la lista de resultados y Enter agrega
+   * el resaltado -- todo el alta de productos se puede hacer sin mouse. */
   function handleSearchKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (searchMatches.length > 0) setHighlightedIndex((i) => Math.min((i < 0 ? 0 : i) + 1, searchMatches.length - 1));
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (searchMatches.length > 0) setHighlightedIndex((i) => Math.max((i < 0 ? 0 : i) - 1, 0));
+      return;
+    }
+    if (e.key === "Escape") {
+      setSearch("");
+      setHighlightedIndex(-1);
+      return;
+    }
     if (e.key !== "Enter") return;
     const raw = search.trim();
+    if (!raw) return;
 
     const weight = parseWeightBarcode(raw);
     if (weight) {
@@ -270,16 +313,20 @@ export function Sale() {
       }
     }
 
-    const match = products.find((p) => (p.active ?? true) && p.code.toLowerCase() === raw.toLowerCase());
-    if (match) {
-      quickAdd(match);
+    const exactCode = products.find((p) => (p.active ?? true) && p.code.toLowerCase() === raw.toLowerCase());
+    if (exactCode) {
+      quickAdd(exactCode);
+      return;
+    }
+
+    const picked = searchMatches[activeMatchIndex];
+    if (picked) {
+      quickAdd(picked);
       return;
     }
 
     setMessage("No se encontró ningún producto con ese código.");
   }
-
-  const searchMatches = search.trim() ? filteredProducts.slice(0, 8) : [];
 
   function removeFromCart(key: string) {
     setCart((current) => current.filter((l) => l.key !== key));
@@ -313,9 +360,13 @@ export function Sale() {
     setPayments([{ accountId: "", amount: "" }]);
     setCashTendered("");
     setMessage("");
+    searchInputRef.current?.focus();
   }
 
+  /** Agrega una fila de pago y le pasa el foco a su selector de cuenta --
+   * ver el useEffect de focusRowIndex más arriba. */
   function addPaymentRow() {
+    setFocusRowIndex(payments.length);
     setPayments((current) => [...current, { accountId: "", amount: "" }]);
   }
 
@@ -598,46 +649,26 @@ export function Sale() {
       ) : (
         <div className="content-grid" style={{ alignItems: "start" }}>
           <section className="panel">
-            <div style={{ position: "relative" }}>
+            <div className="pos-search-wrap">
               <input
+                ref={searchInputRef}
                 type="text"
+                className="pos-search"
                 placeholder="Escaneá o escribí el nombre / código del producto…"
                 value={search}
-                onChange={(e) => setSearch(e.target.value)}
+                onChange={(e) => { setSearch(e.target.value); setHighlightedIndex(-1); }}
                 onKeyDown={handleSearchKeyDown}
-                style={{ width: "100%", fontSize: 20, padding: "16px 14px" }}
                 autoFocus
               />
               {searchMatches.length > 0 && (
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "calc(100% + 4px)",
-                    left: 0,
-                    right: 0,
-                    background: "#fff",
-                    border: "1px solid #d6dce5",
-                    borderRadius: 10,
-                    boxShadow: "0 8px 24px rgba(0,0,0,.12)",
-                    zIndex: 20,
-                    maxHeight: 340,
-                    overflowY: "auto"
-                  }}
-                >
-                  {searchMatches.map((product) => (
+                <div className="pos-dropdown">
+                  {searchMatches.map((product, idx) => (
                     <button
                       key={product.id}
-                      className="secondary"
+                      type="button"
+                      className={`pos-dropdown-item${idx === activeMatchIndex ? " active" : ""}`}
+                      onMouseEnter={() => setHighlightedIndex(idx)}
                       onClick={() => quickAdd(product)}
-                      style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        width: "100%",
-                        textAlign: "left",
-                        border: "none",
-                        borderRadius: 0,
-                        padding: "12px 14px"
-                      }}
                     >
                       <span>{product.name} <span className="muted">({UNIT_LABELS[product.unit]})</span></span>
                       <strong>{formatMoney(product.priceRetail)}</strong>
@@ -693,98 +724,99 @@ export function Sale() {
               </table>
             )}
 
-            <table className="data-table" style={{ marginTop: 18 }}>
-              <thead>
-                <tr>
-                  <th>Producto</th>
-                  <th className="num">Cant.</th>
-                  <th className="num">Desc. $</th>
-                  <th className="num">Subtotal</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
+            {cart.length === 0 ? (
+              <div className="pos-cart-empty">Escaneá o buscá un producto para empezar el ticket.</div>
+            ) : (
+              <div className="pos-cart">
                 {cart.map((line) => (
-                  <tr key={line.key}>
-                    <td style={{ fontSize: 16 }}>{line.name}{line.kind === "manual" && <span className="muted"> (manual)</span>}</td>
-                    <td className="num">
-                      <input
-                        type="number"
-                        min={line.unit === "kg" ? "0.001" : "1"}
-                        step={line.unit === "kg" ? "0.001" : "1"}
-                        value={line.quantity}
-                        onChange={(e) => updateCartQuantity(line.key, e.target.value)}
-                        style={{ width: 80 }}
-                      />{" "}
-                      {UNIT_LABELS[line.unit]}
-                    </td>
-                    <td className="num">
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        placeholder="0"
-                        value={itemDiscounts[line.key] ?? ""}
-                        onChange={(e) => setItemDiscounts({ ...itemDiscounts, [line.key]: e.target.value })}
-                        style={{ width: 70 }}
-                      />
-                    </td>
-                    <td className="num" style={{ fontSize: 16 }}>
+                  <div className="pos-cart-row" key={line.key}>
+                    <div className="name">
+                      {line.name}
+                      <small>
+                        {line.kind === "manual" ? "Manual" : `${formatMoney(line.unitPrice)}${line.unit === "kg" ? " /kg" : ` /${UNIT_LABELS[line.unit]}`}`}
+                      </small>
+                    </div>
+                    <input
+                      type="number"
+                      className="pos-qty-input"
+                      min={line.unit === "kg" ? "0.001" : "1"}
+                      step={line.unit === "kg" ? "0.001" : "1"}
+                      value={line.quantity}
+                      onChange={(e) => updateCartQuantity(line.key, e.target.value)}
+                    />
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="pos-discount-input"
+                      placeholder="Desc. $"
+                      value={itemDiscounts[line.key] ?? ""}
+                      onChange={(e) => setItemDiscounts({ ...itemDiscounts, [line.key]: e.target.value })}
+                    />
+                    <span className="pos-line-total">
                       {formatMoney(line.quantity * line.unitPrice - (parseAmount(itemDiscounts[line.key] || "0") || 0))}
-                    </td>
-                    <td><button className="secondary" onClick={() => removeFromCart(line.key)}>Quitar</button></td>
-                  </tr>
+                    </span>
+                    <button className="pos-remove-btn" onClick={() => removeFromCart(line.key)} aria-label="Quitar" title="Quitar">×</button>
+                  </div>
                 ))}
-              </tbody>
-            </table>
-            {cart.length === 0 && <p className="muted" style={{ marginTop: 14 }}>Escaneá o buscá un producto para empezar el ticket.</p>}
+              </div>
+            )}
 
             {cart.length > 0 && (
               <>
-                <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 14 }}>
-                  <label className="muted">Descuento</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="0"
-                    value={saleDiscount}
-                    onChange={(e) => setSaleDiscount(e.target.value)}
-                    style={{ width: 90 }}
-                  />
-                  <select value={saleDiscountMode} onChange={(e) => setSaleDiscountMode(e.target.value as "amount" | "percent")}>
-                    <option value="amount">$</option>
-                    <option value="percent">%</option>
-                  </select>
-                  <label className="muted">Recargo</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="0"
-                    value={saleSurcharge}
-                    onChange={(e) => setSaleSurcharge(e.target.value)}
-                    style={{ width: 90 }}
-                  />
-                  <select value={saleSurchargeMode} onChange={(e) => setSaleSurchargeMode(e.target.value as "amount" | "percent")}>
-                    <option value="amount">$</option>
-                    <option value="percent">%</option>
-                  </select>
-                  <button className="secondary" onClick={clearTicket}>Cancelar ticket</button>
-                </div>
-
-                <div style={{ marginTop: 14, textAlign: "right" }}>
+                <div className="pos-adjust-card">
+                  <div className="pos-adjust-row">
+                    <label>Descuento</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0"
+                      value={saleDiscount}
+                      onChange={(e) => setSaleDiscount(e.target.value)}
+                    />
+                    <select value={saleDiscountMode} onChange={(e) => setSaleDiscountMode(e.target.value as "amount" | "percent")}>
+                      <option value="amount">$</option>
+                      <option value="percent">%</option>
+                    </select>
+                    <label>Recargo</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      placeholder="0"
+                      value={saleSurcharge}
+                      onChange={(e) => setSaleSurcharge(e.target.value)}
+                    />
+                    <select value={saleSurchargeMode} onChange={(e) => setSaleSurchargeMode(e.target.value as "amount" | "percent")}>
+                      <option value="amount">$</option>
+                      <option value="percent">%</option>
+                    </select>
+                    <button className="secondary" onClick={clearTicket}>Cancelar ticket</button>
+                  </div>
                   {(itemDiscountTotal > 0 || saleDiscountValue > 0 || saleSurchargeValue > 0) && (
-                    <p className="muted" style={{ margin: 0 }}>
+                    <p className="pos-subtotal-line">
                       Subtotal {formatMoney(grossTotal)}
                       {(itemDiscountTotal > 0 || saleDiscountValue > 0) && ` · Descuentos -${formatMoney(itemDiscountTotal + saleDiscountValue)}`}
                       {saleSurchargeValue > 0 && ` · Recargo +${formatMoney(saleSurchargeValue)}`}
                     </p>
                   )}
-                  <strong style={{ fontSize: 32 }}>{formatMoney(total)}</strong>
                 </div>
 
-                <div style={{ marginTop: 14 }}>
+                <div className="pos-payment-card">
+                  <p className="pos-section-label">Forma de pago</p>
                   {payments.map((p, i) => (
-                    <div className="cash-banner-form" key={i} style={{ flexWrap: "wrap", marginTop: 8, justifyContent: "flex-end" }}>
-                      <select value={p.accountId} onChange={(e) => updatePaymentRow(i, "accountId", e.target.value)}>
+                    <div className="pos-payment-row" key={i}>
+                      <select
+                        ref={(el) => { accountSelectRefs.current[i] = el; }}
+                        value={p.accountId}
+                        onChange={(e) => {
+                          updatePaymentRow(i, "accountId", e.target.value);
+                          const chosen = accounts.find((a) => a.id === e.target.value);
+                          requestAnimationFrame(() => {
+                            if (isSplit) amountInputRefs.current[i]?.focus();
+                            else if (chosen?.paymentMethod === "cash") cashTenderedRef.current?.focus();
+                            else chargeButtonRef.current?.focus();
+                          });
+                        }}
+                      >
                         <option value="">¿Con qué te paga?</option>
                         {accounts.map((a) => (
                           <option key={a.id} value={a.id}>{a.name}</option>
@@ -792,12 +824,20 @@ export function Sale() {
                       </select>
                       {isSplit && (
                         <input
+                          ref={(el) => { amountInputRefs.current[i] = el; }}
                           type="text"
                           inputMode="decimal"
                           placeholder="Monto"
                           value={p.amount}
                           onChange={(e) => updatePaymentRow(i, "amount", e.target.value)}
-                          style={{ width: 110 }}
+                          onKeyDown={(e) => {
+                            if (e.key !== "Enter") return;
+                            e.preventDefault();
+                            const isLast = i === payments.length - 1;
+                            if (!isLast) accountSelectRefs.current[i + 1]?.focus();
+                            else if (Math.abs(splitRemaining) <= 0.5) chargeButtonRef.current?.focus();
+                            else addPaymentRow();
+                          }}
                         />
                       )}
                       {isSplit && payments.length > 1 && (
@@ -807,24 +847,29 @@ export function Sale() {
                   ))}
 
                   {isSingleCash && (
-                    <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 8, justifyContent: "flex-end" }}>
+                    <div className="pos-payment-row">
                       <input
+                        ref={cashTenderedRef}
                         type="text"
                         inputMode="decimal"
                         placeholder="Recibiste ($)"
                         value={cashTendered}
                         onChange={(e) => setCashTendered(e.target.value)}
-                        style={{ width: 130 }}
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter") return;
+                          e.preventDefault();
+                          chargeButtonRef.current?.focus();
+                        }}
                       />
                       {change !== null && (
-                        <strong className={change < 0 ? "num-negative" : "num-positive"}>
+                        <strong className={`pos-change ${change < 0 ? "num-negative" : "num-positive"}`}>
                           Vuelto {formatMoney(Math.max(change, 0))}
                         </strong>
                       )}
                     </div>
                   )}
 
-                  <div style={{ marginTop: 8, textAlign: "right" }}>
+                  <div style={{ marginTop: 10, textAlign: "right" }}>
                     {!isSplit ? (
                       <button className="secondary" onClick={addPaymentRow}>+ Dividir el pago en más de un medio</button>
                     ) : (
@@ -836,11 +881,24 @@ export function Sale() {
                       </>
                     )}
                   </div>
+                </div>
 
-                  <div style={{ marginTop: 14, display: "flex", justifyContent: "flex-end" }}>
-                    <button className="charge-button" disabled={busy} onClick={checkout}>
+                <div className="pos-total-bar">
+                  <div>
+                    <p className="pos-total-label">Total a cobrar</p>
+                    <strong className="pos-total-value">{formatMoney(total)}</strong>
+                  </div>
+                  <div>
+                    <button
+                      ref={chargeButtonRef}
+                      className="charge-button pos-charge-btn"
+                      disabled={busy}
+                      onClick={checkout}
+                      onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); checkout(); } }}
+                    >
                       {busy ? "Cobrando…" : "Cobrar"}
                     </button>
+                    <p className="pos-charge-hint">Confirmá con <kbd>Enter</kbd></p>
                   </div>
                 </div>
               </>
