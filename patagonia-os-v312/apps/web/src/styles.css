@@ -267,6 +267,13 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 }
 .ticket-total strong { font-size: 24px; font-variant-numeric: tabular-nums; }
 .ticket-footer { text-align: center; color: #8b95a5; font-size: 12px; margin-top: 16px; }
+.ticket-actions { display: flex; gap: 16px; align-items: center; }
+.ticket-action-btn {
+  background: none; border: 0; padding: 0; color: #8b1e1e; font-size: 12.5px; font-weight: 700;
+  text-decoration: underline; text-underline-offset: 2px;
+}
+.ticket-action-btn:hover { color: #6e1818; }
+.ticket-action-btn:disabled { opacity: .5; cursor: not-allowed; text-decoration: none; }
 
 @media print {
   /* visibility (no display) para esconder todo -- a diferencia de

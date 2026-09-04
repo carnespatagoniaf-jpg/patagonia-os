@@ -169,11 +169,18 @@ export function Sale() {
   }, [branchId]);
 
   /** Cuando se agrega una fila de pago (botón "+"), el foco salta directo a
-   * su selector de cuenta -- así se puede elegir con las flechas y Enter
-   * sin tocar el mouse. */
+   * su selector de cuenta y la lista se abre sola (showPicker) -- un
+   * <select> nativo enfocado no despliega sus opciones por sí solo, así que
+   * sin esto "saltar el foco" no se notaba: había que asomarse a que
+   * quedaba resaltado. Con la lista ya abierta, las flechas + Enter
+   * seleccionan directo. showPicker es relativamente nuevo (Chrome 121+) y
+   * puede no existir o tirar error fuera de un gesto del usuario -- por
+   * eso el try/catch, el focus solo ya alcanza como respaldo. */
   useEffect(() => {
     if (focusRowIndex === null) return;
-    accountSelectRefs.current[focusRowIndex]?.focus();
+    const el = accountSelectRefs.current[focusRowIndex];
+    el?.focus();
+    try { el?.showPicker?.(); } catch { /* navegador sin soporte, queda solo el foco */ }
     setFocusRowIndex(null);
   }, [focusRowIndex]);
 
@@ -435,7 +442,7 @@ export function Sale() {
         setReceipt(demoReceipt);
         clearTicket();
         setMessage("Venta registrada (modo demo, no se descuenta stock real).");
-        await autoPrintReceipt(demoReceipt);
+        await autoPrintReceipt();
         return;
       }
       if (!branchId) throw new Error("Tu usuario no tiene sucursal asignada.");
@@ -473,7 +480,7 @@ export function Sale() {
       clearTicket();
       await reloadProducts();
       await reloadShift();
-      await autoPrintReceipt(newReceipt);
+      await autoPrintReceipt();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo registrar la venta.");
     } finally {
@@ -584,21 +591,15 @@ export function Sale() {
 
   /** Se imprime solo al cobrar -- el ticket para el cliente tiene que salir
    * sí o sí, sin depender de que el cajero se acuerde de apretar
-   * "Imprimir". Si hay impresora térmica emparejada se usa esa; si no hay
-   * (o falla -- apagada, sin emparejar, etc.) cae al diálogo de impresión
-   * normal del navegador, a la impresora de siempre. `isThermalPrintSupported`
-   * solo dice si el navegador tiene la API, no si hay un equipo real
-   * conectado, por eso el fallback cubre también el caso "API sí, impresora
-   * no" y no sólo "sin la API". */
-  async function autoPrintReceipt(r: ReceiptState) {
-    if (isThermalPrintSupported()) {
-      try {
-        await printBytes(buildReceiptTicket(r));
-        return;
-      } catch (err) {
-        setMessage(err instanceof Error ? `Venta cobrada, pero no se pudo imprimir por la térmica: ${err.message}` : "Venta cobrada, pero no se pudo imprimir por la térmica.");
-      }
-    }
+   * "Imprimir". Antes este camino automático probaba primero la impresora
+   * térmica si el navegador tenía la API disponible (`isThermalPrintSupported`)
+   * -- pero esa API existe en cualquier Chrome, tenga o no una impresora
+   * térmica realmente emparejada, así que en la práctica se quedaba
+   * intentando (y fallando) por ese lado y no imprimía nada. Ahora el
+   * camino automático es siempre el diálogo de impresión normal del
+   * navegador; la impresora térmica queda como acción manual aparte (botón
+   * "Imprimir en impresora térmica", para quien la tenga emparejada). */
+  async function autoPrintReceipt() {
     // Pequeña espera para que el DOM termine de pintar el comprobante nuevo
     // antes de que el navegador lo capture para imprimir.
     setTimeout(() => window.print(), 150);
@@ -1029,14 +1030,14 @@ export function Sale() {
         <section className="panel print-area receipt-ticket" style={{ marginTop: 18 }}>
           <div className="panel-title">
             <h2>Último comprobante</h2>
-            <div className="no-print">
+            <div className="no-print ticket-actions">
+              <button className="ticket-action-btn" onClick={() => handlePrint()}>Reimprimir</button>
+              <button className="ticket-action-btn" onClick={() => handlePrint(2)}>2 copias</button>
               {isThermalPrintSupported() && (
-                <button className="secondary" disabled={thermalPrintBusy} onClick={handleThermalPrint} style={{ marginRight: 8 }}>
-                  {thermalPrintBusy ? "Imprimiendo…" : "Imprimir en impresora térmica"}
+                <button className="ticket-action-btn" disabled={thermalPrintBusy} onClick={handleThermalPrint}>
+                  {thermalPrintBusy ? "Imprimiendo…" : "Térmica"}
                 </button>
               )}
-              <button className="secondary" onClick={() => handlePrint()} style={{ marginRight: 8 }}>Imprimir</button>
-              <button className="secondary" onClick={() => handlePrint(2)}>Imprimir 2 copias</button>
             </div>
           </div>
 
