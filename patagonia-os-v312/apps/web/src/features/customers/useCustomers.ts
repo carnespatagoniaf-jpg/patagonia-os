@@ -5,9 +5,11 @@ import { useActiveBranch } from "../branches/BranchProvider";
 import {
   createCustomer,
   createCustomerCharge,
+  createCustomerChargeWithItems,
   deleteCustomerCharge,
   deleteCustomerPayment,
   getCustomerBalance,
+  getCustomerChargeItems,
   listCustomerCharges,
   listCustomerPayments,
   listCustomersWithBalance,
@@ -16,7 +18,9 @@ import {
   updateCustomerCharge,
   updateCustomerPayment,
   type CreateCustomerChargeInput,
+  type CreateCustomerChargeWithItemsInput,
   type CreateCustomerInput,
+  type CustomerChargeItem,
   type RegisterCustomerPaymentInput,
   type UpdateCustomerChargeInput,
   type UpdateCustomerInput,
@@ -149,6 +153,37 @@ export function useCustomers() {
     [loadDetail, demoLedgers, applyDemoLedger]
   );
 
+  const addChargeWithItems = useCallback(
+    async (input: Omit<CreateCustomerChargeWithItemsInput, "branchId">) => {
+      if (!branchId) throw new Error("Tu usuario no tiene sucursal asignada.");
+
+      if (!isSupabaseConfigured) {
+        const total = input.items.reduce((sum, item) => sum + (item.unitPrice ?? 0) * item.quantity, 0);
+        const charge: CustomerCharge = {
+          id: crypto.randomUUID(),
+          customerId: input.customerId,
+          chargeDate: input.chargeDate,
+          amount: Math.round(total),
+          reason: input.reason?.trim() || "Entrega (modo demo)",
+          createdAt: new Date().toISOString()
+        };
+        const existing = demoLedgers[input.customerId] ?? { charges: [], payments: [] };
+        applyDemoLedger(input.customerId, { ...existing, charges: [charge, ...existing.charges] });
+        return { id: charge.id, amount: charge.amount };
+      }
+
+      const result = await createCustomerChargeWithItems({ ...input, branchId });
+      await loadDetail(input.customerId);
+      return result;
+    },
+    [branchId, loadDetail, demoLedgers, applyDemoLedger]
+  );
+
+  const loadChargeItems = useCallback(async (chargeId: string): Promise<CustomerChargeItem[]> => {
+    if (!isSupabaseConfigured) return [];
+    return getCustomerChargeItems(chargeId);
+  }, []);
+
   const registerPayment = useCallback(
     async (input: Omit<RegisterCustomerPaymentInput, "branchId">) => {
       if (!branchId) throw new Error("Tu usuario no tiene sucursal asignada.");
@@ -243,6 +278,8 @@ export function useCustomers() {
     detailLoading,
     loadDetail,
     addCharge,
+    addChargeWithItems,
+    loadChargeItems,
     registerPayment,
     editCharge,
     removeCharge,

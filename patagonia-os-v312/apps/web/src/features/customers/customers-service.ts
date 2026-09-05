@@ -152,6 +152,75 @@ export async function deleteCustomerCharge(id: string): Promise<void> {
   if (error) throw error;
 }
 
+export interface CreateCustomerChargeItemInput {
+  productId?: string;
+  description?: string;
+  unitPrice?: number;
+  quantity: number;
+}
+
+export interface CreateCustomerChargeWithItemsInput {
+  customerId: string;
+  branchId: string;
+  chargeDate: string;
+  items: CreateCustomerChargeItemInput[];
+  reason?: string;
+}
+
+/** A diferencia de createCustomerCharge (monto + texto libre, no toca
+ * stock -- pensado para lo que no es mercadería real), esto es una
+ * entrega de productos reales: descuenta stock igual que una venta de
+ * Mostrador, y guarda el detalle por producto para poder imprimir un
+ * remito de verdad. */
+export async function createCustomerChargeWithItems(input: CreateCustomerChargeWithItemsInput): Promise<{ id: string; amount: number }> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.rpc("create_customer_charge_with_items", {
+    p_customer_id: input.customerId,
+    p_branch_id: input.branchId,
+    p_charge_date: input.chargeDate,
+    p_items: input.items.map((item) =>
+      item.productId
+        ? { product_id: item.productId, quantity: item.quantity }
+        : { description: item.description, unit_price: item.unitPrice, quantity: item.quantity }
+    ),
+    p_reason: input.reason ?? null
+  });
+
+  if (error) throw error;
+  return { id: data.id, amount: Number(data.amount) };
+}
+
+export interface CustomerChargeItem {
+  id: string;
+  productName: string;
+  quantity: number;
+  unitPrice: number;
+  lineTotal: number;
+}
+
+interface CustomerChargeItemRow {
+  id: string;
+  product_name: string;
+  quantity: number;
+  unit_price: number;
+  line_total: number;
+}
+
+export async function getCustomerChargeItems(chargeId: string): Promise<CustomerChargeItem[]> {
+  if (!supabase) return [];
+
+  const { data, error } = await supabase.rpc("get_customer_charge_items", { p_charge_id: chargeId });
+  if (error) throw error;
+  return ((data ?? []) as CustomerChargeItemRow[]).map((row) => ({
+    id: row.id,
+    productName: row.product_name,
+    quantity: Number(row.quantity),
+    unitPrice: Number(row.unit_price),
+    lineTotal: Number(row.line_total)
+  }));
+}
+
 interface CustomerPaymentRow {
   id: string;
   customer_id: string;

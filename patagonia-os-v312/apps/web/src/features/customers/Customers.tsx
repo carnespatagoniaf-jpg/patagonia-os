@@ -1,9 +1,22 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
-import { isOverdueDebt } from "@patagonia/domain";
+import { isOverdueDebt, type Product } from "@patagonia/domain";
 import { useCustomers } from "./useCustomers";
 import { useTreasury } from "../shifts/useTreasury";
 import { todayIso } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
+import { listProductsForBranch } from "../inventory/inventory-service";
+import type { CustomerChargeItem } from "./customers-service";
+
+const UNIT_LABELS: Record<Product["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
+
+interface ChargeCartLine {
+  key: string;
+  productId?: string;
+  name: string;
+  unit: Product["unit"];
+  quantity: number;
+  unitPrice: number;
+}
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
@@ -22,6 +35,7 @@ interface LedgerRow {
 
 export function Customers() {
   const {
+    branchId,
     customers,
     loading,
     error,
@@ -32,7 +46,8 @@ export function Customers() {
     balance,
     detailLoading,
     loadDetail,
-    addCharge,
+    addChargeWithItems,
+    loadChargeItems,
     registerPayment,
     editCharge,
     removeCharge,
@@ -40,6 +55,44 @@ export function Customers() {
     removePayment
   } = useCustomers();
   const { accounts } = useTreasury();
+
+  const [products, setProducts] = useState<Product[]>([]);
+  const [chargeSearch, setChargeSearch] = useState("");
+  const [chargeCart, setChargeCart] = useState<ChargeCartLine[]>([]);
+  const [chargeNote, setChargeNote] = useState("");
+  const [printCharge, setPrintCharge] = useState<{ date: string; reason: string; amount: number; items: CustomerChargeItem[] } | null>(null);
+  const [remitoBusyId, setRemitoBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!branchId) return;
+    void listProductsForBranch(branchId).then(setProducts);
+  }, [branchId]);
+
+  const chargeMatches = chargeSearch.trim()
+    ? products.filter((p) => (p.active ?? true) && p.name.toLowerCase().includes(chargeSearch.toLowerCase())).slice(0, 8)
+    : [];
+
+  function addProductToCharge(product: Product) {
+    setChargeCart((current) => {
+      const existing = current.find((l) => l.productId === product.id);
+      if (existing) {
+        return current.map((l) => (l.productId === product.id ? { ...l, quantity: l.quantity + 1 } : l));
+      }
+      return [...current, { key: product.id, productId: product.id, name: product.name, unit: product.unit, quantity: 1, unitPrice: product.priceRetail }];
+    });
+    setChargeSearch("");
+  }
+
+  function updateChargeItemQty(key: string, raw: string) {
+    const parsed = Number(raw);
+    setChargeCart((current) => current.map((l) => (l.key === key ? { ...l, quantity: l.unit === "kg" ? parsed : Math.round(parsed) } : l)));
+  }
+
+  function removeChargeItem(key: string) {
+    setChargeCart((current) => current.filter((l) => l.key !== key));
+  }
+
+  const chargeTotal = chargeCart.reduce((sum, l) => sum + l.quantity * l.unitPrice, 0);
 
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -57,8 +110,6 @@ export function Customers() {
   const [editActive, setEditActive] = useState(true);
 
   const [chargeDate, setChargeDate] = useState(todayIso());
-  const [chargeAmount, setChargeAmount] = useState("");
-  const [chargeReason, setChargeReason] = useState("");
 
   const [paymentDate, setPaymentDate] = useState(todayIso());
   const [paymentAmount, setPaymentAmount] = useState("");
@@ -167,17 +218,38 @@ export function Customers() {
     setBusy(true);
     try {
       if (!selectedCustomer) return;
-      const amount = parseAmount(chargeAmount);
-      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Ingresá un monto válido.");
-      if (!chargeReason.trim()) throw new Error("Ingresá un detalle (ej. qué le entregaste).");
-      await addCharge({ customerId: selectedCustomer.id, chargeDate, amount, reason: chargeReason.trim() });
-      setChargeAmount("");
-      setChargeReason("");
-      setMessage("Entrega cargada.");
+      if (chargeCart.length === 0) throw new Error("Agregá al menos un producto.");
+      await addChargeWithItems({
+        customerId: selectedCustomer.id,
+        chargeDate,
+        items: chargeCart.map((l) => ({ productId: l.productId, quantity: l.quantity })),
+        reason: chargeNote.trim() || undefined
+      });
+      setChargeCart([]);
+      setChargeNote("");
+      setMessage("Entrega cargada -- se descontó el stock igual que en una venta.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo cargar la entrega.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  /** El remito se arma al toque con lo que ya está guardado (los items de
+   * la entrega) -- no hace falta cargar nada de nuevo, solo traerlos. */
+  async function handleShowRemito(row: LedgerRow) {
+    setRemitoBusyId(row.id);
+    try {
+      const items = await loadChargeItems(row.id);
+      if (items.length === 0) {
+        setMessage("Esta entrega no tiene detalle de productos (se cargó con el formulario viejo de monto + texto).");
+        return;
+      }
+      setPrintCharge({ date: row.date, reason: row.detail, amount: row.debit, items });
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo cargar el detalle de la entrega.");
+    } finally {
+      setRemitoBusyId(null);
     }
   }
 
@@ -368,9 +440,49 @@ export function Customers() {
         </section>
       </div>
 
+      {printCharge && (
+        <section className="panel print-area" style={{ marginTop: 18 }}>
+          <div className="panel-title">
+            <h2>Remito</h2>
+            <div className="no-print">
+              <button className="secondary" onClick={handlePrint}>Imprimir</button>{" "}
+              <button className="secondary" onClick={() => setPrintCharge(null)}>Cerrar</button>
+            </div>
+          </div>
+          <div className="print-only-header">
+            <p className="muted">{selectedCustomer?.name}</p>
+            <p className="muted">Fecha de entrega: {printCharge.date}</p>
+            {printCharge.reason && <p className="muted">{printCharge.reason}</p>}
+          </div>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Producto</th>
+                <th className="num">Cantidad</th>
+                <th className="num">Precio unit.</th>
+                <th className="num">Subtotal</th>
+              </tr>
+            </thead>
+            <tbody>
+              {printCharge.items.map((item) => (
+                <tr key={item.id}>
+                  <td>{item.productName}</td>
+                  <td className="num">{item.quantity}</td>
+                  <td className="num">{formatMoney(item.unitPrice)}</td>
+                  <td className="num">{formatMoney(item.lineTotal)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="totals" style={{ marginTop: 12 }}>
+            <strong>Total <b>{formatMoney(printCharge.amount)}</b></strong>
+          </div>
+        </section>
+      )}
+
       {selectedCustomer && (
         <>
-          <section className="panel print-area" style={{ marginTop: 18 }}>
+          <section className={`panel${printCharge ? "" : " print-area"}`} style={{ marginTop: 18 }}>
             <div className="panel-title">
               <h2>Detalle de cuenta corriente</h2>
               <button className="secondary no-print" onClick={handlePrint}>Imprimir</button>
@@ -432,6 +544,13 @@ export function Customers() {
                       <td className="num">{row.credit > 0 ? formatMoney(row.credit) : "-"}</td>
                       <td className="num">{formatMoney(row.balance)}</td>
                       <td className="no-print">
+                        {row.type === "charge" && (
+                          <>
+                            <button className="secondary" disabled={remitoBusyId === row.id} onClick={() => handleShowRemito(row)}>
+                              {remitoBusyId === row.id ? "…" : "Remito"}
+                            </button>{" "}
+                          </>
+                        )}
                         <button className="secondary" disabled={busy} onClick={() => startEditRow(row)}>Editar</button>{" "}
                         <button className="secondary" disabled={busy} onClick={() => handleDeleteRow(row)}>Borrar</button>
                       </td>
@@ -447,15 +566,74 @@ export function Customers() {
             <section className="panel">
               <div className="panel-title">
                 <h2>Nueva entrega</h2>
+                <span className="muted" style={{ fontSize: 12 }}>Descuenta stock, igual que una venta</span>
               </div>
-              <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10 }}>
+              <div className="cash-banner-form" style={{ marginBottom: 10 }}>
+                <label className="muted">Fecha</label>
                 <input type="date" value={chargeDate} onChange={(e) => setChargeDate(e.target.value)} />
-                <input type="text" inputMode="decimal" placeholder="Monto" value={chargeAmount} onChange={(e) => setChargeAmount(e.target.value)} />
               </div>
-              <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
-                <input placeholder="Detalle (ej. 20kg asado, factura #123)" value={chargeReason} onChange={(e) => setChargeReason(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
-                <button disabled={busy} onClick={handleAddCharge}>{busy ? "Cargando…" : "Cargar entrega"}</button>
+              <div className="pos-search-wrap">
+                <input
+                  type="text"
+                  className="pos-search"
+                  placeholder="Buscá el producto que le entregás…"
+                  value={chargeSearch}
+                  onChange={(e) => setChargeSearch(e.target.value)}
+                  style={{ fontSize: 16, padding: "12px 14px 12px 42px" }}
+                />
+                {chargeMatches.length > 0 && (
+                  <div className="pos-dropdown">
+                    {chargeMatches.map((product) => (
+                      <button key={product.id} type="button" className="pos-dropdown-item" onClick={() => addProductToCharge(product)}>
+                        <span>{product.name} <span className="muted">({UNIT_LABELS[product.unit]})</span></span>
+                        <strong>{formatMoney(product.priceRetail)}</strong>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
+
+              {chargeCart.length === 0 ? (
+                <p className="muted" style={{ marginTop: 12 }}>Buscá y agregá los productos que le estás entregando.</p>
+              ) : (
+                <div className="pos-cart">
+                  {chargeCart.map((line) => (
+                    <div className="pos-cart-row" key={line.key} style={{ gridTemplateColumns: "1fr 90px 110px 34px" }}>
+                      <div className="name">
+                        {line.name}
+                        <small>{formatMoney(line.unitPrice)} /{UNIT_LABELS[line.unit]}</small>
+                      </div>
+                      <input
+                        type="number"
+                        className="pos-qty-input"
+                        min={line.unit === "kg" ? "0.001" : "1"}
+                        step={line.unit === "kg" ? "0.001" : "1"}
+                        value={line.quantity}
+                        onChange={(e) => updateChargeItemQty(line.key, e.target.value)}
+                      />
+                      <span className="pos-line-total">{formatMoney(line.quantity * line.unitPrice)}</span>
+                      <button className="pos-remove-btn" onClick={() => removeChargeItem(line.key)} aria-label="Quitar" title="Quitar">×</button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {chargeCart.length > 0 && (
+                <>
+                  <div className="cash-banner-form" style={{ marginTop: 12 }}>
+                    <input placeholder="Nota (opcional, ej. nº de factura)" value={chargeNote} onChange={(e) => setChargeNote(e.target.value)} style={{ flex: 1, minWidth: 200 }} />
+                  </div>
+                  <div className="pos-total-bar" style={{ marginTop: 12 }}>
+                    <div>
+                      <p className="pos-total-label">Total de la entrega</p>
+                      <strong className="pos-total-value">{formatMoney(chargeTotal)}</strong>
+                    </div>
+                    <button className="charge-button pos-charge-btn" disabled={busy} onClick={handleAddCharge}>
+                      {busy ? "Cargando…" : "Cargar entrega"}
+                    </button>
+                  </div>
+                </>
+              )}
             </section>
 
             <section className="panel">
