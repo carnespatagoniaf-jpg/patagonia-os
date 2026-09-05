@@ -97,8 +97,8 @@ export function Users() {
     }));
   }
 
-  /** A diferencia de "Inactivo (eliminado)" (que preserva el historial),
-   * esto borra el login de verdad -- solo funciona si el usuario nunca
+  /** A diferencia de marcarlo "Inactivo" (que preserva el historial), esto
+   * borra el login de verdad -- solo funciona si el usuario nunca
    * tuvo actividad real (el servidor lo rechaza solo si ya vendió algo,
    * abrió un turno, etc.), así que puede fallar con un mensaje claro. */
   async function handleDelete(user: CompanyUser) {
@@ -126,7 +126,7 @@ export function Users() {
         deniedPermissions: editDraft.deniedPermissions
       });
       setEditingId(null);
-      setMessage(editDraft.active ? "Usuario actualizado." : "Usuario eliminado.");
+      setMessage(editDraft.active ? "Usuario actualizado." : "Usuario desactivado (sigue en la lista, marcado Inactivo, para no perder su historial).");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo actualizar el usuario.");
     }
@@ -193,7 +193,7 @@ export function Users() {
                       <td>
                         <select value={editDraft.active ? "1" : "0"} onChange={(e) => setEditDraft({ ...editDraft, active: e.target.value === "1" })}>
                           <option value="1">Activo</option>
-                          <option value="0">Inactivo (eliminado)</option>
+                          <option value="0">Inactivo</option>
                         </select>
                       </td>
                       <td>
