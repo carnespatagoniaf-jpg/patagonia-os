@@ -20,17 +20,7 @@ import {
 } from "./pos-shift-service";
 import { formatMoney } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
-import {
-  buildTestTicket,
-  getPairedPrinterInfo,
-  getThermalPrintSettings,
-  isThermalPrinterPaired,
-  isThermalPrintSupported,
-  printBytes,
-  saveThermalPrintSettings,
-  TicketBuilder,
-  type ThermalPrintSettings
-} from "./thermal-printer";
+import { getThermalPrintSettings, isThermalPrinterPaired, isThermalPrintSupported, printBytes, TicketBuilder } from "./thermal-printer";
 
 const UNIT_LABELS: Record<Product["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
 
@@ -146,9 +136,6 @@ export function Sale() {
 
   const [thermalPrintBusy, setThermalPrintBusy] = useState(false);
   const [showPrinterSettings, setShowPrinterSettings] = useState(false);
-  const [printSettings, setPrintSettings] = useState<ThermalPrintSettings>(() => getThermalPrintSettings());
-  const [printerInfo, setPrinterInfo] = useState<string | null>(null);
-  const [testPrintBusy, setTestPrintBusy] = useState(false);
   const [autoPrintEnabled, setAutoPrintEnabled] = useState<boolean>(() => getAutoPrintEnabled());
 
   const grossTotal = cart.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
@@ -655,36 +642,6 @@ export function Sale() {
     }
   }
 
-  /** Cada impresora responde distinto a los mismos comandos ESC/POS -- en
-   * vez de que el tamaño de letra quede fijo en el código (y haya que
-   * pedirme un cambio y un redeploy por cada equipo distinto), esto deja
-   * probar combinaciones acá mismo hasta que se vea bien en la impresora
-   * real, e imprime un ticket de prueba al toque para ver el resultado sin
-   * necesitar una venta real. */
-  function updatePrintSettings(patch: Partial<ThermalPrintSettings>) {
-    setPrintSettings((current) => {
-      const next = { ...current, ...patch };
-      saveThermalPrintSettings(next);
-      return next;
-    });
-  }
-
-  async function handleShowPrinterInfo() {
-    const info = await getPairedPrinterInfo();
-    setPrinterInfo(info ? `${info.productName} · ${info.manufacturerName} · vendorId ${info.vendorId} · productId ${info.productId}` : "No hay ninguna impresora térmica emparejada todavía.");
-  }
-
-  async function handleTestPrint() {
-    setMessage("");
-    setTestPrintBusy(true);
-    try {
-      await printBytes(buildTestTicket(printSettings));
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo imprimir el ticket de prueba.");
-    } finally {
-      setTestPrintBusy(false);
-    }
-  }
 
   /** Se imprime solo al cobrar -- pero SOLO si el local activó "Imprimir
    * automáticamente" en Config. impresora. Sin ese interruptor, a quien no
@@ -821,40 +778,8 @@ export function Sale() {
                   Imprimir el comprobante automáticamente al cobrar
                 </label>
                 <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-                  Se abre el diálogo de impresión normal apenas se cobra la venta -- ahí elegís tu impresora por su nombre, como en cualquier programa. Si no tenés impresora, dejalo apagado y nunca te va a aparecer nada solo.
+                  Al cobrar se abre el diálogo de impresión de Windows -- ahí elegís tu impresora por su nombre y confirmás "Imprimir". Por seguridad, ningún navegador imprime sin ese paso (existe una forma de saltearlo por completo, preguntame si te interesa). Si no tenés impresora, dejalo apagado y nunca te va a aparecer nada solo.
                 </p>
-              </div>
-            )}
-
-            {showPrinterSettings && isThermalPrintSupported() && (
-              <div className="pos-manual-card" style={{ flexDirection: "column", alignItems: "stretch", gap: 10 }}>
-                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-                  Opcional, para quien prefiera imprimir directo a una impresora térmica por USB en vez del diálogo normal: probá combinaciones e imprimí el ticket de prueba hasta que se vea bien.
-                </p>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
-                  <select value={printSettings.bodySize} onChange={(e) => updatePrintSettings({ bodySize: e.target.value as ThermalPrintSettings["bodySize"] })}>
-                    <option value="normal">Letra normal</option>
-                    <option value="tall">Más grande (doble alto)</option>
-                    <option value="double">Más grande (doble alto y ancho)</option>
-                  </select>
-                  <select value={printSettings.font} onChange={(e) => updatePrintSettings({ font: e.target.value as ThermalPrintSettings["font"] })}>
-                    <option value="auto">Fuente: la que tenga puesta</option>
-                    <option value="a">Fuente: grande (Font A)</option>
-                    <option value="b">Fuente: chica (Font B)</option>
-                  </select>
-                  <input
-                    type="number"
-                    min="16"
-                    max="64"
-                    value={printSettings.lineWidth}
-                    onChange={(e) => updatePrintSettings({ lineWidth: Number(e.target.value) || 32 })}
-                    style={{ width: 70 }}
-                    title="Caracteres por línea (separadores)"
-                  />
-                  <button disabled={testPrintBusy} onClick={handleTestPrint}>{testPrintBusy ? "Imprimiendo…" : "Imprimir ticket de prueba"}</button>
-                  <button className="secondary" onClick={handleShowPrinterInfo}>Ver modelo de la impresora</button>
-                </div>
-                {printerInfo && <p className="muted" style={{ margin: 0, fontSize: 13 }}>{printerInfo}</p>}
               </div>
             )}
 
