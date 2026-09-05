@@ -7,7 +7,8 @@ import { useAuth } from "../auth/AuthProvider";
 import { can } from "../auth/permissions";
 import { listProductsForBranch } from "../inventory/inventory-service";
 import { useTreasury } from "../shifts/useTreasury";
-import { createPosSale } from "./sale-service";
+import { createPosSale, type CreatePosSaleInput } from "./sale-service";
+import { addPendingSale, getPendingSales, isNetworkError, markPendingSaleError, removePendingSale, type PendingSale } from "./offline-queue";
 import {
   closePosShift,
   getOpenPosShift,
@@ -56,6 +57,10 @@ interface ReceiptState {
   paymentSummary: string;
   amountTendered: number | null;
   change: number | null;
+  /** true si esta venta se guardó localmente porque no había conexión al
+   * cobrar -- todavía no llegó al servidor, se sube sola cuando vuelva
+   * internet (ver features/sale/offline-queue.ts). */
+  pending?: boolean;
 }
 
 const AUTO_PRINT_KEY = "patagonia-auto-print-enabled";
@@ -161,6 +166,8 @@ export function Sale() {
   const [thermalPrintBusy, setThermalPrintBusy] = useState(false);
   const [showPrinterSettings, setShowPrinterSettings] = useState(false);
   const [autoPrintEnabled, setAutoPrintEnabled] = useState<boolean>(() => getAutoPrintEnabled());
+  const [pendingSales, setPendingSales] = useState<PendingSale[]>(() => getPendingSales());
+  const [syncingOffline, setSyncingOffline] = useState(false);
 
   const grossTotal = cart.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
   const itemDiscountTotal = cart.reduce((sum, line) => sum + (parseAmount(itemDiscounts[line.key] || "0") || 0), 0);
@@ -246,6 +253,52 @@ export function Sale() {
   useEffect(() => {
     saveStoredReceipt(receipt);
   }, [receipt]);
+
+  /** Reintenta mandar al servidor las ventas que quedaron guardadas
+   * localmente por falta de conexión. Se corta apenas vuelve a fallar por
+   * red (quedan las demás para el próximo intento); si el servidor
+   * rechaza una por un motivo real (no de red) se marca como error y se
+   * sigue con el resto, para que una venta rara no trabe a las demás. */
+  async function syncPendingSales() {
+    if (syncingOffline) return;
+    const queue = getPendingSales();
+    if (queue.length === 0) return;
+    setSyncingOffline(true);
+    try {
+      for (const sale of queue) {
+        if (sale.status === "error") continue;
+        try {
+          await createPosSale(sale.input);
+          removePendingSale(sale.localId);
+        } catch (err) {
+          if (isNetworkError(err)) break;
+          markPendingSaleError(sale.localId, err instanceof Error ? err.message : "No se pudo subir esta venta.");
+        }
+      }
+    } finally {
+      setPendingSales(getPendingSales());
+      setSyncingOffline(false);
+      try {
+        await reloadShift();
+      } catch {
+        // no crítico -- si todavía no hay conexión, reintenta solo más tarde.
+      }
+    }
+  }
+
+  useEffect(() => {
+    if (getPendingSales().length > 0) void syncPendingSales();
+    window.addEventListener("online", syncPendingSales);
+    return () => window.removeEventListener("online", syncPendingSales);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (pendingSales.length === 0) return;
+    const interval = setInterval(() => void syncPendingSales(), 30000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pendingSales.length]);
 
   async function handleCajaMovement() {
     setMessage("");
@@ -523,38 +576,62 @@ export function Sale() {
         ? payments.map((p) => ({ accountId: p.accountId, amount: parseAmount(p.amount || "0") || 0 }))
         : [{ accountId: payments[0].accountId, amount: total }];
 
-      const result = await createPosSale({
+      const salePayload: CreatePosSaleInput = {
         branchId,
         posShiftId: shift.id,
         items: itemsPayload,
         payments: paymentsPayload,
         discountAmount: saleDiscountValue,
         surchargeAmount: saleSurchargeValue
-      });
+      };
+
+      // Si no hay conexión, createPosSale rechaza por una falla de red (no
+      // un rechazo real del servidor) -- en vez de cortar la venta, queda
+      // guardada tal cual para reintentar sola (ver offline-queue.ts) y el
+      // cajero sigue como si hubiera salido bien, con el total calculado
+      // acá mismo ya que no hay respuesta del servidor todavía.
+      let saleTotal = total;
+      let queuedOffline = false;
+      try {
+        const result = await createPosSale(salePayload);
+        saleTotal = result.total;
+      } catch (err) {
+        if (!isNetworkError(err)) throw err;
+        addPendingSale(salePayload);
+        setPendingSales(getPendingSales());
+        queuedOffline = true;
+      }
+
       const newReceipt: ReceiptState = {
         items: receiptLines,
         saleDiscount: saleDiscountValue,
         saleSurcharge: saleSurchargeValue,
-        total: result.total,
+        total: saleTotal,
         soldAt: new Date().toISOString(),
         paymentSummary,
         amountTendered: tenderedValue,
-        change
+        change,
+        pending: queuedOffline
       };
       setReceipt(newReceipt);
       clearTicket();
       // El ticket tiene que salir sí o sí -- se imprime antes de refrescar
       // stock/turno, y esos dos refrescos van en su propio try/catch para
-      // que un problema de red ahí (la venta ya está guardada) no tape el
-      // ticket ni dispare el mensaje de "no se pudo registrar la venta"
-      // sobre una venta que en realidad sí se cobró.
+      // que un problema de red ahí (la venta ya está guardada, o ya quedó
+      // en la cola offline) no tape el ticket ni dispare el mensaje de "no
+      // se pudo registrar la venta" sobre una venta que en realidad sí se
+      // cobró.
       await autoPrintReceipt();
-      try {
-        await reloadProducts();
-        await reloadShift();
-      } catch {
-        // no crítico -- la venta y el ticket ya están hechos, se van a
-        // refrescar solos la próxima vez que cambie algo.
+      if (queuedOffline) {
+        setMessage("Sin conexión: la venta se guardó en este equipo y se sube sola apenas vuelva internet.");
+      } else {
+        try {
+          await reloadProducts();
+          await reloadShift();
+        } catch {
+          // no crítico -- la venta y el ticket ya están hechos, se van a
+          // refrescar solos la próxima vez que cambie algo.
+        }
       }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo registrar la venta.");
@@ -724,6 +801,18 @@ export function Sale() {
       </header>
 
       {message && <div className="message">{message}</div>}
+
+      {pendingSales.length > 0 && (
+        <div className="message warning" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+          <span>
+            {pendingSales.length === 1 ? "1 venta" : `${pendingSales.length} ventas`} guardada{pendingSales.length === 1 ? "" : "s"} en este equipo, pendiente{pendingSales.length === 1 ? "" : "s"} de subir al servidor
+            {pendingSales.some((s) => s.status === "error") && " (alguna quedó con error, revisala)"}.
+          </span>
+          <button className="secondary" disabled={syncingOffline} onClick={() => void syncPendingSales()}>
+            {syncingOffline ? "Sincronizando…" : "Sincronizar ahora"}
+          </button>
+        </div>
+      )}
 
       {shiftLoading ? (
         <p className="muted">Cargando turno…</p>
@@ -1085,7 +1174,18 @@ export function Sale() {
                 </button>
               )}
               {!showCloseConfirm && (
-                <button className="pos-toolbar-btn" onClick={() => setShowCloseConfirm(true)}>Cerrar turno</button>
+                <button
+                  className="pos-toolbar-btn"
+                  onClick={() => {
+                    if (pendingSales.length > 0) {
+                      setMessage("Todavía hay ventas sin subir al servidor -- sincronizalas antes de cerrar el turno para que el total esté completo.");
+                      return;
+                    }
+                    setShowCloseConfirm(true);
+                  }}
+                >
+                  Cerrar turno
+                </button>
               )}
             </div>
 
@@ -1185,6 +1285,7 @@ export function Sale() {
             <strong>{branches.find((b) => b.id === branchId)?.name ?? "Patagonia OS"}</strong>
             <p>Comprobante interno · no válido como factura</p>
             <p>{new Date(receipt.soldAt).toLocaleString("es-AR")}</p>
+            {receipt.pending && <p className="no-print" style={{ color: "#8a4b00", fontWeight: 700 }}>⏳ Guardada sin conexión, pendiente de subir</p>}
           </div>
 
           <div className="ticket-rule" />
