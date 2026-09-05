@@ -40,6 +40,9 @@ export function Users() {
   const [newPassword, setNewPassword] = useState(randomPassword());
   const [lastCreated, setLastCreated] = useState<CreateStaffUserResult | null>(null);
 
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [deleteBusy, setDeleteBusy] = useState(false);
+
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<Draft & { active: boolean; deniedPermissions: string[] }>({
     ...emptyDraft(""),
@@ -98,16 +101,23 @@ export function Users() {
   }
 
   /** A diferencia de marcarlo "Inactivo" (que preserva el historial), esto
-   * borra el login de verdad -- solo funciona si el usuario nunca
-   * tuvo actividad real (el servidor lo rechaza solo si ya vendió algo,
-   * abrió un turno, etc.), así que puede fallar con un mensaje claro. */
-  async function handleDelete(user: CompanyUser) {
-    if (!window.confirm(`¿Eliminar a ${user.fullName} del todo? Esto no se puede deshacer. Si ya tiene ventas u otra actividad registrada, no va a dejar -- en ese caso marcalo como inactivo en su lugar.`)) return;
+   * borra el login de verdad -- solo funciona si el usuario nunca tuvo
+   * actividad real (el servidor lo rechaza solo si ya vendió algo, abrió
+   * un turno, etc.), así que puede fallar con un mensaje claro. La
+   * confirmación es una fila propia en la tabla, no window.confirm(): un
+   * navegador puede llegar a suprimir esos diálogos nativos sin avisar
+   * (por ejemplo, después de tildar "no volver a preguntar" en otro), y
+   * ahí "Borrar" parece no hacer nada. */
+  async function handleConfirmDelete(user: CompanyUser) {
+    setDeleteBusy(true);
     try {
       await remove(user.id);
+      setConfirmDeleteId(null);
       setMessage("Usuario eliminado.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo eliminar el usuario.");
+    } finally {
+      setDeleteBusy(false);
     }
   }
 
@@ -209,10 +219,20 @@ export function Users() {
                       <td>{user.active ? "Activo" : "Inactivo"}</td>
                       <td>
                         {user.role !== "owner" && (
-                          <>
-                            <button className="secondary" onClick={() => startEdit(user)}>Editar</button>{" "}
-                            <button className="danger" onClick={() => handleDelete(user)}>Borrar</button>
-                          </>
+                          confirmDeleteId === user.id ? (
+                            <>
+                              <span className="muted" style={{ fontSize: 13, marginRight: 6 }}>¿Seguro? No se puede deshacer.</span>
+                              <button className="danger" disabled={deleteBusy} onClick={() => handleConfirmDelete(user)}>
+                                {deleteBusy ? "Eliminando…" : "Sí, borrar"}
+                              </button>{" "}
+                              <button className="secondary" disabled={deleteBusy} onClick={() => setConfirmDeleteId(null)}>Cancelar</button>
+                            </>
+                          ) : (
+                            <>
+                              <button className="secondary" onClick={() => startEdit(user)}>Editar</button>{" "}
+                              <button className="danger" onClick={() => setConfirmDeleteId(user.id)}>Borrar</button>
+                            </>
+                          )
                         )}
                       </td>
                     </>
