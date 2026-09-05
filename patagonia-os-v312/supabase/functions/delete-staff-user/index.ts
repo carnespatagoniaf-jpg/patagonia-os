@@ -75,11 +75,21 @@ Deno.serve(async (req) => {
 
     const { error: deleteErr } = await admin.auth.admin.deleteUser(targetId);
     if (deleteErr) {
-      const isReferenced = /foreign key|violates|referenced/i.test(deleteErr.message ?? "");
+      const raw = deleteErr.message ?? "";
+      const status = (deleteErr as { status?: number }).status;
+      const code = (deleteErr as { code?: string }).code;
+      // "Database error deleting user" es el mensaje genérico que GoTrue
+      // (el servicio de auth de Supabase) devuelve cuando el DELETE de
+      // auth.users falla por cualquier motivo del lado de la base --
+      // normalmente porque alguna tabla (ventas, compras, turnos, etc.)
+      // todavía referencia a este usuario. Se agrega el detalle técnico
+      // igual, por si acá aparece algo más específico.
+      const looksLikeDbRejection = /foreign key|violates|referenced|database error/i.test(raw);
+      const detail = ` [detalle: ${raw}${status ? ` · status ${status}` : ""}${code ? ` · code ${code}` : ""}]`;
       throw new Error(
-        isReferenced
+        (looksLikeDbRejection
           ? "Este usuario ya tiene actividad registrada (ventas, compras, turnos, etc.) y no se puede eliminar del todo -- marcalo como inactivo en su lugar."
-          : deleteErr.message
+          : raw) + detail
       );
     }
 
