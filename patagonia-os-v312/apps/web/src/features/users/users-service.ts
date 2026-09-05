@@ -94,3 +94,31 @@ export async function updateStaffUser(input: UpdateStaffUserInput): Promise<void
   });
   if (error) throw error;
 }
+
+/** Borra el usuario de verdad (login + perfil) en vez de solo marcarlo
+ * inactivo -- solo funciona si nunca tuvo actividad real (ventas, compras,
+ * turnos, etc.), porque esas tablas referencian su login y Postgres
+ * rechaza el borrado solo si hay algo enganchado. Por eso es una Edge
+ * Function (necesita el Admin API para borrar de auth.users), igual que
+ * createStaffUser. */
+export async function deleteStaffUser(id: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.functions.invoke("delete-staff-user", { body: { id } });
+  if (error) {
+    let message = error.message;
+    const context = (error as { context?: Response }).context;
+    if (context) {
+      try {
+        const body = await context.json();
+        if (body?.error) message = body.error;
+      } catch {
+        // keep default message
+      }
+    }
+    throw new Error(message);
+  }
+  if (!data || (data as { error?: string }).error) {
+    throw new Error((data as { error?: string })?.error ?? "No se pudo eliminar el usuario.");
+  }
+}

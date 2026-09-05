@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import {
   createStaffUser,
+  deleteStaffUser,
   listCompanyUsers,
   updateStaffUser,
   type CompanyUser,
@@ -77,5 +78,18 @@ export function useUsers() {
     [reload]
   );
 
-  return { users, loading, error, reload, create, update };
+  const remove = useCallback(
+    async (id: string) => {
+      if (!isSupabaseConfigured) {
+        setUsers((current) => current.filter((u) => u.id !== id));
+        return;
+      }
+
+      await deleteStaffUser(id);
+      await reload();
+    },
+    [reload]
+  );
+
+  return { users, loading, error, reload, create, update, remove };
 }

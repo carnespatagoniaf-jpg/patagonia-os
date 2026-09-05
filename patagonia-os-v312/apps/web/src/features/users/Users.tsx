@@ -32,7 +32,7 @@ function randomPassword() {
 
 export function Users() {
   const { branches } = useActiveBranch();
-  const { users, loading, error, create, update } = useUsers();
+  const { users, loading, error, create, update, remove } = useUsers();
 
   const [message, setMessage] = useState("");
   const [showNewForm, setShowNewForm] = useState(false);
@@ -95,6 +95,20 @@ export function Users() {
         ? current.deniedPermissions.filter((p) => p !== permission)
         : [...current.deniedPermissions, permission]
     }));
+  }
+
+  /** A diferencia de "Inactivo (eliminado)" (que preserva el historial),
+   * esto borra el login de verdad -- solo funciona si el usuario nunca
+   * tuvo actividad real (el servidor lo rechaza solo si ya vendió algo,
+   * abrió un turno, etc.), así que puede fallar con un mensaje claro. */
+  async function handleDelete(user: CompanyUser) {
+    if (!window.confirm(`¿Eliminar a ${user.fullName} del todo? Esto no se puede deshacer. Si ya tiene ventas u otra actividad registrada, no va a dejar -- en ese caso marcalo como inactivo en su lugar.`)) return;
+    try {
+      await remove(user.id);
+      setMessage("Usuario eliminado.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo eliminar el usuario.");
+    }
   }
 
   async function handleUpdate() {
@@ -195,7 +209,10 @@ export function Users() {
                       <td>{user.active ? "Activo" : "Inactivo"}</td>
                       <td>
                         {user.role !== "owner" && (
-                          <button className="secondary" onClick={() => startEdit(user)}>Editar</button>
+                          <>
+                            <button className="secondary" onClick={() => startEdit(user)}>Editar</button>{" "}
+                            <button className="danger" onClick={() => handleDelete(user)}>Borrar</button>
+                          </>
                         )}
                       </td>
                     </>
