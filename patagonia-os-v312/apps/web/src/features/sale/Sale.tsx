@@ -79,6 +79,30 @@ function saveAutoPrintEnabled(enabled: boolean): void {
   }
 }
 
+const LAST_RECEIPT_KEY = "patagonia-pos-last-receipt";
+
+/** El "Último comprobante" vivía solo en el estado de React -- al salir de
+ * Mostrador (a Turnos, Productos, lo que sea) el componente se desmonta y
+ * se perdía, aunque la venta ya esté guardada. sessionStorage lo mantiene
+ * mientras dure la pestaña/turno, sin guardarlo para siempre. */
+function loadStoredReceipt(): ReceiptState | null {
+  try {
+    const raw = sessionStorage.getItem(LAST_RECEIPT_KEY);
+    return raw ? (JSON.parse(raw) as ReceiptState) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveStoredReceipt(receipt: ReceiptState | null): void {
+  try {
+    if (receipt) sessionStorage.setItem(LAST_RECEIPT_KEY, JSON.stringify(receipt));
+    else sessionStorage.removeItem(LAST_RECEIPT_KEY);
+  } catch {
+    // sessionStorage lleno o bloqueado -- no es crítico.
+  }
+}
+
 export function Sale() {
   const { branchId, branches, activeBranch } = useActiveBranch();
   const { profile } = useAuth();
@@ -111,7 +135,7 @@ export function Sale() {
   const [saleSurcharge, setSaleSurcharge] = useState("");
   const [saleSurchargeMode, setSaleSurchargeMode] = useState<"amount" | "percent">("amount");
   const [showDiscountForm, setShowDiscountForm] = useState(false);
-  const [receipt, setReceipt] = useState<ReceiptState | null>(null);
+  const [receipt, setReceipt] = useState<ReceiptState | null>(() => loadStoredReceipt());
 
   const [showManualForm, setShowManualForm] = useState(false);
   const [manualDesc, setManualDesc] = useState("");
@@ -218,6 +242,10 @@ export function Sale() {
     try { el?.showPicker?.(); } catch { /* navegador sin soporte, queda solo el foco */ }
     setFocusRowIndex(null);
   }, [focusRowIndex]);
+
+  useEffect(() => {
+    saveStoredReceipt(receipt);
+  }, [receipt]);
 
   async function handleCajaMovement() {
     setMessage("");
@@ -879,7 +907,7 @@ export function Sale() {
 
             {cart.length > 0 && (
               <>
-                <div className="pos-toolbar" style={{ marginTop: 16 }}>
+                <div className="pos-toolbar" style={{ marginTop: 10 }}>
                   <button
                     className={`pos-toolbar-btn${showDiscountForm || hasAdjustment ? " active" : ""}`}
                     onClick={() => setShowDiscountForm((v) => !v)}
