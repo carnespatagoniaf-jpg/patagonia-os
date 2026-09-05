@@ -68,6 +68,27 @@ interface ReceiptState {
   change: number | null;
 }
 
+const AUTO_PRINT_KEY = "patagonia-auto-print-enabled";
+
+/** Por caja/equipo (localStorage), no por empresa -- cada mostrador puede
+ * tener o no una impresora conectada. Por defecto apagado: a quien nunca
+ * lo prendió no le tiene que aparecer un diálogo de impresión de la nada. */
+function getAutoPrintEnabled(): boolean {
+  try {
+    return localStorage.getItem(AUTO_PRINT_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+function saveAutoPrintEnabled(enabled: boolean): void {
+  try {
+    localStorage.setItem(AUTO_PRINT_KEY, enabled ? "1" : "0");
+  } catch {
+    // localStorage lleno o bloqueado -- no es crítico.
+  }
+}
+
 export function Sale() {
   const { branchId, branches, activeBranch } = useActiveBranch();
   const { profile } = useAuth();
@@ -128,6 +149,7 @@ export function Sale() {
   const [printSettings, setPrintSettings] = useState<ThermalPrintSettings>(() => getThermalPrintSettings());
   const [printerInfo, setPrinterInfo] = useState<string | null>(null);
   const [testPrintBusy, setTestPrintBusy] = useState(false);
+  const [autoPrintEnabled, setAutoPrintEnabled] = useState<boolean>(() => getAutoPrintEnabled());
 
   const grossTotal = cart.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
   const itemDiscountTotal = cart.reduce((sum, line) => sum + (parseAmount(itemDiscounts[line.key] || "0") || 0), 0);
@@ -470,7 +492,7 @@ export function Sale() {
         setReceipt(demoReceipt);
         clearTicket();
         setMessage("Venta registrada (modo demo, no se descuenta stock real).");
-        await autoPrintReceipt(demoReceipt);
+        await autoPrintReceipt();
         return;
       }
       if (!branchId) throw new Error("Tu usuario no tiene sucursal asignada.");
@@ -511,7 +533,7 @@ export function Sale() {
       // que un problema de red ahí (la venta ya está guardada) no tape el
       // ticket ni dispare el mensaje de "no se pudo registrar la venta"
       // sobre una venta que en realidad sí se cobró.
-      await autoPrintReceipt(newReceipt);
+      await autoPrintReceipt();
       try {
         await reloadProducts();
         await reloadShift();
@@ -664,32 +686,20 @@ export function Sale() {
     }
   }
 
-  /** Se imprime solo al cobrar -- el ticket para el cliente tiene que salir
-   * sí o sí, sin depender de que el cajero se acuerde de apretar
-   * "Imprimir". Antes este camino automático probaba primero la impresora
-   * térmica si el navegador tenía la API disponible (`isThermalPrintSupported`)
-   * -- pero esa API existe en cualquier Chrome, tenga o no una impresora
-   * térmica realmente emparejada, así que en la práctica se quedaba
-   * intentando (y fallando) por ese lado y no imprimía nada. Ahora el
-   * camino automático es siempre el diálogo de impresión normal del
-   * navegador; la impresora térmica queda como acción manual aparte (botón
-   * "Imprimir en impresora térmica", para quien la tenga emparejada). */
-  async function autoPrintReceipt(r: ReceiptState) {
-    // Si ya emparejaste una impresora térmica (aunque sea una vez, con el
-    // botón "Imprimir en impresora térmica" de abajo) se usa esa: manda
-    // los bytes ESC/POS directo, con el ancho exacto de esa impresora, sin
-    // depender de qué tamaño de papel entienda el navegador/Windows. Si
-    // todavía no la emparejaste, pedirle el dispositivo sin que el cajero
-    // haya tocado nada fallaría (Chrome exige un gesto del usuario para el
-    // selector de USB), así que ahí cae al diálogo de impresión normal.
-    if (await isThermalPrinterPaired()) {
-      try {
-        await printBytes(buildReceiptTicket(r));
-        return;
-      } catch (err) {
-        setMessage(err instanceof Error ? `Venta cobrada, pero no se pudo imprimir por la térmica: ${err.message}` : "Venta cobrada, pero no se pudo imprimir por la térmica.");
-      }
-    }
+  /** Se imprime solo al cobrar -- pero SOLO si el local activó "Imprimir
+   * automáticamente" en Config. impresora. Sin ese interruptor, a quien no
+   * tiene impresora nunca le aparece un diálogo de impresión de la nada;
+   * quien sí imprime lo prende una vez y listo. Antes esto intentaba la
+   * impresora térmica por USB primero -- forzaba a elegir el dispositivo de
+   * una lista genérica de USB sin nombres claros (imposible para alguien
+   * sin conocimientos técnicos, y no escala a mil clientes con mil
+   * impresoras distintas). Ahora el único camino automático es el diálogo
+   * de impresión normal del navegador, que ya muestra la impresora por su
+   * nombre real y respeta el papel que esa impresora tenga configurado en
+   * Windows. La térmica por USB sigue disponible como botón manual aparte,
+   * para quien la quiera igual. */
+  async function autoPrintReceipt() {
+    if (!autoPrintEnabled) return;
     // Pequeña espera para que el DOM termine de pintar el comprobante nuevo
     // antes de que el navegador lo capture para imprimir.
     setTimeout(() => window.print(), 150);
@@ -792,17 +802,34 @@ export function Sale() {
               <button className={`pos-toolbar-btn${showProductTable ? " active" : ""}`} onClick={() => setShowProductTable((v) => !v)}>
                 {showProductTable ? "Ocultar tabla de productos" : "Ver tabla de productos"}
               </button>
-              {isThermalPrintSupported() && (
-                <button className={`pos-toolbar-btn${showPrinterSettings ? " active" : ""}`} onClick={() => setShowPrinterSettings((v) => !v)}>
-                  {showPrinterSettings ? "Ocultar config. impresora" : "Config. impresora"}
-                </button>
-              )}
+              <button className={`pos-toolbar-btn${showPrinterSettings ? " active" : ""}`} onClick={() => setShowPrinterSettings((v) => !v)}>
+                {showPrinterSettings ? "Ocultar config. impresora" : "Config. impresora"}
+              </button>
             </div>
 
             {showPrinterSettings && (
               <div className="pos-manual-card" style={{ flexDirection: "column", alignItems: "stretch", gap: 10 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
+                  <input
+                    type="checkbox"
+                    checked={autoPrintEnabled}
+                    onChange={(e) => {
+                      setAutoPrintEnabled(e.target.checked);
+                      saveAutoPrintEnabled(e.target.checked);
+                    }}
+                  />
+                  Imprimir el comprobante automáticamente al cobrar
+                </label>
                 <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-                  Cada impresora responde distinto -- probá combinaciones e imprimí el ticket de prueba hasta que se vea bien en la tuya.
+                  Se abre el diálogo de impresión normal apenas se cobra la venta -- ahí elegís tu impresora por su nombre, como en cualquier programa. Si no tenés impresora, dejalo apagado y nunca te va a aparecer nada solo.
+                </p>
+              </div>
+            )}
+
+            {showPrinterSettings && isThermalPrintSupported() && (
+              <div className="pos-manual-card" style={{ flexDirection: "column", alignItems: "stretch", gap: 10 }}>
+                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                  Opcional, para quien prefiera imprimir directo a una impresora térmica por USB en vez del diálogo normal: probá combinaciones e imprimí el ticket de prueba hasta que se vea bien.
                 </p>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                   <select value={printSettings.bodySize} onChange={(e) => updatePrintSettings({ bodySize: e.target.value as ThermalPrintSettings["bodySize"] })}>
