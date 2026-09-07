@@ -62,6 +62,7 @@ export function Purchases() {
     loadSupplier,
     create: createPurchase,
     editItem,
+    editPurchaseDate,
     registerPayment,
     updatePayment,
     removePayment,
@@ -95,6 +96,9 @@ export function Purchases() {
   const [editingItemId, setEditingItemId] = useState<string | null>(null);
   const [editQuantity, setEditQuantity] = useState("");
   const [editUnitPrice, setEditUnitPrice] = useState("");
+
+  const [editingDatePurchaseId, setEditingDatePurchaseId] = useState<string | null>(null);
+  const [editPurchaseDateValue, setEditPurchaseDateValue] = useState("");
 
   const [editingSupplier, setEditingSupplier] = useState(false);
   const [editSupplierName, setEditSupplierName] = useState("");
@@ -277,6 +281,22 @@ export function Purchases() {
       setMessage("Pago actualizado.");
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo actualizar el pago.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSavePurchaseDate(purchaseId: string) {
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (!selectedSupplierId) return;
+      if (!editPurchaseDateValue) throw new Error("Ingresá una fecha válida.");
+      await editPurchaseDate(selectedSupplierId, purchaseId, editPurchaseDateValue);
+      setEditingDatePurchaseId(null);
+      setMessage("Fecha de la compra corregida.");
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo corregir la fecha.");
     } finally {
       setBusy(false);
     }
@@ -557,12 +577,32 @@ export function Purchases() {
               {purchases.map((purchase) => (
                 <div key={purchase.id} style={{ marginBottom: 16, opacity: purchase.status === "voided" ? 0.5 : 1 }}>
                   <div className="list-row">
-                    <strong style={{ textDecoration: purchase.status === "voided" ? "line-through" : undefined }}>
-                      {purchase.purchaseDate}{purchase.invoiceNumber ? ` · Fact. ${purchase.invoiceNumber}` : ""}
-                      {purchase.status === "voided" && " · Anulada"}
-                    </strong>
+                    {editingDatePurchaseId === purchase.id ? (
+                      <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                        <input type="date" value={editPurchaseDateValue} onChange={(e) => setEditPurchaseDateValue(e.target.value)} />
+                        <button disabled={busy} onClick={() => handleSavePurchaseDate(purchase.id)}>Guardar</button>
+                        <button className="secondary" disabled={busy} onClick={() => setEditingDatePurchaseId(null)}>Cancelar</button>
+                      </span>
+                    ) : (
+                      <strong style={{ textDecoration: purchase.status === "voided" ? "line-through" : undefined }}>
+                        {purchase.purchaseDate}{purchase.invoiceNumber ? ` · Fact. ${purchase.invoiceNumber}` : ""}
+                        {purchase.status === "voided" && " · Anulada"}
+                      </strong>
+                    )}
                     <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
                       <span className="num">Total {formatMoney(purchase.total)}</span>
+                      {editingDatePurchaseId !== purchase.id && (
+                        <button
+                          className="secondary"
+                          disabled={busy}
+                          onClick={() => {
+                            setEditingDatePurchaseId(purchase.id);
+                            setEditPurchaseDateValue(purchase.purchaseDate);
+                          }}
+                        >
+                          Editar fecha
+                        </button>
+                      )}
                       {purchase.status === "active" && (
                         <button className="secondary" disabled={busy} onClick={() => handleVoidPurchase(purchase.id)}>Anular</button>
                       )}

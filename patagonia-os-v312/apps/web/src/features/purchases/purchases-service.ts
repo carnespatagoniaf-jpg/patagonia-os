@@ -86,6 +86,13 @@ export async function voidPurchase(purchaseId: string): Promise<void> {
   if (error) throw error;
 }
 
+export async function updatePurchaseDate(purchaseId: string, purchaseDate: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("update_purchase_date", { p_purchase_id: purchaseId, p_purchase_date: purchaseDate });
+  if (error) throw error;
+}
+
 interface PurchaseItemRow {
   id: string;
   purchase_id: string;
