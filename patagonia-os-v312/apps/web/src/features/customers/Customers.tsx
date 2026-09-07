@@ -269,7 +269,12 @@ export function Customers() {
       }
       setPrintCharge({ date: row.date, reason: row.detail, amount: row.debit, items });
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo cargar el detalle de la entrega.");
+      // Detalle crudo del error -- para diagnosticar sin acceso a la base,
+      // ya que el mensaje "lindo" de más abajo no alcanzó para ver la causa
+      // real la primera vez que esto falló.
+      const raw = err instanceof Error ? err.message : typeof err === "object" && err !== null ? JSON.stringify(err) : String(err);
+      const code = (err as { code?: string })?.code;
+      setMessage(`No se pudo cargar el detalle de la entrega. [detalle: ${raw}${code ? ` · code ${code}` : ""}]`);
     } finally {
       setRemitoBusyId(null);
     }
