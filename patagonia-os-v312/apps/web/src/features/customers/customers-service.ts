@@ -105,6 +105,31 @@ export async function listCustomerCharges(customerId: string): Promise<CustomerC
   return (data ?? []).map(mapCharge);
 }
 
+export interface CustomerChargeRangeEntry {
+  date: string;
+  amount: number;
+}
+
+/** Para sumar las entregas a cuenta corriente dentro de "Ventas" (Dashboard,
+ * Rentabilidad) -- customer_charges no tiene branch_id propio, se filtra
+ * por la sucursal del cliente. */
+export async function listCustomerChargesInRange(branchId: string, fromDate: string, toDate: string): Promise<CustomerChargeRangeEntry[]> {
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from("customer_charges")
+    .select("charge_date,amount,customers!inner(branch_id)")
+    .eq("customers.branch_id", branchId)
+    .gte("charge_date", fromDate)
+    .lte("charge_date", toDate);
+
+  if (error) throw error;
+  return ((data ?? []) as unknown as { charge_date: string; amount: number }[]).map((row) => ({
+    date: row.charge_date,
+    amount: Number(row.amount)
+  }));
+}
+
 export interface CreateCustomerChargeInput {
   customerId: string;
   chargeDate: string;

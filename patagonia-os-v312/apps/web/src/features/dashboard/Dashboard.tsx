@@ -7,7 +7,7 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { can } from "../auth/permissions";
 import { useAuth } from "../auth/AuthProvider";
 import { useActiveBranch } from "../branches/BranchProvider";
-import { listCustomersWithBalance } from "../customers/customers-service";
+import { listCustomerChargesInRange, listCustomersWithBalance } from "../customers/customers-service";
 import { listProductsForBranch } from "../inventory/inventory-service";
 import { listProfitabilityPeriods } from "../profitability/profitability-service";
 import { listPosSalesInRange } from "../sale/pos-shift-service";
@@ -46,9 +46,10 @@ export function Dashboard() {
       loadRange(weekAgo, today),
       listProfitabilityPeriods(branchId),
       listPosSalesInRange(branchId, weekAgo, today),
+      can(profile, "customers.manage") ? listCustomerChargesInRange(branchId, weekAgo, today) : Promise.resolve([]),
       can(profile, "customers.manage") ? listCustomersWithBalance() : Promise.resolve([])
     ])
-      .then(([productList, shiftRows, periods, mostradorSales, customers]) => {
+      .then(([productList, shiftRows, periods, mostradorSales, customerCharges, customers]) => {
         if (cancelled) return;
         setProducts(productList);
         setOverdueCustomers(
@@ -64,11 +65,18 @@ export function Dashboard() {
         for (const sale of mostradorSales) {
           mostradorByDate.set(sale.date, (mostradorByDate.get(sale.date) ?? 0) + sale.amount);
         }
+        const entregasByDate = new Map<string, number>();
+        for (const charge of customerCharges) {
+          entregasByDate.set(charge.date, (entregasByDate.get(charge.date) ?? 0) + charge.amount);
+        }
 
         const series: DaySales[] = [];
         for (let i = 6; i >= 0; i--) {
           const date = addDaysIso(today, -i);
-          series.push({ date, total: (turnosByDate.get(date) ?? 0) + (mostradorByDate.get(date) ?? 0) });
+          series.push({
+            date,
+            total: (turnosByDate.get(date) ?? 0) + (mostradorByDate.get(date) ?? 0) + (entregasByDate.get(date) ?? 0)
+          });
         }
         setSalesSeries(series);
         setSalesToday(series[series.length - 1]?.total ?? 0);
@@ -117,7 +125,7 @@ export function Dashboard() {
         <div className="panel">
           <div className="panel-title">
             <h2>Ventas</h2>
-            <span className="muted">Últimos 7 días · Turnos + Mostrador</span>
+            <span className="muted">Últimos 7 días · Turnos + Mostrador + Entregas a cuenta corriente</span>
           </div>
           {salesSeries.some((d) => d.total > 0) ? (
             <SalesTrendChart series={salesSeries} />
