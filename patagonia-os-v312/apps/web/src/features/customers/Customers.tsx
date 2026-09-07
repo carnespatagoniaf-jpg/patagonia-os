@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { isOverdueDebt, type Product } from "@patagonia/domain";
 import { useCustomers } from "./useCustomers";
 import { useTreasury } from "../shifts/useTreasury";
@@ -62,11 +62,16 @@ export function Customers() {
   const [chargeNote, setChargeNote] = useState("");
   const [printCharge, setPrintCharge] = useState<{ date: string; reason: string; amount: number; items: CustomerChargeItem[] } | null>(null);
   const [remitoBusyId, setRemitoBusyId] = useState<string | null>(null);
+  const printSectionRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     if (!branchId) return;
     void listProductsForBranch(branchId).then(setProducts);
   }, [branchId]);
+
+  useEffect(() => {
+    if (printCharge) printSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [printCharge]);
 
   const chargeMatches = chargeSearch.trim()
     ? products.filter((p) => (p.active ?? true) && p.name.toLowerCase().includes(chargeSearch.toLowerCase())).slice(0, 8)
@@ -219,15 +224,32 @@ export function Customers() {
     try {
       if (!selectedCustomer) return;
       if (chargeCart.length === 0) throw new Error("Agregá al menos un producto.");
-      await addChargeWithItems({
+      const cartSnapshot = chargeCart;
+      const noteSnapshot = chargeNote.trim();
+      const result = await addChargeWithItems({
         customerId: selectedCustomer.id,
         chargeDate,
-        items: chargeCart.map((l) => ({ productId: l.productId, quantity: l.quantity })),
-        reason: chargeNote.trim() || undefined
+        items: cartSnapshot.map((l) => ({ productId: l.productId, quantity: l.quantity })),
+        reason: noteSnapshot || undefined
       });
       setChargeCart([]);
       setChargeNote("");
       setMessage("Entrega cargada -- se descontó el stock igual que en una venta.");
+      // Se muestra el remito de ESTA entrega al toque -- la mercadería tiene
+      // que salir con la boleta en el momento, no buscarla después en el
+      // historial (ahí es fácil confundir la de hoy con una vieja).
+      setPrintCharge({
+        date: chargeDate,
+        reason: noteSnapshot || cartSnapshot.map((l) => l.name).join(", "),
+        amount: result.amount,
+        items: cartSnapshot.map((l) => ({
+          id: l.key,
+          productName: l.name,
+          quantity: l.quantity,
+          unitPrice: l.unitPrice,
+          lineTotal: l.quantity * l.unitPrice
+        }))
+      });
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo cargar la entrega.");
     } finally {
@@ -441,7 +463,7 @@ export function Customers() {
       </div>
 
       {printCharge && (
-        <section className="panel print-area" style={{ marginTop: 18 }}>
+        <section ref={printSectionRef} className="panel print-area" style={{ marginTop: 18 }}>
           <div className="panel-title">
             <h2>Remito</h2>
             <div className="no-print">
