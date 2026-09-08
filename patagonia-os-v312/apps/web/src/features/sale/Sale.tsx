@@ -27,6 +27,15 @@ import {
 import { formatMoney } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
 import { getThermalPrintSettings, isThermalPrinterPaired, isThermalPrintSupported, printBytes, TicketBuilder } from "./thermal-printer";
+import {
+  DEFAULT_SCALE_CONFIG,
+  deleteBranchScaleConfig,
+  detectScaleConfig,
+  getBranchScaleConfig,
+  parseWeightBarcode,
+  saveBranchScaleConfig,
+  type ScaleConfig
+} from "./scale-config-service";
 
 const UNIT_LABELS: Record<Product["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
 
@@ -191,6 +200,14 @@ export function Sale() {
   const [pendingSales, setPendingSales] = useState<PendingSale[]>(() => getPendingSales());
   const [syncingOffline, setSyncingOffline] = useState(false);
 
+  const [scaleConfig, setScaleConfig] = useState<ScaleConfig>(DEFAULT_SCALE_CONFIG);
+  const [scaleConfigCalibrated, setScaleConfigCalibrated] = useState(false);
+  const [showScaleWizard, setShowScaleWizard] = useState(false);
+  const [scaleWizardCode, setScaleWizardCode] = useState("");
+  const [scaleWizardWeight, setScaleWizardWeight] = useState("");
+  const [scaleWizardBusy, setScaleWizardBusy] = useState(false);
+  const [scaleWizardResult, setScaleWizardResult] = useState<"idle" | "success" | "not_found">("idle");
+
   const grossTotal = cart.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
   const itemDiscountTotal = cart.reduce((sum, line) => sum + (parseAmount(itemDiscounts[line.key] || "0") || 0), 0);
   const saleSurchargeRaw = parseAmount(saleSurcharge || "0") || 0;
@@ -252,6 +269,24 @@ export function Sale() {
     if (!isSupabaseConfigured) return;
     void listProductCategories().then(setCategories).catch(() => setCategories([]));
   }, []);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !branchId) return;
+    void getBranchScaleConfig(branchId)
+      .then((config) => {
+        if (config) {
+          setScaleConfig(config);
+          setScaleConfigCalibrated(true);
+        } else {
+          setScaleConfig(DEFAULT_SCALE_CONFIG);
+          setScaleConfigCalibrated(false);
+        }
+      })
+      .catch(() => {
+        setScaleConfig(DEFAULT_SCALE_CONFIG);
+        setScaleConfigCalibrated(false);
+      });
+  }, [branchId]);
 
   useEffect(() => {
     void reloadProducts();
@@ -412,6 +447,46 @@ export function Sale() {
     }
   }
 
+  async function handleCalibrateScale() {
+    setScaleWizardResult("idle");
+    if (!branchId) return;
+    const code = scaleWizardCode.trim();
+    const weightKg = parseAmount(scaleWizardWeight || "0") || Number(scaleWizardWeight);
+    if (!code) { setMessage("Escaneá una etiqueta de tu balanza primero."); return; }
+    if (!Number.isFinite(weightKg) || weightKg <= 0) { setMessage("Ingresá el peso que mostró la balanza."); return; }
+    setScaleWizardBusy(true);
+    try {
+      const detected = detectScaleConfig(code, weightKg);
+      if (!detected) {
+        setScaleWizardResult("not_found");
+        return;
+      }
+      await saveBranchScaleConfig(branchId, detected);
+      setScaleConfig(detected);
+      setScaleConfigCalibrated(true);
+      setScaleWizardResult("success");
+      setScaleWizardCode("");
+      setScaleWizardWeight("");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo guardar la configuración de la balanza.");
+    } finally {
+      setScaleWizardBusy(false);
+    }
+  }
+
+  async function handleResetScaleConfig() {
+    if (!branchId) return;
+    try {
+      await deleteBranchScaleConfig(branchId);
+      setScaleConfig(DEFAULT_SCALE_CONFIG);
+      setScaleConfigCalibrated(false);
+      setScaleWizardResult("idle");
+      setMessage("Se borró la calibración de la balanza -- vuelve al formato Kretz por defecto.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo borrar la configuración.");
+    }
+  }
+
   async function handleOpenShift() {
     setMessage("");
     const openingCash = parseAmount(openingCashInput || "0") || 0;
@@ -500,20 +575,6 @@ export function Sale() {
     setShowManualForm(false);
   }
 
-  /**
-   * Etiquetas de balanza Kretz: EAN-13 "2" + PLU (5 dígitos) + peso en gramos
-   * (5 dígitos) + dígito verificador. Ej. 2000102004720 = PLU 00102, peso
-   * 00472 = 0,472 kg. El precio no se lee del código -- siempre se usa el
-   * precio actual del producto en el sistema.
-   */
-  function parseWeightBarcode(code: string): { plu: string; weightKg: number } | null {
-    if (!/^\d{13}$/.test(code) || code[0] !== "2") return null;
-    const plu = String(parseInt(code.slice(2, 7), 10));
-    const weightGrams = parseInt(code.slice(7, 12), 10);
-    if (!Number.isFinite(weightGrams) || weightGrams <= 0) return null;
-    return { plu, weightKg: weightGrams / 1000 };
-  }
-
   const searchMatches = search.trim() ? filteredProducts.slice(0, 8) : [];
   // Con texto buscado siempre queda un renglón resaltado (el primero, salvo
   // que se haya navegado con las flechas) para que Enter agregue directo.
@@ -542,7 +603,7 @@ export function Sale() {
     const raw = search.trim();
     if (!raw) return;
 
-    const weight = parseWeightBarcode(raw);
+    const weight = parseWeightBarcode(raw, scaleConfig);
     if (weight) {
       const match = products.find((p) => (p.active ?? true) && p.code === weight.plu);
       if (match) {
@@ -993,6 +1054,9 @@ export function Sale() {
               <button className={`pos-toolbar-btn${showPrinterSettings ? " active" : ""}`} onClick={() => setShowPrinterSettings((v) => !v)}>
                 {showPrinterSettings ? "Ocultar config. impresora" : "Config. impresora"}
               </button>
+              <button className={`pos-toolbar-btn${showScaleWizard ? " active" : ""}`} onClick={() => { setShowScaleWizard((v) => !v); setScaleWizardResult("idle"); }}>
+                {showScaleWizard ? "Ocultar config. balanza" : "Config. balanza"}
+              </button>
             </div>
 
             {showPrinterSettings && (
@@ -1011,6 +1075,43 @@ export function Sale() {
                 <p className="muted" style={{ margin: 0, fontSize: 13 }}>
                   Al cobrar se abre el diálogo de impresión de Windows -- ahí elegís tu impresora por su nombre y confirmás "Imprimir". Por seguridad, ningún navegador imprime sin ese paso (existe una forma de saltearlo por completo, preguntame si te interesa). Si no tenés impresora, dejalo apagado y nunca te va a aparecer nada solo.
                 </p>
+              </div>
+            )}
+
+            {showScaleWizard && (
+              <div className="pos-manual-card" style={{ flexDirection: "column", alignItems: "stretch", gap: 10 }}>
+                <p style={{ margin: 0, fontWeight: 700 }}>
+                  {scaleConfigCalibrated ? "Tu balanza ya está calibrada." : "Todavía no calibraste tu balanza (usando el formato Kretz por defecto)."}
+                </p>
+                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                  Poné cualquier producto en la balanza, anotá el peso que te muestra, escaneá acá la etiqueta que imprime, y decinos ese peso -- el sistema detecta el formato solo, sin que tengas que entender nada técnico.
+                </p>
+                <input
+                  placeholder="Escaneá acá la etiqueta de la balanza…"
+                  value={scaleWizardCode}
+                  onChange={(e) => setScaleWizardCode(e.target.value)}
+                />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="¿Qué peso mostró la balanza? (ej. 0,472)"
+                  value={scaleWizardWeight}
+                  onChange={(e) => setScaleWizardWeight(e.target.value)}
+                />
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <button disabled={scaleWizardBusy} onClick={handleCalibrateScale}>{scaleWizardBusy ? "Detectando…" : "Detectar formato"}</button>
+                  {scaleConfigCalibrated && (
+                    <button className="secondary" onClick={handleResetScaleConfig}>Borrar calibración</button>
+                  )}
+                </div>
+                {scaleWizardResult === "success" && (
+                  <p style={{ margin: 0, color: "#1a7a3c", fontWeight: 700 }}>Listo, detectado y guardado -- probá escanear otra etiqueta para confirmar.</p>
+                )}
+                {scaleWizardResult === "not_found" && (
+                  <p style={{ margin: 0, color: "#8a4b00", fontWeight: 700 }}>
+                    No pudimos detectar el formato solos con esa etiqueta. Probá de nuevo con otro producto/peso distinto, o escribinos y lo configuramos nosotros.
+                  </p>
+                )}
               </div>
             )}
 
