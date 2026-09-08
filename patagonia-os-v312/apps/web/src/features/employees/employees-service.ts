@@ -173,21 +173,42 @@ export interface EmployeeVoucher {
   type: ShiftOutflow["type"];
   detail: string;
   shiftDate: string;
-  shift: "morning" | "afternoon";
+  shift: "morning" | "afternoon" | "mostrador";
   liquidated: boolean;
 }
 
+interface PosShiftOutflowRow {
+  id: string;
+  outflow_date: string;
+  type: ShiftOutflow["type"];
+  amount: number;
+  detail: string;
+  payroll_liquidation_id: string | null;
+}
+
+/** Los vales se pueden cargar desde Turnos (shift_outflows) o desde
+ * Mostrador (pos_shift_outflows, 066_employee_vale_from_pos_shift.sql) --
+ * acá se combinan las dos fuentes para el listado del empleado. */
 export async function listEmployeeVouchers(employeeId: string): Promise<EmployeeVoucher[]> {
   if (!supabase) return [];
 
-  const { data, error } = await supabase
-    .from("shift_outflows")
-    .select("id,shift_id,account_id,type,amount,detail,employee_id,supplier_id,payroll_liquidation_id,created_at,shift_registers(shift_date,shift)")
-    .eq("employee_id", employeeId)
-    .order("created_at", { ascending: false });
+  const [turnoResult, mostradorResult] = await Promise.all([
+    supabase
+      .from("shift_outflows")
+      .select("id,shift_id,account_id,type,amount,detail,employee_id,supplier_id,payroll_liquidation_id,created_at,shift_registers(shift_date,shift)")
+      .eq("employee_id", employeeId)
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("pos_shift_outflows")
+      .select("id,outflow_date,type,amount,detail,payroll_liquidation_id")
+      .eq("employee_id", employeeId)
+      .order("outflow_date", { ascending: false })
+  ]);
 
-  if (error) throw error;
-  return ((data ?? []) as unknown as VoucherQueryRow[]).map((row) => ({
+  if (turnoResult.error) throw turnoResult.error;
+  if (mostradorResult.error) throw mostradorResult.error;
+
+  const turnoVouchers: EmployeeVoucher[] = ((turnoResult.data ?? []) as unknown as VoucherQueryRow[]).map((row) => ({
     id: row.id,
     amount: Number(row.amount),
     type: row.type,
@@ -196,6 +217,44 @@ export async function listEmployeeVouchers(employeeId: string): Promise<Employee
     shift: row.shift_registers?.shift ?? "morning",
     liquidated: row.payroll_liquidation_id !== null
   }));
+
+  const mostradorVouchers: EmployeeVoucher[] = ((mostradorResult.data ?? []) as PosShiftOutflowRow[]).map((row) => ({
+    id: row.id,
+    amount: Number(row.amount),
+    type: row.type,
+    detail: row.detail,
+    shiftDate: row.outflow_date,
+    shift: "mostrador",
+    liquidated: row.payroll_liquidation_id !== null
+  }));
+
+  return [...turnoVouchers, ...mostradorVouchers].sort((a, b) => b.shiftDate.localeCompare(a.shiftDate));
+}
+
+export interface RegisterEmployeeValeInput {
+  employeeId: string;
+  posShiftId: string;
+  accountId: string;
+  amount: number;
+  detail?: string;
+}
+
+/** Vale de adelanto en efectivo a un empleado, cargado desde la caja de
+ * Mostrador -- se descuenta de su próxima liquidación de sueldo igual que
+ * un vale de Turnos. */
+export async function registerEmployeeValeFromPosShift(input: RegisterEmployeeValeInput): Promise<{ id: string }> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.rpc("register_employee_vale_from_pos_shift", {
+    p_employee_id: input.employeeId,
+    p_pos_shift_id: input.posShiftId,
+    p_account_id: input.accountId,
+    p_amount: input.amount,
+    p_detail: input.detail ?? null
+  });
+
+  if (error) throw error;
+  return { id: data.id };
 }
 
 interface PayrollLiquidationPaymentRow {
@@ -322,7 +381,7 @@ export interface PayrollLiquidationLineItem {
 export async function listPayrollLiquidationDetail(liquidationId: string): Promise<PayrollLiquidationLineItem[]> {
   if (!supabase) return [];
 
-  const [adjResult, voucherResult] = await Promise.all([
+  const [adjResult, voucherResult, mostradorVoucherResult] = await Promise.all([
     supabase
       .from("payroll_adjustments")
       .select("adjustment_date,type,amount,reason")
@@ -330,11 +389,16 @@ export async function listPayrollLiquidationDetail(liquidationId: string): Promi
     supabase
       .from("shift_outflows")
       .select("amount,type,detail,shift_registers(shift_date)")
+      .eq("payroll_liquidation_id", liquidationId),
+    supabase
+      .from("pos_shift_outflows")
+      .select("outflow_date,amount,type,detail")
       .eq("payroll_liquidation_id", liquidationId)
   ]);
 
   if (adjResult.error) throw adjResult.error;
   if (voucherResult.error) throw voucherResult.error;
+  if (mostradorVoucherResult.error) throw mostradorVoucherResult.error;
 
   const adjustmentItems: PayrollLiquidationLineItem[] = (adjResult.data ?? []).map((row) => ({
     date: row.adjustment_date as string,
@@ -358,5 +422,17 @@ export async function listPayrollLiquidationDetail(liquidationId: string): Promi
     };
   });
 
-  return [...adjustmentItems, ...voucherItems].sort((a, b) => a.date.localeCompare(b.date));
+  const mostradorVoucherItems: PayrollLiquidationLineItem[] = ((mostradorVoucherResult.data ?? []) as Array<{
+    outflow_date: string;
+    amount: number;
+    type: ShiftOutflow["type"];
+    detail: string;
+  }>).map((row) => ({
+    date: row.outflow_date,
+    label: row.detail,
+    amount: Number(row.amount),
+    kind: "voucher"
+  }));
+
+  return [...adjustmentItems, ...voucherItems, ...mostradorVoucherItems].sort((a, b) => a.date.localeCompare(b.date));
 }

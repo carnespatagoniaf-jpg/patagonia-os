@@ -467,7 +467,7 @@ export function Employees() {
                   {vouchers.map((v) => (
                     <tr key={v.id}>
                       <td>{v.shiftDate}</td>
-                      <td>{v.shift === "morning" ? "Mañana" : "Tarde"}</td>
+                      <td>{v.shift === "mostrador" ? "Mostrador" : v.shift === "morning" ? "Mañana" : "Tarde"}</td>
                       <td>{OUTFLOW_TYPE_LABELS[v.type] ?? v.type}</td>
                       <td>{v.detail}</td>
                       <td className="num">{formatMoney(v.amount)}</td>

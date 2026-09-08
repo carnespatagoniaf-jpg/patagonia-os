@@ -9,6 +9,8 @@ import { listProductsForBranch } from "../inventory/inventory-service";
 import { useTreasury } from "../shifts/useTreasury";
 import { useSuppliers } from "../purchases/useSuppliers";
 import { registerSupplierPaymentFromPosShift } from "../purchases/purchases-service";
+import { useEmployees } from "../employees/useEmployees";
+import { registerEmployeeValeFromPosShift } from "../employees/employees-service";
 import { createPosSale, type CreatePosSaleInput } from "./sale-service";
 import { addPendingSale, getPendingSales, isNetworkError, markPendingSaleError, removePendingSale, type PendingSale } from "./offline-queue";
 import {
@@ -115,6 +117,7 @@ export function Sale() {
   const { profile } = useAuth();
   const { accounts, adjust } = useTreasury();
   const { suppliers } = useSuppliers();
+  const { employees } = useEmployees();
   const canManageTreasury = can(profile, "treasury.manage");
 
   const [products, setProducts] = useState<Product[]>(isSupabaseConfigured ? [] : demoProducts);
@@ -172,6 +175,13 @@ export function Sale() {
   const [supplierAmount, setSupplierAmount] = useState("");
   const [supplierNotes, setSupplierNotes] = useState("");
   const [supplierBusy, setSupplierBusy] = useState(false);
+
+  const [showValeForm, setShowValeForm] = useState(false);
+  const [valeEmployeeId, setValeEmployeeId] = useState("");
+  const [valeAccountId, setValeAccountId] = useState("");
+  const [valeAmount, setValeAmount] = useState("");
+  const [valeDetail, setValeDetail] = useState("");
+  const [valeBusy, setValeBusy] = useState(false);
 
   const [thermalPrintBusy, setThermalPrintBusy] = useState(false);
   const [showPrinterSettings, setShowPrinterSettings] = useState(false);
@@ -362,6 +372,36 @@ export function Sale() {
       setMessage(err instanceof Error ? err.message : "No se pudo registrar el pago al proveedor.");
     } finally {
       setSupplierBusy(false);
+    }
+  }
+
+  async function handleEmployeeVale() {
+    setMessage("");
+    if (!shift) { setMessage("No hay un turno abierto."); return; }
+    if (!valeEmployeeId) { setMessage("Elegí un empleado."); return; }
+    if (!valeAccountId) { setMessage("Elegí una cuenta."); return; }
+    const amount = parseAmount(valeAmount || "0") || 0;
+    if (!(amount > 0)) { setMessage("El monto debe ser mayor que cero."); return; }
+    setValeBusy(true);
+    try {
+      await registerEmployeeValeFromPosShift({
+        employeeId: valeEmployeeId,
+        posShiftId: shift.id,
+        accountId: valeAccountId,
+        amount,
+        detail: valeDetail.trim() || undefined
+      });
+      const employeeName = employees.find((e) => e.id === valeEmployeeId)?.fullName ?? "-";
+      setMessage(`Vale de ${employeeName} registrado -- se descuenta de su próxima liquidación de sueldo.`);
+      setValeEmployeeId("");
+      setValeAccountId("");
+      setValeAmount("");
+      setValeDetail("");
+      setShowValeForm(false);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo registrar el vale.");
+    } finally {
+      setValeBusy(false);
     }
   }
 
@@ -1220,6 +1260,11 @@ export function Sale() {
                   {showSupplierForm ? "Cancelar pago a proveedor" : "+ Pago a proveedor"}
                 </button>
               )}
+              {canManageTreasury && (
+                <button className="pos-toolbar-btn" onClick={() => setShowValeForm((v) => !v)}>
+                  {showValeForm ? "Cancelar vale a empleado" : "+ Vale a empleado"}
+                </button>
+              )}
               {!showCloseConfirm && (
                 <button
                   className="pos-toolbar-btn"
@@ -1317,6 +1362,37 @@ export function Sale() {
                   onChange={(e) => setSupplierNotes(e.target.value)}
                 />
                 <button disabled={supplierBusy} onClick={handleSupplierPayment}>{supplierBusy ? "Guardando…" : "Registrar"}</button>
+              </div>
+            )}
+
+            {canManageTreasury && showValeForm && (
+              <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
+                <select value={valeEmployeeId} onChange={(e) => setValeEmployeeId(e.target.value)}>
+                  <option value="">Empleado…</option>
+                  {employees.map((e) => (
+                    <option key={e.id} value={e.id}>{e.fullName}</option>
+                  ))}
+                </select>
+                <select value={valeAccountId} onChange={(e) => setValeAccountId(e.target.value)}>
+                  <option value="">Sale de…</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Monto"
+                  value={valeAmount}
+                  onChange={(e) => setValeAmount(e.target.value)}
+                />
+                <input
+                  placeholder="Detalle (opcional)"
+                  value={valeDetail}
+                  onChange={(e) => setValeDetail(e.target.value)}
+                />
+                <p className="muted" style={{ margin: 0, fontSize: 12 }}>Se descuenta de la próxima liquidación de sueldo del empleado.</p>
+                <button disabled={valeBusy} onClick={handleEmployeeVale}>{valeBusy ? "Guardando…" : "Registrar"}</button>
               </div>
             )}
 
