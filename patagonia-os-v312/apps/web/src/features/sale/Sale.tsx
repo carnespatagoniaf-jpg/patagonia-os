@@ -34,7 +34,8 @@ import {
   getBranchScaleConfig,
   parseWeightBarcode,
   saveBranchScaleConfig,
-  type ScaleConfig
+  type ScaleConfig,
+  type ScalePayloadType
 } from "./scale-config-service";
 
 const UNIT_LABELS: Record<Product["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
@@ -205,6 +206,7 @@ export function Sale() {
   const [showScaleWizard, setShowScaleWizard] = useState(false);
   const [scaleWizardCode, setScaleWizardCode] = useState("");
   const [scaleWizardWeight, setScaleWizardWeight] = useState("");
+  const [scaleWizardPayload, setScaleWizardPayload] = useState<ScalePayloadType>("weight");
   const [scaleWizardBusy, setScaleWizardBusy] = useState(false);
   const [scaleWizardResult, setScaleWizardResult] = useState<"idle" | "success" | "not_found">("idle");
 
@@ -451,12 +453,15 @@ export function Sale() {
     setScaleWizardResult("idle");
     if (!branchId) return;
     const code = scaleWizardCode.trim();
-    const weightKg = parseAmount(scaleWizardWeight || "0") || Number(scaleWizardWeight);
+    const enteredValue = parseAmount(scaleWizardWeight || "0") || Number(scaleWizardWeight);
     if (!code) { setMessage("Escaneá una etiqueta de tu balanza primero."); return; }
-    if (!Number.isFinite(weightKg) || weightKg <= 0) { setMessage("Ingresá el peso que mostró la balanza."); return; }
+    if (!Number.isFinite(enteredValue) || enteredValue <= 0) {
+      setMessage(scaleWizardPayload === "weight" ? "Ingresá el peso que mostró la balanza." : "Ingresá el importe que mostró la balanza.");
+      return;
+    }
     setScaleWizardBusy(true);
     try {
-      const detected = detectScaleConfig(code, weightKg);
+      const detected = detectScaleConfig(code, enteredValue, scaleWizardPayload);
       if (!detected) {
         setScaleWizardResult("not_found");
         return;
@@ -603,11 +608,20 @@ export function Sale() {
     const raw = search.trim();
     if (!raw) return;
 
-    const weight = parseWeightBarcode(raw, scaleConfig);
-    if (weight) {
-      const match = products.find((p) => (p.active ?? true) && p.code === weight.plu);
+    const scanned = parseWeightBarcode(raw, scaleConfig);
+    if (scanned) {
+      const match = products.find((p) => (p.active ?? true) && p.code === scanned.plu);
       if (match) {
-        quickAdd(match, weight.weightKg);
+        if (scanned.kind === "weight") {
+          quickAdd(match, scanned.weightKg);
+        } else {
+          // La balanza grabó el importe final, no el peso -- se recalcula
+          // la cantidad al precio actual del producto (mismo criterio que
+          // el peso: el precio no se lee del código, siempre se usa el
+          // precio vigente en el sistema).
+          const quantity = match.priceRetail > 0 ? scanned.amount / match.priceRetail : 0;
+          if (quantity > 0) quickAdd(match, quantity);
+        }
         return;
       }
     }
@@ -1084,8 +1098,21 @@ export function Sale() {
                   {scaleConfigCalibrated ? "Tu balanza ya está calibrada." : "Todavía no calibraste tu balanza (usando el formato Kretz por defecto)."}
                 </p>
                 <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-                  Poné cualquier producto en la balanza, anotá el peso que te muestra, escaneá acá la etiqueta que imprime, y decinos ese peso -- el sistema detecta el formato solo, sin que tengas que entender nada técnico.
+                  Poné cualquier producto en la balanza, anotá lo que te muestra, escaneá acá la etiqueta que imprime, y decinos ese valor -- el sistema detecta el formato solo, sin que tengas que entender nada técnico.
                 </p>
+                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
+                  Ojo: esto sirve para etiquetas de UN producto por código (con su PLU). Un ticket que junta varios productos en un solo total sin código por producto no se puede leer así -- ahí conviene cargar cada producto a mano buscándolo por nombre en Mostrador.
+                </p>
+                <div style={{ display: "flex", gap: 16, fontSize: 14 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <input type="radio" checked={scaleWizardPayload === "weight"} onChange={() => setScaleWizardPayload("weight")} />
+                    Mi balanza muestra el <b>peso</b>
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <input type="radio" checked={scaleWizardPayload === "amount"} onChange={() => setScaleWizardPayload("amount")} />
+                    Mi balanza muestra el <b>importe</b> final
+                  </label>
+                </div>
                 <input
                   placeholder="Escaneá acá la etiqueta de la balanza…"
                   value={scaleWizardCode}
@@ -1094,7 +1121,7 @@ export function Sale() {
                 <input
                   type="text"
                   inputMode="decimal"
-                  placeholder="¿Qué peso mostró la balanza? (ej. 0,472)"
+                  placeholder={scaleWizardPayload === "weight" ? "¿Qué peso mostró la balanza? (ej. 0,472)" : "¿Qué importe mostró la balanza? (ej. 1250)"}
                   value={scaleWizardWeight}
                   onChange={(e) => setScaleWizardWeight(e.target.value)}
                 />

@@ -1,12 +1,19 @@
 import { supabase } from "../../lib/supabase";
 
+export type ScalePayloadType = "weight" | "amount";
+
 export interface ScaleConfig {
   prefixLength: number;
   pluLength: number;
   weightLength: number;
   weightDivisor: number;
   totalLength: number;
+  payloadType: ScalePayloadType;
 }
+
+export type ScaleBarcodeResult =
+  | { plu: string; kind: "weight"; weightKg: number }
+  | { plu: string; kind: "amount"; amount: number };
 
 /** Formato Kretz más común (el único que el sistema entendía antes de
  * poder calibrar): prefijo "2" (1 dígito) + PLU de 5 dígitos + peso en
@@ -17,7 +24,8 @@ export const DEFAULT_SCALE_CONFIG: ScaleConfig = {
   pluLength: 5,
   weightLength: 5,
   weightDivisor: 1000,
-  totalLength: 13
+  totalLength: 13,
+  payloadType: "weight"
 };
 
 interface ScaleConfigRow {
@@ -26,6 +34,7 @@ interface ScaleConfigRow {
   weight_length: number;
   weight_divisor: number;
   total_length: number;
+  payload_type: ScalePayloadType;
 }
 
 function mapConfig(row: ScaleConfigRow): ScaleConfig {
@@ -34,7 +43,8 @@ function mapConfig(row: ScaleConfigRow): ScaleConfig {
     pluLength: row.plu_length,
     weightLength: row.weight_length,
     weightDivisor: Number(row.weight_divisor),
-    totalLength: row.total_length
+    totalLength: row.total_length,
+    payloadType: row.payload_type
   };
 }
 
@@ -43,7 +53,7 @@ export async function getBranchScaleConfig(branchId: string): Promise<ScaleConfi
 
   const { data, error } = await supabase
     .from("branch_scale_configs")
-    .select("prefix_length,plu_length,weight_length,weight_divisor,total_length")
+    .select("prefix_length,plu_length,weight_length,weight_divisor,total_length,payload_type")
     .eq("branch_id", branchId)
     .maybeSingle();
 
@@ -60,7 +70,8 @@ export async function saveBranchScaleConfig(branchId: string, config: ScaleConfi
     p_plu_length: config.pluLength,
     p_weight_length: config.weightLength,
     p_weight_divisor: config.weightDivisor,
-    p_total_length: config.totalLength
+    p_total_length: config.totalLength,
+    p_payload_type: config.payloadType
   });
 
   if (error) throw error;
@@ -77,35 +88,42 @@ export async function deleteBranchScaleConfig(branchId: string): Promise<void> {
  * Lee un código de barras de balanza (EAN-13 típico: prefijo + PLU + peso o
  * importe + dígito verificador) usando la configuración ya calibrada de la
  * sucursal, o el formato Kretz por defecto si todavía no se calibró nada.
+ * "amount" es para balanzas que graban el importe final en vez del peso
+ * (ej. Aura Eco tipo ticket continuo) -- sigue necesitando un PLU en el
+ * código para saber de qué producto se trata; un ticket que solo trae un
+ * total de varios productos juntos, sin PLU, no se puede leer así (hay que
+ * cargarlo a mano, buscando cada producto por nombre en Mostrador).
  */
-export function parseWeightBarcode(code: string, config: ScaleConfig = DEFAULT_SCALE_CONFIG): { plu: string; weightKg: number } | null {
+export function parseWeightBarcode(code: string, config: ScaleConfig = DEFAULT_SCALE_CONFIG): ScaleBarcodeResult | null {
   if (!/^\d+$/.test(code) || code.length !== config.totalLength) return null;
 
   const pluStart = config.prefixLength;
   const pluEnd = pluStart + config.pluLength;
-  const weightStart = pluEnd;
-  const weightEnd = weightStart + config.weightLength;
-  if (weightEnd > code.length) return null;
+  const valueStart = pluEnd;
+  const valueEnd = valueStart + config.weightLength;
+  if (valueEnd > code.length) return null;
 
   const plu = String(parseInt(code.slice(pluStart, pluEnd), 10));
-  const weightRaw = parseInt(code.slice(weightStart, weightEnd), 10);
-  if (!Number.isFinite(weightRaw) || weightRaw <= 0) return null;
+  const valueRaw = parseInt(code.slice(valueStart, valueEnd), 10);
+  if (!Number.isFinite(valueRaw) || valueRaw <= 0) return null;
 
-  return { plu, weightKg: weightRaw / config.weightDivisor };
+  if (config.payloadType === "amount") {
+    return { plu, kind: "amount", amount: valueRaw / config.weightDivisor };
+  }
+  return { plu, kind: "weight", weightKg: valueRaw / config.weightDivisor };
 }
 
 /**
  * Asistente de calibración: el carnicero escanea una etiqueta de SU
- * balanza y dice qué peso mostraba -- se prueban las combinaciones de
- * formato más comunes (largo de prefijo, largo de PLU, largo de peso,
- * gramos/kg) hasta encontrar una que reproduzca ese peso exacto. Devuelve
- * la primera que matchea (orden de prioridad: variantes tipo Kretz
- * primero, que son las más comunes en carnicerías argentinas).
+ * balanza y dice qué peso (o importe) mostraba -- se prueban las
+ * combinaciones de formato más comunes (largo de prefijo, largo de PLU,
+ * largo del valor, divisor) hasta encontrar una que reproduzca ese valor
+ * exacto. Devuelve la primera que matchea.
  */
-export function detectScaleConfig(code: string, knownWeightKg: number): ScaleConfig | null {
+export function detectScaleConfig(code: string, knownValue: number, payloadType: ScalePayloadType = "weight"): ScaleConfig | null {
   if (!/^\d+$/.test(code) || code.length < 8) return null;
   const total = code.length;
-  const TOLERANCE_KG = 0.001;
+  const TOLERANCE = payloadType === "weight" ? 0.001 : 0.01;
 
   const candidates: ScaleConfig[] = [];
   for (const prefixLength of [1, 2, 0]) {
@@ -114,14 +132,16 @@ export function detectScaleConfig(code: string, knownWeightKg: number): ScaleCon
       const weightLength = total - prefixLength - pluLength - 1;
       if (weightLength < 3 || weightLength > 6) continue;
       for (const weightDivisor of [1000, 100, 1]) {
-        candidates.push({ prefixLength, pluLength, weightLength, weightDivisor, totalLength: total });
+        candidates.push({ prefixLength, pluLength, weightLength, weightDivisor, totalLength: total, payloadType });
       }
     }
   }
 
   for (const candidate of candidates) {
     const result = parseWeightBarcode(code, candidate);
-    if (result && Math.abs(result.weightKg - knownWeightKg) < TOLERANCE_KG) {
+    if (!result) continue;
+    const value = result.kind === "weight" ? result.weightKg : result.amount;
+    if (Math.abs(value - knownValue) < TOLERANCE) {
       return candidate;
     }
   }
