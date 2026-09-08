@@ -173,6 +173,34 @@ export async function registerSupplierPayment(
   return { id: data.id, balance: data.balance !== null && data.balance !== undefined ? Number(data.balance) : null };
 }
 
+export interface RegisterSupplierPaymentFromPosShiftInput {
+  supplierId: string;
+  posShiftId: string;
+  accountId: string;
+  amount: number;
+  notes?: string;
+}
+
+/** Igual que registerSupplierPayment, pero ligado a un turno de Mostrador
+ * (pos_shift_id) en vez de a Compras -- así el arqueo de caja del cierre
+ * de turno lo tiene en cuenta como salida de efectivo. */
+export async function registerSupplierPaymentFromPosShift(
+  input: RegisterSupplierPaymentFromPosShiftInput
+): Promise<{ id: string; balance: number | null }> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.rpc("register_supplier_payment_from_pos_shift", {
+    p_supplier_id: input.supplierId,
+    p_pos_shift_id: input.posShiftId,
+    p_account_id: input.accountId,
+    p_amount: input.amount,
+    p_notes: input.notes ?? null
+  });
+
+  if (error) throw error;
+  return { id: data.id, balance: data.balance !== null && data.balance !== undefined ? Number(data.balance) : null };
+}
+
 export interface UpdateSupplierPaymentInput {
   id: string;
   paymentDate: string;

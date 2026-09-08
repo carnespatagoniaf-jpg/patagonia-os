@@ -7,6 +7,8 @@ import { useAuth } from "../auth/AuthProvider";
 import { can } from "../auth/permissions";
 import { listProductsForBranch } from "../inventory/inventory-service";
 import { useTreasury } from "../shifts/useTreasury";
+import { useSuppliers } from "../purchases/useSuppliers";
+import { registerSupplierPaymentFromPosShift } from "../purchases/purchases-service";
 import { createPosSale, type CreatePosSaleInput } from "./sale-service";
 import { addPendingSale, getPendingSales, isNetworkError, markPendingSaleError, removePendingSale, type PendingSale } from "./offline-queue";
 import {
@@ -112,6 +114,7 @@ export function Sale() {
   const { branchId, branches, activeBranch } = useActiveBranch();
   const { profile } = useAuth();
   const { accounts, adjust } = useTreasury();
+  const { suppliers } = useSuppliers();
   const canManageTreasury = can(profile, "treasury.manage");
 
   const [products, setProducts] = useState<Product[]>(isSupabaseConfigured ? [] : demoProducts);
@@ -162,6 +165,13 @@ export function Sale() {
   const [cajaAmount, setCajaAmount] = useState("");
   const [cajaReason, setCajaReason] = useState("");
   const [cajaBusy, setCajaBusy] = useState(false);
+
+  const [showSupplierForm, setShowSupplierForm] = useState(false);
+  const [supplierId, setSupplierId] = useState("");
+  const [supplierAccountId, setSupplierAccountId] = useState("");
+  const [supplierAmount, setSupplierAmount] = useState("");
+  const [supplierNotes, setSupplierNotes] = useState("");
+  const [supplierBusy, setSupplierBusy] = useState(false);
 
   const [thermalPrintBusy, setThermalPrintBusy] = useState(false);
   const [showPrinterSettings, setShowPrinterSettings] = useState(false);
@@ -320,6 +330,38 @@ export function Sale() {
       setMessage(err instanceof Error ? err.message : "No se pudo registrar el movimiento de caja.");
     } finally {
       setCajaBusy(false);
+    }
+  }
+
+  async function handleSupplierPayment() {
+    setMessage("");
+    if (!shift) { setMessage("No hay un turno abierto."); return; }
+    if (!supplierId) { setMessage("Elegí un proveedor."); return; }
+    if (!supplierAccountId) { setMessage("Elegí una cuenta."); return; }
+    const amount = parseAmount(supplierAmount || "0") || 0;
+    if (!(amount > 0)) { setMessage("El monto debe ser mayor que cero."); return; }
+    setSupplierBusy(true);
+    try {
+      const result = await registerSupplierPaymentFromPosShift({
+        supplierId,
+        posShiftId: shift.id,
+        accountId: supplierAccountId,
+        amount,
+        notes: supplierNotes.trim() || undefined
+      });
+      const supplierName = suppliers.find((s) => s.id === supplierId)?.name ?? "-";
+      setMessage(
+        `Pago a ${supplierName} registrado.${result.balance !== null ? ` Saldo restante: ${formatMoney(result.balance)}.` : ""}`
+      );
+      setSupplierId("");
+      setSupplierAccountId("");
+      setSupplierAmount("");
+      setSupplierNotes("");
+      setShowSupplierForm(false);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo registrar el pago al proveedor.");
+    } finally {
+      setSupplierBusy(false);
     }
   }
 
@@ -1173,6 +1215,11 @@ export function Sale() {
                   {showCajaForm ? "Cancelar movimiento de caja" : "+ Movimiento de caja"}
                 </button>
               )}
+              {canManageTreasury && (
+                <button className="pos-toolbar-btn" onClick={() => setShowSupplierForm((v) => !v)}>
+                  {showSupplierForm ? "Cancelar pago a proveedor" : "+ Pago a proveedor"}
+                </button>
+              )}
               {!showCloseConfirm && (
                 <button
                   className="pos-toolbar-btn"
@@ -1240,6 +1287,36 @@ export function Sale() {
                   onChange={(e) => setCajaReason(e.target.value)}
                 />
                 <button disabled={cajaBusy} onClick={handleCajaMovement}>{cajaBusy ? "Guardando…" : "Registrar"}</button>
+              </div>
+            )}
+
+            {canManageTreasury && showSupplierForm && (
+              <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
+                <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+                  <option value="">Proveedor…</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+                <select value={supplierAccountId} onChange={(e) => setSupplierAccountId(e.target.value)}>
+                  <option value="">Pagar desde…</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Monto"
+                  value={supplierAmount}
+                  onChange={(e) => setSupplierAmount(e.target.value)}
+                />
+                <input
+                  placeholder="Nota (opcional)"
+                  value={supplierNotes}
+                  onChange={(e) => setSupplierNotes(e.target.value)}
+                />
+                <button disabled={supplierBusy} onClick={handleSupplierPayment}>{supplierBusy ? "Guardando…" : "Registrar"}</button>
               </div>
             )}
 
