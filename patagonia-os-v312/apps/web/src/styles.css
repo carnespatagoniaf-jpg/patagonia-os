@@ -65,6 +65,10 @@ button { cursor: pointer; }
 .panel { padding: 22px; }
 .panel-title { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-bottom: 18px; }
 .panel-title h2 { margin: 0; }
+/* Listas largas (clientes/proveedores/acreedores) no deben estirar toda
+   la fila del content-grid -- si no, el detalle de cuenta corriente de
+   abajo queda empujado lejos, obligando a bajar mucho para verlo. */
+.panel-list-scroll { max-height: 360px; overflow-y: auto; }
 .empty-chart {
   min-height: 260px; display: grid; place-content: center; text-align: center; gap: 9px;
   color: #8b95a5; border: 1px dashed #d5dbe4; border-radius: 14px;

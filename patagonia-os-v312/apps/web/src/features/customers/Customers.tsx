@@ -395,30 +395,32 @@ export function Customers() {
             <h2>Clientes</h2>
             <span>{loading ? "Cargando…" : `${customers.length}`}</span>
           </div>
-          <table className="data-table">
-            <thead>
-              <tr><th>Nombre</th><th className="num">Saldo</th><th></th></tr>
-            </thead>
-            <tbody>
-              {customers.map((c) => {
-                const overdue = isOverdueDebt(c, todayIso());
-                return (
-                  <tr key={c.id} style={overdue ? { background: "#fdecea" } : undefined}>
-                    <td>
-                      {c.name}
-                      {overdue && <span className="message warning" style={{ display: "inline-block", marginLeft: 8, padding: "1px 8px", fontSize: 11 }}>Atrasado</span>}
-                    </td>
-                    <td className="num">{formatMoney(c.balance)}</td>
-                    <td>
-                      <button className={c.id === selectedId ? "" : "secondary"} onClick={() => selectCustomer(c.id)}>
-                        {c.id === selectedId ? "Seleccionado" : "Ver cuenta"}
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="panel-list-scroll">
+            <table className="data-table">
+              <thead>
+                <tr><th>Nombre</th><th className="num">Saldo</th><th></th></tr>
+              </thead>
+              <tbody>
+                {customers.map((c) => {
+                  const overdue = isOverdueDebt(c, todayIso());
+                  return (
+                    <tr key={c.id} style={overdue ? { background: "#fdecea" } : undefined}>
+                      <td>
+                        {c.name}
+                        {overdue && <span className="message warning" style={{ display: "inline-block", marginLeft: 8, padding: "1px 8px", fontSize: 11 }}>Atrasado</span>}
+                      </td>
+                      <td className="num">{formatMoney(c.balance)}</td>
+                      <td>
+                        <button className={c.id === selectedId ? "" : "secondary"} onClick={() => selectCustomer(c.id)}>
+                          {c.id === selectedId ? "Seleccionado" : "Ver cuenta"}
+                        </button>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
           {customers.length === 0 && !loading && <p className="muted">Todavía no cargaste ningún cliente.</p>}
 
           <div className="cash-banner-form" style={{ marginTop: 16, flexWrap: "wrap" }}>

@@ -411,44 +411,46 @@ export function Purchases() {
             <span>{suppliersLoading ? "Cargando…" : `${suppliers.length} proveedores`}</span>
           </div>
 
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Nombre</th>
-                <th>Rubro</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {suppliers.map((supplier) => (
-                <tr key={supplier.id}>
-                  <td>{supplier.name}</td>
-                  <td>{supplier.category}</td>
-                  <td>
-                    {confirmDeleteSupplierId === supplier.id ? (
-                      <>
-                        <span className="muted" style={{ fontSize: 13, marginRight: 6 }}>¿Seguro? No se puede deshacer.</span>
-                        <button className="danger" disabled={deleteSupplierBusy} onClick={() => handleConfirmDeleteSupplier(supplier.id)}>
-                          {deleteSupplierBusy ? "Eliminando…" : "Sí, borrar"}
-                        </button>{" "}
-                        <button className="secondary" disabled={deleteSupplierBusy} onClick={() => setConfirmDeleteSupplierId(null)}>Cancelar</button>
-                      </>
-                    ) : (
-                      <>
-                        <button
-                          className={supplier.id === selectedSupplierId ? "" : "secondary"}
-                          onClick={() => setSelectedSupplierId(supplier.id)}
-                        >
-                          {supplier.id === selectedSupplierId ? "Seleccionado" : "Ver cuenta"}
-                        </button>{" "}
-                        <button className="danger" onClick={() => setConfirmDeleteSupplierId(supplier.id)}>Borrar</button>
-                      </>
-                    )}
-                  </td>
+          <div className="panel-list-scroll">
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Nombre</th>
+                  <th>Rubro</th>
+                  <th></th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {suppliers.map((supplier) => (
+                  <tr key={supplier.id}>
+                    <td>{supplier.name}</td>
+                    <td>{supplier.category}</td>
+                    <td>
+                      {confirmDeleteSupplierId === supplier.id ? (
+                        <>
+                          <span className="muted" style={{ fontSize: 13, marginRight: 6 }}>¿Seguro? No se puede deshacer.</span>
+                          <button className="danger" disabled={deleteSupplierBusy} onClick={() => handleConfirmDeleteSupplier(supplier.id)}>
+                            {deleteSupplierBusy ? "Eliminando…" : "Sí, borrar"}
+                          </button>{" "}
+                          <button className="secondary" disabled={deleteSupplierBusy} onClick={() => setConfirmDeleteSupplierId(null)}>Cancelar</button>
+                        </>
+                      ) : (
+                        <>
+                          <button
+                            className={supplier.id === selectedSupplierId ? "" : "secondary"}
+                            onClick={() => setSelectedSupplierId(supplier.id)}
+                          >
+                            {supplier.id === selectedSupplierId ? "Seleccionado" : "Ver cuenta"}
+                          </button>{" "}
+                          <button className="danger" onClick={() => setConfirmDeleteSupplierId(supplier.id)}>Borrar</button>
+                        </>
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
 
           <div className="cash-banner-form" style={{ marginTop: 16, flexWrap: "wrap" }}>
             <input placeholder="Nombre" value={supplierName} onChange={(e) => setSupplierName(e.target.value)} />
