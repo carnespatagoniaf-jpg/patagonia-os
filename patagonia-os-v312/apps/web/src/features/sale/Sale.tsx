@@ -78,6 +78,19 @@ interface ReceiptState {
   pending?: boolean;
 }
 
+/** Comprobante imprimible para movimientos que no son una venta -- caja,
+ * pago a proveedor, vale a empleado -- con renglón de firma, para que el
+ * proveedor o el empleado firmen que recibieron la plata. */
+interface MovementReceiptState {
+  title: string;
+  date: string;
+  amount: number;
+  accountName: string;
+  detail: string;
+  counterpartLabel?: string;
+  counterpartName?: string;
+}
+
 const AUTO_PRINT_KEY = "patagonia-auto-print-enabled";
 
 /** Por caja/equipo (localStorage), no por empresa -- cada mostrador puede
@@ -159,6 +172,8 @@ export function Sale() {
   const [saleSurchargeMode, setSaleSurchargeMode] = useState<"amount" | "percent">("amount");
   const [showDiscountForm, setShowDiscountForm] = useState(false);
   const [receipt, setReceipt] = useState<ReceiptState | null>(() => loadStoredReceipt());
+  const [movementReceipt, setMovementReceipt] = useState<MovementReceiptState | null>(null);
+  const movementReceiptRef = useRef<HTMLDivElement | null>(null);
 
   const [showManualForm, setShowManualForm] = useState(false);
   const [manualDesc, setManualDesc] = useState("");
@@ -318,6 +333,10 @@ export function Sale() {
     saveStoredReceipt(receipt);
   }, [receipt]);
 
+  useEffect(() => {
+    if (movementReceipt) movementReceiptRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [movementReceipt]);
+
   /** Reintenta mandar al servidor las ventas que quedaron guardadas
    * localmente por falta de conexión. Se corta apenas vuelve a fallar por
    * red (quedan las demás para el próximo intento); si el servidor
@@ -376,6 +395,14 @@ export function Sale() {
       const posShiftId = shift && isSupabaseConfigured ? shift.id : undefined;
       await adjust({ accountId: cajaAccountId, amount, direction: cajaDirection, reason: cajaReason.trim(), posShiftId });
       await autoPrintCajaMovement({ direction: cajaDirection, amount, accountName, reason: cajaReason.trim() });
+      setMovementReceipt({
+        title: cajaDirection === "in" ? "INGRESO DE CAJA" : "EGRESO DE CAJA",
+        date: new Date().toISOString(),
+        amount,
+        accountName,
+        detail: cajaReason.trim()
+      });
+      await autoPrintMovementReceipt();
       setCajaAccountId("");
       setCajaAmount("");
       setCajaReason("");
@@ -404,9 +431,20 @@ export function Sale() {
         notes: supplierNotes.trim() || undefined
       });
       const supplierName = suppliers.find((s) => s.id === supplierId)?.name ?? "-";
+      const supplierAccountName = accounts.find((a) => a.id === supplierAccountId)?.name ?? "-";
       setMessage(
         `Pago a ${supplierName} registrado.${result.balance !== null ? ` Saldo restante: ${formatMoney(result.balance)}.` : ""}`
       );
+      setMovementReceipt({
+        title: "PAGO A PROVEEDOR",
+        date: new Date().toISOString(),
+        amount,
+        accountName: supplierAccountName,
+        detail: supplierNotes.trim() || "Pago a proveedor",
+        counterpartLabel: "Proveedor",
+        counterpartName: supplierName
+      });
+      await autoPrintMovementReceipt();
       setSupplierId("");
       setSupplierAccountId("");
       setSupplierAmount("");
@@ -436,7 +474,18 @@ export function Sale() {
         detail: valeDetail.trim() || undefined
       });
       const employeeName = employees.find((e) => e.id === valeEmployeeId)?.fullName ?? "-";
+      const valeAccountName = accounts.find((a) => a.id === valeAccountId)?.name ?? "-";
       setMessage(`Vale de ${employeeName} registrado -- se descuenta de su próxima liquidación de sueldo.`);
+      setMovementReceipt({
+        title: "VALE A EMPLEADO",
+        date: new Date().toISOString(),
+        amount,
+        accountName: valeAccountName,
+        detail: valeDetail.trim() || "Vale de adelanto",
+        counterpartLabel: "Empleado",
+        counterpartName: employeeName
+      });
+      await autoPrintMovementReceipt();
       setValeEmployeeId("");
       setValeAccountId("");
       setValeAmount("");
@@ -953,6 +1002,14 @@ export function Sale() {
     if (!autoPrintEnabled) return;
     // Pequeña espera para que el DOM termine de pintar el comprobante nuevo
     // antes de que el navegador lo capture para imprimir.
+    setTimeout(() => window.print(), 150);
+  }
+
+  /** Mismo criterio que autoPrintReceipt, para el comprobante de caja/pago
+   * a proveedor/vale a empleado -- usa el mismo diálogo del navegador
+   * (confiable, no depende de tener una térmica emparejada por USB). */
+  async function autoPrintMovementReceipt() {
+    if (!autoPrintEnabled) return;
     setTimeout(() => window.print(), 150);
   }
 
@@ -1636,6 +1693,38 @@ export function Sale() {
             </p>
           )}
           <p className="ticket-footer print-only-header">Gracias por su compra</p>
+        </section>
+      )}
+
+      {movementReceipt && (
+        <section ref={movementReceiptRef} className="panel print-area receipt-ticket" style={{ marginTop: 18 }}>
+          <div className="panel-title">
+            <h2>Comprobante</h2>
+            <div className="no-print ticket-actions">
+              <button className="ticket-action-btn" onClick={() => handlePrint()}>Imprimir</button>
+              <button className="ticket-action-btn" onClick={() => setMovementReceipt(null)}>Cerrar</button>
+            </div>
+          </div>
+
+          <div className="ticket-header">
+            <strong>{branches.find((b) => b.id === branchId)?.name ?? "Patagonia OS"}</strong>
+            <p>{movementReceipt.title}</p>
+            <p>{new Date(movementReceipt.date).toLocaleString("es-AR")}</p>
+          </div>
+
+          <div className="ticket-rule" />
+          <p className="ticket-line-sm">Cuenta: {movementReceipt.accountName}</p>
+          {movementReceipt.counterpartName && (
+            <p className="ticket-line-sm">{movementReceipt.counterpartLabel}: {movementReceipt.counterpartName}</p>
+          )}
+          <p className="ticket-line-sm">{movementReceipt.detail}</p>
+          <div className="ticket-total"><span>MONTO</span><strong>{formatMoney(movementReceipt.amount)}</strong></div>
+          <div className="ticket-rule" />
+
+          <div style={{ marginTop: 48 }}>
+            <p style={{ borderTop: "1px solid #000", paddingTop: 4, textAlign: "center", margin: 0 }}>Firma</p>
+            <p className="muted" style={{ textAlign: "center", fontSize: 12, margin: "2px 0 0" }}>Aclaración y DNI</p>
+          </div>
         </section>
       )}
 
