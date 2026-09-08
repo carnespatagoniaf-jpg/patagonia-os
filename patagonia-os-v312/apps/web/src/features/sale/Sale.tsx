@@ -227,14 +227,13 @@ export function Sale() {
   const [valeBusy, setValeBusy] = useState(false);
 
   const [thermalPrintBusy, setThermalPrintBusy] = useState(false);
-  const [showPrinterSettings, setShowPrinterSettings] = useState(false);
+  const [showConfigPanel, setShowConfigPanel] = useState(false);
   const [autoPrintEnabled, setAutoPrintEnabled] = useState<boolean>(() => getAutoPrintEnabled());
   const [pendingSales, setPendingSales] = useState<PendingSale[]>(() => getPendingSales());
   const [syncingOffline, setSyncingOffline] = useState(false);
 
   const [scaleConfig, setScaleConfig] = useState<ScaleConfig>(DEFAULT_SCALE_CONFIG);
   const [scaleConfigCalibrated, setScaleConfigCalibrated] = useState(false);
-  const [showScaleWizard, setShowScaleWizard] = useState(false);
   const [scaleWizardCode, setScaleWizardCode] = useState("");
   const [scaleWizardWeight, setScaleWizardWeight] = useState("");
   const [scaleWizardPayload, setScaleWizardPayload] = useState<ScalePayloadType>("weight");
@@ -1130,7 +1129,94 @@ export function Sale() {
           <h1>Mostrador</h1>
           <p className="muted">Escaneá la etiqueta de la balanza (carga el peso solo) o buscá por nombre para lo que no tiene código.</p>
         </div>
+        <button
+          className="secondary"
+          title="Configuración de impresora y balanza"
+          aria-label="Configuración de impresora y balanza"
+          onClick={() => { setShowConfigPanel((v) => !v); setScaleWizardResult("idle"); }}
+          style={{ padding: "10px 12px" }}
+        >
+          <Settings size={18} />
+        </button>
       </header>
+
+      {showConfigPanel && (
+        <section className="panel" style={{ marginBottom: 18 }}>
+          <div className="panel-title">
+            <h2>Configuración</h2>
+          </div>
+          <div style={{ display: "grid", gap: 18 }}>
+            <div>
+              <p style={{ margin: "0 0 8px", fontWeight: 700 }}>Impresora</p>
+              <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
+                <input
+                  type="checkbox"
+                  checked={autoPrintEnabled}
+                  onChange={(e) => {
+                    setAutoPrintEnabled(e.target.checked);
+                    saveAutoPrintEnabled(e.target.checked);
+                  }}
+                />
+                Imprimir el comprobante automáticamente al cobrar
+              </label>
+              <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
+                Al cobrar se abre el diálogo de impresión de Windows -- ahí elegís tu impresora por su nombre y confirmás "Imprimir". Por seguridad, ningún navegador imprime sin ese paso (existe una forma de saltearlo por completo, preguntame si te interesa). Si no tenés impresora, dejalo apagado y nunca te va a aparecer nada solo.
+              </p>
+            </div>
+
+            <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 18 }}>
+              <p style={{ margin: "0 0 8px", fontWeight: 700 }}>Balanza</p>
+              <p className="muted" style={{ margin: "0 0 4px", fontSize: 13 }}>
+                {scaleConfigCalibrated ? "Tu balanza ya está calibrada." : "Todavía no calibraste tu balanza (usando el formato Kretz por defecto)."}
+              </p>
+              <p className="muted" style={{ margin: "0 0 4px", fontSize: 13 }}>
+                Poné cualquier producto en la balanza, anotá lo que te muestra, escaneá acá la etiqueta que imprime, y decinos ese valor -- el sistema detecta el formato solo, sin que tengas que entender nada técnico.
+              </p>
+              <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
+                Ojo: esto sirve para etiquetas de UN producto por código (con su PLU). Un ticket que junta varios productos en un solo total sin código por producto no se puede leer así -- ahí conviene cargar cada producto a mano buscándolo por nombre en Mostrador.
+              </p>
+              <div style={{ display: "grid", gap: 10, maxWidth: 420 }}>
+                <div style={{ display: "flex", gap: 16, fontSize: 14 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <input type="radio" checked={scaleWizardPayload === "weight"} onChange={() => setScaleWizardPayload("weight")} />
+                    Mi balanza muestra el <b>peso</b>
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    <input type="radio" checked={scaleWizardPayload === "amount"} onChange={() => setScaleWizardPayload("amount")} />
+                    Mi balanza muestra el <b>importe</b> final
+                  </label>
+                </div>
+                <input
+                  placeholder="Escaneá acá la etiqueta de la balanza…"
+                  value={scaleWizardCode}
+                  onChange={(e) => setScaleWizardCode(e.target.value)}
+                />
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder={scaleWizardPayload === "weight" ? "¿Qué peso mostró la balanza? (ej. 0,472)" : "¿Qué importe mostró la balanza? (ej. 1250)"}
+                  value={scaleWizardWeight}
+                  onChange={(e) => setScaleWizardWeight(e.target.value)}
+                />
+                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                  <button disabled={scaleWizardBusy} onClick={handleCalibrateScale}>{scaleWizardBusy ? "Detectando…" : "Detectar formato"}</button>
+                  {scaleConfigCalibrated && (
+                    <button className="secondary" onClick={handleResetScaleConfig}>Borrar calibración</button>
+                  )}
+                </div>
+                {scaleWizardResult === "success" && (
+                  <p style={{ margin: 0, color: "#1a7a3c", fontWeight: 700 }}>Listo, detectado y guardado -- probá escanear otra etiqueta para confirmar.</p>
+                )}
+                {scaleWizardResult === "not_found" && (
+                  <p style={{ margin: 0, color: "#8a4b00", fontWeight: 700 }}>
+                    No pudimos detectar el formato solos con esa etiqueta. Probá de nuevo con otro producto/peso distinto, o escribinos y lo configuramos nosotros.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </section>
+      )}
 
       {message && <div className="message">{message}</div>}
 
@@ -1208,82 +1294,7 @@ export function Sale() {
               <button className={`pos-toolbar-btn${showProductTable ? " active" : ""}`} onClick={() => setShowProductTable((v) => !v)}>
                 {showProductTable ? "Ocultar tabla de productos" : "Ver tabla de productos"}
               </button>
-              <button className={`pos-toolbar-btn${showPrinterSettings ? " active" : ""}`} onClick={() => setShowPrinterSettings((v) => !v)} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <Settings size={15} /> Impresora
-              </button>
-              <button className={`pos-toolbar-btn${showScaleWizard ? " active" : ""}`} onClick={() => { setShowScaleWizard((v) => !v); setScaleWizardResult("idle"); }} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                <Settings size={15} /> Balanza
-              </button>
             </div>
-
-            {showPrinterSettings && (
-              <div className="pos-manual-card" style={{ flexDirection: "column", alignItems: "stretch", gap: 10 }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
-                  <input
-                    type="checkbox"
-                    checked={autoPrintEnabled}
-                    onChange={(e) => {
-                      setAutoPrintEnabled(e.target.checked);
-                      saveAutoPrintEnabled(e.target.checked);
-                    }}
-                  />
-                  Imprimir el comprobante automáticamente al cobrar
-                </label>
-                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-                  Al cobrar se abre el diálogo de impresión de Windows -- ahí elegís tu impresora por su nombre y confirmás "Imprimir". Por seguridad, ningún navegador imprime sin ese paso (existe una forma de saltearlo por completo, preguntame si te interesa). Si no tenés impresora, dejalo apagado y nunca te va a aparecer nada solo.
-                </p>
-              </div>
-            )}
-
-            {showScaleWizard && (
-              <div className="pos-manual-card" style={{ flexDirection: "column", alignItems: "stretch", gap: 10 }}>
-                <p style={{ margin: 0, fontWeight: 700 }}>
-                  {scaleConfigCalibrated ? "Tu balanza ya está calibrada." : "Todavía no calibraste tu balanza (usando el formato Kretz por defecto)."}
-                </p>
-                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-                  Poné cualquier producto en la balanza, anotá lo que te muestra, escaneá acá la etiqueta que imprime, y decinos ese valor -- el sistema detecta el formato solo, sin que tengas que entender nada técnico.
-                </p>
-                <p className="muted" style={{ margin: 0, fontSize: 13 }}>
-                  Ojo: esto sirve para etiquetas de UN producto por código (con su PLU). Un ticket que junta varios productos en un solo total sin código por producto no se puede leer así -- ahí conviene cargar cada producto a mano buscándolo por nombre en Mostrador.
-                </p>
-                <div style={{ display: "flex", gap: 16, fontSize: 14 }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <input type="radio" checked={scaleWizardPayload === "weight"} onChange={() => setScaleWizardPayload("weight")} />
-                    Mi balanza muestra el <b>peso</b>
-                  </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <input type="radio" checked={scaleWizardPayload === "amount"} onChange={() => setScaleWizardPayload("amount")} />
-                    Mi balanza muestra el <b>importe</b> final
-                  </label>
-                </div>
-                <input
-                  placeholder="Escaneá acá la etiqueta de la balanza…"
-                  value={scaleWizardCode}
-                  onChange={(e) => setScaleWizardCode(e.target.value)}
-                />
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder={scaleWizardPayload === "weight" ? "¿Qué peso mostró la balanza? (ej. 0,472)" : "¿Qué importe mostró la balanza? (ej. 1250)"}
-                  value={scaleWizardWeight}
-                  onChange={(e) => setScaleWizardWeight(e.target.value)}
-                />
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <button disabled={scaleWizardBusy} onClick={handleCalibrateScale}>{scaleWizardBusy ? "Detectando…" : "Detectar formato"}</button>
-                  {scaleConfigCalibrated && (
-                    <button className="secondary" onClick={handleResetScaleConfig}>Borrar calibración</button>
-                  )}
-                </div>
-                {scaleWizardResult === "success" && (
-                  <p style={{ margin: 0, color: "#1a7a3c", fontWeight: 700 }}>Listo, detectado y guardado -- probá escanear otra etiqueta para confirmar.</p>
-                )}
-                {scaleWizardResult === "not_found" && (
-                  <p style={{ margin: 0, color: "#8a4b00", fontWeight: 700 }}>
-                    No pudimos detectar el formato solos con esa etiqueta. Probá de nuevo con otro producto/peso distinto, o escribinos y lo configuramos nosotros.
-                  </p>
-                )}
-              </div>
-            )}
 
             {showManualForm && (
               <div className="pos-manual-card">
