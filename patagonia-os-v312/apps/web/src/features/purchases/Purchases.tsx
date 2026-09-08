@@ -537,24 +537,40 @@ export function Purchases() {
 
             {lines.map((line) => {
               const selectedProduct = products.find((p) => p.id === line.productId);
+              const productMatches = !line.productId && line.description.trim()
+                ? products.filter((p) => p.name.toLowerCase().includes(line.description.toLowerCase())).slice(0, 8)
+                : [];
               return (
                 <div key={line.key}>
                   <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 4 }}>
-                    <select
-                      value={line.productId}
-                      onChange={(e) => updateLine(line.key, { productId: e.target.value, description: "" })}
-                    >
-                      <option value="">Sin producto (texto libre)</option>
-                      {products.map((product) => (
-                        <option key={product.id} value={product.id}>{product.name}</option>
-                      ))}
-                    </select>
-                    {!line.productId && (
-                      <input
-                        placeholder="Descripción"
-                        value={line.description}
-                        onChange={(e) => updateLine(line.key, { description: e.target.value })}
-                      />
+                    {selectedProduct ? (
+                      <span className="cash-banner-form" style={{ gap: 6, padding: 0 }}>
+                        <strong>{selectedProduct.name}</strong>
+                        <button className="secondary" onClick={() => updateLine(line.key, { productId: "", description: "" })}>Cambiar</button>
+                      </span>
+                    ) : (
+                      <div className="pos-search-wrap" style={{ minWidth: 220 }}>
+                        <input
+                          placeholder="Buscá el producto o escribí una descripción libre…"
+                          value={line.description}
+                          onChange={(e) => updateLine(line.key, { description: e.target.value })}
+                        />
+                        {productMatches.length > 0 && (
+                          <div className="pos-dropdown">
+                            {productMatches.map((product) => (
+                              <button
+                                key={product.id}
+                                type="button"
+                                className="pos-dropdown-item"
+                                onClick={() => updateLine(line.key, { productId: product.id, description: "" })}
+                              >
+                                <span>{product.name}</span>
+                                <strong>{formatMoney(product.cost)}</strong>
+                              </button>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                     )}
                     <input
                       type="number"
