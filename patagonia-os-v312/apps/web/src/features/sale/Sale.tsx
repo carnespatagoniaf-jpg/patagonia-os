@@ -440,10 +440,12 @@ export function Sale() {
 
   const CATEGORY_LESS_LABEL = "Sin categoría";
   /** Agrupa la tabla de productos por categoría (antes era una sola lista
-   * plana con todo mezclado) -- categorías con nombre primero, ordenadas
-   * alfabéticamente, "Sin categoría" al final. */
+   * plana con todo mezclado) -- categorías en el orden elegido a mano en
+   * Inventario (product_categories.sort_order, ej. "Carne" siempre
+   * primero), no alfabético, "Sin categoría" al final. */
   const productGroups = (() => {
     const byId = new Map(categories.map((c) => [c.id, c.name] as const));
+    const orderByLabel = new Map(categories.map((c) => [c.name, c.sortOrder] as const));
     const groups = new Map<string, Product[]>();
     for (const product of filteredProducts) {
       const label = (product.categoryId && byId.get(product.categoryId)) || CATEGORY_LESS_LABEL;
@@ -457,7 +459,7 @@ export function Sale() {
     return [...groups.entries()].sort(([a], [b]) => {
       if (a === CATEGORY_LESS_LABEL) return 1;
       if (b === CATEGORY_LESS_LABEL) return -1;
-      return a.localeCompare(b);
+      return (orderByLabel.get(a) ?? 0) - (orderByLabel.get(b) ?? 0);
     });
   })();
 

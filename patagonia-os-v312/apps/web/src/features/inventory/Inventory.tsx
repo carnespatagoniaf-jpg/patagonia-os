@@ -9,6 +9,7 @@ import {
   createProductCategory,
   deleteProductCategory,
   listProductCategories,
+  reorderProductCategory,
   updateProductCategory,
   type ProductCategory
 } from "./product-categories-service";
@@ -126,6 +127,15 @@ export function Inventory() {
       await reloadCategories();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo renombrar la categoría.");
+    }
+  }
+
+  async function handleMoveCategory(category: ProductCategory, direction: "up" | "down") {
+    try {
+      await reorderProductCategory(category.id, direction);
+      await reloadCategories();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo reordenar la categoría.");
     }
   }
 
@@ -286,7 +296,7 @@ export function Inventory() {
 
         {showCategoryManager && (
           <div className="panel" style={{ marginBottom: 16, padding: 14 }}>
-            {categories.map((category) => (
+            {categories.map((category, index) => (
               <div key={category.id} className="list-row">
                 {renamingCategoryId === category.id ? (
                   <>
@@ -300,6 +310,22 @@ export function Inventory() {
                   <>
                     <span>{category.name}</span>
                     <span>
+                      <button
+                        className="secondary"
+                        disabled={index === 0}
+                        onClick={() => handleMoveCategory(category, "up")}
+                        title="Subir"
+                      >
+                        ↑
+                      </button>{" "}
+                      <button
+                        className="secondary"
+                        disabled={index === categories.length - 1}
+                        onClick={() => handleMoveCategory(category, "down")}
+                        title="Bajar"
+                      >
+                        ↓
+                      </button>{" "}
                       <button className="secondary" onClick={() => startRenameCategory(category)}>Renombrar</button>{" "}
                       <button className="danger" onClick={() => handleDeleteCategory(category)}>Borrar</button>
                     </span>
