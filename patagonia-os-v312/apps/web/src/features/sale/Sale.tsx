@@ -451,6 +451,9 @@ export function Sale() {
       if (list) list.push(product);
       else groups.set(label, [product]);
     }
+    for (const list of groups.values()) {
+      list.sort((a, b) => a.code.localeCompare(b.code, undefined, { numeric: true, sensitivity: "base" }));
+    }
     return [...groups.entries()].sort(([a], [b]) => {
       if (a === CATEGORY_LESS_LABEL) return 1;
       if (b === CATEGORY_LESS_LABEL) return -1;
