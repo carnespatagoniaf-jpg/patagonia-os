@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Supplier } from "@patagonia/domain";
 import { isSupabaseConfigured } from "../../lib/supabase";
-import { createSupplier, listSuppliers, updateSupplier, type CreateSupplierInput, type UpdateSupplierInput } from "./suppliers-service";
+import { createSupplier, deleteSupplier, listSuppliers, updateSupplier, type CreateSupplierInput, type UpdateSupplierInput } from "./suppliers-service";
 
 const DEMO_SUPPLIERS: Supplier[] = [
   { id: "demo-supplier-1", name: "Avícola San José", category: "pollo", active: true },
@@ -63,5 +63,18 @@ export function useSuppliers() {
     [reload]
   );
 
-  return { suppliers, loading, error, create, update, reload };
+  const remove = useCallback(
+    async (id: string) => {
+      if (!isSupabaseConfigured) {
+        setSuppliers((current) => current.filter((s) => s.id !== id));
+        return;
+      }
+
+      await deleteSupplier(id);
+      await reload();
+    },
+    [reload]
+  );
+
+  return { suppliers, loading, error, create, update, remove, reload };
 }

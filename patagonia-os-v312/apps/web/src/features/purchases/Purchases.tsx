@@ -50,7 +50,7 @@ interface LedgerRow {
 }
 
 export function Purchases() {
-  const { suppliers, loading: suppliersLoading, error: suppliersError, create: createSupplier, update: updateSupplier } = useSuppliers();
+  const { suppliers, loading: suppliersLoading, error: suppliersError, create: createSupplier, update: updateSupplier, remove: removeSupplier } = useSuppliers();
   const {
     purchases,
     items,
@@ -77,6 +77,8 @@ export function Purchases() {
   const [supplierPhone, setSupplierPhone] = useState("");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [confirmDeleteSupplierId, setConfirmDeleteSupplierId] = useState<string | null>(null);
+  const [deleteSupplierBusy, setDeleteSupplierBusy] = useState(false);
 
   const [purchaseDate, setPurchaseDate] = useState(todayIso());
   const [invoiceNumber, setInvoiceNumber] = useState("");
@@ -165,6 +167,20 @@ export function Purchases() {
       setMessage(error instanceof Error ? error.message : "No se pudo actualizar el proveedor.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  async function handleConfirmDeleteSupplier(supplierId: string) {
+    setDeleteSupplierBusy(true);
+    try {
+      await removeSupplier(supplierId);
+      setConfirmDeleteSupplierId(null);
+      if (selectedSupplierId === supplierId) setSelectedSupplierId(null);
+      setMessage("Proveedor eliminado.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo eliminar el proveedor.");
+    } finally {
+      setDeleteSupplierBusy(false);
     }
   }
 
@@ -409,12 +425,25 @@ export function Purchases() {
                   <td>{supplier.name}</td>
                   <td>{supplier.category}</td>
                   <td>
-                    <button
-                      className={supplier.id === selectedSupplierId ? "" : "secondary"}
-                      onClick={() => setSelectedSupplierId(supplier.id)}
-                    >
-                      {supplier.id === selectedSupplierId ? "Seleccionado" : "Ver cuenta"}
-                    </button>
+                    {confirmDeleteSupplierId === supplier.id ? (
+                      <>
+                        <span className="muted" style={{ fontSize: 13, marginRight: 6 }}>¿Seguro? No se puede deshacer.</span>
+                        <button className="danger" disabled={deleteSupplierBusy} onClick={() => handleConfirmDeleteSupplier(supplier.id)}>
+                          {deleteSupplierBusy ? "Eliminando…" : "Sí, borrar"}
+                        </button>{" "}
+                        <button className="secondary" disabled={deleteSupplierBusy} onClick={() => setConfirmDeleteSupplierId(null)}>Cancelar</button>
+                      </>
+                    ) : (
+                      <>
+                        <button
+                          className={supplier.id === selectedSupplierId ? "" : "secondary"}
+                          onClick={() => setSelectedSupplierId(supplier.id)}
+                        >
+                          {supplier.id === selectedSupplierId ? "Seleccionado" : "Ver cuenta"}
+                        </button>{" "}
+                        <button className="danger" onClick={() => setConfirmDeleteSupplierId(supplier.id)}>Borrar</button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}

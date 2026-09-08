@@ -80,6 +80,13 @@ export async function updateSupplier(input: UpdateSupplierInput): Promise<void> 
   if (error) throw error;
 }
 
+export async function deleteSupplier(id: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("delete_supplier", { p_supplier_id: id });
+  if (error) throw error;
+}
+
 export interface SupplierBalance {
   supplierId: string;
   totalPurchases: number;
