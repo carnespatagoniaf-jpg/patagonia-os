@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import type { Product } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
@@ -6,6 +6,7 @@ import { useActiveBranch } from "../branches/BranchProvider";
 import { useAuth } from "../auth/AuthProvider";
 import { can } from "../auth/permissions";
 import { listProductsForBranch } from "../inventory/inventory-service";
+import { listProductCategories, type ProductCategory } from "../inventory/product-categories-service";
 import { useTreasury } from "../shifts/useTreasury";
 import { useSuppliers } from "../purchases/useSuppliers";
 import { registerSupplierPaymentFromPosShift } from "../purchases/purchases-service";
@@ -121,6 +122,7 @@ export function Sale() {
   const canManageTreasury = can(profile, "treasury.manage");
 
   const [products, setProducts] = useState<Product[]>(isSupabaseConfigured ? [] : demoProducts);
+  const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -245,6 +247,11 @@ export function Sale() {
       setShiftLoading(false);
     }
   }
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    void listProductCategories().then(setCategories).catch(() => setCategories([]));
+  }, []);
 
   useEffect(() => {
     void reloadProducts();
@@ -430,6 +437,26 @@ export function Sale() {
   const filteredProducts = products
     .filter((p) => p.active ?? true)
     .filter((p) => p.name.toLowerCase().includes(search.toLowerCase()) || p.code.toLowerCase() === search.toLowerCase());
+
+  const CATEGORY_LESS_LABEL = "Sin categoría";
+  /** Agrupa la tabla de productos por categoría (antes era una sola lista
+   * plana con todo mezclado) -- categorías con nombre primero, ordenadas
+   * alfabéticamente, "Sin categoría" al final. */
+  const productGroups = (() => {
+    const byId = new Map(categories.map((c) => [c.id, c.name] as const));
+    const groups = new Map<string, Product[]>();
+    for (const product of filteredProducts) {
+      const label = (product.categoryId && byId.get(product.categoryId)) || CATEGORY_LESS_LABEL;
+      const list = groups.get(label);
+      if (list) list.push(product);
+      else groups.set(label, [product]);
+    }
+    return [...groups.entries()].sort(([a], [b]) => {
+      if (a === CATEGORY_LESS_LABEL) return 1;
+      if (b === CATEGORY_LESS_LABEL) return -1;
+      return a.localeCompare(b);
+    });
+  })();
 
   function quickAdd(product: Product, quantity = 1) {
     setMessage("");
@@ -1023,13 +1050,20 @@ export function Sale() {
                     </tr>
                   </thead>
                   <tbody>
-                    {filteredProducts.map((product) => (
-                      <tr key={product.id}>
-                        <td>{product.code}</td>
-                        <td>{product.name} <span className="muted">({UNIT_LABELS[product.unit]})</span></td>
-                        <td className="num">{formatMoney(product.priceRetail)}</td>
-                        <td><button className="secondary" onClick={() => quickAdd(product)}>+ Agregar</button></td>
-                      </tr>
+                    {productGroups.map(([categoryLabel, categoryProducts]) => (
+                      <Fragment key={categoryLabel}>
+                        <tr>
+                          <td colSpan={4} className="pos-category-row">{categoryLabel}</td>
+                        </tr>
+                        {categoryProducts.map((product) => (
+                          <tr key={product.id}>
+                            <td>{product.code}</td>
+                            <td>{product.name} <span className="muted">({UNIT_LABELS[product.unit]})</span></td>
+                            <td className="num">{formatMoney(product.priceRetail)}</td>
+                            <td><button className="secondary" onClick={() => quickAdd(product)}>+ Agregar</button></td>
+                          </tr>
+                        ))}
+                      </Fragment>
                     ))}
                     {filteredProducts.length === 0 && (
                       <tr><td colSpan={4} className="muted">No hay productos que coincidan.</td></tr>
