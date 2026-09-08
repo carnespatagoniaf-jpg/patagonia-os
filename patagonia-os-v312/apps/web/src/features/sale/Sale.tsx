@@ -11,17 +11,26 @@ import { useTreasury } from "../shifts/useTreasury";
 import { useSuppliers } from "../purchases/useSuppliers";
 import { registerSupplierPaymentFromPosShift } from "../purchases/purchases-service";
 import { useEmployees } from "../employees/useEmployees";
-import { registerEmployeeValeFromPosShift } from "../employees/employees-service";
+import {
+  deletePosShiftOutflow,
+  listPosShiftVales,
+  registerEmployeeValeFromPosShift,
+  type PosShiftVale
+} from "../employees/employees-service";
 import { createPosSale, type CreatePosSaleInput } from "./sale-service";
 import { addPendingSale, getPendingSales, isNetworkError, markPendingSaleError, removePendingSale, type PendingSale } from "./offline-queue";
 import {
   closePosShift,
+  deletePosShiftAdjustment,
   getOpenPosShift,
+  listPosShiftAdjustments,
   listPosShiftSales,
   openPosShift,
+  registerPosShiftTransfer,
   voidPosSale,
   type CloseShiftResult,
   type PosShift,
+  type PosShiftAdjustment,
   type PosShiftSale
 } from "./pos-shift-service";
 import { formatMoney } from "../shifts/format";
@@ -194,7 +203,13 @@ export function Sale() {
   const [cajaAccountId, setCajaAccountId] = useState("");
   const [cajaAmount, setCajaAmount] = useState("");
   const [cajaReason, setCajaReason] = useState("");
+  const [cajaDestAccountId, setCajaDestAccountId] = useState("");
   const [cajaBusy, setCajaBusy] = useState(false);
+
+  const [showMovementsList, setShowMovementsList] = useState(false);
+  const [cajaAdjustments, setCajaAdjustments] = useState<PosShiftAdjustment[]>([]);
+  const [posShiftVales, setPosShiftVales] = useState<PosShiftVale[]>([]);
+  const [deletingMovementId, setDeletingMovementId] = useState<string | null>(null);
 
   const [showSupplierForm, setShowSupplierForm] = useState(false);
   const [supplierId, setSupplierId] = useState("");
@@ -277,6 +292,14 @@ export function Sale() {
       const open = await getOpenPosShift(branchId);
       setShift(open);
       setShiftSales(open ? await listPosShiftSales(open.id) : []);
+      if (open) {
+        const [adjustments, vales] = await Promise.all([listPosShiftAdjustments(open.id), listPosShiftVales(open.id)]);
+        setCajaAdjustments(adjustments);
+        setPosShiftVales(vales);
+      } else {
+        setCajaAdjustments([]);
+        setPosShiftVales([]);
+      }
     } finally {
       setShiftLoading(false);
     }
@@ -389,28 +412,83 @@ export function Sale() {
     const amount = parseAmount(cajaAmount || "0") || 0;
     if (!(amount > 0)) { setMessage("El monto debe ser mayor que cero."); return; }
     if (!cajaReason.trim()) { setMessage("Ingresá un motivo."); return; }
+    const isTransfer = cajaDirection === "out" && !!cajaDestAccountId;
+    if (isTransfer && !shift) { setMessage("No hay un turno abierto."); return; }
     setCajaBusy(true);
     try {
       const accountName = accounts.find((a) => a.id === cajaAccountId)?.name ?? "-";
-      const posShiftId = shift && isSupabaseConfigured ? shift.id : undefined;
-      await adjust({ accountId: cajaAccountId, amount, direction: cajaDirection, reason: cajaReason.trim(), posShiftId });
+      let receiptTitle: string;
+      if (isTransfer && shift) {
+        const destName = accounts.find((a) => a.id === cajaDestAccountId)?.name ?? "-";
+        await registerPosShiftTransfer({
+          posShiftId: shift.id,
+          fromAccountId: cajaAccountId,
+          toAccountId: cajaDestAccountId,
+          amount,
+          reason: cajaReason.trim()
+        });
+        receiptTitle = `TRASPASO A ${destName.toUpperCase()}`;
+      } else {
+        const posShiftId = shift && isSupabaseConfigured ? shift.id : undefined;
+        await adjust({ accountId: cajaAccountId, amount, direction: cajaDirection, reason: cajaReason.trim(), posShiftId });
+        receiptTitle = cajaDirection === "in" ? "INGRESO DE CAJA" : "EGRESO DE CAJA";
+      }
       await autoPrintCajaMovement({ direction: cajaDirection, amount, accountName, reason: cajaReason.trim() });
       setMovementReceipt({
-        title: cajaDirection === "in" ? "INGRESO DE CAJA" : "EGRESO DE CAJA",
+        title: receiptTitle,
         date: new Date().toISOString(),
         amount,
         accountName,
         detail: cajaReason.trim()
       });
       await autoPrintMovementReceipt();
+      await reloadShiftMovements();
       setCajaAccountId("");
       setCajaAmount("");
       setCajaReason("");
+      setCajaDestAccountId("");
       setShowCajaForm(false);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo registrar el movimiento de caja.");
     } finally {
       setCajaBusy(false);
+    }
+  }
+
+  async function reloadShiftMovements() {
+    if (!shift || !isSupabaseConfigured) return;
+    try {
+      const [adjustments, vales] = await Promise.all([listPosShiftAdjustments(shift.id), listPosShiftVales(shift.id)]);
+      setCajaAdjustments(adjustments);
+      setPosShiftVales(vales);
+    } catch {
+      // La lista de movimientos es informativa -- si falla no bloquea nada.
+    }
+  }
+
+  async function handleDeleteAdjustment(id: string) {
+    setDeletingMovementId(id);
+    try {
+      await deletePosShiftAdjustment(id);
+      await reloadShiftMovements();
+      setMessage("Movimiento borrado.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo borrar el movimiento.");
+    } finally {
+      setDeletingMovementId(null);
+    }
+  }
+
+  async function handleDeleteVale(id: string) {
+    setDeletingMovementId(id);
+    try {
+      await deletePosShiftOutflow(id);
+      await reloadShiftMovements();
+      setMessage("Vale borrado.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo borrar el vale.");
+    } finally {
+      setDeletingMovementId(null);
     }
   }
 
@@ -486,6 +564,7 @@ export function Sale() {
         counterpartName: employeeName
       });
       await autoPrintMovementReceipt();
+      await reloadShiftMovements();
       setValeEmployeeId("");
       setValeAccountId("");
       setValeAmount("");
@@ -1475,6 +1554,11 @@ export function Sale() {
                 {showShiftMovements ? "Ocultar movimientos" : "Ver movimientos"}
               </button>
               {canManageTreasury && (
+                <button className="pos-toolbar-btn" onClick={() => setShowMovementsList((v) => !v)}>
+                  {showMovementsList ? "Ocultar caja/vales" : "Ver movimientos de caja"}
+                </button>
+              )}
+              {canManageTreasury && (
                 <button className="pos-toolbar-btn" onClick={() => setShowCajaForm((v) => !v)}>
                   {showCajaForm ? "Cancelar movimiento de caja" : "+ Movimiento de caja"}
                 </button>
@@ -1531,6 +1615,72 @@ export function Sale() {
               )
             )}
 
+            {canManageTreasury && showMovementsList && (
+              <div style={{ marginTop: 14 }}>
+                <p className="muted" style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 12, textTransform: "uppercase" }}>Caja</p>
+                {cajaAdjustments.length > 0 ? (
+                  <table className="data-table">
+                    <thead>
+                      <tr><th>Hora</th><th>Cuenta</th><th>Motivo</th><th className="num">Monto</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                      {cajaAdjustments.map((m) => (
+                        <tr key={m.id}>
+                          <td>{new Date(m.createdAt).toLocaleTimeString("es-AR")}</td>
+                          <td>{m.accountName}</td>
+                          <td>{m.notes ?? "-"}</td>
+                          <td className="num">{m.direction === "in" ? "+" : "-"}{formatMoney(m.amount)}</td>
+                          <td>
+                            <button
+                              className="secondary"
+                              disabled={deletingMovementId === m.id}
+                              onClick={() => handleDeleteAdjustment(m.id)}
+                            >
+                              {deletingMovementId === m.id ? "…" : "Borrar"}
+                            </button>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p className="muted" style={{ fontSize: 13 }}>Sin movimientos de caja en este turno.</p>
+                )}
+
+                <p className="muted" style={{ margin: "14px 0 6px", fontWeight: 700, fontSize: 12, textTransform: "uppercase" }}>Vales a empleados</p>
+                {posShiftVales.length > 0 ? (
+                  <table className="data-table">
+                    <thead>
+                      <tr><th>Hora</th><th>Empleado</th><th>Detalle</th><th className="num">Monto</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                      {posShiftVales.map((v) => (
+                        <tr key={v.id}>
+                          <td>{new Date(v.createdAt).toLocaleTimeString("es-AR")}</td>
+                          <td>{v.employeeName}</td>
+                          <td>{v.detail}{v.liquidated && <span className="muted"> · Liquidado</span>}</td>
+                          <td className="num">{formatMoney(v.amount)}</td>
+                          <td>
+                            {!v.liquidated && (
+                              <button
+                                className="secondary"
+                                disabled={deletingMovementId === v.id}
+                                onClick={() => handleDeleteVale(v.id)}
+                              >
+                                {deletingMovementId === v.id ? "…" : "Borrar"}
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                ) : (
+                  <p className="muted" style={{ fontSize: 13 }}>Sin vales cargados en este turno.</p>
+                )}
+              </div>
+            )}
+
             {canManageTreasury && showCajaForm && (
               <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
                 <select value={cajaDirection} onChange={(e) => setCajaDirection(e.target.value as "in" | "out")}>
@@ -1543,6 +1693,14 @@ export function Sale() {
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
                 </select>
+                {cajaDirection === "out" && (
+                  <select value={cajaDestAccountId} onChange={(e) => setCajaDestAccountId(e.target.value)}>
+                    <option value="">¿Va a otra cuenta? (opcional, ej. Caja fuerte)</option>
+                    {accounts.filter((a) => a.id !== cajaAccountId).map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                  </select>
+                )}
                 <input
                   type="text"
                   inputMode="decimal"
@@ -1555,6 +1713,11 @@ export function Sale() {
                   value={cajaReason}
                   onChange={(e) => setCajaReason(e.target.value)}
                 />
+                {cajaDestAccountId && (
+                  <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+                    Va a quedar como traspaso: sale de acá (cuenta este turno) y entra a la otra cuenta -- el cierre de caja va a restar esta salida del efectivo esperado.
+                  </p>
+                )}
                 <button disabled={cajaBusy} onClick={handleCajaMovement}>{cajaBusy ? "Guardando…" : "Registrar"}</button>
               </div>
             )}

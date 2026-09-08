@@ -71,6 +71,83 @@ export async function voidPosSale(saleId: string): Promise<void> {
   if (error) throw error;
 }
 
+export interface PosShiftAdjustment {
+  id: string;
+  direction: "in" | "out";
+  amount: number;
+  movementType: string;
+  accountName: string;
+  notes: string | null;
+  createdAt: string;
+}
+
+interface PosShiftAdjustmentRow {
+  id: string;
+  direction: "in" | "out";
+  amount: number;
+  movement_type: string;
+  notes: string | null;
+  created_at: string;
+  treasury_accounts: { name: string } | null;
+}
+
+/** "Movimiento de caja" (Ingreso/Egreso) y traspasos hechos desde Mostrador
+ * -- para poder listarlos y borrar uno mal cargado mientras el turno sigue
+ * abierto. No incluye pagos a proveedor (esos se editan desde Compras). */
+export async function listPosShiftAdjustments(posShiftId: string): Promise<PosShiftAdjustment[]> {
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from("treasury_movements")
+    .select("id,direction,amount,movement_type,notes,created_at,treasury_accounts(name)")
+    .or(`and(reference_type.eq.pos_shift,reference_id.eq.${posShiftId}),pos_shift_id.eq.${posShiftId}`)
+    .in("movement_type", ["ajuste", "transferencia"])
+    .order("created_at");
+
+  if (error) throw error;
+  return ((data ?? []) as unknown as PosShiftAdjustmentRow[]).map((row) => ({
+    id: row.id,
+    direction: row.direction,
+    amount: Number(row.amount),
+    movementType: row.movement_type,
+    accountName: row.treasury_accounts?.name ?? "-",
+    notes: row.notes,
+    createdAt: row.created_at
+  }));
+}
+
+export async function deletePosShiftAdjustment(movementId: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("delete_pos_shift_adjustment", { p_movement_id: movementId });
+  if (error) throw error;
+}
+
+export interface RegisterPosShiftTransferInput {
+  posShiftId: string;
+  fromAccountId: string;
+  toAccountId: string;
+  amount: number;
+  reason?: string;
+}
+
+/** Traspaso de una cuenta a otra (ej. Efectivo -> Caja fuerte) que sí
+ * descuenta del arqueo de este turno, a diferencia de la transferencia
+ * genérica de Tesorería. */
+export async function registerPosShiftTransfer(input: RegisterPosShiftTransferInput): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("register_pos_shift_transfer", {
+    p_pos_shift_id: input.posShiftId,
+    p_from_account_id: input.fromAccountId,
+    p_to_account_id: input.toAccountId,
+    p_amount: input.amount,
+    p_reason: input.reason ?? null
+  });
+
+  if (error) throw error;
+}
+
 export interface PosShiftSaleItem {
   productName: string;
   quantity: number;

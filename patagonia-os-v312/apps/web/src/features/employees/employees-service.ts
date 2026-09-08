@@ -257,6 +257,53 @@ export async function registerEmployeeValeFromPosShift(input: RegisterEmployeeVa
   return { id: data.id };
 }
 
+export interface PosShiftVale {
+  id: string;
+  employeeName: string;
+  amount: number;
+  detail: string;
+  liquidated: boolean;
+  createdAt: string;
+}
+
+interface PosShiftOutflowRowWithEmployee {
+  id: string;
+  amount: number;
+  detail: string;
+  payroll_liquidation_id: string | null;
+  created_at: string;
+  employees: { full_name: string } | null;
+}
+
+/** Vales de empleados cargados desde ESTE turno de Mostrador -- para poder
+ * listarlos y borrar uno mal cargado mientras el turno sigue abierto. */
+export async function listPosShiftVales(posShiftId: string): Promise<PosShiftVale[]> {
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from("pos_shift_outflows")
+    .select("id,amount,detail,payroll_liquidation_id,created_at,employees(full_name)")
+    .eq("pos_shift_id", posShiftId)
+    .order("created_at");
+
+  if (error) throw error;
+  return ((data ?? []) as unknown as PosShiftOutflowRowWithEmployee[]).map((row) => ({
+    id: row.id,
+    employeeName: row.employees?.full_name ?? "-",
+    amount: Number(row.amount),
+    detail: row.detail,
+    liquidated: row.payroll_liquidation_id !== null,
+    createdAt: row.created_at
+  }));
+}
+
+export async function deletePosShiftOutflow(id: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("delete_pos_shift_outflow", { p_id: id });
+  if (error) throw error;
+}
+
 interface PayrollLiquidationPaymentRow {
   id: string;
   account_id: string;
