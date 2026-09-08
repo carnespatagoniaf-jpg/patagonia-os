@@ -450,7 +450,9 @@ export function Sale() {
       setCajaDestAccountId("");
       setShowCajaForm(false);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo registrar el movimiento de caja.");
+      const raw = err instanceof Error ? err.message : typeof err === "object" && err !== null ? JSON.stringify(err) : String(err);
+      const code = (err as { code?: string })?.code;
+      setMessage(`No se pudo registrar el movimiento de caja. [detalle: ${raw}${code ? ` · code ${code}` : ""}]`);
     } finally {
       setCajaBusy(false);
     }
@@ -530,7 +532,9 @@ export function Sale() {
       setSupplierNotes("");
       setShowSupplierForm(false);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo registrar el pago al proveedor.");
+      const raw = err instanceof Error ? err.message : typeof err === "object" && err !== null ? JSON.stringify(err) : String(err);
+      const code = (err as { code?: string })?.code;
+      setMessage(`No se pudo registrar el pago al proveedor. [detalle: ${raw}${code ? ` · code ${code}` : ""}]`);
     } finally {
       setSupplierBusy(false);
     }
@@ -572,7 +576,9 @@ export function Sale() {
       setValeDetail("");
       setShowValeForm(false);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo registrar el vale.");
+      const raw = err instanceof Error ? err.message : typeof err === "object" && err !== null ? JSON.stringify(err) : String(err);
+      const code = (err as { code?: string })?.code;
+      setMessage(`No se pudo registrar el vale. [detalle: ${raw}${code ? ` · code ${code}` : ""}]`);
     } finally {
       setValeBusy(false);
     }
