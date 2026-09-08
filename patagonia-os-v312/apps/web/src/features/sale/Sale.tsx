@@ -1,4 +1,5 @@
 import { Fragment, useEffect, useRef, useState } from "react";
+import { Settings } from "lucide-react";
 import type { Product } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
@@ -1201,11 +1202,11 @@ export function Sale() {
               <button className={`pos-toolbar-btn${showProductTable ? " active" : ""}`} onClick={() => setShowProductTable((v) => !v)}>
                 {showProductTable ? "Ocultar tabla de productos" : "Ver tabla de productos"}
               </button>
-              <button className={`pos-toolbar-btn${showPrinterSettings ? " active" : ""}`} onClick={() => setShowPrinterSettings((v) => !v)}>
-                {showPrinterSettings ? "Ocultar config. impresora" : "Config. impresora"}
+              <button className={`pos-toolbar-btn${showPrinterSettings ? " active" : ""}`} onClick={() => setShowPrinterSettings((v) => !v)} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <Settings size={15} /> Impresora
               </button>
-              <button className={`pos-toolbar-btn${showScaleWizard ? " active" : ""}`} onClick={() => { setShowScaleWizard((v) => !v); setScaleWizardResult("idle"); }}>
-                {showScaleWizard ? "Ocultar config. balanza" : "Config. balanza"}
+              <button className={`pos-toolbar-btn${showScaleWizard ? " active" : ""}`} onClick={() => { setShowScaleWizard((v) => !v); setScaleWizardResult("idle"); }} style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                <Settings size={15} /> Balanza
               </button>
             </div>
 
