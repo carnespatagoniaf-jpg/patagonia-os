@@ -14,6 +14,7 @@ import {
   type ProductCategory
 } from "./product-categories-service";
 import { parseAmount } from "../../lib/money";
+import { downloadScaleExportCsv } from "./scale-export";
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
@@ -292,7 +293,13 @@ export function Inventory() {
           <button className="secondary" onClick={() => setShowCategoryManager((v) => !v)}>
             {showCategoryManager ? "Ocultar categorías" : "Gestionar categorías"}
           </button>
+          <button className="secondary" onClick={() => downloadScaleExportCsv(products, categories)}>
+            Descargar lista para balanza
+          </button>
         </div>
+        <p className="muted" style={{ margin: "-8px 0 14px", fontSize: 12 }}>
+          CSV para importar en el software de PC de la balanza (Kretz Simplex/iTegra) -- formato de prueba, todavía sin confirmar contra el importador real.
+        </p>
 
         {showCategoryManager && (
           <div className="panel" style={{ marginBottom: 16, padding: 14 }}>
