@@ -36,7 +36,7 @@ import {
 } from "./pos-shift-service";
 import { formatMoney } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
-import { getThermalPrintSettings, isThermalPrinterPaired, isThermalPrintSupported, printBytes, TicketBuilder } from "./thermal-printer";
+import { buildTestTicket, getThermalPrintSettings, isThermalPrinterPaired, isThermalPrintSupported, printBytes, TicketBuilder } from "./thermal-printer";
 import {
   DEFAULT_SCALE_CONFIG,
   deleteBranchScaleConfig,
@@ -231,6 +231,8 @@ export function Sale() {
   const [valeBusy, setValeBusy] = useState(false);
 
   const [thermalPrintBusy, setThermalPrintBusy] = useState(false);
+  const [thermalConnectBusy, setThermalConnectBusy] = useState(false);
+  const [thermalPaired, setThermalPaired] = useState(false);
   const [showConfigPanel, setShowConfigPanel] = useState(false);
   const [autoPrintEnabled, setAutoPrintEnabled] = useState<boolean>(() => getAutoPrintEnabled());
   const [pendingSales, setPendingSales] = useState<PendingSale[]>(() => getPendingSales());
@@ -404,6 +406,13 @@ export function Sale() {
   }, []);
 
   useEffect(() => {
+    // navigator.usb.getDevices() no pide permiso -- solo informa si YA hay
+    // una impresora emparejada de una sesión anterior (igual que la
+    // balanza), así que se puede chequear solo al entrar a la página.
+    void isThermalPrinterPaired().then(setThermalPaired);
+  }, []);
+
+  useEffect(() => {
     if (pendingSales.length === 0) return;
     const interval = setInterval(() => void syncPendingSales(), 30000);
     return () => clearInterval(interval);
@@ -437,15 +446,15 @@ export function Sale() {
         await adjust({ accountId: cajaAccountId, amount, direction: cajaDirection, reason: cajaReason.trim(), posShiftId });
         receiptTitle = cajaDirection === "in" ? "INGRESO DE CAJA" : "EGRESO DE CAJA";
       }
-      await autoPrintCajaMovement({ direction: cajaDirection, amount, accountName, reason: cajaReason.trim() });
-      setMovementReceipt({
+      const movementReceiptData: MovementReceiptState = {
         title: receiptTitle,
         date: new Date().toISOString(),
         amount,
         accountName,
         detail: cajaReason.trim()
-      });
-      await autoPrintMovementReceipt();
+      };
+      setMovementReceipt(movementReceiptData);
+      await autoPrintMovementReceipt(movementReceiptData);
       await reloadShiftMovements();
       setCajaAccountId("");
       setCajaAmount("");
@@ -519,7 +528,7 @@ export function Sale() {
       setMessage(
         `Pago a ${supplierName} registrado.${result.balance !== null ? ` Saldo restante: ${formatMoney(result.balance)}.` : ""}`
       );
-      setMovementReceipt({
+      const movementReceiptData: MovementReceiptState = {
         title: "PAGO A PROVEEDOR",
         date: new Date().toISOString(),
         amount,
@@ -527,8 +536,9 @@ export function Sale() {
         detail: supplierNotes.trim() || "Pago a proveedor",
         counterpartLabel: "Proveedor",
         counterpartName: supplierName
-      });
-      await autoPrintMovementReceipt();
+      };
+      setMovementReceipt(movementReceiptData);
+      await autoPrintMovementReceipt(movementReceiptData);
       setSupplierId("");
       setSupplierAccountId("");
       setSupplierAmount("");
@@ -562,7 +572,7 @@ export function Sale() {
       const employeeName = employees.find((e) => e.id === valeEmployeeId)?.fullName ?? "-";
       const valeAccountName = accounts.find((a) => a.id === valeAccountId)?.name ?? "-";
       setMessage(`Vale de ${employeeName} registrado -- se descuenta de su próxima liquidación de sueldo.`);
-      setMovementReceipt({
+      const movementReceiptData: MovementReceiptState = {
         title: "VALE A EMPLEADO",
         date: new Date().toISOString(),
         amount,
@@ -570,8 +580,9 @@ export function Sale() {
         detail: valeDetail.trim() || "Vale de adelanto",
         counterpartLabel: "Empleado",
         counterpartName: employeeName
-      });
-      await autoPrintMovementReceipt();
+      };
+      setMovementReceipt(movementReceiptData);
+      await autoPrintMovementReceipt(movementReceiptData);
       await reloadShiftMovements();
       setValeEmployeeId("");
       setValeAccountId("");
@@ -887,7 +898,7 @@ export function Sale() {
         setReceipt(demoReceipt);
         clearTicket();
         setMessage("Venta registrada (modo demo, no se descuenta stock real).");
-        await autoPrintReceipt();
+        await autoPrintReceipt(demoReceipt);
         return;
       }
       if (!branchId) throw new Error("Tu usuario no tiene sucursal asignada.");
@@ -948,7 +959,7 @@ export function Sale() {
       // en la cola offline) no tape el ticket ni dispare el mensaje de "no
       // se pudo registrar la venta" sobre una venta que en realidad sí se
       // cobró.
-      await autoPrintReceipt();
+      await autoPrintReceipt(newReceipt);
       if (queuedOffline) {
         setMessage("Sin conexión: la venta se guardó en este equipo y se sube sola apenas vuelva internet.");
       } else {
@@ -1074,55 +1085,92 @@ export function Sale() {
     }
   }
 
+  /** Emparejar la impresora térmica una sola vez -- mismo mecanismo que
+   * "Conectar balanza" en Stock (navigator.usb.requestDevice, recordado por
+   * el navegador después). Imprime un ticket de prueba en el momento para
+   * confirmar que además de emparejarse, imprime bien -- así no queda
+   * "conectada" en el papel pero rota en la práctica. */
+  async function handleConnectThermalPrinter() {
+    setMessage("");
+    setThermalConnectBusy(true);
+    try {
+      await printBytes(buildTestTicket(getThermalPrintSettings()));
+      setThermalPaired(true);
+      setMessage("Impresora térmica conectada -- imprimió un ticket de prueba. De ahora en más, el comprobante sale ahí directo al cobrar (si tenés activado \"Imprimir automáticamente\" arriba), sin ningún diálogo.");
+    } catch (err) {
+      setMessage(err instanceof Error ? `No se pudo conectar con la impresora: ${err.message}` : "No se pudo conectar con la impresora térmica.");
+    } finally {
+      setThermalConnectBusy(false);
+    }
+  }
+
+  function buildMovementTicket(mov: MovementReceiptState): Uint8Array {
+    const settings = getThermalPrintSettings();
+    const branchName = branches.find((b) => b.id === branchId)?.name;
+    const t = new TicketBuilder();
+    if (settings.font !== "auto") t.font(settings.font);
+    t.bodySize(settings, true);
+    t.align("center").bold(true).line(mov.title).bold(false);
+    if (branchName) t.line(branchName);
+    t.align("left").separator("-", settings.lineWidth);
+    t.line(new Date(mov.date).toLocaleString("es-AR"));
+    t.separator("-", settings.lineWidth);
+    t.line(`Cuenta: ${mov.accountName}`);
+    if (mov.counterpartName) t.line(`${mov.counterpartLabel}: ${mov.counterpartName}`);
+    if (mov.detail) t.line(mov.detail);
+    t.separator("-", settings.lineWidth);
+    t.bodySize(settings, false);
+    t.bold(true).doubleSize(true).line(`MONTO ${formatMoney(mov.amount)}`).doubleSize(false).bold(false);
+    t.bodySize(settings, true);
+    t.feed(3);
+    t.align("center").line("Firma: _______________________");
+    t.line("Aclaración y DNI:");
+    t.bodySize(settings, false);
+    t.cut();
+    return t.build();
+  }
 
   /** Se imprime solo al cobrar -- pero SOLO si el local activó "Imprimir
    * automáticamente" en Config. impresora. Sin ese interruptor, a quien no
    * tiene impresora nunca le aparece un diálogo de impresión de la nada;
-   * quien sí imprime lo prende una vez y listo. Antes esto intentaba la
-   * impresora térmica por USB primero -- forzaba a elegir el dispositivo de
-   * una lista genérica de USB sin nombres claros (imposible para alguien
-   * sin conocimientos técnicos, y no escala a mil clientes con mil
-   * impresoras distintas). Ahora el único camino automático es el diálogo
-   * de impresión normal del navegador, que ya muestra la impresora por su
-   * nombre real y respeta el papel que esa impresora tenga configurado en
-   * Windows. La térmica por USB sigue disponible como botón manual aparte,
-   * para quien la quiera igual. */
-  async function autoPrintReceipt() {
+   * quien sí imprime lo prende una vez y listo.
+   * Si ya hay una térmica emparejada por USB (navigator.usb, el mismo
+   * mecanismo de "conectar una vez y listo" que la balanza), se manda ahí
+   * directo -- sale el ticket sin ningún diálogo ni clic extra, ideal para
+   * un cliente que compra el sistema y solo necesita emparejar la
+   * impresora una vez. Si no hay ninguna emparejada (o el envío falla, ej.
+   * un hipo de USB puntual), cae al diálogo de impresión normal del
+   * navegador como red de seguridad -- ese SÍ requiere un clic en
+   * "Imprimir" (ningún navegador permite saltear eso por seguridad), pero
+   * nunca deja a alguien sin ticket. */
+  async function autoPrintReceipt(receiptToPrint: ReceiptState) {
     if (!autoPrintEnabled) return;
+    if (await isThermalPrinterPaired()) {
+      try {
+        await printBytes(buildReceiptTicket(receiptToPrint));
+        return;
+      } catch {
+        // térmica emparejada pero falló el envío -- cae al diálogo de abajo.
+      }
+    }
     // Pequeña espera para que el DOM termine de pintar el comprobante nuevo
     // antes de que el navegador lo capture para imprimir.
     setTimeout(() => window.print(), 150);
   }
 
   /** Mismo criterio que autoPrintReceipt, para el comprobante de caja/pago
-   * a proveedor/vale a empleado -- usa el mismo diálogo del navegador
-   * (confiable, no depende de tener una térmica emparejada por USB). */
-  async function autoPrintMovementReceipt() {
+   * a proveedor/vale a empleado. */
+  async function autoPrintMovementReceipt(mov: MovementReceiptState) {
     if (!autoPrintEnabled) return;
-    setTimeout(() => window.print(), 150);
-  }
-
-  /** Comprobante chico para cada Ingreso/Egreso de caja -- así queda algo en
-   * papel cada vez que entra o sale plata del cajón, no solo al cerrar. */
-  async function autoPrintCajaMovement(mov: { direction: "in" | "out"; amount: number; accountName: string; reason: string }) {
-    // Esto no tiene un comprobante en pantalla para caer al diálogo del
-    // navegador como el ticket de venta -- si no hay térmica emparejada
-    // directamente no hay dónde imprimir, así que no tiene sentido
-    // intentar (y menos mostrar un error cada vez que no está emparejada).
-    if (!(await isThermalPrinterPaired())) return;
-    try {
-      const t = new TicketBuilder();
-      t.align("center").bold(true).line(mov.direction === "in" ? "INGRESO DE CAJA" : "EGRESO DE CAJA").bold(false);
-      t.align("left").separator();
-      t.line(new Date().toLocaleString("es-AR"));
-      t.line(`Cuenta: ${mov.accountName}`);
-      t.bold(true).doubleSize(true).line(`${mov.direction === "in" ? "+" : "-"} ${formatMoney(mov.amount)}`).doubleSize(false).bold(false);
-      t.line(`Motivo: ${mov.reason}`);
-      t.cut();
-      await printBytes(t.build());
-    } catch (err) {
-      setMessage(err instanceof Error ? `Movimiento registrado, pero no se pudo imprimir: ${err.message}` : "Movimiento registrado, pero no se pudo imprimir el ticket.");
+    if (await isThermalPrinterPaired()) {
+      try {
+        await printBytes(buildMovementTicket(mov));
+        return;
+      } catch {
+        // térmica emparejada pero falló el envío -- cae al diálogo de abajo.
+      }
     }
+    setTimeout(() => window.print(), 150);
   }
 
   return (
@@ -1164,8 +1212,20 @@ export function Sale() {
                 Imprimir el comprobante automáticamente al cobrar
               </label>
               <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
-                Al cobrar se abre el diálogo de impresión de Windows -- ahí elegís tu impresora por su nombre y confirmás "Imprimir". Por seguridad, ningún navegador imprime sin ese paso (existe una forma de saltearlo por completo, preguntame si te interesa). Si no tenés impresora, dejalo apagado y nunca te va a aparecer nada solo.
+                Si conectaste una impresora térmica abajo, el ticket sale ahí directo, sin ningún diálogo ni clic extra. Si no conectaste ninguna, al cobrar se abre el diálogo de impresión de Windows -- ahí elegís tu impresora por su nombre y confirmás "Imprimir" (ningún navegador permite saltear ese clic sin una impresora conectada por USB, es una protección de seguridad). Si no tenés impresora, dejalo apagado y nunca te va a aparecer nada solo.
               </p>
+              {isThermalPrintSupported() && (
+                <div style={{ marginTop: 10 }}>
+                  <button className="secondary" disabled={thermalConnectBusy} onClick={handleConnectThermalPrinter}>
+                    {thermalConnectBusy ? "Conectando…" : thermalPaired ? "Volver a elegir impresora térmica" : "Conectar impresora térmica (USB)"}
+                  </button>
+                  <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
+                    {thermalPaired
+                      ? "Impresora térmica conectada en este navegador -- el ticket va a salir ahí solo, sin diálogo, mientras esté prendido \"Imprimir automáticamente\"."
+                      : "Conectala una sola vez (elegila de la lista que te va a mostrar Chrome) para que el ticket salga solo al cobrar, sin ningún diálogo -- igual que se conecta la balanza en Stock."}
+                  </p>
+                </div>
+              )}
             </div>
 
             <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 18 }}>
