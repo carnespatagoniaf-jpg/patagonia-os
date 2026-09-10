@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { Product } from "@patagonia/domain";
 import { marginPercent, priceFromMargin } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
@@ -135,6 +135,31 @@ export function Inventory() {
 
   const visibleProducts = categoryFilter ? products.filter((p) => p.categoryId === categoryFilter) : products;
   const scaleSyncPlan = planScaleSync(products);
+
+  function compareByCode(a: Product, b: Product) {
+    const na = Number(a.code);
+    const nb = Number(b.code);
+    if (Number.isFinite(na) && Number.isFinite(nb)) return na - nb;
+    return a.code.localeCompare(b.code);
+  }
+
+  const productsByCategory = new Map<string, Product[]>();
+  const productsWithoutCategory: Product[] = [];
+  for (const product of visibleProducts) {
+    if (product.categoryId) {
+      const group = productsByCategory.get(product.categoryId) ?? [];
+      group.push(product);
+      productsByCategory.set(product.categoryId, group);
+    } else {
+      productsWithoutCategory.push(product);
+    }
+  }
+  const groupedProducts: { key: string; label: string; products: Product[] }[] = categories
+    .map((c) => ({ key: c.id, label: c.name, products: (productsByCategory.get(c.id) ?? []).sort(compareByCode) }))
+    .filter((g) => g.products.length > 0);
+  if (productsWithoutCategory.length > 0) {
+    groupedProducts.push({ key: "sin-categoria", label: "Sin categoría", products: productsWithoutCategory.sort(compareByCode) });
+  }
 
   async function handleCreateCategory() {
     try {
@@ -721,7 +746,14 @@ export function Inventory() {
             </tr>
           </thead>
           <tbody>
-            {visibleProducts.map((product) => (
+            {groupedProducts.map((group) => (
+              <Fragment key={group.key}>
+                <tr>
+                  <td colSpan={11} style={{ fontWeight: 700, background: "#f7f7f8", padding: "8px 10px" }}>
+                    {group.label} <span className="muted" style={{ fontWeight: 400 }}>({group.products.length})</span>
+                  </td>
+                </tr>
+                {group.products.map((product) => (
               <tr key={product.id}>
                 {editingId === product.id ? (
                   <>
@@ -846,6 +878,8 @@ export function Inventory() {
                   </>
                 )}
               </tr>
+                ))}
+              </Fragment>
             ))}
           </tbody>
         </table>
