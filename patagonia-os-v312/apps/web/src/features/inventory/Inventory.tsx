@@ -16,6 +16,7 @@ import {
 import { parseAmount } from "../../lib/money";
 import { downloadScaleExportCsv } from "./scale-export";
 import {
+  checkScaleCompatibility,
   connectScalePort,
   deleteScalePlu,
   describeResponseCode,
@@ -237,6 +238,24 @@ export function Inventory() {
       );
     } catch (err) {
       setScaleLog(err instanceof Error ? err.message : "Falló la prueba de conexión.");
+    } finally {
+      setScaleBusy(false);
+    }
+  }
+
+  async function handleCheckCompatibility() {
+    setScaleBusy(true);
+    setScaleLog("Probando compatibilidad… esto carga y borra un producto de prueba en la balanza, no toca productos reales.");
+    try {
+      const result = await checkScaleCompatibility();
+      const details = [
+        `Conexión: ${result.pingOk ? "OK" : "sin respuesta"}.`,
+        result.writeResponseCode ? `Escritura de prueba: código "${result.writeResponseCode}".` : "",
+        result.readResponseCode ? `Relectura: código "${result.readResponseCode}".` : ""
+      ].filter(Boolean).join(" ");
+      setScaleLog(`${result.compatible ? "✅" : "❌"} ${result.message} ${details}`);
+    } catch (err) {
+      setScaleLog(err instanceof Error ? err.message : "Falló la prueba de compatibilidad.");
     } finally {
       setScaleBusy(false);
     }
@@ -509,6 +528,14 @@ export function Inventory() {
                 <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handlePingScale}>
                   Probar conexión
                 </button>
+                <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handleCheckCompatibility}>
+                  Verificar compatibilidad
+                </button>
+              </div>
+              <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
+                Si es una balanza que no probamos todavía (no una Report LT), usá "Verificar compatibilidad" antes de mandar productos: carga y borra un producto de prueba para confirmar que entiende el mismo formato, sin arriesgar datos reales.
+              </p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
                 <details style={{ display: "inline-block" }}>
                   <summary className="secondary" style={{ display: "inline-block", cursor: "pointer", padding: "10px 14px", border: "1px solid #ccc", borderRadius: 6 }}>
                     Configuración avanzada

@@ -500,6 +500,123 @@ export async function readScalePlu(pluCode: string): Promise<ScalePluReadResult>
   return { rawResponseHex: toHex(response), responseCode: extractResponseCode(response), rawDataAscii };
 }
 
+async function readPluRaw(port: SerialPort, settings: ScaleSerialSettings, pluDigits: number): Promise<{ responseCode: string | null; fields: string[] | null }> {
+  const argument = fixedDigits(pluDigits - 1, 6);
+  const frame = buildFrame(settings.deviceType, settings.equipmentId, "5005", argument);
+  const response = await writeFrameResilient(port, frame, settings.baudRate);
+  const responseCode = extractResponseCode(response);
+  if (responseCode !== "01") return { responseCode, fields: null };
+  const dataBytes = response.length > 10 ? response.slice(8, -3) : new Uint8Array();
+  const dataStr = Array.from(dataBytes).map((b) => String.fromCharCode(b)).join("");
+  const fields = splitPluFields(dataStr);
+  if (Number(fields[0]) !== pluDigits) return { responseCode, fields: null };
+  return { responseCode, fields };
+}
+
+/** PLU alto, fuera de cualquier catálogo real de un cliente, usado
+ * exclusivamente por checkScaleCompatibility como zona de prueba
+ * descartable. */
+const COMPATIBILITY_TEST_PLU = 99999;
+
+export interface ScaleCompatibilityResult {
+  pingOk: boolean;
+  pingResponseCode: string | null;
+  testPluCode: number;
+  aborted: boolean;
+  writeResponseCode: string | null;
+  readResponseCode: string | null;
+  fieldsMatch: boolean;
+  deleteResponseCode: string | null;
+  compatible: boolean;
+  message: string;
+}
+
+/** Prueba si ESTA balanza puntual habla el mismo protocolo que la Report
+ * LT contra la que se confirmó todo (ver el comentario del encabezado del
+ * archivo). No confía en el modelo/nombre de la balanza ni en ninguna
+ * documentación pública -- ya se demostró una vez que el documento
+ * público de Kretz no coincidía con los anchos de campo reales de la
+ * Report LT usada acá. En cambio, hace la prueba real: escribe un PLU
+ * sintético en una zona alta (99999, fuera de cualquier catálogo real),
+ * lo relee, compara byte a byte contra lo que se mandó, y lo borra de
+ * nuevo para no dejar nada cargado. Si coincide exacto, el modelo de
+ * campos que usa buildPluFrame (PLU_FIELD_WIDTHS) es el correcto para
+ * esta balanza y el envío masivo debería funcionar igual que en la
+ * balanza ya confirmada -- sin tener que tocar código. */
+export async function checkScaleCompatibility(): Promise<ScaleCompatibilityResult> {
+  if (!isScaleSerialSupported()) {
+    throw new Error("Este navegador no soporta comunicación serie directa (usá Chrome o Edge).");
+  }
+  const settings = getScaleSerialSettings();
+  const port = await pickPort();
+
+  const pingFrame = buildFrame(settings.deviceType, settings.equipmentId, "0001", "");
+  const pingResponse = await writeFrameResilient(port, pingFrame, settings.baudRate);
+  const pingResponseCode = extractResponseCode(pingResponse);
+  const pingOk = pingResponse.length > 0;
+
+  if (!pingOk) {
+    return {
+      pingOk, pingResponseCode, testPluCode: COMPATIBILITY_TEST_PLU, aborted: true,
+      writeResponseCode: null, readResponseCode: null, fieldsMatch: false, deleteResponseCode: null,
+      compatible: false,
+      message: "La balanza no respondió al comando de test de conexión (0001). Revisá el cable, el puerto y la velocidad configurada antes de probar de nuevo."
+    };
+  }
+
+  const before = await readPluRaw(port, settings, COMPATIBILITY_TEST_PLU);
+  if (before.fields) {
+    return {
+      pingOk, pingResponseCode, testPluCode: COMPATIBILITY_TEST_PLU, aborted: true,
+      writeResponseCode: null, readResponseCode: before.responseCode, fieldsMatch: false, deleteResponseCode: null,
+      compatible: false,
+      message: `No se pudo probar: ya existe un producto real cargado en el código ${COMPATIBILITY_TEST_PLU} de esta balanza -- se frenó para no arriesgarse a pisarlo.`
+    };
+  }
+
+  const pluNumber = fixedDigits(COMPATIBILITY_TEST_PLU, 6);
+  const pluCodeStr = fixedDigits(COMPATIBILITY_TEST_PLU, 5);
+  const testName = fixedAscii("PRUEBA PATAGONIA", 26);
+  const testFields = [
+    pluNumber, fixedDigits(1, 3), fixedDigits(1, 3), testName, testName, pluCodeStr, "N", fixedDigits(0, 7),
+    fixedDigits(12345, 6), fixedDigits(0, 6), fixedDigits(2, 6), fixedDigits(0, 6), fixedDigits(0, 6),
+    fixedDigits(0, 5), fixedDigits(0, 5), fixedDigits(0, 2), fixedDigits(0, 4), fixedDigits(0, 4),
+    fixedDigits(0, 4), fixedDigits(0, 4)
+  ];
+  const data = testFields.join("");
+  if (data.length !== 135) {
+    throw new Error(`Error interno armando la trama de prueba: ${data.length} caracteres en vez de 135.`);
+  }
+
+  const writeResponse = await writeFrameResilient(port, buildFrame(settings.deviceType, settings.equipmentId, settings.altaCommand, data), settings.baudRate);
+  const writeResponseCode = extractResponseCode(writeResponse);
+
+  if (writeResponseCode !== "01") {
+    return {
+      pingOk, pingResponseCode, testPluCode: COMPATIBILITY_TEST_PLU, aborted: false,
+      writeResponseCode, readResponseCode: null, fieldsMatch: false, deleteResponseCode: null,
+      compatible: false,
+      message: `La balanza respondió código "${writeResponseCode}" (${describeResponseCode(writeResponseCode)}) al cargar el PLU de prueba -- no es compatible con el formato que usamos. Por ahora, cargar productos en esta balanza con iTegra.`
+    };
+  }
+
+  await new Promise((resolve) => setTimeout(resolve, 400));
+  const after = await readPluRaw(port, settings, COMPATIBILITY_TEST_PLU);
+  const fieldsMatch = after.fields !== null && after.fields.join("") === testFields.join("");
+
+  const deleteResponse = await writeFrameResilient(port, buildFrame(settings.deviceType, settings.equipmentId, "3005", pluNumber), settings.baudRate);
+  const deleteResponseCode = extractResponseCode(deleteResponse);
+
+  const compatible = fieldsMatch;
+  const message = compatible
+    ? "Compatible: se cargó un producto de prueba, se releyó tal cual se mandó, y se borró de nuevo. El envío masivo debería funcionar igual que en la balanza ya confirmada."
+    : after.fields === null
+      ? `No compatible: se pudo cargar el PLU de prueba, pero al releerlo la balanza respondió código "${after.responseCode}" (${describeResponseCode(after.responseCode)}) en vez de devolverlo. El formato de esta balanza no es el que usamos.`
+      : "No compatible: se releyó el PLU de prueba pero los datos no coinciden con lo que se mandó -- el orden o ancho de los campos de esta balanza es distinto al que usamos.";
+
+  return { pingOk, pingResponseCode, testPluCode: COMPATIBILITY_TEST_PLU, aborted: false, writeResponseCode, readResponseCode: after.responseCode, fieldsMatch, deleteResponseCode, compatible, message };
+}
+
 /** Ancho real del campo "Código de PLU" (5 dígitos, confirmado con el
  * comando 5002) -- es el más chico de los dos campos que llevan el número
  * de PLU (el otro, "Número de PLU", es de 6), así que es el límite real:
