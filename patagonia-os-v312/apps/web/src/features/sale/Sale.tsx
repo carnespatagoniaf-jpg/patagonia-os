@@ -1090,6 +1090,15 @@ export function Sale() {
    * el navegador después). Imprime un ticket de prueba en el momento para
    * confirmar que además de emparejarse, imprime bien -- así no queda
    * "conectada" en el papel pero rota en la práctica. */
+  /** El error real de WebUSB cuando Windows ya tiene un driver instalado
+   * para esta impresora (el caso más común, ej. la "POS-80C" genérica) es
+   * un mensaje técnico en inglés que no le dice nada a un dueño de
+   * carnicería -- "Unable to claim interface" o similar. En vez de mostrar
+   * eso tal cual, se distingue el caso de "cancelaste el selector sin
+   * elegir nada" (NotFoundError, no es un error real) del resto, y a
+   * cualquier otro error se le agrega la explicación + el siguiente paso
+   * (modo kiosco), en vez de dejar a alguien no técnico con un mensaje en
+   * inglés y ningún rumbo. */
   async function handleConnectThermalPrinter() {
     setMessage("");
     setThermalConnectBusy(true);
@@ -1098,7 +1107,14 @@ export function Sale() {
       setThermalPaired(true);
       setMessage("Impresora térmica conectada -- imprimió un ticket de prueba. De ahora en más, el comprobante sale ahí directo al cobrar (si tenés activado \"Imprimir automáticamente\" arriba), sin ningún diálogo.");
     } catch (err) {
-      setMessage(err instanceof Error ? `No se pudo conectar con la impresora: ${err.message}` : "No se pudo conectar con la impresora térmica.");
+      if (err instanceof Error && err.name === "NotFoundError") {
+        setMessage("No elegiste ninguna impresora de la lista -- probá de nuevo y seleccioná una.");
+      } else {
+        const raw = err instanceof Error ? err.message : String(err);
+        setMessage(
+          `No se pudo conectar directo por USB (detalle técnico: ${raw}). Es normal si Windows ya tiene instalado el driver de esta impresora para el diálogo de impresión normal -- en ese caso este camino 100% automático no va a funcionar para este equipo. Usá el modo kiosco como alternativa (link para descargarlo más abajo).`
+        );
+      }
     } finally {
       setThermalConnectBusy(false);
     }
@@ -1223,6 +1239,10 @@ export function Sale() {
                     {thermalPaired
                       ? "Impresora térmica conectada en este navegador -- el ticket va a salir ahí solo, sin diálogo, mientras esté prendido \"Imprimir automáticamente\"."
                       : "Conectala una sola vez (elegila de la lista que te va a mostrar Chrome) para que el ticket salga solo al cobrar, sin ningún diálogo -- igual que se conecta la balanza en Stock."}
+                  </p>
+                  <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>
+                    ¿La conexión directa no funcionó (suele pasar cuando Windows ya tiene un driver instalado para esa impresora)? Descargá este script y ejecutalo en la PC del Mostrador -- configura un acceso directo especial que aprueba la impresión sola, sin mostrar ningún diálogo:{" "}
+                    <a href="/kiosco-impresora.bat" download>kiosco-impresora.bat</a>
                   </p>
                 </div>
               )}

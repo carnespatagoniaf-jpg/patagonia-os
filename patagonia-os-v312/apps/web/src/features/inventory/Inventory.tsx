@@ -533,7 +533,7 @@ export function Inventory() {
                 </button>
               </div>
               <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
-                Si es una balanza que no probamos todavía (no una Report LT), usá "Verificar compatibilidad" antes de mandar productos: carga y borra un producto de prueba para confirmar que entiende el mismo formato, sin arriesgar datos reales.
+                Si es una balanza que no probamos todavía (Report NX, Novel Eco, Aura Eco, o cualquier otra que no sea esta Report LT), usá "Verificar compatibilidad" antes de mandar productos: carga y borra un producto de prueba para confirmar que entiende el mismo formato, sin arriesgar datos reales. No hace falta saber el modelo -- la prueba es la misma para cualquiera.
               </p>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
                 <details style={{ display: "inline-block" }}>
