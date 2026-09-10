@@ -48,6 +48,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // producción: mismo usuario, mismo filtro, una respuesta con la fila y
   // la otra sin ninguna). Esta bandera evita la carrera.
   const signingInRef = useRef(false);
+  // Para poder saber, dentro del listener de onAuthStateChange (que se
+  // registra una sola vez, con closure fijo), si el perfil YA cargado
+  // corresponde al usuario de la sesión actual -- leer el estado `profile`
+  // ahí adentro daría siempre su valor viejo del montaje inicial.
+  const loadedProfileUserIdRef = useRef<string | null>(null);
 
   async function loadProfile(userId: string) {
     if (!supabase) return;
@@ -66,6 +71,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data: isAdmin } = await supabase.rpc("am_i_platform_admin");
       setIsPlatformAdmin(Boolean(isAdmin));
       setProfile(null);
+      loadedProfileUserIdRef.current = null;
       if (!isAdmin) throw new Error("No se encontró tu perfil.");
       return;
     }
@@ -76,6 +82,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!companyActive) throw new Error("Esta empresa está desactivada.");
     setIsPlatformAdmin(false);
     setProfile(data as UserProfile);
+    loadedProfileUserIdRef.current = userId;
   }
 
   useEffect(() => {
@@ -96,6 +103,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (signingInRef.current) {
         // signIn() está manejando este login directamente; evitar una
         // segunda llamada a loadProfile en paralelo.
+        setLoading(false);
+        return;
+      }
+      // TOKEN_REFRESHED es solo una renovación del token del mismo usuario
+      // -- pasa sola cada tanto, por ejemplo al volver a la pestaña después
+      // de un rato. Si ya tenemos el perfil de ESE usuario cargado, no hace
+      // falta pedirlo de nuevo -- antes esto igual volvía a consultar el
+      // perfil en cada refresh, y un error transitorio de red durante esa
+      // consulta terminaba cerrando la sesión del usuario sin motivo real.
+      if (event === "TOKEN_REFRESHED" && nextSession?.user && loadedProfileUserIdRef.current === nextSession.user.id) {
         setLoading(false);
         return;
       }
@@ -130,6 +147,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (supabase) await supabase.auth.signOut();
     setSession(null);
     setProfile(null);
+    loadedProfileUserIdRef.current = null;
     setPasswordRecovery(false);
     setIsPlatformAdmin(false);
   }
