@@ -20,13 +20,10 @@ import {
   deleteScalePlu,
   describeResponseCode,
   getScaleSerialSettings,
-  inspectPluNeighborhood,
   isScalePortPaired,
   isScaleSerialSupported,
   planScaleSync,
   readScalePlu,
-  runPreservePriceTest,
-  runSyntheticPluTest,
   saveScaleSerialSettings,
   sendScalePing,
   syncOneProductToScale,
@@ -338,72 +335,6 @@ export function Inventory() {
     }
   }
 
-  async function handleInspectNeighborhood() {
-    const code = scaleTestCode.trim();
-    if (!code) {
-      setScaleLog("Ingresá un código para inspeccionar el vecindario (código-1, código, código+1).");
-      return;
-    }
-    setScaleBusy(true);
-    setScaleLog("Leyendo vecindario (mirá también la consola, F12)...");
-    try {
-      const results = await inspectPluNeighborhood(code);
-      const lines = results.map(
-        (r) => `Argumento "${r.argument}" -- código "${r.responseCode}" -- PLU interno "${r.internalPluNumber}" -- nombre "${r.name}" -- precio "${r.price}"`
-      );
-      setScaleLog(lines.join("\n"));
-    } catch (err) {
-      setScaleLog(err instanceof Error ? err.message : "Falló la inspección.");
-    } finally {
-      setScaleBusy(false);
-    }
-  }
-
-  async function handleSyntheticTest() {
-    setScaleBusy(true);
-    setScaleLog("Prueba sintética en curso (PLU 90001, zona sin datos reales) -- mirá la consola (F12) para el detalle completo...");
-    try {
-      const r = await runSyntheticPluTest();
-      const parts = [
-        `Zona vacía -- PLU interno más cercano encontrado: "${r.zoneEmptyCheck.internalPluNumber || "(ninguno)"}".`,
-        `1ra escritura (TEST SINTETICO A) -- código "${r.firstWriteResponseCode}". Relectura: PLU "${r.afterFirstWrite.internalPluNumber}" nombre "${r.afterFirstWrite.name}".`,
-        `2da escritura MISMO PLU (TEST SINTETICO B) -- código "${r.secondWriteResponseCode}". Relectura: PLU "${r.afterSecondWrite.internalPluNumber}" nombre "${r.afterSecondWrite.name}".`,
-        r.updatedInPlace
-          ? "RESULTADO: 2005 SÍ modifica en el lugar -- no duplica."
-          : "RESULTADO: 2005 NO modificó en el lugar (sigue el valor viejo o algo distinto) -- parece agregar en vez de modificar."
-      ];
-      setScaleLog(parts.join(" "));
-    } catch (err) {
-      setScaleLog(err instanceof Error ? err.message : "Falló la prueba sintética.");
-    } finally {
-      setScaleBusy(false);
-    }
-  }
-
-  async function handlePreservePriceTest() {
-    const code = scaleTestCode.trim();
-    if (!code) {
-      setScaleLog("Ingresá el código del producto (ej. 20) para la prueba.");
-      return;
-    }
-    setScaleBusy(true);
-    setScaleLog("Prueba definitiva en curso -- lee, cambia SOLO el precio a un valor de prueba bien distinto ($77.777), preserva todo lo demás, reescribe y relee (mirá la consola, F12)...");
-    try {
-      const r = await runPreservePriceTest(code, 77777);
-      const parts = [
-        `Precio antes: "${r.before.fields[8]}".`,
-        `Escritura -- código "${r.writeResponseCode}".`,
-        `Precio después: "${r.after.fields[8]}".`,
-        r.priceUpdated ? "RESULTADO A: el precio SÍ se actualizó preservando el resto de los campos." : "RESULTADO B: el precio NO se actualizó ni preservando todo lo demás."
-      ];
-      setScaleLog(parts.join(" "));
-    } catch (err) {
-      setScaleLog(err instanceof Error ? err.message : "Falló la prueba definitiva.");
-    } finally {
-      setScaleBusy(false);
-    }
-  }
-
   function onCostOrMarginChange(draft: DraftProduct, setDraft: (d: DraftProduct) => void, field: "cost" | "margin") {
     return (value: string) => {
       const cost = field === "cost" ? parseAmount(value) : parseAmount(draft.cost);
@@ -558,127 +489,127 @@ export function Inventory() {
         </p>
 
         {showScalePanel && (
-          <div style={{ border: "1px solid #eef0f3", borderRadius: 8, padding: 14, marginBottom: 14 }}>
-            <p style={{ margin: "0 0 6px", fontWeight: 700 }}>Carga directa a la balanza por cable (sin iTegra)</p>
-            <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
-              Le manda los productos directo a la balanza Kretz por el protocolo propio de Kretz, cable serie RS232 (o USB con adaptador serie) conectado a esta PC -- no usa el software de iTegra/Simplex para nada. Solo funciona en Chrome o Edge. La primera vez el navegador va a pedir que elijas el puerto.
+          <div style={{ border: "1px solid #eef0f3", borderRadius: 10, padding: 18, marginBottom: 14 }}>
+            <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 16 }}>Balanza por cable</p>
+            <p className="muted" style={{ margin: "0 0 16px", fontSize: 13 }}>
+              Manda los productos directo a la balanza Kretz por cable, sin usar el software de iTegra. Solo funciona en Chrome o Edge.
             </p>
             {!isScaleSerialSupported() && (
-              <p style={{ margin: "0 0 10px", color: "#8a4b00", fontWeight: 700 }}>
-                Este navegador no soporta esto -- abrí Patagonia OS en Chrome o Edge para usar la balanza por cable.
+              <p style={{ margin: "0 0 14px", color: "#8a4b00", fontWeight: 700 }}>
+                Este navegador no soporta esto -- abrí Patagonia OS en Chrome o Edge.
               </p>
             )}
-            <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", marginBottom: 10, fontSize: 14 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                Velocidad del puerto
-                <select
-                  value={scaleSettings.baudRate}
-                  onChange={(e) => updateScaleSettings({ baudRate: Number(e.target.value) })}
-                >
-                  {[2400, 4800, 9600, 19200, 38400, 57600, 115200].map((rate) => (
-                    <option key={rate} value={rate}>{rate}</option>
-                  ))}
-                </select>
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                ID de equipo
-                <input
-                  style={{ width: 50 }}
-                  value={scaleSettings.equipmentId}
-                  onChange={(e) => updateScaleSettings({ equipmentId: e.target.value.slice(0, 2) })}
-                />
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                Tipo de equipo
-                <input
-                  style={{ width: 40 }}
-                  value={scaleSettings.deviceType}
-                  onChange={(e) => updateScaleSettings({ deviceType: e.target.value.slice(0, 1).toUpperCase() })}
-                />
-              </label>
-            </div>
-            <p className="muted" style={{ margin: "0 0 10px", fontSize: 12 }}>
-              Protocolo confirmado contra una balanza Report LT real: 115200 baudios, tipo de equipo "C". Si conectás un modelo distinto y "Probar conexión" no responde nada, puede que necesite otros valores acá.
-            </p>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
-              <button disabled={scaleBusy || !isScaleSerialSupported()} onClick={handleConnectScale}>
-                {scalePortReady ? "Volver a elegir puerto" : "Conectar balanza"}
-              </button>
-              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handlePingScale}>
-                Probar conexión
-              </button>
-              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={() => setShowScalePreview((v) => !v)}>
-                {showScalePreview ? "Ocultar vista previa" : `Vista previa (${scaleSyncPlan.toSend.length} productos)`}
-              </button>
-              <button disabled={scaleBusy || !isScaleSerialSupported()} onClick={handleSyncScale}>
-                {scaleBusy && scaleSyncProgress ? `Enviando… ${scaleSyncProgress.done}/${scaleSyncProgress.total}` : "Enviar todos los productos"}
-              </button>
-            </div>
-            {showScalePreview && (
-              <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid #eef0f3", borderRadius: 6, padding: 10, marginBottom: 10, fontSize: 13 }}>
-                <p style={{ margin: "0 0 8px", fontWeight: 700 }}>
-                  Se enviarían {scaleSyncPlan.toSend.length} de {products.length} productos totales
-                  {" "}({scaleSyncPlan.skipped.length} salteados + {scaleSyncPlan.inactive.length} inactivos = {scaleSyncPlan.toSend.length + scaleSyncPlan.skipped.length + scaleSyncPlan.inactive.length} de {products.length}).
-                </p>
-                <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                  <thead>
-                    <tr style={{ textAlign: "left" }}>
-                      <th>Código</th>
-                      <th>PLU interno</th>
-                      <th>Nombre</th>
-                      <th>Precio</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {scaleSyncPlan.toSend.map((p) => (
-                      <tr key={p.id}>
-                        <td>{p.code}</td>
-                        <td>{String(Number(p.code)).padStart(6, "0")}</td>
-                        <td>{p.name}</td>
-                        <td>{formatMoney(p.priceRetail)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                {scaleSyncPlan.skipped.length > 0 && (
-                  <>
-                    <p style={{ margin: "10px 0 4px", fontWeight: 700 }}>Salteados (no se envían):</p>
-                    <ul style={{ margin: 0, paddingLeft: 18 }}>
-                      {scaleSyncPlan.skipped.map((s) => (
-                        <li key={s.product.id}>{s.product.name} ({s.product.code}) -- {s.reason}</li>
-                      ))}
-                    </ul>
-                  </>
-                )}
+
+            <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 14, marginBottom: 14 }}>
+              <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 13, textTransform: "uppercase", color: "#666" }}>1. Conexión</p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button disabled={scaleBusy || !isScaleSerialSupported()} onClick={handleConnectScale}>
+                  {scalePortReady ? "Volver a elegir puerto" : "Conectar balanza"}
+                </button>
+                <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handlePingScale}>
+                  Probar conexión
+                </button>
+                <details style={{ display: "inline-block" }}>
+                  <summary className="secondary" style={{ display: "inline-block", cursor: "pointer", padding: "10px 14px", border: "1px solid #ccc", borderRadius: 6 }}>
+                    Configuración avanzada
+                  </summary>
+                  <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", marginTop: 10, fontSize: 14 }}>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      Velocidad
+                      <select value={scaleSettings.baudRate} onChange={(e) => updateScaleSettings({ baudRate: Number(e.target.value) })}>
+                        {[2400, 4800, 9600, 19200, 38400, 57600, 115200].map((rate) => (
+                          <option key={rate} value={rate}>{rate}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      ID de equipo
+                      <input style={{ width: 50 }} value={scaleSettings.equipmentId} onChange={(e) => updateScaleSettings({ equipmentId: e.target.value.slice(0, 2) })} />
+                    </label>
+                    <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                      Tipo de equipo
+                      <input style={{ width: 40 }} value={scaleSettings.deviceType} onChange={(e) => updateScaleSettings({ deviceType: e.target.value.slice(0, 1).toUpperCase() })} />
+                    </label>
+                  </div>
+                  <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
+                    Ya configurado para una Report LT (115200 baudios, tipo "C"). Solo tocar esto si conectás un modelo distinto.
+                  </p>
+                </details>
               </div>
-            )}
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
-              <input
-                placeholder="Código de un producto (ej. 12)"
-                style={{ width: 200 }}
-                value={scaleTestCode}
-                onChange={(e) => setScaleTestCode(e.target.value)}
-              />
-              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handleSendOneProduct}>
-                Enviar solo este producto
-              </button>
-              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handleReadPlu}>
-                Leer este PLU de la balanza
-              </button>
-              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" style={{ color: "#8a1f11" }} onClick={handleDeletePlu}>
-                Borrar este PLU de la balanza
-              </button>
-              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handleInspectNeighborhood}>
-                Inspeccionar vecindario (código-1, código, código+1)
-              </button>
-              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handleSyntheticTest}>
-                Prueba sintética (PLU 90001, sin tocar productos reales)
-              </button>
-              <button disabled={scaleBusy || !isScaleSerialSupported()} onClick={handlePreservePriceTest}>
-                Prueba definitiva: cambiar SOLO precio, preservando todo lo demás
-              </button>
             </div>
-            {scaleLog && <p style={{ margin: 0, fontSize: 13, whiteSpace: "pre-wrap" }}>{scaleLog}</p>}
+
+            <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 14, marginBottom: 14 }}>
+              <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 13, textTransform: "uppercase", color: "#666" }}>2. Envío masivo</p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={() => setShowScalePreview((v) => !v)}>
+                  {showScalePreview ? "Ocultar vista previa" : `Vista previa (${scaleSyncPlan.toSend.length} productos)`}
+                </button>
+                <button disabled={scaleBusy || !isScaleSerialSupported()} onClick={handleSyncScale}>
+                  {scaleBusy && scaleSyncProgress ? `Enviando… ${scaleSyncProgress.done}/${scaleSyncProgress.total}` : "Enviar todos los productos"}
+                </button>
+              </div>
+              {showScalePreview && (
+                <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid #eef0f3", borderRadius: 6, padding: 10, marginTop: 10, fontSize: 13 }}>
+                  <p style={{ margin: "0 0 8px", fontWeight: 700 }}>
+                    Se enviarían {scaleSyncPlan.toSend.length} de {products.length} productos
+                    {" "}({scaleSyncPlan.skipped.length} salteados, {scaleSyncPlan.inactive.length} inactivos).
+                  </p>
+                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                    <thead>
+                      <tr style={{ textAlign: "left" }}>
+                        <th>Código</th>
+                        <th>Nombre</th>
+                        <th>Precio</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {scaleSyncPlan.toSend.map((p) => (
+                        <tr key={p.id}>
+                          <td>{p.code}</td>
+                          <td>{p.name}</td>
+                          <td>{formatMoney(p.priceRetail)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  {scaleSyncPlan.skipped.length > 0 && (
+                    <>
+                      <p style={{ margin: "10px 0 4px", fontWeight: 700 }}>Salteados (no se envían):</p>
+                      <ul style={{ margin: 0, paddingLeft: 18 }}>
+                        {scaleSyncPlan.skipped.map((s) => (
+                          <li key={s.product.id}>{s.product.name} ({s.product.code}) -- {s.reason}</li>
+                        ))}
+                      </ul>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 14 }}>
+              <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 13, textTransform: "uppercase", color: "#666" }}>3. Un solo producto</p>
+              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                <input
+                  placeholder="Código del producto (ej. 12)"
+                  style={{ width: 200 }}
+                  value={scaleTestCode}
+                  onChange={(e) => setScaleTestCode(e.target.value)}
+                />
+                <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handleSendOneProduct}>
+                  Enviar
+                </button>
+                <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handleReadPlu}>
+                  Leer de la balanza
+                </button>
+                <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" style={{ color: "#8a1f11" }} onClick={handleDeletePlu}>
+                  Borrar de la balanza
+                </button>
+              </div>
+            </div>
+
+            {scaleLog && (
+              <p style={{ margin: "14px 0 0", fontSize: 13, whiteSpace: "pre-wrap", background: "#f7f7f8", borderRadius: 6, padding: 10 }}>{scaleLog}</p>
+            )}
           </div>
         )}
 
