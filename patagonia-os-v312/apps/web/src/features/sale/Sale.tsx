@@ -152,7 +152,11 @@ export function Sale() {
   const { accounts, adjust } = useTreasury();
   const { suppliers } = useSuppliers();
   const { employees } = useEmployees();
-  const canManageTreasury = can(profile, "treasury.manage");
+  // "treasury.manage" (dueño/admin) da acceso a la pantalla completa de
+  // Tesorería; "pos.treasury" es más angosto y solo destraba estos botones
+  // de Mostrador (caja/proveedor/vale) para un cajero, sin abrirle Tesorería
+  // -- ver el comentario en permissions.ts.
+  const canManageTreasury = can(profile, "treasury.manage") || can(profile, "pos.treasury");
 
   const [products, setProducts] = useState<Product[]>(isSupabaseConfigured ? [] : demoProducts);
   const [categories, setCategories] = useState<ProductCategory[]>([]);

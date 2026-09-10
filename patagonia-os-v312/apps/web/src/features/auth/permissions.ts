@@ -10,6 +10,7 @@ export type Permission =
   | "inventory.adjust"
   | "purchases.manage"
   | "treasury.manage"
+  | "pos.treasury"
   | "employees.manage"
   | "profitability.view"
   | "carcass.manage"
@@ -35,6 +36,17 @@ export type Permission =
 // ni Stock, ni (por supuesto) Tesorería/Compras/Empleados. No hace falta
 // una pantalla aparte para ocultarle el resto, alcanza con darle de alta
 // como "Cajero" (no "Admin") en Usuarios.
+// "pos.treasury" es un permiso angosto a propósito: solo destraba los
+// botones de Mostrador para cargar Movimiento de caja / Pago a proveedor /
+// Vale a empleado durante el turno (y sus comprobantes). No es lo mismo que
+// "treasury.manage" -- ese sigue siendo el único que abre la pantalla
+// completa de Tesorería (todas las cuentas, saldos y traspasos de la
+// empresa), que un cajero no debería ver. El backend (RPCs
+// adjust_treasury_account / register_pos_shift_transfer /
+// register_supplier_payment_from_pos_shift / register_employee_vale_from_pos_shift)
+// no exige ningún rol puntual -- ya alcanzaba con pertenecer a la empresa y
+// tener un turno abierto -- así que este permiso es la única traba real y
+// se puede sumar sin tocar SQL.
 // "products.view" es distinto de "inventory.view" (Stock): Productos es de
 // solo lectura y nunca muestra costo/margen (solo nombre y precio de
 // venta, con opción de imprimir una etiqueta para la góndola) — pensada
@@ -52,6 +64,7 @@ export const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> 
     "inventory.adjust",
     "purchases.manage",
     "treasury.manage",
+    "pos.treasury",
     "employees.manage",
     "profitability.view",
     "carcass.manage",
@@ -62,7 +75,7 @@ export const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> 
     "users.manage"
   ],
   manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view"],
-  cashier: ["pos.sell", "products.view", "sales.create"],
+  cashier: ["pos.sell", "products.view", "sales.create", "pos.treasury"],
   production: ["dashboard.view", "inventory.view", "inventory.adjust"],
   readonly: ["dashboard.view", "inventory.view", "reports.view"]
 };
@@ -78,6 +91,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   "inventory.adjust": "Ajustar stock",
   "purchases.manage": "Compras y proveedores",
   "treasury.manage": "Tesorería",
+  "pos.treasury": "Movimientos de caja en Mostrador (caja, proveedor, vale)",
   "employees.manage": "Empleados",
   "profitability.view": "Rentabilidad",
   "carcass.manage": "Despiece",
