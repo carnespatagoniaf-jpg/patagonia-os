@@ -15,6 +15,24 @@ import {
 } from "./product-categories-service";
 import { parseAmount } from "../../lib/money";
 import { downloadScaleExportCsv } from "./scale-export";
+import {
+  connectScalePort,
+  deleteScalePlu,
+  describeResponseCode,
+  getScaleSerialSettings,
+  inspectPluNeighborhood,
+  isScalePortPaired,
+  isScaleSerialSupported,
+  planScaleSync,
+  readScalePlu,
+  runPreservePriceTest,
+  runSyntheticPluTest,
+  saveScaleSerialSettings,
+  sendScalePing,
+  syncOneProductToScale,
+  syncProductsToScale,
+  type ScaleSerialSettings
+} from "./scale-serial";
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
@@ -76,6 +94,19 @@ export function Inventory() {
   const [renamingCategoryId, setRenamingCategoryId] = useState<string | null>(null);
   const [renameCategoryName, setRenameCategoryName] = useState("");
 
+  const [showScalePanel, setShowScalePanel] = useState(false);
+  const [scaleSettings, setScaleSettings] = useState<ScaleSerialSettings>(getScaleSerialSettings());
+  const [scalePortReady, setScalePortReady] = useState(false);
+  const [scaleBusy, setScaleBusy] = useState(false);
+  const [scaleSyncProgress, setScaleSyncProgress] = useState<{ done: number; total: number } | null>(null);
+  const [scaleLog, setScaleLog] = useState("");
+  const [scaleTestCode, setScaleTestCode] = useState("");
+  const [showScalePreview, setShowScalePreview] = useState(false);
+
+  useEffect(() => {
+    void isScalePortPaired().then(setScalePortReady);
+  }, []);
+
   async function reload() {
     if (!isSupabaseConfigured || !branchId) return;
     setLoading(true);
@@ -103,6 +134,7 @@ export function Inventory() {
   }
 
   const visibleProducts = categoryFilter ? products.filter((p) => p.categoryId === categoryFilter) : products;
+  const scaleSyncPlan = planScaleSync(products);
 
   async function handleCreateCategory() {
     try {
@@ -148,6 +180,202 @@ export function Inventory() {
       await reload();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo borrar la categoría.");
+    }
+  }
+
+  function updateScaleSettings(patch: Partial<ScaleSerialSettings>) {
+    const next = { ...scaleSettings, ...patch };
+    setScaleSettings(next);
+    saveScaleSerialSettings(next);
+  }
+
+  async function handleConnectScale() {
+    setScaleBusy(true);
+    setScaleLog("");
+    try {
+      await connectScalePort();
+      setScalePortReady(true);
+      setScaleLog("Puerto conectado. Ahora probá la conexión antes de sincronizar productos.");
+    } catch (err) {
+      setScaleLog(err instanceof Error ? err.message : "No se pudo conectar con el puerto.");
+    } finally {
+      setScaleBusy(false);
+    }
+  }
+
+  async function handlePingScale() {
+    setScaleBusy(true);
+    setScaleLog("");
+    try {
+      const result = await sendScalePing();
+      setScaleLog(
+        result.ok
+          ? `La balanza respondió: ${result.rawResponseHex || "(sin bytes)"} -- código "${result.responseCode}": ${describeResponseCode(result.responseCode)}`
+          : "La balanza no respondió nada -- revisá el cable, o probá otra velocidad de puerto."
+      );
+    } catch (err) {
+      setScaleLog(err instanceof Error ? err.message : "Falló la prueba de conexión.");
+    } finally {
+      setScaleBusy(false);
+    }
+  }
+
+  async function handleSyncScale() {
+    setScaleBusy(true);
+    setScaleLog("");
+    setScaleSyncProgress({ done: 0, total: 0 });
+    try {
+      const result = await syncProductsToScale(products, categories, (done, total) => setScaleSyncProgress({ done, total }));
+      const okCount = result.responseCodeCounts["01"] ?? 0;
+      const failedCount = result.attempted - okCount;
+      const codesSummary = Object.entries(result.responseCodeCounts)
+        .filter(([code]) => code !== "01")
+        .map(([code, count]) => `${count} con código "${code}" (${describeResponseCode(code)})`)
+        .join(", ");
+      const parts = [`${okCount} enviados con éxito de ${result.attempted} intentados.`];
+      if (failedCount > 0 && codesSummary) parts.push(`Fallidos: ${codesSummary}.`);
+      if (result.failed.length) {
+        parts.push(
+          "Detalle: " +
+            result.failed.map((f) => `${f.product.name} (${f.product.code}, código "${f.responseCode}")`).join(", ") +
+            "."
+        );
+      }
+      if (result.skipped.length) parts.push(`${result.skipped.length} sin código numérico (no se enviaron).`);
+      if (result.noResponse.length) parts.push(`${result.noResponse.length} sin ninguna respuesta.`);
+      if (result.transportErrors.length) {
+        parts.push(`${result.transportErrors.length} con error de conexión (${result.transportErrors[0].message}) -- probá enviar de nuevo, capaz fue un hipo del cable.`);
+      }
+      setScaleLog(parts.join(" "));
+    } catch (err) {
+      setScaleLog(err instanceof Error ? err.message : "Falló el envío a la balanza.");
+    } finally {
+      setScaleBusy(false);
+      setScaleSyncProgress(null);
+    }
+  }
+
+  async function handleSendOneProduct() {
+    const product = products.find((p) => p.code === scaleTestCode.trim());
+    if (!product) {
+      setScaleLog(`No encontré ningún producto con código "${scaleTestCode.trim()}".`);
+      return;
+    }
+    setScaleBusy(true);
+    setScaleLog("");
+    try {
+      const result = await syncOneProductToScale(product, categories);
+      setScaleLog(
+        `Mandé "${product.name}" (código ${product.code}, $${product.priceRetail}). Respuesta: ${result.rawResponseHex} -- código "${result.responseCode}": ${describeResponseCode(result.responseCode)}`
+      );
+    } catch (err) {
+      setScaleLog(err instanceof Error ? err.message : "Falló el envío del producto.");
+    } finally {
+      setScaleBusy(false);
+    }
+  }
+
+  async function handleReadPlu() {
+    if (!scaleTestCode.trim()) {
+      setScaleLog("Ingresá un código de PLU para leer.");
+      return;
+    }
+    setScaleBusy(true);
+    setScaleLog("");
+    try {
+      const result = await readScalePlu(scaleTestCode.trim());
+      setScaleLog(
+        `Leí PLU ${scaleTestCode.trim()}. Respuesta: ${result.rawResponseHex} -- código "${result.responseCode}": ${describeResponseCode(result.responseCode)}. Datos como texto: "${result.rawDataAscii}"`
+      );
+    } catch (err) {
+      setScaleLog(err instanceof Error ? err.message : "Falló la lectura del PLU.");
+    } finally {
+      setScaleBusy(false);
+    }
+  }
+
+  async function handleDeletePlu() {
+    const code = scaleTestCode.trim();
+    if (!code) {
+      setScaleLog("Ingresá un código de PLU para borrar.");
+      return;
+    }
+    if (!window.confirm(`¿Seguro que querés borrar el PLU ${code} de la balanza? Esto borra el registro de la balanza (no de Patagonia OS).`)) return;
+    setScaleBusy(true);
+    setScaleLog("");
+    try {
+      const result = await deleteScalePlu(code);
+      setScaleLog(`Borré PLU ${code}. Respuesta: ${result.rawResponseHex} -- código "${result.responseCode}": ${describeResponseCode(result.responseCode)}`);
+    } catch (err) {
+      setScaleLog(err instanceof Error ? err.message : "Falló el borrado del PLU.");
+    } finally {
+      setScaleBusy(false);
+    }
+  }
+
+  async function handleInspectNeighborhood() {
+    const code = scaleTestCode.trim();
+    if (!code) {
+      setScaleLog("Ingresá un código para inspeccionar el vecindario (código-1, código, código+1).");
+      return;
+    }
+    setScaleBusy(true);
+    setScaleLog("Leyendo vecindario (mirá también la consola, F12)...");
+    try {
+      const results = await inspectPluNeighborhood(code);
+      const lines = results.map(
+        (r) => `Argumento "${r.argument}" -- código "${r.responseCode}" -- PLU interno "${r.internalPluNumber}" -- nombre "${r.name}" -- precio "${r.price}"`
+      );
+      setScaleLog(lines.join("\n"));
+    } catch (err) {
+      setScaleLog(err instanceof Error ? err.message : "Falló la inspección.");
+    } finally {
+      setScaleBusy(false);
+    }
+  }
+
+  async function handleSyntheticTest() {
+    setScaleBusy(true);
+    setScaleLog("Prueba sintética en curso (PLU 90001, zona sin datos reales) -- mirá la consola (F12) para el detalle completo...");
+    try {
+      const r = await runSyntheticPluTest();
+      const parts = [
+        `Zona vacía -- PLU interno más cercano encontrado: "${r.zoneEmptyCheck.internalPluNumber || "(ninguno)"}".`,
+        `1ra escritura (TEST SINTETICO A) -- código "${r.firstWriteResponseCode}". Relectura: PLU "${r.afterFirstWrite.internalPluNumber}" nombre "${r.afterFirstWrite.name}".`,
+        `2da escritura MISMO PLU (TEST SINTETICO B) -- código "${r.secondWriteResponseCode}". Relectura: PLU "${r.afterSecondWrite.internalPluNumber}" nombre "${r.afterSecondWrite.name}".`,
+        r.updatedInPlace
+          ? "RESULTADO: 2005 SÍ modifica en el lugar -- no duplica."
+          : "RESULTADO: 2005 NO modificó en el lugar (sigue el valor viejo o algo distinto) -- parece agregar en vez de modificar."
+      ];
+      setScaleLog(parts.join(" "));
+    } catch (err) {
+      setScaleLog(err instanceof Error ? err.message : "Falló la prueba sintética.");
+    } finally {
+      setScaleBusy(false);
+    }
+  }
+
+  async function handlePreservePriceTest() {
+    const code = scaleTestCode.trim();
+    if (!code) {
+      setScaleLog("Ingresá el código del producto (ej. 20) para la prueba.");
+      return;
+    }
+    setScaleBusy(true);
+    setScaleLog("Prueba definitiva en curso -- lee, cambia SOLO el precio a un valor de prueba bien distinto ($77.777), preserva todo lo demás, reescribe y relee (mirá la consola, F12)...");
+    try {
+      const r = await runPreservePriceTest(code, 77777);
+      const parts = [
+        `Precio antes: "${r.before.fields[8]}".`,
+        `Escritura -- código "${r.writeResponseCode}".`,
+        `Precio después: "${r.after.fields[8]}".`,
+        r.priceUpdated ? "RESULTADO A: el precio SÍ se actualizó preservando el resto de los campos." : "RESULTADO B: el precio NO se actualizó ni preservando todo lo demás."
+      ];
+      setScaleLog(parts.join(" "));
+    } catch (err) {
+      setScaleLog(err instanceof Error ? err.message : "Falló la prueba definitiva.");
+    } finally {
+      setScaleBusy(false);
     }
   }
 
@@ -296,10 +524,138 @@ export function Inventory() {
           <button className="secondary" onClick={() => downloadScaleExportCsv(products, categories)}>
             Descargar lista para balanza
           </button>
+          <button className="secondary" onClick={() => setShowScalePanel((v) => !v)}>
+            {showScalePanel ? "Ocultar balanza por cable" : "Balanza por cable (sin iTegra)"}
+          </button>
         </div>
         <p className="muted" style={{ margin: "-8px 0 14px", fontSize: 12 }}>
           CSV para importar en el software de PC de la balanza (Kretz Simplex/iTegra) -- formato de prueba, todavía sin confirmar contra el importador real.
         </p>
+
+        {showScalePanel && (
+          <div style={{ border: "1px solid #eef0f3", borderRadius: 8, padding: 14, marginBottom: 14 }}>
+            <p style={{ margin: "0 0 6px", fontWeight: 700 }}>Carga directa a la balanza por cable (sin iTegra)</p>
+            <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
+              Le manda los productos directo a la balanza Kretz por el protocolo propio de Kretz, cable serie RS232 (o USB con adaptador serie) conectado a esta PC -- no usa el software de iTegra/Simplex para nada. Solo funciona en Chrome o Edge. La primera vez el navegador va a pedir que elijas el puerto.
+            </p>
+            {!isScaleSerialSupported() && (
+              <p style={{ margin: "0 0 10px", color: "#8a4b00", fontWeight: 700 }}>
+                Este navegador no soporta esto -- abrí Patagonia OS en Chrome o Edge para usar la balanza por cable.
+              </p>
+            )}
+            <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", marginBottom: 10, fontSize: 14 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                Velocidad del puerto
+                <select
+                  value={scaleSettings.baudRate}
+                  onChange={(e) => updateScaleSettings({ baudRate: Number(e.target.value) })}
+                >
+                  {[2400, 4800, 9600, 19200, 38400, 57600, 115200].map((rate) => (
+                    <option key={rate} value={rate}>{rate}</option>
+                  ))}
+                </select>
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                ID de equipo
+                <input
+                  style={{ width: 50 }}
+                  value={scaleSettings.equipmentId}
+                  onChange={(e) => updateScaleSettings({ equipmentId: e.target.value.slice(0, 2) })}
+                />
+              </label>
+              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                Tipo de equipo
+                <input
+                  style={{ width: 40 }}
+                  value={scaleSettings.deviceType}
+                  onChange={(e) => updateScaleSettings({ deviceType: e.target.value.slice(0, 1).toUpperCase() })}
+                />
+              </label>
+            </div>
+            <p className="muted" style={{ margin: "0 0 10px", fontSize: 12 }}>
+              Protocolo confirmado contra una balanza Report LT real: 115200 baudios, tipo de equipo "C". Si conectás un modelo distinto y "Probar conexión" no responde nada, puede que necesite otros valores acá.
+            </p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
+              <button disabled={scaleBusy || !isScaleSerialSupported()} onClick={handleConnectScale}>
+                {scalePortReady ? "Volver a elegir puerto" : "Conectar balanza"}
+              </button>
+              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handlePingScale}>
+                Probar conexión
+              </button>
+              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={() => setShowScalePreview((v) => !v)}>
+                {showScalePreview ? "Ocultar vista previa" : `Vista previa (${scaleSyncPlan.toSend.length} productos)`}
+              </button>
+              <button disabled={scaleBusy || !isScaleSerialSupported()} onClick={handleSyncScale}>
+                {scaleBusy && scaleSyncProgress ? `Enviando… ${scaleSyncProgress.done}/${scaleSyncProgress.total}` : "Enviar todos los productos"}
+              </button>
+            </div>
+            {showScalePreview && (
+              <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid #eef0f3", borderRadius: 6, padding: 10, marginBottom: 10, fontSize: 13 }}>
+                <p style={{ margin: "0 0 8px", fontWeight: 700 }}>
+                  Se enviarían {scaleSyncPlan.toSend.length} de {products.length} productos totales
+                  {" "}({scaleSyncPlan.skipped.length} salteados + {scaleSyncPlan.inactive.length} inactivos = {scaleSyncPlan.toSend.length + scaleSyncPlan.skipped.length + scaleSyncPlan.inactive.length} de {products.length}).
+                </p>
+                <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                  <thead>
+                    <tr style={{ textAlign: "left" }}>
+                      <th>Código</th>
+                      <th>PLU interno</th>
+                      <th>Nombre</th>
+                      <th>Precio</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {scaleSyncPlan.toSend.map((p) => (
+                      <tr key={p.id}>
+                        <td>{p.code}</td>
+                        <td>{String(Number(p.code)).padStart(6, "0")}</td>
+                        <td>{p.name}</td>
+                        <td>{formatMoney(p.priceRetail)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {scaleSyncPlan.skipped.length > 0 && (
+                  <>
+                    <p style={{ margin: "10px 0 4px", fontWeight: 700 }}>Salteados (no se envían):</p>
+                    <ul style={{ margin: 0, paddingLeft: 18 }}>
+                      {scaleSyncPlan.skipped.map((s) => (
+                        <li key={s.product.id}>{s.product.name} ({s.product.code}) -- {s.reason}</li>
+                      ))}
+                    </ul>
+                  </>
+                )}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 10 }}>
+              <input
+                placeholder="Código de un producto (ej. 12)"
+                style={{ width: 200 }}
+                value={scaleTestCode}
+                onChange={(e) => setScaleTestCode(e.target.value)}
+              />
+              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handleSendOneProduct}>
+                Enviar solo este producto
+              </button>
+              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handleReadPlu}>
+                Leer este PLU de la balanza
+              </button>
+              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" style={{ color: "#8a1f11" }} onClick={handleDeletePlu}>
+                Borrar este PLU de la balanza
+              </button>
+              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handleInspectNeighborhood}>
+                Inspeccionar vecindario (código-1, código, código+1)
+              </button>
+              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handleSyntheticTest}>
+                Prueba sintética (PLU 90001, sin tocar productos reales)
+              </button>
+              <button disabled={scaleBusy || !isScaleSerialSupported()} onClick={handlePreservePriceTest}>
+                Prueba definitiva: cambiar SOLO precio, preservando todo lo demás
+              </button>
+            </div>
+            {scaleLog && <p style={{ margin: 0, fontSize: 13, whiteSpace: "pre-wrap" }}>{scaleLog}</p>}
+          </div>
+        )}
 
         {showCategoryManager && (
           <div className="panel" style={{ marginBottom: 16, padding: 14 }}>
