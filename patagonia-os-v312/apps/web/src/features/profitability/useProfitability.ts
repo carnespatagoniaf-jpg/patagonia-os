@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FixedCost, ProfitabilityPeriod, StockCount } from "@patagonia/domain";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
@@ -41,6 +41,7 @@ export function useProfitability() {
 
   const [stockCounts, setStockCounts] = useState<StockCount[]>([]);
   const [stockCountsLoading, setStockCountsLoading] = useState(false);
+  const demoStockCountsRef = useRef<StockCount[]>([]);
 
   const reload = useCallback(async () => {
     if (!isSupabaseConfigured) return;
@@ -135,7 +136,11 @@ export function useProfitability() {
 
   const loadStockCounts = useCallback(
     async (fromDate: string, toDate: string) => {
-      if (!isSupabaseConfigured || !branchId) return;
+      if (!isSupabaseConfigured) {
+        setStockCounts(demoStockCountsRef.current.filter((c) => c.countDate >= fromDate && c.countDate <= toDate));
+        return;
+      }
+      if (!branchId) return;
       setStockCountsLoading(true);
       try {
         setStockCounts(await listStockCounts(branchId, fromDate, toDate));
@@ -149,16 +154,34 @@ export function useProfitability() {
   const addStockCount = useCallback(
     async (input: Omit<SaveStockCountInput, "branchId">) => {
       if (!branchId) throw new Error("Tu usuario no tiene sucursal asignada.");
-      if (!isSupabaseConfigured) return;
+
+      if (!isSupabaseConfigured) {
+        const next = [
+          ...demoStockCountsRef.current.filter((c) => !(c.countDate === input.countDate && c.category === input.category)),
+          { id: crypto.randomUUID(), branchId, countDate: input.countDate, category: input.category, value: input.value }
+        ];
+        demoStockCountsRef.current = next;
+        setStockCounts(next);
+        return;
+      }
+
       await saveStockCount({ ...input, branchId });
     },
     [branchId]
   );
 
-  const removeStockCount = useCallback(async (stockCountId: string) => {
-    if (!isSupabaseConfigured) return;
-    await deleteStockCount(stockCountId);
-  }, []);
+  const removeStockCount = useCallback(
+    async (stockCountId: string) => {
+      if (!isSupabaseConfigured) {
+        const next = demoStockCountsRef.current.filter((c) => c.id !== stockCountId);
+        demoStockCountsRef.current = next;
+        setStockCounts(next);
+        return;
+      }
+      await deleteStockCount(stockCountId);
+    },
+    []
+  );
 
   const getStockNear = useCallback(
     async (date: string) => {

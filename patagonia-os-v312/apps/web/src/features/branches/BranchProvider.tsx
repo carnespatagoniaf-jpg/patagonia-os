@@ -5,6 +5,7 @@ import { can } from "../auth/permissions";
 import { createBranch, listBranches, setBranchSalesMode, type Branch, type SalesMode } from "./branches-service";
 
 const DEMO_BRANCH_ID = "demo-branch";
+const DEMO_BRANCH: Branch = { id: DEMO_BRANCH_ID, name: "Sucursal demo", sales_mode: null };
 
 interface BranchContextValue {
   branchId: string | null;
@@ -27,7 +28,7 @@ export function BranchProvider({ children }: { children: ReactNode }) {
   const { profile } = useAuth();
   const canSwitch = can(profile, "branches.manage");
 
-  const [branches, setBranches] = useState<Branch[]>([]);
+  const [branches, setBranches] = useState<Branch[]>(isSupabaseConfigured ? [] : [DEMO_BRANCH]);
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
