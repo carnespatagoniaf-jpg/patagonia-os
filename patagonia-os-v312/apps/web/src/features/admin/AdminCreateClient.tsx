@@ -162,6 +162,8 @@ export function AdminCreateClient() {
           <thead>
             <tr>
               <th>Negocio</th>
+              <th>Dueño</th>
+              <th>Email</th>
               <th className="num">Sucursales</th>
               <th className="num">Usuarios</th>
               <th>Alta</th>
@@ -173,6 +175,8 @@ export function AdminCreateClient() {
             {companies.map((company) => (
               <tr key={company.id}>
                 <td>{company.name}</td>
+                <td>{company.ownerFullName ?? "-"}</td>
+                <td>{company.ownerEmail ?? "-"}</td>
                 <td className="num">{company.branchCount}</td>
                 <td className="num">{company.userCount}</td>
                 <td>{formatDate(company.createdAt)}</td>

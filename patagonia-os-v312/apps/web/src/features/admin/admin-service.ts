@@ -45,6 +45,12 @@ export interface CompanySummary {
   createdAt: string;
   branchCount: number;
   userCount: number;
+  /** Dueño real de la empresa (profiles.role = 'owner') -- null si por
+   * algún motivo no tiene ningún perfil con ese rol. A diferencia del
+   * cartel de "cliente creado" (que solo se ve una vez), esto queda
+   * disponible siempre en la tabla de Clientes. */
+  ownerFullName: string | null;
+  ownerEmail: string | null;
 }
 
 export async function listCompanies(): Promise<CompanySummary[]> {
@@ -53,14 +59,19 @@ export async function listCompanies(): Promise<CompanySummary[]> {
   const { data, error } = await supabase.rpc("list_companies_for_admin");
   if (error) throw error;
 
-  interface Row { id: string; name: string; active: boolean; created_at: string; branch_count: number; user_count: number }
+  interface Row {
+    id: string; name: string; active: boolean; created_at: string; branch_count: number; user_count: number;
+    owner_full_name: string | null; owner_email: string | null;
+  }
   return ((data ?? []) as Row[]).map((row) => ({
     id: row.id,
     name: row.name,
     active: row.active,
     createdAt: row.created_at,
     branchCount: Number(row.branch_count),
-    userCount: Number(row.user_count)
+    userCount: Number(row.user_count),
+    ownerFullName: row.owner_full_name,
+    ownerEmail: row.owner_email
   }));
 }
 
