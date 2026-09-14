@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import type { Session, User } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "../../lib/supabase";
+import { clearStoredPosReceipt } from "../../lib/pos-receipt-storage";
 
 export interface UserProfile {
   id: string;
@@ -56,6 +57,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   async function loadProfile(userId: string) {
     if (!supabase) return;
+    // Si el usuario cambió (login con otra cuenta en la misma pestaña, sin
+    // pasar por signOut()), limpiar datos de sesión que no están scopeados
+    // por empresa -- por ej. el "Último comprobante" de Mostrador, que
+    // quedaba pegado de la cuenta anterior (ver pos-receipt-storage.ts).
+    if (loadedProfileUserIdRef.current && loadedProfileUserIdRef.current !== userId) clearStoredPosReceipt();
     const { data, error } = await supabase
       .from("profiles")
       .select("id,company_id,branch_id,full_name,role,active,denied_permissions,companies(active)")
@@ -150,6 +156,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     loadedProfileUserIdRef.current = null;
     setPasswordRecovery(false);
     setIsPlatformAdmin(false);
+    clearStoredPosReceipt();
   }
 
   async function sendPasswordReset(email: string) {

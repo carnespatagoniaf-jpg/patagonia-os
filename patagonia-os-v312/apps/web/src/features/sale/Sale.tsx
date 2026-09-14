@@ -3,6 +3,7 @@ import { Settings } from "lucide-react";
 import type { Product } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
+import { POS_LAST_RECEIPT_KEY } from "../../lib/pos-receipt-storage";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { useAuth } from "../auth/AuthProvider";
 import { can } from "../auth/permissions";
@@ -122,15 +123,15 @@ function saveAutoPrintEnabled(enabled: boolean): void {
   }
 }
 
-const LAST_RECEIPT_KEY = "patagonia-pos-last-receipt";
-
 /** El "Último comprobante" vivía solo en el estado de React -- al salir de
  * Mostrador (a Turnos, Productos, lo que sea) el componente se desmonta y
  * se perdía, aunque la venta ya esté guardada. sessionStorage lo mantiene
- * mientras dure la pestaña/turno, sin guardarlo para siempre. */
+ * mientras dure la pestaña/turno, sin guardarlo para siempre. AuthProvider
+ * limpia esta misma clave al cerrar sesión, para que no quede pegado el
+ * comprobante de una empresa al entrar con otra cuenta en la misma pestaña. */
 function loadStoredReceipt(): ReceiptState | null {
   try {
-    const raw = sessionStorage.getItem(LAST_RECEIPT_KEY);
+    const raw = sessionStorage.getItem(POS_LAST_RECEIPT_KEY);
     return raw ? (JSON.parse(raw) as ReceiptState) : null;
   } catch {
     return null;
@@ -139,8 +140,8 @@ function loadStoredReceipt(): ReceiptState | null {
 
 function saveStoredReceipt(receipt: ReceiptState | null): void {
   try {
-    if (receipt) sessionStorage.setItem(LAST_RECEIPT_KEY, JSON.stringify(receipt));
-    else sessionStorage.removeItem(LAST_RECEIPT_KEY);
+    if (receipt) sessionStorage.setItem(POS_LAST_RECEIPT_KEY, JSON.stringify(receipt));
+    else sessionStorage.removeItem(POS_LAST_RECEIPT_KEY);
   } catch {
     // sessionStorage lleno o bloqueado -- no es crítico.
   }
