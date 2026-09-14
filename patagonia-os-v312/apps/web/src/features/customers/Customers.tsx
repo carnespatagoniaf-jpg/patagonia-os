@@ -178,7 +178,7 @@ export function Customers() {
         type: "charge" as const,
         id: c.id,
         date: c.chargeDate,
-        detail: `Entrega · ${c.reason}`,
+        detail: `Venta · ${c.reason}`,
         debit: c.amount,
         credit: 0
       })),
@@ -234,8 +234,8 @@ export function Customers() {
       });
       setChargeCart([]);
       setChargeNote("");
-      setMessage("Entrega cargada -- se descontó el stock igual que en una venta.");
-      // Se muestra el remito de ESTA entrega al toque -- la mercadería tiene
+      setMessage("Venta registrada -- se descontó el stock, igual que en el Mostrador.");
+      // Se muestra el remito de ESTA venta al toque -- la mercadería tiene
       // que salir con la boleta en el momento, no buscarla después en el
       // historial (ahí es fácil confundir la de hoy con una vieja).
       setPrintCharge({
@@ -251,20 +251,20 @@ export function Customers() {
         }))
       });
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo cargar la entrega.");
+      setMessage(err instanceof Error ? err.message : "No se pudo registrar la venta.");
     } finally {
       setBusy(false);
     }
   }
 
   /** El remito se arma al toque con lo que ya está guardado (los items de
-   * la entrega) -- no hace falta cargar nada de nuevo, solo traerlos. */
+   * la venta) -- no hace falta cargar nada de nuevo, solo traerlos. */
   async function handleShowRemito(row: LedgerRow) {
     setRemitoBusyId(row.id);
     try {
       const items = await loadChargeItems(row.id);
       if (items.length === 0) {
-        setMessage("Esta entrega no tiene detalle de productos (se cargó con el formulario viejo de monto + texto).");
+        setMessage("Esta venta no tiene detalle de productos (se cargó con el formulario viejo de monto + texto).");
         return;
       }
       setPrintCharge({ date: row.date, reason: row.detail, amount: row.debit, items });
@@ -274,7 +274,7 @@ export function Customers() {
       // real la primera vez que esto falló.
       const raw = err instanceof Error ? err.message : typeof err === "object" && err !== null ? JSON.stringify(err) : String(err);
       const code = (err as { code?: string })?.code;
-      setMessage(`No se pudo cargar el detalle de la entrega. [detalle: ${raw}${code ? ` · code ${code}` : ""}]`);
+      setMessage(`No se pudo cargar el detalle de la venta. [detalle: ${raw}${code ? ` · code ${code}` : ""}]`);
     } finally {
       setRemitoBusyId(null);
     }
@@ -343,7 +343,7 @@ export function Customers() {
         });
       }
       setEditingRowKey(null);
-      setMessage(row.type === "charge" ? "Entrega actualizada." : "Pago actualizado.");
+      setMessage(row.type === "charge" ? "Venta actualizada." : "Pago actualizado.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo guardar el cambio.");
     } finally {
@@ -353,14 +353,14 @@ export function Customers() {
 
   async function handleDeleteRow(row: LedgerRow) {
     if (busy) return;
-    const label = row.type === "charge" ? "esta entrega" : "este pago";
+    const label = row.type === "charge" ? "esta venta" : "este pago";
     if (!window.confirm(`¿Seguro que querés borrar ${label}? No se puede deshacer.`)) return;
     setBusy(true);
     try {
       if (!selectedCustomer) return;
       if (row.type === "charge") {
         await removeCharge(selectedCustomer.id, row.id);
-        setMessage("Entrega borrada.");
+        setMessage("Venta borrada.");
       } else {
         await removePayment(selectedCustomer.id, row.id);
         setMessage("Pago borrado.");
@@ -382,7 +382,7 @@ export function Customers() {
         <div>
           <p className="eyebrow">CLIENTES</p>
           <h1>Clientes y cuenta corriente</h1>
-          <p className="muted">Clientes a los que les entregás mercadería sin cobrar en el momento (mayoristas, etc.) — los pagos que te hacen bajan el saldo y suben la caja.</p>
+          <p className="muted">Clientes a los que les vendés fiado, sin cobrar en el momento (mayoristas, etc.). Elegí un cliente de la lista y abajo vas a poder cargarle una venta o registrar un pago.</p>
         </div>
       </header>
 
@@ -439,7 +439,7 @@ export function Customers() {
           {selectedCustomer && !editingCustomer && (
             <div className="totals">
               <span>Cliente <b>{selectedCustomer.name}</b></span>
-              <span>Total entregado <b>{formatMoney(balance?.totalCharged ?? 0)}</b></span>
+              <span>Total vendido <b>{formatMoney(balance?.totalCharged ?? 0)}</b></span>
               <span>Pagado <b>{formatMoney(balance?.totalPaid ?? 0)}</b></span>
               <strong>Saldo (te debe) <b>{formatMoney(balance?.balance ?? 0)}</b></strong>
               <span>Plazo de pago <b>{selectedCustomer.paymentTermDays ? `${selectedCustomer.paymentTermDays} días` : "sin definir"}</b></span>
@@ -480,7 +480,7 @@ export function Customers() {
           </div>
           <div className="print-only-header">
             <p className="muted">{selectedCustomer?.name}</p>
-            <p className="muted">Fecha de entrega: {printCharge.date}</p>
+            <p className="muted">Fecha de venta: {printCharge.date}</p>
             {printCharge.reason && <p className="muted">{printCharge.reason}</p>}
           </div>
           <table className="data-table">
@@ -522,8 +522,8 @@ export function Customers() {
                 <tr>
                   <th>Fecha</th>
                   <th>Concepto</th>
-                  <th className="num">Debe</th>
-                  <th className="num">Haber</th>
+                  <th className="num">Venta</th>
+                  <th className="num">Pago</th>
                   <th className="num">Saldo</th>
                   <th className="no-print"></th>
                 </tr>
@@ -594,18 +594,19 @@ export function Customers() {
           <div className="content-grid" style={{ marginTop: 18 }}>
             <section className="panel">
               <div className="panel-title">
-                <h2>Nueva entrega</h2>
-                <span className="muted" style={{ fontSize: 12 }}>Descuenta stock, igual que una venta</span>
+                <h2>Nueva venta (fiado)</h2>
+                <span className="muted" style={{ fontSize: 12 }}>Descuenta stock y suma al saldo del cliente, igual que una venta del Mostrador</span>
               </div>
               <div className="cash-banner-form" style={{ marginBottom: 10 }}>
                 <label className="muted">Fecha</label>
                 <input type="date" value={chargeDate} onChange={(e) => setChargeDate(e.target.value)} />
               </div>
               <div className="pos-search-wrap">
+                <label className="muted" style={{ display: "block", marginBottom: 4 }}>Producto</label>
                 <input
                   type="text"
                   className="pos-search"
-                  placeholder="Buscá el producto que le entregás…"
+                  placeholder="Buscá el producto que le vendés…"
                   value={chargeSearch}
                   onChange={(e) => setChargeSearch(e.target.value)}
                   style={{ fontSize: 16, padding: "12px 14px 12px 42px" }}
@@ -623,7 +624,7 @@ export function Customers() {
               </div>
 
               {chargeCart.length === 0 ? (
-                <p className="muted" style={{ marginTop: 12 }}>Buscá y agregá los productos que le estás entregando.</p>
+                <p className="muted" style={{ marginTop: 12 }}>Buscá y agregá los productos que le estás vendiendo.</p>
               ) : (
                 <div className="pos-cart">
                   {chargeCart.map((line) => (
@@ -654,11 +655,11 @@ export function Customers() {
                   </div>
                   <div className="pos-total-bar" style={{ marginTop: 12 }}>
                     <div>
-                      <p className="pos-total-label">Total de la entrega</p>
+                      <p className="pos-total-label">Total de la venta</p>
                       <strong className="pos-total-value">{formatMoney(chargeTotal)}</strong>
                     </div>
                     <button className="charge-button pos-charge-btn" disabled={busy} onClick={handleAddCharge}>
-                      {busy ? "Cargando…" : "Cargar entrega"}
+                      {busy ? "Registrando…" : "Registrar venta"}
                     </button>
                   </div>
                 </>
