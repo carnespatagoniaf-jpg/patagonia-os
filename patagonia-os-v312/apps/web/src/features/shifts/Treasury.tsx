@@ -248,24 +248,41 @@ export function Treasury() {
             );
           })}
         </div>
+        <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
+          Las cuentas no se pueden borrar (los movimientos históricos quedarían sin cuenta) — se desactivan: dejan de aparecer para cobrar, ajustar o transferir, pero el historial y los saldos viejos se mantienen intactos.
+        </p>
         {showNewAccountForm ? (
-          <div className="cash-banner-form" style={{ marginTop: 16, flexWrap: "wrap" }}>
-            <input placeholder="Nombre de cuenta" value={accountName} onChange={(e) => setAccountName(e.target.value)} />
-            <select value={accountPaymentMethod} onChange={(e) => setAccountPaymentMethod(e.target.value as PaymentMethod | "")}>
-              <option value="">Otros / sin medio fijo</option>
-              {PAYMENT_METHOD_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>{option.label}</option>
-              ))}
-            </select>
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="Saldo inicial"
-              value={accountInitialBalance}
-              onChange={(e) => setAccountInitialBalance(e.target.value)}
-            />
-            <button onClick={handleCreateAccount}>Guardar cuenta</button>
-            <button className="secondary" onClick={() => setShowNewAccountForm(false)}>Cancelar</button>
+          <div style={{ marginTop: 16 }}>
+            <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
+              <div>
+                <label className="muted" style={{ display: "block", marginBottom: 4 }}>Nombre de cuenta</label>
+                <input placeholder="Ej. Banco Galicia" value={accountName} onChange={(e) => setAccountName(e.target.value)} />
+              </div>
+              <div>
+                <label className="muted" style={{ display: "block", marginBottom: 4 }}>Tipo (opcional, solo para identificarla)</label>
+                <select value={accountPaymentMethod} onChange={(e) => setAccountPaymentMethod(e.target.value as PaymentMethod | "")}>
+                  <option value="">Ninguno de estos / no aplica</option>
+                  {PAYMENT_METHOD_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </div>
+              <div>
+                <label className="muted" style={{ display: "block", marginBottom: 4 }}>Saldo inicial</label>
+                <input
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="$ 0"
+                  value={accountInitialBalance}
+                  onChange={(e) => setAccountInitialBalance(e.target.value)}
+                />
+              </div>
+              <button onClick={handleCreateAccount} style={{ alignSelf: "flex-end" }}>Guardar cuenta</button>
+              <button className="secondary" onClick={() => setShowNewAccountForm(false)} style={{ alignSelf: "flex-end" }}>Cancelar</button>
+            </div>
+            <p className="muted" style={{ fontSize: 12, marginTop: 6 }}>
+              El "Tipo" es solo una etiqueta para reconocerla en las listas, no afecta el funcionamiento. Si tu banco o billetera no está en la lista, dejalo en "Ninguno de estos".
+            </p>
           </div>
         ) : (
           <button className="secondary" style={{ marginTop: 16 }} onClick={() => setShowNewAccountForm(true)}>
