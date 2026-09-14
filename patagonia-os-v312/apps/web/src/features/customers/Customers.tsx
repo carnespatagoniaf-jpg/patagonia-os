@@ -60,6 +60,11 @@ export function Customers() {
   const [chargeSearch, setChargeSearch] = useState("");
   const [chargeCart, setChargeCart] = useState<ChargeCartLine[]>([]);
   const [chargeNote, setChargeNote] = useState("");
+  const [showManualForm, setShowManualForm] = useState(false);
+  const [manualDesc, setManualDesc] = useState("");
+  const [manualPrice, setManualPrice] = useState("");
+  const [manualQty, setManualQty] = useState("1");
+  const [manualUnit, setManualUnit] = useState<Product["unit"]>("unit");
   const [printCharge, setPrintCharge] = useState<{ date: string; reason: string; amount: number; items: CustomerChargeItem[] } | null>(null);
   const [remitoBusyId, setRemitoBusyId] = useState<string | null>(null);
   const printSectionRef = useRef<HTMLDivElement | null>(null);
@@ -86,6 +91,23 @@ export function Customers() {
       return [...current, { key: product.id, productId: product.id, name: product.name, unit: product.unit, quantity: 1, unitPrice: product.priceRetail }];
     });
     setChargeSearch("");
+  }
+
+  function addManualItem() {
+    setMessage("");
+    const desc = manualDesc.trim();
+    const price = parseAmount(manualPrice || "0") || 0;
+    const qty = Number(manualQty || "1");
+    if (!desc) { setMessage("Ingresá una descripción para el artículo."); return; }
+    if (!(price >= 0)) { setMessage("Precio inválido."); return; }
+    if (!(qty > 0)) { setMessage("Cantidad inválida."); return; }
+    const key = `manual-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    setChargeCart((current) => [...current, { key, name: desc, unit: manualUnit, quantity: qty, unitPrice: price }]);
+    setManualDesc("");
+    setManualPrice("");
+    setManualQty("1");
+    setManualUnit("unit");
+    setShowManualForm(false);
   }
 
   function updateChargeItemQty(key: string, raw: string) {
@@ -229,7 +251,11 @@ export function Customers() {
       const result = await addChargeWithItems({
         customerId: selectedCustomer.id,
         chargeDate,
-        items: cartSnapshot.map((l) => ({ productId: l.productId, quantity: l.quantity })),
+        items: cartSnapshot.map((l) =>
+          l.productId
+            ? { productId: l.productId, quantity: l.quantity }
+            : { description: l.name, unitPrice: l.unitPrice, quantity: l.quantity }
+        ),
         reason: noteSnapshot || undefined
       });
       setChargeCart([]);
@@ -622,6 +648,46 @@ export function Customers() {
                   </div>
                 )}
               </div>
+              {products.length === 0 && (
+                <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
+                  Todavía no cargaste productos en el catálogo — usá "Vender algo sin código" para cargar la venta igual.
+                </p>
+              )}
+
+              <div className="pos-toolbar">
+                <button className={`pos-toolbar-btn${showManualForm ? " active" : ""}`} onClick={() => setShowManualForm((v) => !v)}>
+                  + Vender algo sin código
+                </button>
+              </div>
+
+              {showManualForm && (
+                <div className="pos-manual-card">
+                  <input placeholder="Descripción" value={manualDesc} onChange={(e) => setManualDesc(e.target.value)} style={{ flex: 1, minWidth: 160 }} />
+                  <input
+                    type="text"
+                    inputMode="decimal"
+                    placeholder={manualUnit === "kg" ? "Precio /kg" : "Precio"}
+                    value={manualPrice}
+                    onChange={(e) => setManualPrice(e.target.value)}
+                    style={{ width: 100 }}
+                  />
+                  <input
+                    type="number"
+                    min={manualUnit === "kg" ? "0.001" : "1"}
+                    step={manualUnit === "kg" ? "0.001" : "1"}
+                    placeholder="Cant."
+                    value={manualQty}
+                    onChange={(e) => setManualQty(e.target.value)}
+                    style={{ width: 70 }}
+                  />
+                  <select value={manualUnit} onChange={(e) => setManualUnit(e.target.value as Product["unit"])}>
+                    <option value="unit">Unidad</option>
+                    <option value="kg">Kg</option>
+                  </select>
+                  <button onClick={addManualItem}>Agregar</button>
+                  <button className="secondary" onClick={() => setShowManualForm(false)}>Cancelar</button>
+                </div>
+              )}
 
               {chargeCart.length === 0 ? (
                 <p className="muted" style={{ marginTop: 12 }}>Buscá y agregá los productos que le estás vendiendo.</p>

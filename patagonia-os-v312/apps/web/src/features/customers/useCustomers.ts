@@ -164,7 +164,7 @@ export function useCustomers() {
           customerId: input.customerId,
           chargeDate: input.chargeDate,
           amount: Math.round(total),
-          reason: input.reason?.trim() || "Entrega (modo demo)",
+          reason: input.reason?.trim() || "Venta (modo demo)",
           createdAt: new Date().toISOString()
         };
         const existing = demoLedgers[input.customerId] ?? { charges: [], payments: [] };
