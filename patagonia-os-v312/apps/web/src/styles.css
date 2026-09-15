@@ -204,6 +204,24 @@ button.danger { background: white; color: #b42318; border: 1px solid #f3d0cc; }
 .pos-subtotal-line { margin-top: 8px; text-align: right; color: #697386; font-size: 13px; }
 
 .pos-payment-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px 14px; margin-top: 10px; }
+.pos-payment-methods { display: flex; flex-wrap: wrap; gap: 8px; }
+.pos-payment-method-btn {
+  display: flex; align-items: center; gap: 8px; background: #f8f9fb; border: 1.5px solid #e5e7eb;
+  border-radius: 12px; padding: 10px 16px; font-size: 15px; font-weight: 700; color: #47505c;
+}
+.pos-payment-method-btn:hover { background: #f0f2f5; }
+.pos-payment-method-btn.active { background: #fff1f1; border-color: #8b1e1e; color: #8b1e1e; }
+.pos-payment-method-btn kbd {
+  background: #e9ecf1; border: 1px solid #d6dce5; border-radius: 6px; padding: 2px 6px;
+  font-size: 12px; font-family: inherit; font-weight: 800; color: #697386;
+}
+.pos-payment-method-btn.active kbd { background: rgba(139,30,30,.12); border-color: #f3d0cc; color: #8b1e1e; }
+.pos-confirm-banner {
+  margin-top: 10px; background: #fff8e1; border: 1.5px solid #f0c14b; border-radius: 12px;
+  padding: 12px 16px; text-align: center; font-weight: 800; color: #7a5b00; font-size: 15px;
+}
+.pos-charge-btn.confirming { background: #b8860b; }
+.pos-charge-btn.confirming:hover:not(:disabled) { background: #9c7209; }
 .pos-payment-row { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; justify-content: flex-end; }
 .pos-payment-row + .pos-payment-row { margin-top: 8px; }
 .pos-payment-row select { padding: 10px 12px; border: 1px solid #d6dce5; border-radius: 10px; background: #fff; font-size: 15px; flex: 1; min-width: 160px; }

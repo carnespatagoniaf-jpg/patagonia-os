@@ -1,6 +1,6 @@
 import { Fragment, useEffect, useRef, useState } from "react";
 import { Settings } from "lucide-react";
-import type { Product } from "@patagonia/domain";
+import type { Product, TreasuryAccount } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { POS_LAST_RECEIPT_KEY } from "../../lib/pos-receipt-storage";
@@ -197,6 +197,12 @@ export function Sale() {
   const [manualUnit, setManualUnit] = useState<Product["unit"]>("unit");
 
   const [payments, setPayments] = useState<PaymentRow[]>([{ accountId: "", amount: "" }]);
+  // Cartel de "confirmá para cobrar" -- se arma con el primer Enter/clic en
+  // "Cobrar" (una vez que el medio de pago ya es válido) y recién con un
+  // segundo Enter/clic se cobra de verdad. Pensado para el miedo real de
+  // cobrar con el medio equivocado (ej. tocar Efectivo siendo Mercado
+  // Pago) -- ver checkout().
+  const [confirmCharge, setConfirmCharge] = useState(false);
   const [cashTendered, setCashTendered] = useState("");
   const [focusRowIndex, setFocusRowIndex] = useState<number | null>(null);
   const accountSelectRefs = useRef<Array<HTMLSelectElement | null>>([]);
@@ -840,7 +846,56 @@ export function Sale() {
 
   function updatePaymentRow(index: number, field: "accountId" | "amount", value: string) {
     setPayments((current) => current.map((p, i) => (i === index ? { ...p, [field]: value } : p)));
+    // Si ya estaba armado el cartel de "confirmá para cobrar", cualquier
+    // cambio en el medio/monto lo desarma -- que muestre siempre el medio
+    // que realmente está elegido AHORA, no uno viejo.
+    setConfirmCharge(false);
   }
+
+  /** Elige la cuenta de la fila 0 (pago único, no dividido) -- mismo efecto
+   * que elegirla del <select>, para que F1/F2/etc. y el mouse terminen en
+   * el mismo lugar: foco en "Recibiste" si es efectivo, si no en Cobrar. */
+  function selectSinglePaymentAccount(account: TreasuryAccount) {
+    updatePaymentRow(0, "accountId", account.id);
+    requestAnimationFrame(() => {
+      if (account.paymentMethod === "cash") cashTenderedRef.current?.focus();
+      else chargeButtonRef.current?.focus();
+    });
+  }
+
+  // Si el carrito cambia (se agrega/saca/edita algo) después de armar el
+  // cartel de confirmación, lo desarma -- no tiene sentido confirmar un
+  // total que ya no es el que se muestra.
+  useEffect(() => {
+    setConfirmCharge(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cart]);
+
+  // F1..F9 eligen el medio de pago único por orden (el mismo orden que ya
+  // tiene la cuenta en Tesorería) sin soltar el teclado -- solo tiene
+  // sentido en pago único (no dividido), con turno abierto y carrito con
+  // algo cargado. Se frena el comportamiento normal de esas teclas en el
+  // navegador (F1 ayuda, F5 recargar, etc.) mientras se usan acá, para no
+  // perder el ticket por accidente.
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape" && confirmCharge) {
+        e.preventDefault();
+        setConfirmCharge(false);
+        return;
+      }
+      if (isSplit || busy || cart.length === 0 || !shift) return;
+      const match = /^F([1-9])$/.exec(e.key);
+      if (!match) return;
+      const account = accounts[Number(match[1]) - 1];
+      if (!account) return;
+      e.preventDefault();
+      selectSinglePaymentAccount(account);
+    }
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSplit, busy, cart.length, shift, accounts, confirmCharge]);
 
   async function checkout() {
     if (cart.length === 0 || !shift) return;
@@ -871,6 +926,18 @@ export function Sale() {
         return;
       }
     }
+
+    // El medio de pago ya es válido -- pero todavía no se cobra. Primer
+    // Enter/clic solo arma el cartel de confirmación (ver el botón más
+    // abajo); recién el segundo, con el cartel ya armado, cobra de
+    // verdad. Pensado para el miedo real de cobrar con el medio
+    // equivocado (ej. tocar Efectivo siendo Mercado Pago).
+    if (!confirmCharge) {
+      setMessage("");
+      setConfirmCharge(true);
+      return;
+    }
+    setConfirmCharge(false);
 
     setBusy(true);
     setMessage("");
@@ -1535,19 +1602,29 @@ export function Sale() {
 
                 <div className="pos-payment-card">
                   <p className="pos-section-label">Forma de pago</p>
-                  {payments.map((p, i) => (
+                  {!isSplit && (
+                    <div className="pos-payment-methods">
+                      {accounts.map((a, i) => (
+                        <button
+                          key={a.id}
+                          type="button"
+                          className={`pos-payment-method-btn${payments[0]?.accountId === a.id ? " active" : ""}`}
+                          onClick={() => selectSinglePaymentAccount(a)}
+                        >
+                          {i < 9 && <kbd>F{i + 1}</kbd>}
+                          <span>{a.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                  {isSplit && payments.map((p, i) => (
                     <div className="pos-payment-row" key={i}>
                       <select
                         ref={(el) => { accountSelectRefs.current[i] = el; }}
                         value={p.accountId}
                         onChange={(e) => {
                           updatePaymentRow(i, "accountId", e.target.value);
-                          const chosen = accounts.find((a) => a.id === e.target.value);
-                          requestAnimationFrame(() => {
-                            if (isSplit) amountInputRefs.current[i]?.focus();
-                            else if (chosen?.paymentMethod === "cash") cashTenderedRef.current?.focus();
-                            else chargeButtonRef.current?.focus();
-                          });
+                          requestAnimationFrame(() => amountInputRefs.current[i]?.focus());
                         }}
                       >
                         <option value="">¿Con qué te paga?</option>
@@ -1616,6 +1693,15 @@ export function Sale() {
                   </div>
                 </div>
 
+                {confirmCharge && (
+                  <p className="pos-confirm-banner">
+                    Vas a cobrar {formatMoney(total)} con{" "}
+                    {isSplit
+                      ? payments.map((p) => accounts.find((a) => a.id === p.accountId)?.name ?? "-").join(" + ")
+                      : singleAccount?.name}
+                    . Apretá Enter de nuevo (o tocá el botón) para confirmar -- Esc para elegir otro medio.
+                  </p>
+                )}
                 <div className="pos-total-bar">
                   <div>
                     <p className="pos-total-label">Total a cobrar</p>
@@ -1623,12 +1709,12 @@ export function Sale() {
                   </div>
                   <button
                     ref={chargeButtonRef}
-                    className="charge-button pos-charge-btn"
+                    className={`charge-button pos-charge-btn${confirmCharge ? " confirming" : ""}`}
                     disabled={busy}
                     onClick={checkout}
                     onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); checkout(); } }}
                   >
-                    {busy ? "Cobrando…" : (<>Cobrar <kbd>Enter</kbd></>)}
+                    {busy ? "Cobrando…" : confirmCharge ? (<>Confirmar cobro <kbd>Enter</kbd></>) : (<>Cobrar <kbd>Enter</kbd></>)}
                   </button>
                 </div>
               </>
