@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { LockKeyhole } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
-import { createClient, listCompanies, setCompanyActive, type CompanySummary, type CreateClientResult } from "./admin-service";
+import { createClient, deleteClient, listCompanies, setCompanyActive, type CompanySummary, type CreateClientResult } from "./admin-service";
 
 /** Mensaje listo para pegar en WhatsApp/mail y mandarle al dueño nuevo --
  * evita tener que copiar el usuario y la contraseña por separado a mano. */
@@ -42,6 +42,7 @@ export function AdminCreateClient() {
   const [companies, setCompanies] = useState<CompanySummary[]>([]);
   const [companiesLoading, setCompaniesLoading] = useState(true);
   const [togglingId, setTogglingId] = useState<string | null>(null);
+  const [deletingId, setDeletingId] = useState<string | null>(null);
 
   const reloadCompanies = useCallback(async () => {
     setCompaniesLoading(true);
@@ -65,6 +66,25 @@ export function AdminCreateClient() {
       setMessage(error instanceof Error ? error.message : "No se pudo actualizar el cliente.");
     } finally {
       setTogglingId(null);
+    }
+  }
+
+  /** Borrado real (no desactivar) -- el servidor ya rechaza esto solo si la
+   * empresa tiene cualquier actividad real cargada, así que acá solo hace
+   * falta la confirmación de "estás seguro" antes de intentarlo. */
+  async function handleDeleteClient(company: CompanySummary) {
+    if (!window.confirm(`¿Borrar "${company.name}" para siempre? Esto no se puede deshacer. Si ya tiene productos, ventas o cualquier otro dato cargado, el sistema va a rechazar el borrado solo.`)) {
+      return;
+    }
+    setMessage("");
+    setDeletingId(company.id);
+    try {
+      await deleteClient(company.id);
+      await reloadCompanies();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo borrar el cliente.");
+    } finally {
+      setDeletingId(null);
     }
   }
 
@@ -181,13 +201,21 @@ export function AdminCreateClient() {
                 <td className="num">{company.userCount}</td>
                 <td>{formatDate(company.createdAt)}</td>
                 <td>{company.active ? "Activo" : "Inactivo"}</td>
-                <td>
+                <td style={{ display: "flex", gap: 6 }}>
                   <button
                     className="secondary"
                     disabled={togglingId === company.id}
                     onClick={() => toggleActive(company)}
                   >
                     {togglingId === company.id ? "…" : company.active ? "Desactivar" : "Activar"}
+                  </button>
+                  <button
+                    className="secondary"
+                    style={{ color: "#8a1f11" }}
+                    disabled={deletingId === company.id}
+                    onClick={() => void handleDeleteClient(company)}
+                  >
+                    {deletingId === company.id ? "…" : "Borrar"}
                   </button>
                 </td>
               </tr>

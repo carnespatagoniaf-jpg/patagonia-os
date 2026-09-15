@@ -81,3 +81,30 @@ export async function setCompanyActive(companyId: string, active: boolean): Prom
   const { error } = await supabase.rpc("set_company_active", { p_company_id: companyId, p_active: active });
   if (error) throw error;
 }
+
+/** Borra de verdad un cliente (no solo lo desactiva) -- solo funciona si la
+ * empresa nunca tuvo actividad real (ningún producto, venta, compra, etc.
+ * cargado). Si ya tiene algo, el servidor rechaza el borrado con un mensaje
+ * claro en vez de arriesgarse a perder datos -- ver
+ * delete_company_if_unused en la migración 075. */
+export async function deleteClient(companyId: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.functions.invoke("delete-client", { body: { companyId } });
+  if (error) {
+    let message = error.message;
+    const context = (error as { context?: Response }).context;
+    if (context) {
+      try {
+        const body = await context.json();
+        if (body?.error) message = body.error;
+      } catch {
+        // keep default message
+      }
+    }
+    throw new Error(message);
+  }
+  if (!data || (data as { error?: string }).error) {
+    throw new Error((data as { error?: string })?.error ?? "No se pudo borrar el cliente.");
+  }
+}
