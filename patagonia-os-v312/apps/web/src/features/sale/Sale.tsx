@@ -158,6 +158,12 @@ export function Sale() {
   // de Mostrador (caja/proveedor/vale) para un cajero, sin abrirle Tesorería
   // -- ver el comentario en permissions.ts.
   const canManageTreasury = can(profile, "treasury.manage") || can(profile, "pos.treasury");
+  // A diferencia de canManageTreasury (que un cajero también tiene, vía
+  // pos.treasury, para poder cargar caja/proveedor/vale), esto es a
+  // propósito más angosto: cuánto se lleva vendido en el turno es
+  // información que el dueño/admin puede querer no mostrarle a un cajero
+  // en pantalla mientras atiende.
+  const canSeeShiftTotals = can(profile, "treasury.manage");
 
   const [products, setProducts] = useState<Product[]>(isSupabaseConfigured ? [] : demoProducts);
   const [categories, setCategories] = useState<ProductCategory[]>([]);
@@ -1727,21 +1733,25 @@ export function Sale() {
               <span className="muted" style={{ fontSize: 12 }}>desde {new Date(shift.openedAt).toLocaleTimeString("es-AR")}</span>
             </div>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-              <div style={{ background: "#f8f9fb", borderRadius: 12, padding: "12px 14px" }}>
-                <p className="muted" style={{ margin: 0, fontSize: 12 }}>Ventas</p>
-                <strong style={{ fontSize: 22 }}>{activeShiftSales.length}</strong>
+            {canSeeShiftTotals && (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
+                <div style={{ background: "#f8f9fb", borderRadius: 12, padding: "12px 14px" }}>
+                  <p className="muted" style={{ margin: 0, fontSize: 12 }}>Ventas</p>
+                  <strong style={{ fontSize: 22 }}>{activeShiftSales.length}</strong>
+                </div>
+                <div style={{ background: "#f8f9fb", borderRadius: 12, padding: "12px 14px" }}>
+                  <p className="muted" style={{ margin: 0, fontSize: 12 }}>Acumulado</p>
+                  <strong style={{ fontSize: 22 }}>{formatMoney(shiftTotal)}</strong>
+                </div>
               </div>
-              <div style={{ background: "#f8f9fb", borderRadius: 12, padding: "12px 14px" }}>
-                <p className="muted" style={{ margin: 0, fontSize: 12 }}>Acumulado</p>
-                <strong style={{ fontSize: 22 }}>{formatMoney(shiftTotal)}</strong>
-              </div>
-            </div>
+            )}
 
             <div style={{ display: "grid", gap: 8 }}>
-              <button className="pos-toolbar-btn" onClick={() => setShowShiftMovements((v) => !v)}>
-                {showShiftMovements ? "Ocultar movimientos" : "Ver movimientos"}
-              </button>
+              {canSeeShiftTotals && (
+                <button className="pos-toolbar-btn" onClick={() => setShowShiftMovements((v) => !v)}>
+                  {showShiftMovements ? "Ocultar movimientos" : "Ver movimientos"}
+                </button>
+              )}
               {canManageTreasury && (
                 <button className="pos-toolbar-btn" onClick={() => setShowMovementsList((v) => !v)}>
                   {showMovementsList ? "Ocultar caja/vales" : "Ver movimientos de caja"}
@@ -1778,7 +1788,7 @@ export function Sale() {
               )}
             </div>
 
-            {showShiftMovements && (
+            {canSeeShiftTotals && showShiftMovements && (
               shiftSales.length > 0 ? (
                 <table className="data-table" style={{ marginTop: 14 }}>
                   <thead>
