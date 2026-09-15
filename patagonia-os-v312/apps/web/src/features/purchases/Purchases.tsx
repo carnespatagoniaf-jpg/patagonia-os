@@ -83,6 +83,14 @@ export function Purchases() {
   const [purchaseDate, setPurchaseDate] = useState(todayIso());
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
+  // Qué renglón tiene el buscador de producto abierto ahora mismo -- antes
+  // el listado de sugerencias se mostraba con solo que hubiera texto y
+  // coincidencias, sin importar el foco, y al ser position:absolute tapaba
+  // literalmente el botón "+ Agregar ítem" de abajo (con un solo renglón,
+  // no había otro elemento debajo para "empujarlo"). Ahora solo se muestra
+  // mientras el campo está enfocado, y se cierra solo al salir de foco, sin
+  // obligar a borrar lo escrito para volver a ver el resto del formulario.
+  const [openSearchKey, setOpenSearchKey] = useState<string | null>(null);
 
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentAccountId, setPaymentAccountId] = useState("");
@@ -530,79 +538,104 @@ export function Purchases() {
             <div className="panel-title">
               <h2>Nueva compra</h2>
             </div>
-            <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 14 }}>
-              <input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
-              <input placeholder="N° de factura" value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} />
+            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 18 }}>
+              <div className="field">
+                <span>Fecha</span>
+                <input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
+              </div>
+              <div className="field" style={{ minWidth: 180 }}>
+                <span>N° de factura</span>
+                <input placeholder="Opcional" value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} />
+              </div>
             </div>
 
-            {lines.map((line) => {
-              const selectedProduct = products.find((p) => p.id === line.productId);
-              const productMatches = !line.productId && line.description.trim()
-                ? products.filter((p) => p.name.toLowerCase().includes(line.description.toLowerCase())).slice(0, 8)
-                : [];
-              return (
-                <div key={line.key}>
-                  <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 4 }}>
-                    {selectedProduct ? (
-                      <span className="cash-banner-form" style={{ gap: 6, padding: 0 }}>
-                        <strong>{selectedProduct.name}</strong>
-                        <button className="secondary" onClick={() => updateLine(line.key, { productId: "", description: "" })}>Cambiar</button>
-                      </span>
-                    ) : (
-                      <div className="pos-search-wrap" style={{ minWidth: 220 }}>
-                        <input
-                          placeholder="Buscá el producto o escribí una descripción libre…"
-                          value={line.description}
-                          onChange={(e) => updateLine(line.key, { description: e.target.value })}
-                        />
-                        {productMatches.length > 0 && (
-                          <div className="pos-dropdown">
-                            {productMatches.map((product) => (
-                              <button
-                                key={product.id}
-                                type="button"
-                                className="pos-dropdown-item"
-                                onClick={() => updateLine(line.key, { productId: product.id, description: "" })}
-                              >
-                                <span>{product.name}</span>
-                                <strong>{formatMoney(product.cost)}</strong>
-                              </button>
-                            ))}
+            <div style={{ display: "grid", gap: 10 }}>
+              {lines.map((line) => {
+                const selectedProduct = products.find((p) => p.id === line.productId);
+                const productMatches = !line.productId && line.description.trim()
+                  ? products.filter((p) => p.name.toLowerCase().includes(line.description.toLowerCase())).slice(0, 8)
+                  : [];
+                return (
+                  <div key={line.key} style={{ border: "1px solid #eef0f3", borderRadius: 10, padding: 14 }}>
+                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+                      <div className="field" style={{ flex: "1 1 260px" }}>
+                        <span>Producto</span>
+                        {selectedProduct ? (
+                          <span style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 0" }}>
+                            <strong>{selectedProduct.name}</strong>
+                            <button className="secondary" onClick={() => updateLine(line.key, { productId: "", description: "" })}>Cambiar</button>
+                          </span>
+                        ) : (
+                          <div className="pos-search-wrap">
+                            <input
+                              placeholder="Buscá el producto o escribí una descripción libre…"
+                              value={line.description}
+                              onChange={(e) => updateLine(line.key, { description: e.target.value })}
+                              onFocus={() => setOpenSearchKey(line.key)}
+                              onBlur={() => setOpenSearchKey((k) => (k === line.key ? null : k))}
+                              onKeyDown={(e) => { if (e.key === "Escape") (e.target as HTMLInputElement).blur(); }}
+                            />
+                            {openSearchKey === line.key && productMatches.length > 0 && (
+                              <div className="pos-dropdown">
+                                {productMatches.map((product) => (
+                                  <button
+                                    key={product.id}
+                                    type="button"
+                                    className="pos-dropdown-item"
+                                    onMouseDown={(e) => e.preventDefault()}
+                                    onClick={() => { updateLine(line.key, { productId: product.id, description: "" }); setOpenSearchKey(null); }}
+                                  >
+                                    <span>{product.name}</span>
+                                    <strong>{formatMoney(product.cost)}</strong>
+                                  </button>
+                                ))}
+                              </div>
+                            )}
+                            <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                              Escribí un nombre y tocá afuera o Esc para escribir una descripción libre sin elegir ningún producto de la lista.
+                            </p>
                           </div>
                         )}
                       </div>
+                      <div className="field" style={{ width: 110 }}>
+                        <span>Cantidad</span>
+                        <input
+                          type="number"
+                          min={line.unit === "kg" ? "0.001" : "1"}
+                          step={line.unit === "kg" ? "0.001" : "1"}
+                          value={line.quantity}
+                          onChange={(e) => updateLine(line.key, { quantity: e.target.value })}
+                        />
+                      </div>
+                      <div className="field" style={{ width: 110 }}>
+                        <span>Unidad</span>
+                        <select value={line.unit} onChange={(e) => updateLine(line.key, { unit: e.target.value as "kg" | "unit" })}>
+                          <option value="kg">kg</option>
+                          <option value="unit">unidad</option>
+                        </select>
+                      </div>
+                      <div className="field" style={{ width: 140 }}>
+                        <span>Precio unitario</span>
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={line.unitPrice}
+                          onChange={(e) => updateLine(line.key, { unitPrice: e.target.value })}
+                        />
+                      </div>
+                      <button className="danger" onClick={() => removeLine(line.key)}>Quitar</button>
+                    </div>
+                    {selectedProduct && (
+                      <p className="muted" style={{ margin: "10px 0 0" }}>
+                        Costo registrado: {formatMoney(selectedProduct.cost)} · Margen: {marginPercent(selectedProduct.cost, selectedProduct.priceRetail)}% · Venta: {formatMoney(selectedProduct.priceRetail)}
+                      </p>
                     )}
-                    <input
-                      type="number"
-                      min={line.unit === "kg" ? "0.001" : "1"}
-                      step={line.unit === "kg" ? "0.001" : "1"}
-                      placeholder="Cantidad"
-                      value={line.quantity}
-                      onChange={(e) => updateLine(line.key, { quantity: e.target.value })}
-                    />
-                    <select value={line.unit} onChange={(e) => updateLine(line.key, { unit: e.target.value as "kg" | "unit" })}>
-                      <option value="kg">kg</option>
-                      <option value="unit">unidad</option>
-                    </select>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      placeholder="Precio unitario"
-                      value={line.unitPrice}
-                      onChange={(e) => updateLine(line.key, { unitPrice: e.target.value })}
-                    />
-                    <button className="danger" onClick={() => removeLine(line.key)}>Quitar</button>
                   </div>
-                  {selectedProduct && (
-                    <p className="muted" style={{ marginBottom: 10 }}>
-                      Costo registrado: {formatMoney(selectedProduct.cost)} · Margen: {marginPercent(selectedProduct.cost, selectedProduct.priceRetail)}% · Venta: {formatMoney(selectedProduct.priceRetail)}
-                    </p>
-                  )}
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
 
-            <div className="cash-banner-form">
+            <div style={{ marginTop: 12 }}>
               <button className="secondary" onClick={addLine}>+ Agregar ítem</button>
             </div>
 
