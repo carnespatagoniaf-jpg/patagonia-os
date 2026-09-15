@@ -204,16 +204,22 @@ button.danger { background: white; color: #b42318; border: 1px solid #f3d0cc; }
 .pos-subtotal-line { margin-top: 8px; text-align: right; color: #697386; font-size: 13px; }
 
 .pos-payment-card { background: #fff; border: 1px solid #e5e7eb; border-radius: 14px; padding: 12px 14px; margin-top: 10px; }
-.pos-payment-methods { display: flex; flex-wrap: wrap; gap: 8px; }
+/* grid en vez de flex-wrap: con flex, un botón de más se va solo a una
+   segunda línea corta y desnivelada (ej. "F4 Mercado Pago" solo, colgando
+   a la izquierda) -- con grid + auto-fit, todos los botones de cada fila
+   se estiran parejo para llenarla, se vea prolijo con 3, 4 o los que
+   haya, y en pantallas anchas ocupan el ancho real de la tarjeta en vez
+   de quedar chicos con espacio vacío al lado. */
+.pos-payment-methods { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
 .pos-payment-method-btn {
-  display: flex; align-items: center; gap: 8px; background: #f8f9fb; border: 1.5px solid #e5e7eb;
-  border-radius: 12px; padding: 10px 16px; font-size: 15px; font-weight: 700; color: #47505c;
+  display: flex; align-items: center; justify-content: center; gap: 6px; background: #f8f9fb; border: 1.5px solid #e5e7eb;
+  border-radius: 10px; padding: 9px 10px; font-size: 13.5px; font-weight: 700; color: #47505c;
 }
 .pos-payment-method-btn:hover { background: #f0f2f5; }
 .pos-payment-method-btn.active { background: #fff1f1; border-color: #8b1e1e; color: #8b1e1e; }
 .pos-payment-method-btn kbd {
-  background: #e9ecf1; border: 1px solid #d6dce5; border-radius: 6px; padding: 2px 6px;
-  font-size: 12px; font-family: inherit; font-weight: 800; color: #697386;
+  background: #e9ecf1; border: 1px solid #d6dce5; border-radius: 5px; padding: 1px 5px;
+  font-size: 10.5px; font-family: inherit; font-weight: 800; color: #697386; flex-shrink: 0;
 }
 .pos-payment-method-btn.active kbd { background: rgba(139,30,30,.12); border-color: #f3d0cc; color: #8b1e1e; }
 .pos-confirm-banner {
