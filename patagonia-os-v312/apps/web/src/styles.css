@@ -109,7 +109,13 @@ button.danger { background: white; color: #b42318; border: 1px solid #f3d0cc; }
   padding-bottom: 18px; margin-bottom: 18px; border-bottom: 1px solid #eef1f5;
 }
 .field { display: grid; gap: 7px; font-size: 13px; font-weight: 800; color: #47505c; }
-.field input, .field select { padding: 11px; border: 1px solid #d6dce5; border-radius: 10px; font-weight: 400; color: #18202b; }
+/* min-width:0 pisa el mínimo de fábrica del navegador para <input>/<select>
+   (~170px de min-content en Chrome) -- sin esto, un .field angosto (ej.
+   110px para "Cantidad") no lo podía achicar: el campo se desbordaba del
+   ancho pedido y tapaba lo que viniera al lado. Confirmado midiendo con
+   getBoundingClientRect que el input medía 171px real contra un padre de
+   110px, en Compras > Nueva compra. */
+.field input, .field select { padding: 11px; border: 1px solid #d6dce5; border-radius: 10px; font-weight: 400; color: #18202b; width: 100%; min-width: 0; box-sizing: border-box; }
 .period-toggle { display: inline-flex; border: 1px solid #d6dce5; border-radius: 10px; overflow: hidden; }
 .period-toggle button { border: 0; padding: 11px 18px; background: white; color: #47505c; font-weight: 800; border-radius: 0; }
 .period-toggle button.active { background: #8b1e1e; color: white; }
