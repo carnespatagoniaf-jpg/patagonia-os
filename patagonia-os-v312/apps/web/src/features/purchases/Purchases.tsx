@@ -557,46 +557,43 @@ export function Purchases() {
                   : [];
                 return (
                   <div key={line.key} style={{ border: "1px solid #eef0f3", borderRadius: 10, padding: 14 }}>
+                    <div className="field" style={{ marginBottom: 12 }}>
+                      <span>Producto</span>
+                      {selectedProduct ? (
+                        <span style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 0" }}>
+                          <strong>{selectedProduct.name}</strong>
+                          <button className="secondary" onClick={() => updateLine(line.key, { productId: "", description: "" })}>Cambiar</button>
+                        </span>
+                      ) : (
+                        <div className="pos-search-wrap">
+                          <input
+                            placeholder="Buscá el producto o escribí una descripción libre…"
+                            value={line.description}
+                            onChange={(e) => updateLine(line.key, { description: e.target.value })}
+                            onFocus={() => setOpenSearchKey(line.key)}
+                            onBlur={() => setOpenSearchKey((k) => (k === line.key ? null : k))}
+                            onKeyDown={(e) => { if (e.key === "Escape") (e.target as HTMLInputElement).blur(); }}
+                          />
+                          {openSearchKey === line.key && productMatches.length > 0 && (
+                            <div className="pos-dropdown">
+                              {productMatches.map((product) => (
+                                <button
+                                  key={product.id}
+                                  type="button"
+                                  className="pos-dropdown-item"
+                                  onMouseDown={(e) => e.preventDefault()}
+                                  onClick={() => { updateLine(line.key, { productId: product.id, description: "" }); setOpenSearchKey(null); }}
+                                >
+                                  <span>{product.name}</span>
+                                  <strong>{formatMoney(product.cost)}</strong>
+                                </button>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
                     <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-                      <div className="field" style={{ flex: "1 1 260px" }}>
-                        <span>Producto</span>
-                        {selectedProduct ? (
-                          <span style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 0" }}>
-                            <strong>{selectedProduct.name}</strong>
-                            <button className="secondary" onClick={() => updateLine(line.key, { productId: "", description: "" })}>Cambiar</button>
-                          </span>
-                        ) : (
-                          <div className="pos-search-wrap">
-                            <input
-                              placeholder="Buscá el producto o escribí una descripción libre…"
-                              value={line.description}
-                              onChange={(e) => updateLine(line.key, { description: e.target.value })}
-                              onFocus={() => setOpenSearchKey(line.key)}
-                              onBlur={() => setOpenSearchKey((k) => (k === line.key ? null : k))}
-                              onKeyDown={(e) => { if (e.key === "Escape") (e.target as HTMLInputElement).blur(); }}
-                            />
-                            {openSearchKey === line.key && productMatches.length > 0 && (
-                              <div className="pos-dropdown">
-                                {productMatches.map((product) => (
-                                  <button
-                                    key={product.id}
-                                    type="button"
-                                    className="pos-dropdown-item"
-                                    onMouseDown={(e) => e.preventDefault()}
-                                    onClick={() => { updateLine(line.key, { productId: product.id, description: "" }); setOpenSearchKey(null); }}
-                                  >
-                                    <span>{product.name}</span>
-                                    <strong>{formatMoney(product.cost)}</strong>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                            <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
-                              Escribí un nombre y tocá afuera o Esc para escribir una descripción libre sin elegir ningún producto de la lista.
-                            </p>
-                          </div>
-                        )}
-                      </div>
                       <div className="field" style={{ width: 110 }}>
                         <span>Cantidad</span>
                         <input
@@ -625,6 +622,11 @@ export function Purchases() {
                       </div>
                       <button className="danger" onClick={() => removeLine(line.key)}>Quitar</button>
                     </div>
+                    {!selectedProduct && (
+                      <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
+                        Escribí un nombre y tocá afuera o Esc para escribir una descripción libre sin elegir ningún producto de la lista.
+                      </p>
+                    )}
                     {selectedProduct && (
                       <p className="muted" style={{ margin: "10px 0 0" }}>
                         Costo registrado: {formatMoney(selectedProduct.cost)} · Margen: {marginPercent(selectedProduct.cost, selectedProduct.priceRetail)}% · Venta: {formatMoney(selectedProduct.priceRetail)}
