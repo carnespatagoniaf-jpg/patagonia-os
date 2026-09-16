@@ -361,13 +361,20 @@ async function readExistingPluFields(port: SerialPort, settings: ScaleSerialSett
  * IMPORTANTE -- por qué esto lee antes de escribir: confirmado con pruebas
  * reales que 2005 puede IGNORAR silenciosamente la modificación de un PLU
  * que ya existía (cargado antes por iTegra) si los campos "secundarios"
- * (flag de posición decimal, código de etiqueta, campo 19, etc.) no
- * coinciden con lo que ya tenía -- aunque igual responda código "01". Por
- * eso, si el PLU ya existe, se lee primero (5005) y se preservan esos
- * campos tal cual estaban, cambiando solo nombre/descripción/precio/tipo.
- * Si el PLU es nuevo (nunca existió), se usan valores por defecto
- * razonables (0 decimales, ya que los precios de Patagonia OS son siempre
- * pesos enteros).
+ * (código de etiqueta, campo 19, etc.) no coinciden con lo que ya tenía --
+ * aunque igual responda código "01". Por eso, si el PLU ya existe, se lee
+ * primero (5005) y se preservan esos campos tal cual estaban, cambiando
+ * solo nombre/descripción/precio/tipo. Si el PLU es nuevo (nunca existió),
+ * se usan valores por defecto razonables.
+ *
+ * Excepción: el flag de posición decimal NUNCA se preserva del registro
+ * viejo (ver más abajo) -- un PLU cargado antes por iTegra puede traer otra
+ * cantidad de decimales, y mandar el precio entero de Patagonia OS con ese
+ * flag viejo corre el precio un dígito en la balanza (bug real detectado en
+ * producción: mandamos 17500, la balanza mostraba 1750). Confirmado que
+ * forzarlo a 0 decimales aunque no coincida con lo que ya tenía NO dispara
+ * el ignorado silencioso de arriba -- el precio se actualiza igual, solo
+ * cambia (correctamente) cómo se interpreta.
  * `descriptionOverride` es solo para casos puntuales -- el flujo normal
  * siempre manda el nombre del producto también como descripción, porque
  * Patagonia OS no tiene un campo de descripción separado. */
@@ -416,15 +423,30 @@ async function buildPluFrame(
   const familia = existing?.[2] ?? fixedDigits(1, 3);
   const valorFijo = existing?.[7] ?? fixedDigits(0, 7);
   const precioAlternativo = existing?.[9] ?? fixedDigits(0, 6);
-  const posicionDecimal = existing?.[10] ?? fixedDigits(2, 6); // 2 = 0 decimales
+  // A diferencia de los demás campos secundarios, este NO se preserva del
+  // registro viejo: un PLU cargado antes por iTegra puede traer otra
+  // cantidad de decimales, y como Patagonia OS manda el precio siempre
+  // como pesos enteros, heredar ese flag corre el precio un dígito en la
+  // balanza (mandás 17500 y muestra 1750) -- bug real detectado en
+  // producción. Siempre "1" = 0 decimales en esta balanza (confirmado
+  // leyendo con 5005 un PLU real que muestra bien su precio, ej. PLU 3 --
+  // "2", el valor que se usaba antes acá, era una suposición nunca
+  // verificada, nunca puesta a prueba porque hasta ahora todo PLU
+  // sincronizado ya existía de antes por iTegra).
+  const posicionDecimal = fixedDigits(1, 6);
   const impuesto1 = existing?.[11] ?? fixedDigits(0, 6);
   const impuesto2 = existing?.[12] ?? fixedDigits(0, 6);
   const taraPreempaque = existing?.[13] ?? fixedDigits(0, 5);
   const taraPublico = existing?.[14] ?? fixedDigits(0, 5);
-  const codigoEtiqueta = existing?.[15] ?? fixedDigits(0, 2);
+  // "00" (sin formato de etiqueta asignado) es probablemente la causa real
+  // de "Formato no definido" en la balanza para un PLU nuevo -- un PLU real
+  // que sí muestra bien su etiqueta (PLU 3) trae "01" acá, no "00".
+  const codigoEtiqueta = existing?.[15] ?? fixedDigits(1, 2);
   const codigoReceta = existing?.[16] ?? fixedDigits(0, 4);
   const codigoNutricional = existing?.[17] ?? fixedDigits(0, 4);
-  const campo19 = existing?.[18] ?? fixedDigits(0, 4);
+  // Sin documentación de qué es este campo, pero el mismo PLU 3 trae
+  // "1000" acá, no "0000" -- se replica el valor real en vez de adivinar.
+  const campo19 = existing?.[18] ?? fixedDigits(1000, 4);
   const campo22 = existing?.[19] ?? fixedDigits(0, 4);
 
   const data =
