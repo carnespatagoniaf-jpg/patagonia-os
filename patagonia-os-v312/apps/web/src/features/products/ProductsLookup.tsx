@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { formatMoney } from "../shifts/format";
+import { ScaleSyncPanel } from "../inventory/ScaleSyncPanel";
 import { listProductPrices, type ProductPriceRow } from "./products-service";
 
 const UNIT_LABELS: Record<ProductPriceRow["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
@@ -62,6 +63,13 @@ export function ProductsLookup() {
       </header>
 
       <section className="panel">
+        <div className="panel-title">
+          <h2>Balanza</h2>
+        </div>
+        <ScaleSyncPanel products={products} />
+      </section>
+
+      <section className="panel" style={{ marginTop: 18 }}>
         <div className="panel-title">
           <h2>Buscar producto</h2>
           <span>{loading ? "Cargando…" : `${filtered.length} productos`}</span>

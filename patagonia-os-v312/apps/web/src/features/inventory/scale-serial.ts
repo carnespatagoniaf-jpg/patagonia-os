@@ -1,5 +1,19 @@
 import type { Product } from "@patagonia/domain";
-import type { ProductCategory } from "./product-categories-service";
+
+/** Lo mínimo que hace falta de un producto para mandarlo a la balanza --
+ * no el `Product` completo de @patagonia/domain. Así esta función sirve
+ * tanto desde Stock (que tiene el producto entero, con costo) como desde
+ * la pantalla de Productos del cajero (que solo carga nombre/precio,
+ * nunca costo -- ver products-service.ts). Cualquier `Product` real ya
+ * cumple esta forma sin cambios, de sobra. */
+export interface ScaleSyncableProduct {
+  id: string;
+  code: string;
+  name: string;
+  unit: Product["unit"];
+  priceRetail: number;
+  active?: boolean;
+}
 
 /**
  * Carga de PLUs directo a la balanza Kretz (familia Report NX/LT) por cable
@@ -359,7 +373,7 @@ async function readExistingPluFields(port: SerialPort, settings: ScaleSerialSett
  * Patagonia OS no tiene un campo de descripción separado. */
 async function buildPluFrame(
   port: SerialPort,
-  product: Product,
+  product: ScaleSyncableProduct,
   deviceType: string,
   equipmentId: string,
   altaCommand: string,
@@ -433,7 +447,7 @@ export interface ScalePluWriteResult {
 }
 
 /** Manda un solo producto a la balanza (comando 2005). */
-export async function syncOneProductToScale(product: Product, _categories: ProductCategory[]): Promise<ScalePluWriteResult> {
+export async function syncOneProductToScale(product: ScaleSyncableProduct): Promise<ScalePluWriteResult> {
   if (!isScaleSerialSupported()) {
     throw new Error("Este navegador no soporta comunicación serie directa (usá Chrome o Edge).");
   }
@@ -624,13 +638,13 @@ export async function checkScaleCompatibility(): Promise<ScaleCompatibilityResul
 const MAX_PLU_CODE = 99999;
 
 export interface ScaleSyncPlan {
-  toSend: Product[];
-  skipped: { product: Product; reason: string }[];
+  toSend: ScaleSyncableProduct[];
+  skipped: { product: ScaleSyncableProduct; reason: string }[];
   /** Productos inactivos -- ni se evalúan, page.active los filtra en
    * inventory-service (products acá ya viene sin bajas si corresponde),
    * pero se cuentan aparte para que enviados + salteados + inactivos dé
    * exactamente el total de productos. */
-  inactive: Product[];
+  inactive: ScaleSyncableProduct[];
 }
 
 /** Decide qué productos activos calificarían para el envío masivo, sin
@@ -645,11 +659,11 @@ export interface ScaleSyncPlan {
  * -- por eso se saltean en vez de mandarse truncados. También se detecta y
  * bloquea cualquier colisión real (dos productos que, después de sumarle 1
  * al código, terminarían apuntando al mismo PLU interno). */
-export function planScaleSync(products: Product[]): ScaleSyncPlan {
+export function planScaleSync(products: ScaleSyncableProduct[]): ScaleSyncPlan {
   const inactive = products.filter((p) => !(p.active ?? true));
   const active = products.filter((p) => p.active ?? true);
-  const skipped: { product: Product; reason: string }[] = [];
-  const candidates: Product[] = [];
+  const skipped: { product: ScaleSyncableProduct; reason: string }[] = [];
+  const candidates: ScaleSyncableProduct[] = [];
 
   for (const product of active) {
     if (!/^\d+$/.test(product.code)) {
@@ -669,7 +683,7 @@ export function planScaleSync(products: Product[]): ScaleSyncPlan {
   // cual (sin +1) esto solo puede pasar si dos productos ya comparten el
   // mismo código en Patagonia OS -- un problema de datos previo, no del
   // envío a la balanza -- pero se chequea igual como red de seguridad.
-  const byPlu = new Map<number, Product[]>();
+  const byPlu = new Map<number, ScaleSyncableProduct[]>();
   for (const product of candidates) {
     const plu = Number(product.code);
     const group = byPlu.get(plu) ?? [];
@@ -677,7 +691,7 @@ export function planScaleSync(products: Product[]): ScaleSyncPlan {
     byPlu.set(plu, group);
   }
 
-  const toSend: Product[] = [];
+  const toSend: ScaleSyncableProduct[] = [];
   for (const [plu, group] of byPlu) {
     if (group.length > 1) {
       for (const product of group) {
@@ -696,19 +710,19 @@ export interface ScaleSyncResult {
   /** Productos salteados antes de mandar nada -- código no numérico o
    * precio inválido -- para no arriesgarse a mandar un PLU con datos
    * corruptos que rompa el registro de otro producto. */
-  skipped: { product: Product; reason: string }[];
-  noResponse: { product: Product }[];
+  skipped: { product: ScaleSyncableProduct; reason: string }[];
+  noResponse: { product: ScaleSyncableProduct }[];
   /** Errores de bajo nivel del puerto (ej. "Framing error") -- un hipo del
    * cable en un producto no debe tirar abajo el envío del resto del
    * catálogo. */
-  transportErrors: { product: Product; message: string }[];
+  transportErrors: { product: ScaleSyncableProduct; message: string }[];
   /** Cuenta de intentos por código de respuesta real de la balanza -- "01" es
    * éxito confirmado (probado a fondo: grabó y se pudo releer); cualquier
    * otro código es un rechazo real (ver describeResponseCode). */
   responseCodeCounts: Record<string, number>;
   /** Detalle por producto de los que NO dieron "01", para poder identificar
    * cuáles hay que revisar a mano en vez de solo ver un conteo agregado. */
-  failed: { product: Product; responseCode: string | null }[];
+  failed: { product: ScaleSyncableProduct; responseCode: string | null }[];
 }
 
 /** Manda el catálogo completo a la balanza por PLU (comando 2005), uno por
@@ -718,8 +732,7 @@ export interface ScaleSyncResult {
  * resto si un producto puntual falla (por rechazo de la balanza o por un
  * hipo de conexión) en vez de frenar todo el envío. */
 export async function syncProductsToScale(
-  products: Product[],
-  categories: ProductCategory[],
+  products: ScaleSyncableProduct[],
   onProgress?: (done: number, total: number) => void
 ): Promise<ScaleSyncResult> {
   if (!isScaleSerialSupported()) {
@@ -730,10 +743,10 @@ export async function syncProductsToScale(
 
   const { toSend, skipped } = planScaleSync(products);
 
-  const noResponse: { product: Product }[] = [];
-  const transportErrors: { product: Product; message: string }[] = [];
+  const noResponse: { product: ScaleSyncableProduct }[] = [];
+  const transportErrors: { product: ScaleSyncableProduct; message: string }[] = [];
   const responseCodeCounts: Record<string, number> = {};
-  const failed: { product: Product; responseCode: string | null }[] = [];
+  const failed: { product: ScaleSyncableProduct; responseCode: string | null }[] = [];
 
   for (let i = 0; i < toSend.length; i++) {
     const product = toSend[i];

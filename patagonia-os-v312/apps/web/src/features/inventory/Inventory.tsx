@@ -15,22 +15,7 @@ import {
 } from "./product-categories-service";
 import { parseAmount } from "../../lib/money";
 import { downloadScaleExportCsv } from "./scale-export";
-import {
-  checkScaleCompatibility,
-  connectScalePort,
-  deleteScalePlu,
-  describeResponseCode,
-  getScaleSerialSettings,
-  isScalePortPaired,
-  isScaleSerialSupported,
-  planScaleSync,
-  readScalePlu,
-  saveScaleSerialSettings,
-  sendScalePing,
-  syncOneProductToScale,
-  syncProductsToScale,
-  type ScaleSerialSettings
-} from "./scale-serial";
+import { ScaleSyncPanel } from "./ScaleSyncPanel";
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
@@ -92,18 +77,6 @@ export function Inventory() {
   const [renamingCategoryId, setRenamingCategoryId] = useState<string | null>(null);
   const [renameCategoryName, setRenameCategoryName] = useState("");
 
-  const [showScalePanel, setShowScalePanel] = useState(false);
-  const [scaleSettings, setScaleSettings] = useState<ScaleSerialSettings>(getScaleSerialSettings());
-  const [scalePortReady, setScalePortReady] = useState(false);
-  const [scaleBusy, setScaleBusy] = useState(false);
-  const [scaleSyncProgress, setScaleSyncProgress] = useState<{ done: number; total: number } | null>(null);
-  const [scaleLog, setScaleLog] = useState("");
-  const [scaleTestCode, setScaleTestCode] = useState("");
-  const [showScalePreview, setShowScalePreview] = useState(false);
-
-  useEffect(() => {
-    void isScalePortPaired().then(setScalePortReady);
-  }, []);
 
   async function reload() {
     if (!isSupabaseConfigured || !branchId) return;
@@ -132,7 +105,6 @@ export function Inventory() {
   }
 
   const visibleProducts = categoryFilter ? products.filter((p) => p.categoryId === categoryFilter) : products;
-  const scaleSyncPlan = planScaleSync(products);
 
   function compareByCode(a: Product, b: Product) {
     const na = Number(a.code);
@@ -203,154 +175,6 @@ export function Inventory() {
       await reload();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo borrar la categoría.");
-    }
-  }
-
-  function updateScaleSettings(patch: Partial<ScaleSerialSettings>) {
-    const next = { ...scaleSettings, ...patch };
-    setScaleSettings(next);
-    saveScaleSerialSettings(next);
-  }
-
-  async function handleConnectScale() {
-    setScaleBusy(true);
-    setScaleLog("");
-    try {
-      await connectScalePort();
-      setScalePortReady(true);
-      setScaleLog("Puerto conectado. Ahora probá la conexión antes de sincronizar productos.");
-    } catch (err) {
-      setScaleLog(err instanceof Error ? err.message : "No se pudo conectar con el puerto.");
-    } finally {
-      setScaleBusy(false);
-    }
-  }
-
-  async function handlePingScale() {
-    setScaleBusy(true);
-    setScaleLog("");
-    try {
-      const result = await sendScalePing();
-      setScaleLog(
-        result.ok
-          ? `La balanza respondió: ${result.rawResponseHex || "(sin bytes)"} -- código "${result.responseCode}": ${describeResponseCode(result.responseCode)}`
-          : "La balanza no respondió nada -- revisá el cable, o probá otra velocidad de puerto."
-      );
-    } catch (err) {
-      setScaleLog(err instanceof Error ? err.message : "Falló la prueba de conexión.");
-    } finally {
-      setScaleBusy(false);
-    }
-  }
-
-  async function handleCheckCompatibility() {
-    setScaleBusy(true);
-    setScaleLog("Probando compatibilidad… esto carga y borra un producto de prueba en la balanza, no toca productos reales.");
-    try {
-      const result = await checkScaleCompatibility();
-      const details = [
-        `Conexión: ${result.pingOk ? "OK" : "sin respuesta"}.`,
-        result.writeResponseCode ? `Escritura de prueba: código "${result.writeResponseCode}".` : "",
-        result.readResponseCode ? `Relectura: código "${result.readResponseCode}".` : ""
-      ].filter(Boolean).join(" ");
-      setScaleLog(`${result.compatible ? "✅" : "❌"} ${result.message} ${details}`);
-    } catch (err) {
-      setScaleLog(err instanceof Error ? err.message : "Falló la prueba de compatibilidad.");
-    } finally {
-      setScaleBusy(false);
-    }
-  }
-
-  async function handleSyncScale() {
-    setScaleBusy(true);
-    setScaleLog("");
-    setScaleSyncProgress({ done: 0, total: 0 });
-    try {
-      const result = await syncProductsToScale(products, categories, (done, total) => setScaleSyncProgress({ done, total }));
-      const okCount = result.responseCodeCounts["01"] ?? 0;
-      const failedCount = result.attempted - okCount;
-      const codesSummary = Object.entries(result.responseCodeCounts)
-        .filter(([code]) => code !== "01")
-        .map(([code, count]) => `${count} con código "${code}" (${describeResponseCode(code)})`)
-        .join(", ");
-      const parts = [`${okCount} enviados con éxito de ${result.attempted} intentados.`];
-      if (failedCount > 0 && codesSummary) parts.push(`Fallidos: ${codesSummary}.`);
-      if (result.failed.length) {
-        parts.push(
-          "Detalle: " +
-            result.failed.map((f) => `${f.product.name} (${f.product.code}, código "${f.responseCode}")`).join(", ") +
-            "."
-        );
-      }
-      if (result.skipped.length) parts.push(`${result.skipped.length} sin código numérico (no se enviaron).`);
-      if (result.noResponse.length) parts.push(`${result.noResponse.length} sin ninguna respuesta.`);
-      if (result.transportErrors.length) {
-        parts.push(`${result.transportErrors.length} con error de conexión (${result.transportErrors[0].message}) -- probá enviar de nuevo, capaz fue un hipo del cable.`);
-      }
-      setScaleLog(parts.join(" "));
-    } catch (err) {
-      setScaleLog(err instanceof Error ? err.message : "Falló el envío a la balanza.");
-    } finally {
-      setScaleBusy(false);
-      setScaleSyncProgress(null);
-    }
-  }
-
-  async function handleSendOneProduct() {
-    const product = products.find((p) => p.code === scaleTestCode.trim());
-    if (!product) {
-      setScaleLog(`No encontré ningún producto con código "${scaleTestCode.trim()}".`);
-      return;
-    }
-    setScaleBusy(true);
-    setScaleLog("");
-    try {
-      const result = await syncOneProductToScale(product, categories);
-      setScaleLog(
-        `Mandé "${product.name}" (código ${product.code}, $${product.priceRetail}). Respuesta: ${result.rawResponseHex} -- código "${result.responseCode}": ${describeResponseCode(result.responseCode)}`
-      );
-    } catch (err) {
-      setScaleLog(err instanceof Error ? err.message : "Falló el envío del producto.");
-    } finally {
-      setScaleBusy(false);
-    }
-  }
-
-  async function handleReadPlu() {
-    if (!scaleTestCode.trim()) {
-      setScaleLog("Ingresá un código de PLU para leer.");
-      return;
-    }
-    setScaleBusy(true);
-    setScaleLog("");
-    try {
-      const result = await readScalePlu(scaleTestCode.trim());
-      setScaleLog(
-        `Leí PLU ${scaleTestCode.trim()}. Respuesta: ${result.rawResponseHex} -- código "${result.responseCode}": ${describeResponseCode(result.responseCode)}. Datos como texto: "${result.rawDataAscii}"`
-      );
-    } catch (err) {
-      setScaleLog(err instanceof Error ? err.message : "Falló la lectura del PLU.");
-    } finally {
-      setScaleBusy(false);
-    }
-  }
-
-  async function handleDeletePlu() {
-    const code = scaleTestCode.trim();
-    if (!code) {
-      setScaleLog("Ingresá un código de PLU para borrar.");
-      return;
-    }
-    if (!window.confirm(`¿Seguro que querés borrar el PLU ${code} de la balanza? Esto borra el registro de la balanza (no de Patagonia OS).`)) return;
-    setScaleBusy(true);
-    setScaleLog("");
-    try {
-      const result = await deleteScalePlu(code);
-      setScaleLog(`Borré PLU ${code}. Respuesta: ${result.rawResponseHex} -- código "${result.responseCode}": ${describeResponseCode(result.responseCode)}`);
-    } catch (err) {
-      setScaleLog(err instanceof Error ? err.message : "Falló el borrado del PLU.");
-    } finally {
-      setScaleBusy(false);
     }
   }
 
@@ -499,146 +323,11 @@ export function Inventory() {
           <button className="secondary" onClick={() => downloadScaleExportCsv(products, categories)}>
             Descargar lista para balanza
           </button>
-          <button className="secondary" onClick={() => setShowScalePanel((v) => !v)}>
-            {showScalePanel ? "Ocultar balanza por cable" : "Balanza por cable (sin iTegra)"}
-          </button>
+          <ScaleSyncPanel products={products} />
         </div>
         <p className="muted" style={{ margin: "-8px 0 14px", fontSize: 12 }}>
           CSV para importar en el software de PC de la balanza (Kretz Simplex/iTegra) -- formato de prueba, todavía sin confirmar contra el importador real.
         </p>
-
-        {showScalePanel && (
-          <div style={{ border: "1px solid #eef0f3", borderRadius: 10, padding: 18, marginBottom: 14 }}>
-            <p style={{ margin: "0 0 4px", fontWeight: 700, fontSize: 16 }}>Balanza por cable</p>
-            <p className="muted" style={{ margin: "0 0 16px", fontSize: 13 }}>
-              Manda los productos directo a la balanza Kretz por cable, sin usar el software de iTegra. Solo funciona en Chrome o Edge.
-            </p>
-            {!isScaleSerialSupported() && (
-              <p style={{ margin: "0 0 14px", color: "#8a4b00", fontWeight: 700 }}>
-                Este navegador no soporta esto -- abrí Patagonia OS en Chrome o Edge.
-              </p>
-            )}
-
-            <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 14, marginBottom: 14 }}>
-              <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 13, textTransform: "uppercase", color: "#666" }}>1. Conexión</p>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button disabled={scaleBusy || !isScaleSerialSupported()} onClick={handleConnectScale}>
-                  {scalePortReady ? "Volver a elegir puerto" : "Conectar balanza"}
-                </button>
-                <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handlePingScale}>
-                  Probar conexión
-                </button>
-                <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handleCheckCompatibility}>
-                  Verificar compatibilidad
-                </button>
-              </div>
-              <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
-                Si es una balanza que no probamos todavía (Report NX, Novel Eco, Aura Eco, o cualquier otra que no sea esta Report LT), usá "Verificar compatibilidad" antes de mandar productos: carga y borra un producto de prueba para confirmar que entiende el mismo formato, sin arriesgar datos reales. No hace falta saber el modelo -- la prueba es la misma para cualquiera.
-              </p>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-                <details style={{ display: "inline-block" }}>
-                  <summary className="secondary" style={{ display: "inline-block", cursor: "pointer", padding: "10px 14px", border: "1px solid #ccc", borderRadius: 6 }}>
-                    Configuración avanzada
-                  </summary>
-                  <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", marginTop: 10, fontSize: 14 }}>
-                    <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      Velocidad
-                      <select value={scaleSettings.baudRate} onChange={(e) => updateScaleSettings({ baudRate: Number(e.target.value) })}>
-                        {[2400, 4800, 9600, 19200, 38400, 57600, 115200].map((rate) => (
-                          <option key={rate} value={rate}>{rate}</option>
-                        ))}
-                      </select>
-                    </label>
-                    <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      ID de equipo
-                      <input style={{ width: 50 }} value={scaleSettings.equipmentId} onChange={(e) => updateScaleSettings({ equipmentId: e.target.value.slice(0, 2) })} />
-                    </label>
-                    <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                      Tipo de equipo
-                      <input style={{ width: 40 }} value={scaleSettings.deviceType} onChange={(e) => updateScaleSettings({ deviceType: e.target.value.slice(0, 1).toUpperCase() })} />
-                    </label>
-                  </div>
-                  <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
-                    Ya configurado para una Report LT (115200 baudios, tipo "C"). Solo tocar esto si conectás un modelo distinto.
-                  </p>
-                </details>
-              </div>
-            </div>
-
-            <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 14, marginBottom: 14 }}>
-              <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 13, textTransform: "uppercase", color: "#666" }}>2. Envío masivo</p>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={() => setShowScalePreview((v) => !v)}>
-                  {showScalePreview ? "Ocultar vista previa" : `Vista previa (${scaleSyncPlan.toSend.length} productos)`}
-                </button>
-                <button disabled={scaleBusy || !isScaleSerialSupported()} onClick={handleSyncScale}>
-                  {scaleBusy && scaleSyncProgress ? `Enviando… ${scaleSyncProgress.done}/${scaleSyncProgress.total}` : "Enviar todos los productos"}
-                </button>
-              </div>
-              {showScalePreview && (
-                <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid #eef0f3", borderRadius: 6, padding: 10, marginTop: 10, fontSize: 13 }}>
-                  <p style={{ margin: "0 0 8px", fontWeight: 700 }}>
-                    Se enviarían {scaleSyncPlan.toSend.length} de {products.length} productos
-                    {" "}({scaleSyncPlan.skipped.length} salteados, {scaleSyncPlan.inactive.length} inactivos).
-                  </p>
-                  <table style={{ width: "100%", borderCollapse: "collapse" }}>
-                    <thead>
-                      <tr style={{ textAlign: "left" }}>
-                        <th>Código</th>
-                        <th>Nombre</th>
-                        <th>Precio</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {scaleSyncPlan.toSend.map((p) => (
-                        <tr key={p.id}>
-                          <td>{p.code}</td>
-                          <td>{p.name}</td>
-                          <td>{formatMoney(p.priceRetail)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  {scaleSyncPlan.skipped.length > 0 && (
-                    <>
-                      <p style={{ margin: "10px 0 4px", fontWeight: 700 }}>Salteados (no se envían):</p>
-                      <ul style={{ margin: 0, paddingLeft: 18 }}>
-                        {scaleSyncPlan.skipped.map((s) => (
-                          <li key={s.product.id}>{s.product.name} ({s.product.code}) -- {s.reason}</li>
-                        ))}
-                      </ul>
-                    </>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 14 }}>
-              <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 13, textTransform: "uppercase", color: "#666" }}>3. Un solo producto</p>
-              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                <input
-                  placeholder="Código del producto (ej. 12)"
-                  style={{ width: 200 }}
-                  value={scaleTestCode}
-                  onChange={(e) => setScaleTestCode(e.target.value)}
-                />
-                <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handleSendOneProduct}>
-                  Enviar
-                </button>
-                <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handleReadPlu}>
-                  Leer de la balanza
-                </button>
-                <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" style={{ color: "#8a1f11" }} onClick={handleDeletePlu}>
-                  Borrar de la balanza
-                </button>
-              </div>
-            </div>
-
-            {scaleLog && (
-              <p style={{ margin: "14px 0 0", fontSize: 13, whiteSpace: "pre-wrap", background: "#f7f7f8", borderRadius: 6, padding: 10 }}>{scaleLog}</p>
-            )}
-          </div>
-        )}
 
         {showCategoryManager && (
           <div className="panel" style={{ marginBottom: 16, padding: 14 }}>
