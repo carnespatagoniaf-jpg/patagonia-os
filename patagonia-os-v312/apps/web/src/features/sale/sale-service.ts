@@ -11,6 +11,9 @@ export interface CreatePosSaleItemInput {
 export interface CreatePosSalePaymentInput {
   accountId: string;
   amount: number;
+  /** Cupón o número de operación -- obligatorio para cualquier medio que
+   * no sea efectivo (ver 076_pos_sale_payment_reference.sql). */
+  reference?: string;
 }
 
 export interface CreatePosSaleInput {
@@ -37,7 +40,7 @@ export async function createPosSale(input: CreatePosSaleInput): Promise<CreatePo
         ? { product_id: item.productId, quantity: item.quantity, discount_amount: item.discountAmount }
         : { description: item.description, unit_price: item.unitPrice, quantity: item.quantity, discount_amount: item.discountAmount }
     ),
-    p_payments: input.payments.map((p) => ({ account_id: p.accountId, amount: p.amount })),
+    p_payments: input.payments.map((p) => ({ account_id: p.accountId, amount: p.amount, reference: p.reference ?? null })),
     p_pos_shift_id: input.posShiftId,
     p_discount_amount: input.discountAmount,
     p_surcharge_amount: input.surchargeAmount

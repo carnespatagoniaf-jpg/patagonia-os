@@ -64,6 +64,10 @@ interface TicketLine {
 interface PaymentRow {
   accountId: string;
   amount: string;
+  /** Cupón o número de operación -- se pide solo si la cuenta elegida no
+   * es efectivo (ver checkout()), para que no se pueda marcar "Tarjeta" o
+   * "Transferencia" sin tener el comprobante real en la mano. */
+  reference: string;
 }
 
 interface ReceiptLine {
@@ -208,7 +212,7 @@ export function Sale() {
   const [manualQty, setManualQty] = useState("1");
   const [manualUnit, setManualUnit] = useState<Product["unit"]>("unit");
 
-  const [payments, setPayments] = useState<PaymentRow[]>([{ accountId: "", amount: "" }]);
+  const [payments, setPayments] = useState<PaymentRow[]>([{ accountId: "", amount: "", reference: "" }]);
   // Cartel de "confirmá para cobrar" -- se arma con el primer Enter/clic en
   // "Cobrar" (una vez que el medio de pago ya es válido) y recién con un
   // segundo Enter/clic se cobra de verdad. Pensado para el miedo real de
@@ -839,7 +843,7 @@ export function Sale() {
     setSaleSurcharge("");
     setSaleSurchargeMode("amount");
     setShowDiscountForm(false);
-    setPayments([{ accountId: "", amount: "" }]);
+    setPayments([{ accountId: "", amount: "", reference: "" }]);
     setCashTendered("");
     // Se vuelve a tapar solo después de cada venta -- que no quede
     // "revelado" toda la tarde después de un solo clic.
@@ -852,15 +856,21 @@ export function Sale() {
    * ver el useEffect de focusRowIndex más arriba. */
   function addPaymentRow() {
     setFocusRowIndex(payments.length);
-    setPayments((current) => [...current, { accountId: "", amount: "" }]);
+    setPayments((current) => [...current, { accountId: "", amount: "", reference: "" }]);
   }
 
   function removePaymentRow(index: number) {
     setPayments((current) => (current.length > 1 ? current.filter((_, i) => i !== index) : current));
   }
 
-  function updatePaymentRow(index: number, field: "accountId" | "amount", value: string) {
-    setPayments((current) => current.map((p, i) => (i === index ? { ...p, [field]: value } : p)));
+  function updatePaymentRow(index: number, field: "accountId" | "amount" | "reference", value: string) {
+    setPayments((current) => current.map((p, i) => {
+      if (i !== index) return p;
+      // Cambiar de cuenta borra el cupón que hubiera cargado -- si no, un
+      // cupón de una tarjeta podría quedar pegado a otro medio de pago
+      // elegido después sin que nadie lo note.
+      return field === "accountId" ? { ...p, accountId: value, reference: "" } : { ...p, [field]: value };
+    }));
     // Si ya estaba armado el cartel de "confirmá para cobrar", cualquier
     // cambio en el medio/monto lo desarma -- que muestre siempre el medio
     // que realmente está elegido AHORA, no uno viejo.
@@ -931,9 +941,17 @@ export function Sale() {
         setMessage("Ingresá cuánto te dio el cliente (tiene que alcanzar para el total).");
         return;
       }
+      if (!isSingleCash && !payments[0].reference.trim()) {
+        setMessage("Cargá el cupón o número de operación de este pago.");
+        return;
+      }
     } else {
       if (payments.some((p) => !p.accountId)) {
         setMessage("Elegí la cuenta en cada medio de pago.");
+        return;
+      }
+      if (payments.some((p) => accounts.find((a) => a.id === p.accountId)?.paymentMethod !== "cash" && !p.reference.trim())) {
+        setMessage("Cargá el cupón o número de operación en cada pago que no sea efectivo.");
         return;
       }
       if (Math.abs(splitRemaining) > 0.5) {
@@ -994,8 +1012,8 @@ export function Sale() {
         discountAmount: itemDiscountsSnapshot[l.key]
       }));
       const paymentsPayload = isSplit
-        ? payments.map((p) => ({ accountId: p.accountId, amount: parseAmount(p.amount || "0") || 0 }))
-        : [{ accountId: payments[0].accountId, amount: total }];
+        ? payments.map((p) => ({ accountId: p.accountId, amount: parseAmount(p.amount || "0") || 0, reference: p.reference.trim() || undefined }))
+        : [{ accountId: payments[0].accountId, amount: total, reference: payments[0].reference.trim() || undefined }];
 
       const salePayload: CreatePosSaleInput = {
         branchId,
@@ -1632,6 +1650,21 @@ export function Sale() {
                       ))}
                     </div>
                   )}
+                  {!isSplit && singleAccount && singleAccount.paymentMethod !== "cash" && (
+                    <div className="pos-payment-row">
+                      <input
+                        type="text"
+                        placeholder="Cupón / N° de operación"
+                        value={payments[0].reference}
+                        onChange={(e) => updatePaymentRow(0, "reference", e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key !== "Enter") return;
+                          e.preventDefault();
+                          chargeButtonRef.current?.focus();
+                        }}
+                      />
+                    </div>
+                  )}
                   {isSplit && payments.map((p, i) => (
                     <div className="pos-payment-row" key={i}>
                       <select
@@ -1663,6 +1696,14 @@ export function Sale() {
                             else if (Math.abs(splitRemaining) <= 0.5) chargeButtonRef.current?.focus();
                             else addPaymentRow();
                           }}
+                        />
+                      )}
+                      {accounts.find((a) => a.id === p.accountId)?.paymentMethod !== "cash" && p.accountId && (
+                        <input
+                          type="text"
+                          placeholder="Cupón / N° de operación"
+                          value={p.reference}
+                          onChange={(e) => updatePaymentRow(i, "reference", e.target.value)}
                         />
                       )}
                       {isSplit && payments.length > 1 && (

@@ -160,6 +160,7 @@ export interface PosShiftSaleItem {
 export interface PosShiftSalePayment {
   accountName: string;
   amount: number;
+  reference: string | null;
 }
 
 export interface PosShiftSale {
@@ -180,7 +181,7 @@ interface PosShiftSaleRow {
   surcharge_amount: number;
   total: number;
   voided_at: string | null;
-  pos_sale_payments: { amount: number; treasury_accounts: { name: string } | null }[];
+  pos_sale_payments: { amount: number; reference: string | null; treasury_accounts: { name: string } | null }[];
   pos_sale_items: {
     quantity: number;
     unit_price: number;
@@ -233,7 +234,7 @@ export async function listPosShiftSales(shiftId: string): Promise<PosShiftSale[]
     .from("pos_sales")
     .select(
       "id,created_at,discount_amount,surcharge_amount,total,voided_at," +
-        "pos_sale_payments(amount,treasury_accounts(name))," +
+        "pos_sale_payments(amount,reference,treasury_accounts(name))," +
         "pos_sale_items(quantity,unit_price,discount_amount,line_total,description,products(name,unit))"
     )
     .eq("pos_shift_id", shiftId)
@@ -243,7 +244,7 @@ export async function listPosShiftSales(shiftId: string): Promise<PosShiftSale[]
   return ((data ?? []) as unknown as PosShiftSaleRow[]).map((row) => ({
     id: row.id,
     createdAt: row.created_at,
-    payments: row.pos_sale_payments.map((p) => ({ accountName: p.treasury_accounts?.name ?? "-", amount: Number(p.amount) })),
+    payments: row.pos_sale_payments.map((p) => ({ accountName: p.treasury_accounts?.name ?? "-", amount: Number(p.amount), reference: p.reference })),
     discountAmount: Number(row.discount_amount),
     surchargeAmount: Number(row.surcharge_amount ?? 0),
     total: Number(row.total),
