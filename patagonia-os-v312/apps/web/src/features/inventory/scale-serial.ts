@@ -426,16 +426,16 @@ async function buildPluFrame(
   // A diferencia de los demás campos secundarios, este NO se preserva del
   // registro viejo: un PLU cargado antes por iTegra puede traer otra
   // cantidad de decimales, y como Patagonia OS manda el precio siempre
-  // como pesos enteros, heredar ese flag corre el precio en la balanza --
-  // bug real detectado en producción (mandamos $17500, la balanza mostró
-  // "1750.0", confirmado con foto de la pantalla). El campo es literal:
-  // cuántos dígitos desde la derecha son decimales -- "1" corta un dígito
-  // ($17500 -> 1750.0), NO "0 decimales" como se asumió en un intento
-  // anterior (esa suposición partía de otro PLU que "andaba bien" sin
-  // haber mirado su pantalla real -- puede tener el mismo bug sin que
-  // nadie lo haya notado todavía). El valor correcto para los precios
-  // enteros de Patagonia OS es siempre "0".
-  const posicionDecimal = fixedDigits(0, 6);
+  // como pesos enteros, heredar ese flag corre el precio en la balanza.
+  // Confirmado con fotos reales de la pantalla probando los tres valores
+  // en ROAST BEEF ($17500 cargado): flag "0" -> "175.00" (÷100), flag "1"
+  // -> "1750.0" (÷10), flag "2" -> entero sin decimales (÷1, el que
+  // corresponde). El patrón es "decimales mostrados = 2 - flag" -- por eso
+  // el valor correcto es siempre "2", que es el que ya estaba en este
+  // código antes de este incidente. El bug real nunca fue este valor por
+  // defecto: fue que antes se heredaba el flag viejo de iTegra en vez de
+  // forzar "2" siempre.
+  const posicionDecimal = fixedDigits(2, 6);
   const impuesto1 = existing?.[11] ?? fixedDigits(0, 6);
   const impuesto2 = existing?.[12] ?? fixedDigits(0, 6);
   const taraPreempaque = existing?.[13] ?? fixedDigits(0, 5);
