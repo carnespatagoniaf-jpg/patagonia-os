@@ -175,6 +175,12 @@ export function Sale() {
   const [shiftLoading, setShiftLoading] = useState(isSupabaseConfigured);
   const [shiftSales, setShiftSales] = useState<PosShiftSale[]>([]);
   const [showShiftMovements, setShowShiftMovements] = useState(false);
+  // Arranca siempre oculto, incluso para quien SÍ puede verlo -- la idea no
+  // es solo "que el cajero no tenga permiso", sino que el número de ventas
+  // no quede pegado en la pantalla todo el tiempo, porque cualquiera que
+  // pase por detrás del mostrador (dueño cobrando incluido) lo puede ver
+  // de reojo. Hace falta un clic deliberado cada vez.
+  const [showShiftTotals, setShowShiftTotals] = useState(false);
   const [openingCashInput, setOpeningCashInput] = useState("");
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [closingCountedCashInput, setClosingCountedCashInput] = useState("");
@@ -835,6 +841,9 @@ export function Sale() {
     setShowDiscountForm(false);
     setPayments([{ accountId: "", amount: "" }]);
     setCashTendered("");
+    // Se vuelve a tapar solo después de cada venta -- que no quede
+    // "revelado" toda la tarde después de un solo clic.
+    setShowShiftTotals(false);
     setMessage("");
     searchInputRef.current?.focus();
   }
@@ -1733,7 +1742,7 @@ export function Sale() {
               <span className="muted" style={{ fontSize: 12 }}>desde {new Date(shift.openedAt).toLocaleTimeString("es-AR")}</span>
             </div>
 
-            {canSeeShiftTotals && (
+            {canSeeShiftTotals && showShiftTotals && (
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
                 <div style={{ background: "#f8f9fb", borderRadius: 12, padding: "12px 14px" }}>
                   <p className="muted" style={{ margin: 0, fontSize: 12 }}>Ventas</p>
@@ -1747,6 +1756,11 @@ export function Sale() {
             )}
 
             <div style={{ display: "grid", gap: 8 }}>
+              {canSeeShiftTotals && (
+                <button className="pos-toolbar-btn" onClick={() => setShowShiftTotals((v) => !v)}>
+                  {showShiftTotals ? "Ocultar total del turno" : "Ver total del turno"}
+                </button>
+              )}
               {canSeeShiftTotals && (
                 <button className="pos-toolbar-btn" onClick={() => setShowShiftMovements((v) => !v)}>
                   {showShiftMovements ? "Ocultar movimientos" : "Ver movimientos"}
