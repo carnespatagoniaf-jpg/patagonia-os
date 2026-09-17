@@ -172,7 +172,7 @@ button.danger { background: white; color: #b42318; border: 1px solid #f3d0cc; }
   background: #f8f9fb; padding-top: 12px !important;
 }
 
-.pos-cart { display: grid; margin-top: 12px; }
+.pos-cart { display: grid; margin-top: 12px; max-height: 360px; overflow-y: auto; }
 .pos-cart-empty {
   margin-top: 12px; padding: 24px 16px; text-align: center; border: 1.5px dashed #d5dbe4;
   border-radius: 14px; color: #8b95a5;

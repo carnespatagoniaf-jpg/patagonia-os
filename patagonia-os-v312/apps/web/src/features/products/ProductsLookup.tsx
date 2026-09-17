@@ -45,7 +45,7 @@ export function ProductsLookup() {
     if (labelProduct) labelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [labelProduct]);
 
-  const filtered = products.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()));
+  const filtered = products.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()) || p.code.toLowerCase().includes(search.toLowerCase()));
   const sizeStyle = LABEL_SIZE_STYLES[labelSize];
 
   function handlePrint() {
@@ -76,7 +76,7 @@ export function ProductsLookup() {
         </div>
         <input
           type="text"
-          placeholder="Buscar por nombre…"
+          placeholder="Buscar por nombre o código…"
           value={search}
           onChange={(e) => setSearch(e.target.value)}
           style={{ marginBottom: 14, width: "100%", maxWidth: 320 }}
@@ -84,6 +84,7 @@ export function ProductsLookup() {
         <table className="data-table">
           <thead>
             <tr>
+              <th>Código</th>
               <th>Producto</th>
               <th className="num">Precio</th>
               <th></th>
@@ -92,6 +93,7 @@ export function ProductsLookup() {
           <tbody>
             {filtered.map((product) => (
               <tr key={product.id}>
+                <td>{product.code}</td>
                 <td>{product.name} <span className="muted">({UNIT_LABELS[product.unit]})</span></td>
                 <td className="num">{formatMoney(product.priceRetail)}</td>
                 <td>
