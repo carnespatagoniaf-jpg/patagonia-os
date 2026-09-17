@@ -208,6 +208,12 @@ export function Sale() {
    * declaró (ver discusión: acá no hay una encargada que se lleve la
    * plata como en un supermercado, así que este es el único registro). */
   const [closeAdjustments, setCloseAdjustments] = useState<PosShiftAdjustment[]>([]);
+  /** Al cerrar, cada cuenta no efectivo (tarjeta/posnet, transferencias)
+   * también se puede corroborar contra el resumen real (el ticket del
+   * posnet, el resumen de transferencias del banco) -- solo en pantalla,
+   * no se guarda en ningún lado, es nomás para que el dueño vea si algo
+   * no cuadra antes de dar el turno por cerrado. */
+  const [accountReconcileInput, setAccountReconcileInput] = useState<Record<string, string>>({});
 
   const [search, setSearch] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -381,6 +387,7 @@ export function Sale() {
     setCloseSummary(null);
     setCloseDetail([]);
     setCloseAdjustments([]);
+    setAccountReconcileInput({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId]);
 
@@ -1216,6 +1223,7 @@ export function Sale() {
         });
         setCloseDetail(activeShiftSales);
         setCloseAdjustments(cajaAdjustments);
+        setAccountReconcileInput({});
         setShift(null);
         setShiftSales([]);
         setShowCloseConfirm(false);
@@ -1228,6 +1236,7 @@ export function Sale() {
       setCloseSummary(result);
       setCloseDetail(detailSnapshot);
       setCloseAdjustments(adjustmentsSnapshot);
+      setAccountReconcileInput({});
       setShowCloseConfirm(false);
       setClosingCountedCashInput("");
       await reloadShift();
@@ -2326,16 +2335,44 @@ export function Sale() {
           {closeSummary.byAccount.length > 0 && (
             <table className="data-table" style={{ marginBottom: 16 }}>
               <thead>
-                <tr><th>Cuenta</th><th className="num">Ventas</th><th className="num">Monto</th></tr>
+                <tr>
+                  <th>Cuenta</th>
+                  <th className="num">Ventas</th>
+                  <th className="num">Monto</th>
+                  <th className="num no-print">Real (posnet/resumen)</th>
+                  <th className="num no-print">Diferencia</th>
+                </tr>
               </thead>
               <tbody>
-                {closeSummary.byAccount.map((row) => (
-                  <tr key={row.accountId}>
-                    <td>{accounts.find((a) => a.id === row.accountId)?.name ?? row.accountId}</td>
-                    <td className="num">{row.salesCount}</td>
-                    <td className="num">{formatMoney(row.amount)}</td>
-                  </tr>
-                ))}
+                {closeSummary.byAccount.map((row) => {
+                  const realInput = accountReconcileInput[row.accountId] ?? "";
+                  const realValue = realInput.trim() ? parseAmount(realInput) : null;
+                  const diff = realValue !== null && Number.isFinite(realValue) ? realValue - row.amount : null;
+                  return (
+                    <tr key={row.accountId}>
+                      <td>{accounts.find((a) => a.id === row.accountId)?.name ?? row.accountId}</td>
+                      <td className="num">{row.salesCount}</td>
+                      <td className="num">{formatMoney(row.amount)}</td>
+                      <td className="num no-print">
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          placeholder="$"
+                          style={{ width: 110, textAlign: "right" }}
+                          value={realInput}
+                          onChange={(e) => setAccountReconcileInput({ ...accountReconcileInput, [row.accountId]: e.target.value })}
+                        />
+                      </td>
+                      <td className="num no-print">
+                        {diff !== null && (
+                          <strong className={diff < 0 ? "num-negative" : diff > 0 ? "num-positive" : undefined}>
+                            {formatMoney(diff)}
+                          </strong>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           )}
