@@ -499,6 +499,10 @@ export function Sale() {
         accountName,
         detail: cajaReason.trim()
       };
+      // Idem al comentario en checkout() pero al revés -- si queda un
+      // ticket de venta viejo en pantalla, sacarlo para que no compita con
+      // este comprobante al imprimir.
+      setReceipt(null);
       setMovementReceipt(movementReceiptData);
       await autoPrintMovementReceipt(movementReceiptData);
       await reloadShiftMovements();
@@ -634,6 +638,10 @@ export function Sale() {
         counterpartLabel: "Proveedor",
         counterpartName: supplierName
       };
+      // Idem al comentario en checkout() pero al revés -- si queda un
+      // ticket de venta viejo en pantalla, sacarlo para que no compita con
+      // este comprobante al imprimir.
+      setReceipt(null);
       setMovementReceipt(movementReceiptData);
       await autoPrintMovementReceipt(movementReceiptData);
       setSupplierId("");
@@ -678,6 +686,10 @@ export function Sale() {
         counterpartLabel: "Empleado",
         counterpartName: employeeName
       };
+      // Idem al comentario en checkout() pero al revés -- si queda un
+      // ticket de venta viejo en pantalla, sacarlo para que no compita con
+      // este comprobante al imprimir.
+      setReceipt(null);
       setMovementReceipt(movementReceiptData);
       await autoPrintMovementReceipt(movementReceiptData);
       await reloadShiftMovements();
@@ -1071,6 +1083,7 @@ export function Sale() {
           change
         };
         setReceipt(demoReceipt);
+        setMovementReceipt(null);
         clearTicket();
         setMessage("Venta registrada (modo demo, no se descuenta stock real).");
         await autoPrintReceipt(demoReceipt);
@@ -1127,6 +1140,12 @@ export function Sale() {
         pending: queuedOffline
       };
       setReceipt(newReceipt);
+      // Si quedó un comprobante de caja/proveedor/vale de antes en pantalla,
+      // sacarlo -- las dos secciones son .print-area, y si las dos quedan
+      // montadas a la vez, imprimir la venta nueva puede terminar sacando
+      // el papel viejo en vez del ticket de esta venta (bug real reportado
+      // en producción).
+      setMovementReceipt(null);
       clearTicket();
       // El ticket tiene que salir sí o sí -- se imprime antes de refrescar
       // stock/turno, y esos dos refrescos van en su propio try/catch para
