@@ -48,6 +48,7 @@ import {
   type ScaleConfig,
   type ScalePayloadType
 } from "./scale-config-service";
+import { getMostradorPin, setMostradorPin } from "./company-settings-service";
 
 const UNIT_LABELS: Record<Product["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
 
@@ -179,6 +180,16 @@ export function Sale() {
   const [shiftLoading, setShiftLoading] = useState(isSupabaseConfigured);
   const [shiftSales, setShiftSales] = useState<PosShiftSale[]>([]);
   const [showShiftMovements, setShowShiftMovements] = useState(false);
+  // PIN para revelar "Ver movimientos" / "Ver movimientos de caja" -- ver
+  // company-settings-service.ts. null = todavía no se cargó o no hay
+  // ninguno configurado (en ese caso no se pide nada, como antes).
+  const [mostradorPin, setMostradorPinValue] = useState<string | null>(null);
+  const [pinUnlocked, setPinUnlocked] = useState(false);
+  const [pinPromptFor, setPinPromptFor] = useState<null | "movements" | "caja">(null);
+  const [pinInput, setPinInput] = useState("");
+  const [pinError, setPinError] = useState("");
+  const [pinSettingInput, setPinSettingInput] = useState("");
+  const [pinSettingBusy, setPinSettingBusy] = useState(false);
   // Arranca siempre oculto, incluso para quien SÍ puede verlo -- la idea no
   // es solo "que el cajero no tenga permiso", sino que el número de ventas
   // no quede pegado en la pantalla todo el tiempo, porque cualquiera que
@@ -373,6 +384,10 @@ export function Sale() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId]);
 
+  useEffect(() => {
+    void getMostradorPin().then(setMostradorPinValue);
+  }, []);
+
   /** Cuando se agrega una fila de pago (botón "+"), el foco salta directo a
    * su selector de cuenta y la lista se abre sola (showPicker) -- un
    * <select> nativo enfocado no despliega sus opciones por sí solo, así que
@@ -509,6 +524,57 @@ export function Sale() {
       setPosShiftVales(vales);
     } catch {
       // La lista de movimientos es informativa -- si falla no bloquea nada.
+    }
+  }
+
+  /** "Ver movimientos" y "Ver movimientos de caja" -- si hay un PIN
+   * configurado y todavía no se destrabó en esta sesión, pide el PIN antes
+   * de mostrar. Ocultar (el toggle inverso) nunca pide nada. */
+  function requestReveal(kind: "movements" | "caja") {
+    const isShown = kind === "movements" ? showShiftMovements : showMovementsList;
+    const reveal = kind === "movements" ? () => setShowShiftMovements(true) : () => setShowMovementsList(true);
+    if (isShown) {
+      if (kind === "movements") setShowShiftMovements(false);
+      else setShowMovementsList(false);
+      return;
+    }
+    if (mostradorPin && !pinUnlocked) {
+      setPinInput("");
+      setPinError("");
+      setPinPromptFor(kind);
+      return;
+    }
+    reveal();
+  }
+
+  function confirmPin() {
+    if (pinInput.trim() !== mostradorPin) {
+      setPinError("PIN incorrecto.");
+      return;
+    }
+    setPinUnlocked(true);
+    if (pinPromptFor === "movements") setShowShiftMovements(true);
+    else if (pinPromptFor === "caja") setShowMovementsList(true);
+    setPinPromptFor(null);
+    setPinInput("");
+    setPinError("");
+  }
+
+  async function handleSavePin(value: string | null = pinSettingInput) {
+    if (value && !/^\d{4}$/.test(value)) {
+      setMessage("El PIN tiene que ser de 4 dígitos.");
+      return;
+    }
+    setPinSettingBusy(true);
+    try {
+      await setMostradorPin(value || null);
+      setMostradorPinValue(value || null);
+      setPinSettingInput("");
+      setMessage(value ? "PIN guardado." : "PIN sacado -- ya no va a pedir nada.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo guardar el PIN.");
+    } finally {
+      setPinSettingBusy(false);
     }
   }
 
@@ -1418,6 +1484,34 @@ export function Sale() {
                 )}
               </div>
             </div>
+
+            {canSeeShiftTotals && (
+              <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 18 }}>
+                <p style={{ margin: "0 0 8px", fontWeight: 700 }}>PIN para ver movimientos</p>
+                <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
+                  {mostradorPin
+                    ? "Configurado -- hay que tipearlo para revelar \"Ver movimientos\" y \"Ver movimientos de caja\", así no queda a la vista de cualquiera que pase por el mostrador."
+                    : "Sin configurar -- \"Ver movimientos\" y \"Ver movimientos de caja\" se revelan con un clic, sin pedir nada."}
+                </p>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <input
+                    type="password"
+                    inputMode="numeric"
+                    maxLength={4}
+                    placeholder="Nuevo PIN (4 dígitos)"
+                    value={pinSettingInput}
+                    onChange={(e) => setPinSettingInput(e.target.value)}
+                    style={{ width: 160 }}
+                  />
+                  <button disabled={pinSettingBusy} onClick={() => handleSavePin()}>Guardar</button>
+                  {mostradorPin && (
+                    <button className="secondary" disabled={pinSettingBusy} onClick={() => void handleSavePin(null)}>
+                      Sacar PIN
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
         </section>
       )}
@@ -1822,14 +1916,35 @@ export function Sale() {
                 </button>
               )}
               {canSeeShiftTotals && (
-                <button className="pos-toolbar-btn" onClick={() => setShowShiftMovements((v) => !v)}>
+                <button className="pos-toolbar-btn" onClick={() => requestReveal("movements")}>
                   {showShiftMovements ? "Ocultar movimientos" : "Ver movimientos"}
                 </button>
               )}
               {canManageTreasury && (
-                <button className="pos-toolbar-btn" onClick={() => setShowMovementsList((v) => !v)}>
+                <button className="pos-toolbar-btn" onClick={() => requestReveal("caja")}>
                   {showMovementsList ? "Ocultar caja/vales" : "Ver movimientos de caja"}
                 </button>
+              )}
+              {pinPromptFor && (
+                <div className="panel" style={{ padding: 14 }}>
+                  <p style={{ margin: "0 0 8px", fontWeight: 700 }}>Ingresá el PIN para ver esto</p>
+                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={4}
+                      placeholder="PIN"
+                      autoFocus
+                      value={pinInput}
+                      onChange={(e) => setPinInput(e.target.value)}
+                      onKeyDown={(e) => { if (e.key === "Enter") confirmPin(); }}
+                      style={{ width: 80 }}
+                    />
+                    <button onClick={confirmPin}>Confirmar</button>
+                    <button className="secondary" onClick={() => setPinPromptFor(null)}>Cancelar</button>
+                  </div>
+                  {pinError && <p style={{ color: "#a52424", margin: "6px 0 0" }}>{pinError}</p>}
+                </div>
               )}
               {canManageTreasury && (
                 <button className="pos-toolbar-btn" onClick={() => setShowCajaForm((v) => !v)}>
