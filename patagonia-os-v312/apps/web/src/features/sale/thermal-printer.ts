@@ -222,16 +222,40 @@ export function buildTestTicket(settings: ThermalPrintSettings): Uint8Array {
   return t.build();
 }
 
+/** WebUSB no garantiza que device.open()/claimInterface()/transferOut()
+ * resuelvan o rechacen en tiempo acotado -- si la impresora quedó en un
+ * estado raro (desconectada a medias, ocupada por otra pestaña, etc.),
+ * alguna de esas llamadas puede quedarse esperando para siempre. Eso
+ * trababa TODA la pantalla de Mostrador (el cobro se completaba pero
+ * autoPrintReceipt nunca volvía, así que setBusy(false) nunca se
+ * ejecutaba) -- bug real detectado en producción. Un timeout acota la
+ * espera y deja que el fallback a window.print() (en autoPrintReceipt)
+ * haga su trabajo en vez de colgar todo. */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`La impresora térmica no respondió en ${ms / 1000}s.`)), ms);
+    promise.then(
+      (value) => { clearTimeout(timer); resolve(value); },
+      (err) => { clearTimeout(timer); reject(err); }
+    );
+  });
+}
+
 export async function printBytes(bytes: Uint8Array): Promise<void> {
   if (!isThermalPrintSupported()) {
     throw new Error("Este navegador no soporta impresión USB directa (usá Chrome o Edge).");
   }
-  const device = await pickDevice();
   try {
-    await device.open();
-    const { interfaceNumber, endpointNumber } = await findPrintEndpoint(device);
-    await device.claimInterface(interfaceNumber);
-    await device.transferOut(endpointNumber, bytes);
+    await withTimeout(
+      (async () => {
+        const device = await pickDevice();
+        await device.open();
+        const { interfaceNumber, endpointNumber } = await findPrintEndpoint(device);
+        await device.claimInterface(interfaceNumber);
+        await device.transferOut(endpointNumber, bytes);
+      })(),
+      6000
+    );
   } catch (err) {
     cachedDevice = null;
     throw err;
