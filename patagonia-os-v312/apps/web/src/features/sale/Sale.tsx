@@ -1081,7 +1081,15 @@ export function Sale() {
         }
       }
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo registrar la venta.");
+      // Los errores de RPC de Supabase (PostgrestError) sí son instancias de
+      // Error, pero por las dudas -- que nunca se le muestre al cajero un
+      // mensaje genérico e inútil cuando el motivo real está ahí adentro.
+      const raw = err instanceof Error
+        ? err.message
+        : typeof err === "object" && err !== null && "message" in err && typeof (err as { message?: unknown }).message === "string"
+          ? (err as { message: string }).message
+          : "";
+      setMessage(raw || "No se pudo registrar la venta.");
     } finally {
       setBusy(false);
     }
