@@ -190,6 +190,13 @@ export function Sale() {
   const [closingCountedCashInput, setClosingCountedCashInput] = useState("");
   const [closeSummary, setCloseSummary] = useState<CloseShiftResult | null>(null);
   const [closeDetail, setCloseDetail] = useState<PosShiftSale[]>([]);
+  /** Foto de los "Movimiento de caja" (egresos a la caja fuerte, ingresos,
+   * traspasos) del turno que se acaba de cerrar -- para que el dueño pueda
+   * corroborar en el cierre, sin ir a buscarlo a otro lado, que lo que la
+   * cajera tiró a la caja fuerte durante el día coincide con lo que
+   * declaró (ver discusión: acá no hay una encargada que se lleve la
+   * plata como en un supermercado, así que este es el único registro). */
+  const [closeAdjustments, setCloseAdjustments] = useState<PosShiftAdjustment[]>([]);
 
   const [search, setSearch] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
@@ -362,6 +369,7 @@ export function Sale() {
     void reloadShift();
     setCloseSummary(null);
     setCloseDetail([]);
+    setCloseAdjustments([]);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId]);
 
@@ -1114,6 +1122,7 @@ export function Sale() {
           difference: countedCash !== undefined ? countedCash - expectedCash : null
         });
         setCloseDetail(activeShiftSales);
+        setCloseAdjustments(cajaAdjustments);
         setShift(null);
         setShiftSales([]);
         setShowCloseConfirm(false);
@@ -1121,9 +1130,11 @@ export function Sale() {
         return;
       }
       const detailSnapshot = activeShiftSales;
+      const adjustmentsSnapshot = cajaAdjustments;
       const result = await closePosShift(shift.id, countedCash);
       setCloseSummary(result);
       setCloseDetail(detailSnapshot);
+      setCloseAdjustments(adjustmentsSnapshot);
       setShowCloseConfirm(false);
       setClosingCountedCashInput("");
       await reloadShift();
@@ -2185,6 +2196,35 @@ export function Sale() {
                 ))}
               </tbody>
             </table>
+          )}
+          {closeAdjustments.length > 0 && (
+            <div className="panel" style={{ padding: 14, marginBottom: 16 }}>
+              <p className="muted" style={{ margin: 0, marginBottom: 6, fontWeight: 800, textTransform: "uppercase", fontSize: 12 }}>
+                Movimientos de caja del turno
+              </p>
+              <table className="data-table">
+                <thead>
+                  <tr><th>Hora</th><th>Tipo</th><th>Cuenta</th><th>Motivo</th><th className="num">Monto</th></tr>
+                </thead>
+                <tbody>
+                  {closeAdjustments.map((adj) => (
+                    <tr key={adj.id}>
+                      <td>{new Date(adj.createdAt).toLocaleTimeString("es-AR")}</td>
+                      <td>{adj.movementType === "transferencia" ? "Traspaso" : adj.direction === "in" ? "Ingreso" : "Egreso"}</td>
+                      <td>{adj.accountName}</td>
+                      <td>{adj.notes ?? "-"}</td>
+                      <td className="num">{adj.direction === "in" ? "" : "-"}{formatMoney(adj.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p style={{ margin: "8px 0 0" }}>
+                Total sacado de caja (egresos y traspasos):{" "}
+                <strong>
+                  {formatMoney(closeAdjustments.filter((a) => a.direction === "out").reduce((sum, a) => sum + a.amount, 0))}
+                </strong>
+              </p>
+            </div>
           )}
           <table className="data-table">
             <thead>
