@@ -208,6 +208,11 @@ export function Sale() {
    * declaró (ver discusión: acá no hay una encargada que se lleve la
    * plata como en un supermercado, así que este es el único registro). */
   const [closeAdjustments, setCloseAdjustments] = useState<PosShiftAdjustment[]>([]);
+  /** Mismo criterio que closeAdjustments pero para "Vale a empleado" -- el
+   * detalle del turno cerrado no tenía ninguna sección de vales, así que
+   * al imprimir el cierre esa plata quedaba invisible (bug real
+   * reportado: "no se ve el detalle" de los vales en el papel). */
+  const [closeVales, setCloseVales] = useState<PosShiftVale[]>([]);
   /** Al cerrar, cada cuenta no efectivo (tarjeta/posnet, transferencias)
    * también se puede corroborar contra el resumen real (el ticket del
    * posnet, el resumen de transferencias del banco) -- solo en pantalla,
@@ -387,6 +392,7 @@ export function Sale() {
     setCloseSummary(null);
     setCloseDetail([]);
     setCloseAdjustments([]);
+    setCloseVales([]);
     setAccountReconcileInput({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId]);
@@ -1223,6 +1229,7 @@ export function Sale() {
         });
         setCloseDetail(activeShiftSales);
         setCloseAdjustments(cajaAdjustments);
+        setCloseVales(posShiftVales);
         setAccountReconcileInput({});
         setShift(null);
         setShiftSales([]);
@@ -1232,10 +1239,12 @@ export function Sale() {
       }
       const detailSnapshot = activeShiftSales;
       const adjustmentsSnapshot = cajaAdjustments;
+      const valesSnapshot = posShiftVales;
       const result = await closePosShift(shift.id, countedCash);
       setCloseSummary(result);
       setCloseDetail(detailSnapshot);
       setCloseAdjustments(adjustmentsSnapshot);
+      setCloseVales(valesSnapshot);
       setAccountReconcileInput({});
       setShowCloseConfirm(false);
       setClosingCountedCashInput("");
@@ -2402,6 +2411,31 @@ export function Sale() {
                 <strong>
                   {formatMoney(closeAdjustments.filter((a) => a.direction === "out").reduce((sum, a) => sum + a.amount, 0))}
                 </strong>
+              </p>
+            </div>
+          )}
+          {closeVales.length > 0 && (
+            <div className="panel" style={{ padding: 14, marginBottom: 16 }}>
+              <p className="muted" style={{ margin: 0, marginBottom: 6, fontWeight: 800, textTransform: "uppercase", fontSize: 12 }}>
+                Vales a empleados del turno
+              </p>
+              <table className="data-table">
+                <thead>
+                  <tr><th>Hora</th><th>Empleado</th><th>Detalle</th><th className="num">Monto</th></tr>
+                </thead>
+                <tbody>
+                  {closeVales.map((v) => (
+                    <tr key={v.id}>
+                      <td>{new Date(v.createdAt).toLocaleTimeString("es-AR")}</td>
+                      <td>{v.employeeName}</td>
+                      <td>{v.detail || "-"}</td>
+                      <td className="num">{formatMoney(v.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p style={{ margin: "8px 0 0" }}>
+                Total en vales: <strong>{formatMoney(closeVales.reduce((sum, v) => sum + v.amount, 0))}</strong>
               </p>
             </div>
           )}
