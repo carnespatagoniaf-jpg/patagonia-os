@@ -3,7 +3,7 @@ import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { formatMoney } from "../shifts/format";
 import { ScaleSyncPanel } from "../inventory/ScaleSyncPanel";
-import { listProductPrices, type ProductPriceRow } from "./products-service";
+import { compareByCode, listProductPrices, type ProductPriceRow } from "./products-service";
 
 const UNIT_LABELS: Record<ProductPriceRow["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
 
@@ -23,7 +23,8 @@ const LABEL_SIZE_STYLES: Record<LabelSize, { box: string; name: number; price: n
 
 const DEMO_ROWS: ProductPriceRow[] = demoProducts
   .filter((p) => p.active ?? true)
-  .map((p) => ({ id: p.id, code: p.code, name: p.name, unit: p.unit, priceRetail: p.priceRetail }));
+  .map((p) => ({ id: p.id, code: p.code, name: p.name, unit: p.unit, priceRetail: p.priceRetail }))
+  .sort((a, b) => compareByCode(a.code, b.code));
 
 export function ProductsLookup() {
   const [products, setProducts] = useState<ProductPriceRow[]>(isSupabaseConfigured ? [] : DEMO_ROWS);
