@@ -1225,7 +1225,8 @@ export function Sale() {
           byAccount: [],
           expectedCash,
           countedCash: countedCash ?? null,
-          difference: countedCash !== undefined ? countedCash - expectedCash : null
+          difference: countedCash !== undefined ? countedCash - expectedCash : null,
+          breakdown: null
         });
         setCloseDetail(activeShiftSales);
         setCloseAdjustments(cajaAdjustments);
@@ -2326,7 +2327,22 @@ export function Sale() {
           <p><strong>Total del turno: {formatMoney(closeSummary.total)}</strong></p>
           <div className="panel" style={{ padding: 14, marginBottom: 16 }}>
             <p className="muted" style={{ margin: 0, marginBottom: 6, fontWeight: 800, textTransform: "uppercase", fontSize: 12 }}>Arqueo de caja</p>
+            {closeSummary.breakdown && (
+              <>
+                <p style={{ margin: "4px 0" }}>Fondo inicial: <strong>{formatMoney(closeSummary.breakdown.openingCash)}</strong></p>
+                <p style={{ margin: "4px 0" }}>+ Ventas en efectivo: <strong>{formatMoney(closeSummary.breakdown.cashSales)}</strong></p>
+                {closeSummary.breakdown.cashInflows > 0 && (
+                  <p style={{ margin: "4px 0" }}>+ Ingresos de caja: <strong>{formatMoney(closeSummary.breakdown.cashInflows)}</strong></p>
+                )}
+                <p style={{ margin: "4px 0" }}>- Salidas de efectivo (vales, pagos, egresos): <strong>{formatMoney(closeSummary.breakdown.cashOutflows)}</strong></p>
+              </>
+            )}
             <p style={{ margin: "4px 0" }}>Efectivo esperado: <strong>{formatMoney(closeSummary.expectedCash)}</strong></p>
+            {closeSummary.breakdown && closeSummary.breakdown.noncashOutflows > 0 && (
+              <p className="num-negative" style={{ margin: "6px 0", fontWeight: 700 }}>
+                Ojo: {formatMoney(closeSummary.breakdown.noncashOutflows)} en vales/pagos/egresos de este turno se cargaron con una cuenta que no es de efectivo, por eso NO se restaron del efectivo esperado. Si esa plata salió del cajón, tiene que cargarse con la cuenta Efectivo.
+              </p>
+            )}
             {closeSummary.countedCash !== null ? (
               <>
                 <p style={{ margin: "4px 0" }}>Efectivo contado: <strong>{formatMoney(closeSummary.countedCash)}</strong></p>

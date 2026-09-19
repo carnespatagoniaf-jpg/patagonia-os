@@ -41,6 +41,17 @@ export interface CloseShiftResult {
   expectedCash: number;
   countedCash: number | null;
   difference: number | null;
+  /** Desglose del efectivo esperado -- null si el servidor todavía no
+   * devuelve estos campos (versión anterior de close_pos_shift). */
+  breakdown: {
+    openingCash: number;
+    cashSales: number;
+    cashOutflows: number;
+    cashInflows: number;
+    /** Salidas del turno (vales, pagos, egresos) cargadas contra cuentas
+     * que NO son efectivo -- no se restan del efectivo esperado. */
+    noncashOutflows: number;
+  } | null;
 }
 
 export async function closePosShift(shiftId: string, closingCountedCash?: number): Promise<CloseShiftResult> {
@@ -60,7 +71,17 @@ export async function closePosShift(shiftId: string, closingCountedCash?: number
     })),
     expectedCash: Number(data.expected_cash ?? 0),
     countedCash: data.counted_cash !== null && data.counted_cash !== undefined ? Number(data.counted_cash) : null,
-    difference: data.difference !== null && data.difference !== undefined ? Number(data.difference) : null
+    difference: data.difference !== null && data.difference !== undefined ? Number(data.difference) : null,
+    breakdown:
+      data.cash_outflows !== undefined && data.cash_outflows !== null
+        ? {
+            openingCash: Number(data.opening_cash ?? 0),
+            cashSales: Number(data.cash_sales ?? 0),
+            cashOutflows: Number(data.cash_outflows ?? 0),
+            cashInflows: Number(data.cash_inflows ?? 0),
+            noncashOutflows: Number(data.noncash_outflows ?? 0)
+          }
+        : null
   };
 }
 
