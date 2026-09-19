@@ -48,6 +48,8 @@ export interface CloseShiftResult {
     cashSales: number;
     cashOutflows: number;
     cashInflows: number;
+    cashVales: number;
+    cashSupplierPayments: number;
     /** Salidas del turno (vales, pagos, egresos) cargadas contra cuentas
      * que NO son efectivo -- no se restan del efectivo esperado. */
     noncashOutflows: number;
@@ -79,6 +81,8 @@ export async function closePosShift(shiftId: string, closingCountedCash?: number
             cashSales: Number(data.cash_sales ?? 0),
             cashOutflows: Number(data.cash_outflows ?? 0),
             cashInflows: Number(data.cash_inflows ?? 0),
+            cashVales: Number(data.cash_vales ?? 0),
+            cashSupplierPayments: Number(data.cash_supplier_payments ?? 0),
             noncashOutflows: Number(data.noncash_outflows ?? 0)
           }
         : null

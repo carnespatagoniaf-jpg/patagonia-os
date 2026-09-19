@@ -1,16 +1,15 @@
--- Pedido real: al cerrar la caja de la noche el efectivo dio -$165.606 y la
--- causa eran vales a empleados ($113.896) y un pago a proveedor ($51.500)
--- que salieron del cajón pero no se habían restado del "efectivo
--- esperado". close_pos_shift (065) solo resta las salidas cargadas contra
--- una cuenta con payment_method = 'cash' -- una salida cargada contra
--- cualquier otra cuenta (o una cuenta sin payment_method, que Tesorería
--- deja crear) no se resta y el faltante aparece sin explicación.
+-- Pedido real: la caja de la noche parecía dar -$165.606 en efectivo. El
+-- arqueo del sistema estaba bien (-$210); el número salía de comparar las
+-- ventas en efectivo ($820.606) contra lo contado en la caja fuerte
+-- ($655.000) sin descontar los vales ($113.896) ni el pago a Santiago
+-- ($51.500), que también salieron de esa plata.
 --
 -- Esta versión hace lo mismo que la de 065 (el cálculo del efectivo
 -- esperado no cambia) pero además DEVUELVE el desglose -- fondo inicial,
--- ventas en efectivo, salidas y entradas en efectivo -- y cuánto se sacó
--- del turno contra cuentas que NO son efectivo, para que el cierre pueda
--- mostrar de dónde sale el número y avisar cuando algo no se restó.
+-- ventas en efectivo, salidas y entradas en efectivo, total de vales y de
+-- pagos a proveedores -- y cuánto se sacó del turno contra cuentas que NO
+-- son efectivo (esas no se restan del esperado), para que el cierre pueda
+-- mostrar de dónde sale cada número.
 create or replace function public.close_pos_shift(p_pos_shift_id uuid, p_closing_counted_cash numeric default null)
 returns jsonb
 language plpgsql
@@ -28,6 +27,8 @@ declare
   v_cash_movements numeric(14,2) := 0;
   v_cash_outflows numeric(14,2) := 0;
   v_cash_inflows numeric(14,2) := 0;
+  v_cash_vales numeric(14,2) := 0;
+  v_cash_supplier numeric(14,2) := 0;
   v_noncash_outflows numeric(14,2) := 0;
   v_expected_cash numeric(14,2);
   v_difference numeric(14,2);
@@ -90,8 +91,10 @@ begin
   select
     coalesce(sum(case when tm.direction = 'in' then tm.amount else -tm.amount end), 0),
     coalesce(sum(tm.amount) filter (where tm.direction = 'out'), 0),
-    coalesce(sum(tm.amount) filter (where tm.direction = 'in'), 0)
-  into v_cash_movements, v_cash_outflows, v_cash_inflows
+    coalesce(sum(tm.amount) filter (where tm.direction = 'in'), 0),
+    coalesce(sum(tm.amount) filter (where tm.direction = 'out' and tm.movement_type in ('vale_adelanto', 'vale_mercaderia')), 0),
+    coalesce(sum(tm.amount) filter (where tm.direction = 'out' and tm.movement_type = 'pago_proveedor'), 0)
+  into v_cash_movements, v_cash_outflows, v_cash_inflows, v_cash_vales, v_cash_supplier
   from public.treasury_movements tm
   join public.treasury_accounts ta on ta.id = tm.account_id
   where ta.payment_method = 'cash'
@@ -134,6 +137,7 @@ begin
     'total', v_total, 'by_account', v_summary,
     'opening_cash', coalesce(v_shift.opening_cash, 0), 'cash_sales', v_cash_sales,
     'cash_outflows', v_cash_outflows, 'cash_inflows', v_cash_inflows,
+    'cash_vales', v_cash_vales, 'cash_supplier_payments', v_cash_supplier,
     'noncash_outflows', v_noncash_outflows,
     'expected_cash', v_expected_cash, 'counted_cash', p_closing_counted_cash, 'difference', v_difference
   );

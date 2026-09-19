@@ -2370,12 +2370,29 @@ export function Sale() {
               </thead>
               <tbody>
                 {closeSummary.byAccount.map((row) => {
+                  const account = accounts.find((a) => a.id === row.accountId);
+                  const cashRowCount = closeSummary.byAccount.filter((r) => accounts.find((a) => a.id === r.accountId)?.paymentMethod === "cash").length;
+                  // Fila de efectivo: lo que se cuenta (caja fuerte) sale de las
+                  // ventas en efectivo MENOS lo que salió de esa plata -- vales,
+                  // pagos a proveedores y egresos que no fueron a la caja fuerte.
+                  // Sin esto la diferencia daba negativa por todo lo pagado.
+                  const isCashRow = account?.paymentMethod === "cash" && cashRowCount === 1 && closeSummary.breakdown !== null;
+                  const otherOutflows = isCashRow
+                    ? closeAdjustments
+                        .filter((a) => a.direction === "out" && a.movementType === "ajuste" && a.accountName === account?.name && !/caja\s*f|fuerte/i.test(a.notes ?? ""))
+                        .reduce((sum, a) => sum + a.amount, 0)
+                    : 0;
+                  const cashDeductions = isCashRow && closeSummary.breakdown
+                    ? closeSummary.breakdown.cashVales + closeSummary.breakdown.cashSupplierPayments + otherOutflows
+                    : 0;
+                  const expectedAmount = row.amount - cashDeductions;
                   const realInput = accountReconcileInput[row.accountId] ?? "";
                   const realValue = realInput.trim() ? parseAmount(realInput) : null;
-                  const diff = realValue !== null && Number.isFinite(realValue) ? realValue - row.amount : null;
+                  const diff = realValue !== null && Number.isFinite(realValue) ? realValue - expectedAmount : null;
                   return (
-                    <tr key={row.accountId}>
-                      <td>{accounts.find((a) => a.id === row.accountId)?.name ?? row.accountId}</td>
+                    <Fragment key={row.accountId}>
+                    <tr>
+                      <td>{account?.name ?? row.accountId}</td>
                       <td className="num">{row.salesCount}</td>
                       <td className="num">{formatMoney(row.amount)}</td>
                       <td className="num no-print">
@@ -2396,6 +2413,18 @@ export function Sale() {
                         )}
                       </td>
                     </tr>
+                    {isCashRow && closeSummary.breakdown && (
+                      <tr className="no-print">
+                        <td colSpan={5} className="muted" style={{ fontSize: 13 }}>
+                          Lo que tiene que dar la caja fuerte: ventas {formatMoney(row.amount)}
+                          {closeSummary.breakdown.cashVales > 0 && ` − vales ${formatMoney(closeSummary.breakdown.cashVales)}`}
+                          {closeSummary.breakdown.cashSupplierPayments > 0 && ` − pagos a proveedores ${formatMoney(closeSummary.breakdown.cashSupplierPayments)}`}
+                          {otherOutflows > 0 && ` − otras salidas ${formatMoney(otherOutflows)}`}
+                          {" = "}<strong>{formatMoney(expectedAmount)}</strong>. Los movimientos con "caja fuerte" en el motivo se cuentan como depósito, no como salida.
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   );
                 })}
               </tbody>
