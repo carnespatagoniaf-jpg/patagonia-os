@@ -7,7 +7,8 @@ export type PaymentMethod =
   | "debit"
   | "credit"
   | "bank_province"
-  | "transfer";
+  | "transfer"
+  | "digital";
 
 export interface Product {
   id: string;

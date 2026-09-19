@@ -37,7 +37,8 @@ const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   debit: "Débito",
   credit: "Crédito",
   bank_province: "Banco Provincia",
-  transfer: "Transferencia"
+  transfer: "Transferencia",
+  digital: "Pagos digitales"
 };
 
 interface LedgerRow {

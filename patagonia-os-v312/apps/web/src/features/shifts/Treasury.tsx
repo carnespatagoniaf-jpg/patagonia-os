@@ -7,13 +7,13 @@ import { parseAmount } from "../../lib/money";
 import type { ShiftRangeRow } from "./shifts-service";
 import { listTreasuryMovements, type TreasuryExpenseCategory, type TreasuryMovementRow } from "./treasury-service";
 
+// Al sistema solo le importa si la cuenta es efectivo o no (cierre de caja,
+// vuelto, cupón obligatorio) -- un posnet recibe débito, crédito y QR juntos,
+// así que no tiene sentido pedir el tipo exacto. Obligatorio para que una
+// cuenta de efectivo nunca quede sin marcar.
 const PAYMENT_METHOD_OPTIONS: { value: PaymentMethod; label: string }[] = [
   { value: "cash", label: "Efectivo" },
-  { value: "qr", label: "Mercado Pago QR" },
-  { value: "debit", label: "Débito" },
-  { value: "credit", label: "Crédito" },
-  { value: "bank_province", label: "Banco Provincia" },
-  { value: "transfer", label: "Transferencia" }
+  { value: "digital", label: "Pagos digitales (posnet, banco, transferencia, QR)" }
 ];
 
 const MOVEMENTS_SEARCH_LIMIT = 3000;
@@ -115,7 +115,8 @@ export function Treasury() {
       if (!accountName.trim()) throw new Error("El nombre de la cuenta es obligatorio.");
       const initialBalance = accountInitialBalance ? parseAmount(accountInitialBalance) : 0;
       if (!Number.isFinite(initialBalance) || initialBalance < 0) throw new Error("El saldo inicial no puede ser negativo.");
-      await create({ name: accountName.trim(), paymentMethod: accountPaymentMethod || undefined, initialBalance });
+      if (!accountPaymentMethod) throw new Error("Elegí si la cuenta es Efectivo o Pagos digitales.");
+      await create({ name: accountName.trim(), paymentMethod: accountPaymentMethod, initialBalance });
       setAccountName("");
       setAccountPaymentMethod("");
       setAccountInitialBalance("");
@@ -259,9 +260,9 @@ export function Treasury() {
                 <input placeholder="Ej. Banco Galicia" value={accountName} onChange={(e) => setAccountName(e.target.value)} />
               </div>
               <div>
-                <label className="muted" style={{ display: "block", marginBottom: 4 }}>Tipo (opcional, solo para identificarla)</label>
+                <label className="muted" style={{ display: "block", marginBottom: 4 }}>Tipo de cuenta</label>
                 <select value={accountPaymentMethod} onChange={(e) => setAccountPaymentMethod(e.target.value as PaymentMethod | "")}>
-                  <option value="">Ninguno de estos / no aplica</option>
+                  <option value="">Elegí un tipo…</option>
                   {PAYMENT_METHOD_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
                   ))}
