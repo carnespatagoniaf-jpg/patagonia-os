@@ -26,6 +26,8 @@ import {
   deletePosShiftAdjustment,
   getOpenPosShift,
   listPosShiftAdjustments,
+  listPosShiftSupplierPayments,
+  type PosShiftSupplierPayment,
   listPosShiftSales,
   openPosShift,
   registerPosShiftTransfer,
@@ -213,6 +215,7 @@ export function Sale() {
    * al imprimir el cierre esa plata quedaba invisible (bug real
    * reportado: "no se ve el detalle" de los vales en el papel). */
   const [closeVales, setCloseVales] = useState<PosShiftVale[]>([]);
+  const [closeSupplierPayments, setCloseSupplierPayments] = useState<PosShiftSupplierPayment[]>([]);
   /** Al cerrar, cada cuenta no efectivo (tarjeta/posnet, transferencias)
    * también se puede corroborar contra el resumen real (el ticket del
    * posnet, el resumen de transferencias del banco) -- solo en pantalla,
@@ -393,6 +396,7 @@ export function Sale() {
     setCloseDetail([]);
     setCloseAdjustments([]);
     setCloseVales([]);
+    setCloseSupplierPayments([]);
     setAccountReconcileInput({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [branchId]);
@@ -1241,8 +1245,14 @@ export function Sale() {
       const detailSnapshot = activeShiftSales;
       const adjustmentsSnapshot = cajaAdjustments;
       const valesSnapshot = posShiftVales;
+      const closingShiftId = shift.id;
       const result = await closePosShift(shift.id, countedCash);
       setCloseSummary(result);
+      try {
+        setCloseSupplierPayments(await listPosShiftSupplierPayments(closingShiftId));
+      } catch {
+        // informativo -- si falla no tapa el cierre, que ya está hecho.
+      }
       setCloseDetail(detailSnapshot);
       setCloseAdjustments(adjustmentsSnapshot);
       setCloseVales(valesSnapshot);
@@ -1341,6 +1351,100 @@ export function Sale() {
       }
     } finally {
       setThermalConnectBusy(false);
+    }
+  }
+
+  /** Ticket del cierre de turno para la térmica: total, arqueo, cada cuenta,
+   * y el detalle de movimientos de caja, vales y pagos a proveedores para
+   * que quede en papel qué salió de la caja durante el turno. */
+  function buildCloseTicket(): Uint8Array {
+    const settings = getThermalPrintSettings();
+    const width = settings.lineWidth;
+    const row = (left: string, right: string) => {
+      const room = Math.max(width - right.length - 1, 1);
+      return left.slice(0, room).padEnd(room) + " " + right;
+    };
+    const branchName = branches.find((b) => b.id === branchId)?.name;
+    const summary = closeSummary;
+    const t = new TicketBuilder();
+    if (settings.font !== "auto") t.font(settings.font);
+    t.bodySize(settings, true);
+    t.align("center").bold(true).line("CIERRE DE TURNO").bold(false);
+    if (branchName) t.line(branchName);
+    t.align("left").separator("-", width);
+    t.line(new Date().toLocaleString("es-AR"));
+    if (summary) {
+      t.separator("-", width);
+      t.bold(true).line(row("Total del turno", formatMoney(summary.total))).bold(false);
+      t.line("ARQUEO DE EFECTIVO");
+      if (summary.breakdown) {
+        t.line(row("Fondo inicial", formatMoney(summary.breakdown.openingCash)));
+        t.line(row("+ Ventas efectivo", formatMoney(summary.breakdown.cashSales)));
+        if (summary.breakdown.cashInflows > 0) t.line(row("+ Ingresos de caja", formatMoney(summary.breakdown.cashInflows)));
+        t.line(row("- Salidas efectivo", formatMoney(summary.breakdown.cashOutflows)));
+      }
+      t.line(row("Esperado", formatMoney(summary.expectedCash)));
+      if (summary.countedCash !== null) {
+        t.line(row("Contado", formatMoney(summary.countedCash)));
+        t.bold(true).line(row("Diferencia", formatMoney(summary.difference ?? 0))).bold(false);
+      } else {
+        t.line("Sin conteo de efectivo.");
+      }
+      if (summary.byAccount.length > 0) {
+        t.separator("-", width);
+        t.line("POR CUENTA");
+        summary.byAccount.forEach((r) => {
+          t.line(row(accounts.find((a) => a.id === r.accountId)?.name ?? "Cuenta", formatMoney(r.amount)));
+        });
+      }
+    }
+    if (closeAdjustments.length > 0) {
+      t.separator("-", width);
+      t.line("MOVIMIENTOS DE CAJA");
+      closeAdjustments.forEach((a) => {
+        const kind = a.movementType === "transferencia" ? "Traspaso" : a.direction === "in" ? "Ingreso" : "Egreso";
+        const hour = new Date(a.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+        t.line(row(hour + " " + kind, (a.direction === "in" ? "" : "-") + formatMoney(a.amount)));
+        if (a.notes) t.line("  " + a.notes);
+      });
+      const totalOut = closeAdjustments.filter((a) => a.direction === "out").reduce((sum, a) => sum + a.amount, 0);
+      t.bold(true).line(row("Total sacado", formatMoney(totalOut))).bold(false);
+    }
+    if (closeVales.length > 0) {
+      t.separator("-", width);
+      t.line("VALES A EMPLEADOS");
+      closeVales.forEach((v) => {
+        t.line(row(v.employeeName, formatMoney(v.amount)));
+        if (v.detail) t.line("  " + v.detail);
+      });
+      t.bold(true).line(row("Total vales", formatMoney(closeVales.reduce((sum, v) => sum + v.amount, 0)))).bold(false);
+    }
+    if (closeSupplierPayments.length > 0) {
+      t.separator("-", width);
+      t.line("PAGOS A PROVEEDORES");
+      closeSupplierPayments.forEach((p) => {
+        t.line(row(p.supplierName, formatMoney(p.amount)));
+        if (p.notes) t.line("  " + p.notes);
+      });
+      t.bold(true).line(row("Total pagos", formatMoney(closeSupplierPayments.reduce((sum, p) => sum + p.amount, 0)))).bold(false);
+    }
+    t.separator("-", width);
+    t.feed(3);
+    t.align("center").line("Firma: _______________________");
+    t.bodySize(settings, false);
+    t.cut();
+    return t.build();
+  }
+
+  async function handleCloseTicketPrint() {
+    setMessage("");
+    setThermalPrintBusy(true);
+    try {
+      await printBytes(buildCloseTicket());
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo imprimir el ticket de cierre en la térmica.");
+    } finally {
+      setThermalPrintBusy(false);
     }
   }
 
@@ -2321,7 +2425,14 @@ export function Sale() {
         <section className="panel print-area" style={{ marginTop: 18 }}>
           <div className="panel-title">
             <h2>Detalle del turno cerrado</h2>
-            <button className="secondary no-print" onClick={() => handlePrint()}>Imprimir</button>
+            <div className="no-print" style={{ display: "flex", gap: 8 }}>
+              {isThermalPrintSupported() && (
+                <button className="secondary" disabled={thermalPrintBusy} onClick={handleCloseTicketPrint}>
+                  {thermalPrintBusy ? "Imprimiendo…" : "Ticket (térmica)"}
+                </button>
+              )}
+              <button className="secondary" onClick={() => handlePrint()}>Imprimir</button>
+            </div>
           </div>
           <p className="muted print-only-header">Cerrado {new Date().toLocaleString("es-AR")}</p>
           <p><strong>Total del turno: {formatMoney(closeSummary.total)}</strong></p>
@@ -2481,6 +2592,32 @@ export function Sale() {
               </table>
               <p style={{ margin: "8px 0 0" }}>
                 Total en vales: <strong>{formatMoney(closeVales.reduce((sum, v) => sum + v.amount, 0))}</strong>
+              </p>
+            </div>
+          )}
+          {closeSupplierPayments.length > 0 && (
+            <div className="panel" style={{ padding: 14, marginBottom: 16 }}>
+              <p className="muted" style={{ margin: 0, marginBottom: 6, fontWeight: 800, textTransform: "uppercase", fontSize: 12 }}>
+                Pagos a proveedores del turno
+              </p>
+              <table className="data-table">
+                <thead>
+                  <tr><th>Hora</th><th>Proveedor</th><th>Cuenta</th><th>Detalle</th><th className="num">Monto</th></tr>
+                </thead>
+                <tbody>
+                  {closeSupplierPayments.map((p) => (
+                    <tr key={p.id}>
+                      <td>{new Date(p.createdAt).toLocaleTimeString("es-AR")}</td>
+                      <td>{p.supplierName}</td>
+                      <td>{p.accountName}</td>
+                      <td>{p.notes || "-"}</td>
+                      <td className="num">{formatMoney(p.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p style={{ margin: "8px 0 0" }}>
+                Total en pagos a proveedores: <strong>{formatMoney(closeSupplierPayments.reduce((sum, p) => sum + p.amount, 0))}</strong>
               </p>
             </div>
           )}

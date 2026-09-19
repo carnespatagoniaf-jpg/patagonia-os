@@ -141,6 +141,61 @@ export async function listPosShiftAdjustments(posShiftId: string): Promise<PosSh
   }));
 }
 
+export interface PosShiftSupplierPayment {
+  id: string;
+  supplierName: string;
+  accountName: string;
+  amount: number;
+  notes: string | null;
+  createdAt: string;
+}
+
+/** Pagos a proveedores hechos desde Mostrador durante un turno ("+ Pago a
+ * proveedor", 065) -- para el detalle y el ticket del cierre. */
+export async function listPosShiftSupplierPayments(posShiftId: string): Promise<PosShiftSupplierPayment[]> {
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from("treasury_movements")
+    .select("id,reference_id,amount,notes,created_at,treasury_accounts(name)")
+    .eq("pos_shift_id", posShiftId)
+    .eq("movement_type", "pago_proveedor")
+    .order("created_at");
+  if (error) throw error;
+
+  const rows = (data ?? []) as unknown as {
+    id: string;
+    reference_id: string | null;
+    amount: number;
+    notes: string | null;
+    created_at: string;
+    treasury_accounts: { name: string } | null;
+  }[];
+  if (rows.length === 0) return [];
+
+  const paymentIds = rows.map((r) => r.reference_id).filter((id): id is string => !!id);
+  const supplierByPayment = new Map<string, string>();
+  if (paymentIds.length > 0) {
+    const { data: payments, error: paymentsError } = await supabase
+      .from("supplier_payments")
+      .select("id,suppliers(name)")
+      .in("id", paymentIds);
+    if (paymentsError) throw paymentsError;
+    for (const p of (payments ?? []) as unknown as { id: string; suppliers: { name: string } | null }[]) {
+      if (p.suppliers?.name) supplierByPayment.set(p.id, p.suppliers.name);
+    }
+  }
+
+  return rows.map((r) => ({
+    id: r.id,
+    supplierName: (r.reference_id && supplierByPayment.get(r.reference_id)) || "Proveedor",
+    accountName: r.treasury_accounts?.name ?? "-",
+    amount: Number(r.amount),
+    notes: r.notes,
+    createdAt: r.created_at
+  }));
+}
+
 export async function deletePosShiftAdjustment(movementId: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
