@@ -37,6 +37,13 @@ const DEMO_PROFILE: UserProfile = {
   active: true
 };
 
+/** El perfil se cargó bien y dice que este usuario NO puede entrar
+ * (desactivado, empresa desactivada, sin perfil y sin ser admin de
+ * plataforma) -- único caso donde corresponde cerrar la sesión. Cualquier
+ * otro error (401 por una carrera con el token, un corte de red) es
+ * transitorio y NO tiene que sacar al usuario del sistema. */
+class DefinitiveProfileError extends Error {}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
   const [session, setSession] = useState<Session | null>(null);
@@ -74,18 +81,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Sin fila en profiles: puede ser un platform admin (da de alta
       // clientes nuevos, no pertenece a ninguna empresa) en vez de un
       // usuario sin perfil real.
-      const { data: isAdmin } = await supabase.rpc("am_i_platform_admin");
+      const { data: isAdmin, error: adminError } = await supabase.rpc("am_i_platform_admin");
+      // Si la consulta falló, no se sabe si es admin -- no es lo mismo que
+      // "no es admin", y no tiene que terminar en cerrar la sesión.
+      if (adminError) throw adminError;
       setIsPlatformAdmin(Boolean(isAdmin));
       setProfile(null);
-      loadedProfileUserIdRef.current = null;
-      if (!isAdmin) throw new Error("No se encontró tu perfil.");
+      if (!isAdmin) {
+        loadedProfileUserIdRef.current = null;
+        throw new DefinitiveProfileError("No se encontró tu perfil.");
+      }
+      // Igual que un usuario común: marcar que ya está cargado, para que
+      // un refresh de token no vuelva a pedir todo y arriesgue una falla.
+      loadedProfileUserIdRef.current = userId;
       return;
     }
 
-    if (!data.active) throw new Error("El usuario está desactivado.");
+    if (!data.active) throw new DefinitiveProfileError("El usuario está desactivado.");
     const company = data.companies as unknown as { active: boolean } | { active: boolean }[] | null;
     const companyActive = Array.isArray(company) ? (company[0]?.active ?? true) : (company?.active ?? true);
-    if (!companyActive) throw new Error("Esta empresa está desactivada.");
+    if (!companyActive) throw new DefinitiveProfileError("Esta empresa está desactivada.");
     setIsPlatformAdmin(false);
     setProfile(data as UserProfile);
     loadedProfileUserIdRef.current = userId;
@@ -103,7 +118,35 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setLoading(false);
     }).catch(() => setLoading(false));
 
-    const { data: listener } = supabase.auth.onAuthStateChange(async (event, nextSession) => {
+    async function loadProfileWithRetry(userId: string) {
+      const delays = [500, 1500];
+      for (let attempt = 0; ; attempt++) {
+        try {
+          await loadProfile(userId);
+          return;
+        } catch (err) {
+          if (err instanceof DefinitiveProfileError || attempt >= delays.length) throw err;
+          await new Promise((resolve) => setTimeout(resolve, delays[attempt]));
+        }
+      }
+    }
+
+    async function reloadProfileAfterAuthChange(userId: string) {
+      try {
+        await loadProfileWithRetry(userId);
+      } catch (err) {
+        // Solo se cierra la sesión si el perfil dice que no puede entrar.
+        // Antes CUALQUIER error sacaba al usuario -- y el pedido de perfil
+        // hecho ADENTRO del callback de onAuthStateChange salía con la
+        // clave anónima (sin la sesión, todavía no aplicada), daba 401 y
+        // cerraba la sesión del admin de plataforma al poco de entrar
+        // (visto en los registros de producción).
+        if (err instanceof DefinitiveProfileError && supabase) await supabase.auth.signOut();
+      }
+      setLoading(false);
+    }
+
+    const { data: listener } = supabase.auth.onAuthStateChange((event, nextSession) => {
       if (event === "PASSWORD_RECOVERY") setPasswordRecovery(true);
       setSession(nextSession);
       if (signingInRef.current) {
@@ -112,25 +155,25 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setLoading(false);
         return;
       }
-      // TOKEN_REFRESHED es solo una renovación del token del mismo usuario
-      // -- pasa sola cada tanto, por ejemplo al volver a la pestaña después
-      // de un rato. Si ya tenemos el perfil de ESE usuario cargado, no hace
-      // falta pedirlo de nuevo -- antes esto igual volvía a consultar el
-      // perfil en cada refresh, y un error transitorio de red durante esa
-      // consulta terminaba cerrando la sesión del usuario sin motivo real.
-      if (event === "TOKEN_REFRESHED" && nextSession?.user && loadedProfileUserIdRef.current === nextSession.user.id) {
+      const user = nextSession?.user;
+      // TOKEN_REFRESHED es solo una renovación del token del mismo usuario,
+      // y SIGNED_IN también se dispara solo al volver a la pestaña. Si ya
+      // tenemos el perfil de ESE usuario cargado, no hace falta pedirlo de
+      // nuevo (también vale para el admin de plataforma, que no tiene fila
+      // en profiles).
+      if ((event === "TOKEN_REFRESHED" || event === "SIGNED_IN") && user && loadedProfileUserIdRef.current === user.id) {
         setLoading(false);
         return;
       }
       setProfile(null);
-      if (nextSession?.user) {
-        try {
-          await loadProfile(nextSession.user.id);
-        } catch {
-          if (supabase) await supabase.auth.signOut();
-        }
+      if (!user) {
+        setLoading(false);
+        return;
       }
-      setLoading(false);
+      // Diferido: llamar a supabase adentro del callback, mientras el
+      // cliente todavía tiene tomado el candado de la sesión, hace que el
+      // pedido salga sin el token del usuario.
+      setTimeout(() => void reloadProfileAfterAuthChange(user.id), 0);
     });
 
     return () => listener.subscription.unsubscribe();
@@ -143,7 +186,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
       if (error) throw error;
       if (!data.user) throw new Error("No se pudo iniciar sesión.");
-      await loadProfile(data.user.id);
+      try {
+        await loadProfile(data.user.id);
+      } catch (err) {
+        if (err instanceof DefinitiveProfileError) await supabase.auth.signOut();
+        throw err;
+      }
     } finally {
       signingInRef.current = false;
     }

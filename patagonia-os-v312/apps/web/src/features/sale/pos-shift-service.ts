@@ -268,7 +268,7 @@ interface PosShiftSaleRow {
     discount_amount: number;
     line_total: number;
     description: string | null;
-    products: { name: string; unit: "kg" | "unit" | "box" } | null;
+    product_id: string | null;
   }[];
 }
 
@@ -315,13 +315,33 @@ export async function listPosShiftSales(shiftId: string): Promise<PosShiftSale[]
     .select(
       "id,created_at,discount_amount,surcharge_amount,total,voided_at," +
         "pos_sale_payments(amount,reference,treasury_accounts(name))," +
-        "pos_sale_items(quantity,unit_price,discount_amount,line_total,description,products(name,unit))"
+        "pos_sale_items(quantity,unit_price,discount_amount,line_total,description,product_id)"
     )
     .eq("pos_shift_id", shiftId)
     .order("created_at");
 
   if (error) throw error;
-  return ((data ?? []) as unknown as PosShiftSaleRow[]).map((row) => ({
+  const rows = (data ?? []) as unknown as PosShiftSaleRow[];
+
+  // El nombre/unidad del producto NO se embebe (products(name,unit)): desde
+  // 051_hide_cost_from_cashiers.sql el rol authenticated no tiene SELECT
+  // sobre products, y ese embed hacía fallar TODA esta consulta con 403 --
+  // el turno no cargaba ventas, ni vales, ni movimientos de caja. Se lee de
+  // la vista products_price_list, que sí está habilitada y no trae costo.
+  const productIds = [...new Set(rows.flatMap((r) => r.pos_sale_items.map((i) => i.product_id)).filter((id): id is string => !!id))];
+  const productById = new Map<string, { name: string; unit: "kg" | "unit" | "box" }>();
+  for (let i = 0; i < productIds.length; i += 80) {
+    const { data: products, error: productsError } = await supabase
+      .from("products_price_list")
+      .select("id,name,unit")
+      .in("id", productIds.slice(i, i + 80));
+    if (productsError) throw productsError;
+    for (const p of (products ?? []) as { id: string; name: string; unit: "kg" | "unit" | "box" }[]) {
+      productById.set(p.id, { name: p.name, unit: p.unit });
+    }
+  }
+
+  return rows.map((row) => ({
     id: row.id,
     createdAt: row.created_at,
     payments: row.pos_sale_payments.map((p) => ({ accountName: p.treasury_accounts?.name ?? "-", amount: Number(p.amount), reference: p.reference })),
@@ -330,9 +350,9 @@ export async function listPosShiftSales(shiftId: string): Promise<PosShiftSale[]
     total: Number(row.total),
     voidedAt: row.voided_at,
     items: row.pos_sale_items.map((item) => ({
-      productName: item.products?.name ?? item.description ?? "-",
+      productName: (item.product_id && productById.get(item.product_id)?.name) || item.description || "-",
       quantity: Number(item.quantity),
-      unit: item.products?.unit ?? "unit",
+      unit: (item.product_id && productById.get(item.product_id)?.unit) || "unit",
       unitPrice: Number(item.unit_price),
       discountAmount: Number(item.discount_amount),
       lineTotal: Number(item.line_total)
