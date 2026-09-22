@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { Customer, CustomerBalance, CustomerCharge, CustomerPayment } from "@patagonia/domain";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
@@ -52,6 +52,13 @@ export function useCustomers() {
   const [balance, setBalance] = useState<CustomerBalance | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [demoLedgers, setDemoLedgers] = useState<Record<string, DemoLedger>>({});
+  // Si se pide el detalle de un cliente y, antes de que responda, se pide
+  // el de otro (click rápido entre clientes, o crear uno nuevo mientras el
+  // anterior todavía estaba cargando), la respuesta vieja puede llegar
+  // DESPUÉS de la nueva y pisarle los datos -- se ve la cuenta de un
+  // cliente con el nombre de otro. Este ref guarda cuál es el pedido más
+  // reciente para descartar cualquier respuesta que ya quedó vieja.
+  const latestDetailRequestRef = useRef<string | null>(null);
 
   const reload = useCallback(async () => {
     if (!isSupabaseConfigured) return;
@@ -106,6 +113,8 @@ export function useCustomers() {
 
   const loadDetail = useCallback(
     async (customerId: string) => {
+      latestDetailRequestRef.current = customerId;
+
       if (!isSupabaseConfigured) {
         const ledger = demoLedgers[customerId];
         setCharges(ledger?.charges ?? []);
@@ -121,11 +130,14 @@ export function useCustomers() {
           listCustomerPayments(customerId),
           getCustomerBalance(customerId)
         ]);
+        // Si mientras esto cargaba se pidió el detalle de OTRO cliente, esta
+        // respuesta ya quedó vieja -- no pisar lo que se está mostrando ahora.
+        if (latestDetailRequestRef.current !== customerId) return;
         setCharges(chargeList);
         setPayments(paymentList);
         setBalance(balanceRow);
       } finally {
-        setDetailLoading(false);
+        if (latestDetailRequestRef.current === customerId) setDetailLoading(false);
       }
     },
     [demoLedgers]
