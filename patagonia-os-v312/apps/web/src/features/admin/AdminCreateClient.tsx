@@ -24,10 +24,11 @@ interface Draft {
   branchName: string;
   ownerFullName: string;
   ownerEmail: string;
+  contactPhone: string;
 }
 
 function emptyDraft(): Draft {
-  return { companyName: "", branchName: "", ownerFullName: "", ownerEmail: "" };
+  return { companyName: "", branchName: "", ownerFullName: "", ownerEmail: "", contactPhone: "" };
 }
 
 export function AdminCreateClient() {
@@ -102,7 +103,8 @@ export function AdminCreateClient() {
         companyName: draft.companyName.trim(),
         branchName: draft.branchName.trim(),
         ownerFullName: draft.ownerFullName.trim(),
-        ownerEmail: draft.ownerEmail.trim()
+        ownerEmail: draft.ownerEmail.trim(),
+        contactPhone: draft.contactPhone.trim() || undefined
       });
       setResult(created);
       setResultCompanyName(draft.companyName.trim());
@@ -114,6 +116,40 @@ export function AdminCreateClient() {
     } finally {
       setBusy(false);
     }
+  }
+
+  const activeCompanies = companies.filter((c) => c.active);
+  const inactiveCompanies = companies.filter((c) => !c.active);
+
+  function renderCompanyRow(company: CompanySummary) {
+    return (
+      <tr key={company.id}>
+        <td>{company.name}</td>
+        <td>{company.ownerFullName ?? "-"}</td>
+        <td>{company.ownerEmail ?? "-"}</td>
+        <td>{company.contactPhone ?? "-"}</td>
+        <td className="num">{company.branchCount}</td>
+        <td className="num">{company.userCount}</td>
+        <td>{formatDate(company.createdAt)}</td>
+        <td style={{ display: "flex", gap: 6 }}>
+          <button
+            className="secondary"
+            disabled={togglingId === company.id}
+            onClick={() => toggleActive(company)}
+          >
+            {togglingId === company.id ? "…" : company.active ? "Desactivar" : "Activar"}
+          </button>
+          <button
+            className="secondary"
+            style={{ color: "#8a1f11" }}
+            disabled={deletingId === company.id}
+            onClick={() => void handleDeleteClient(company)}
+          >
+            {deletingId === company.id ? "…" : "Borrar"}
+          </button>
+        </td>
+      </tr>
+    );
   }
 
   return (
@@ -161,6 +197,10 @@ export function AdminCreateClient() {
               Email del dueño
               <input value={draft.ownerEmail} onChange={(e) => setDraft({ ...draft, ownerEmail: e.target.value })} type="email" required />
             </label>
+            <label>
+              Teléfono de contacto (opcional, uso interno)
+              <input value={draft.contactPhone} onChange={(e) => setDraft({ ...draft, contactPhone: e.target.value })} />
+            </label>
             <button className="charge-button" disabled={busy}>
               {busy ? "Creando…" : "Crear cliente"}
             </button>
@@ -174,8 +214,8 @@ export function AdminCreateClient() {
 
       <section className="panel">
         <div className="panel-title">
-          <h2>Clientes</h2>
-          <span>{companiesLoading ? "Cargando…" : `${companies.length} clientes`}</span>
+          <h2>Clientes activos</h2>
+          <span>{companiesLoading ? "Cargando…" : `${activeCompanies.length}`}</span>
         </div>
 
         <table className="data-table">
@@ -184,46 +224,43 @@ export function AdminCreateClient() {
               <th>Negocio</th>
               <th>Dueño</th>
               <th>Email</th>
+              <th>Teléfono</th>
               <th className="num">Sucursales</th>
               <th className="num">Usuarios</th>
               <th>Alta</th>
-              <th>Estado</th>
               <th></th>
             </tr>
           </thead>
-          <tbody>
-            {companies.map((company) => (
-              <tr key={company.id}>
-                <td>{company.name}</td>
-                <td>{company.ownerFullName ?? "-"}</td>
-                <td>{company.ownerEmail ?? "-"}</td>
-                <td className="num">{company.branchCount}</td>
-                <td className="num">{company.userCount}</td>
-                <td>{formatDate(company.createdAt)}</td>
-                <td>{company.active ? "Activo" : "Inactivo"}</td>
-                <td style={{ display: "flex", gap: 6 }}>
-                  <button
-                    className="secondary"
-                    disabled={togglingId === company.id}
-                    onClick={() => toggleActive(company)}
-                  >
-                    {togglingId === company.id ? "…" : company.active ? "Desactivar" : "Activar"}
-                  </button>
-                  <button
-                    className="secondary"
-                    style={{ color: "#8a1f11" }}
-                    disabled={deletingId === company.id}
-                    onClick={() => void handleDeleteClient(company)}
-                  >
-                    {deletingId === company.id ? "…" : "Borrar"}
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
+          <tbody>{activeCompanies.map(renderCompanyRow)}</tbody>
         </table>
-        {companies.length === 0 && !companiesLoading && <p className="muted">Todavía no diste de alta ningún cliente.</p>}
+        {activeCompanies.length === 0 && !companiesLoading && <p className="muted">Todavía no diste de alta ningún cliente.</p>}
       </section>
+
+      {inactiveCompanies.length > 0 && (
+        <section className="panel">
+          <details>
+            <summary className="panel-title" style={{ cursor: "pointer" }}>
+              <h2>Clientes desactivados</h2>
+              <span>{inactiveCompanies.length}</span>
+            </summary>
+            <table className="data-table" style={{ marginTop: 12 }}>
+              <thead>
+                <tr>
+                  <th>Negocio</th>
+                  <th>Dueño</th>
+                  <th>Email</th>
+                  <th>Teléfono</th>
+                  <th className="num">Sucursales</th>
+                  <th className="num">Usuarios</th>
+                  <th>Alta</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>{inactiveCompanies.map(renderCompanyRow)}</tbody>
+            </table>
+          </details>
+        </section>
+      )}
       </div>
     </main>
   );

@@ -5,6 +5,7 @@ export interface CreateClientInput {
   branchName: string;
   ownerFullName: string;
   ownerEmail: string;
+  contactPhone?: string;
 }
 
 export interface CreateClientResult {
@@ -51,6 +52,9 @@ export interface CompanySummary {
    * disponible siempre en la tabla de Clientes. */
   ownerFullName: string | null;
   ownerEmail: string | null;
+  /** Teléfono de contacto guardado a mano al crear el cliente -- uso interno
+   * nuestro (para ubicar a quien pidió la demo), no lo ve el cliente. */
+  contactPhone: string | null;
 }
 
 export async function listCompanies(): Promise<CompanySummary[]> {
@@ -61,7 +65,7 @@ export async function listCompanies(): Promise<CompanySummary[]> {
 
   interface Row {
     id: string; name: string; active: boolean; created_at: string; branch_count: number; user_count: number;
-    owner_full_name: string | null; owner_email: string | null;
+    owner_full_name: string | null; owner_email: string | null; contact_phone: string | null;
   }
   return ((data ?? []) as Row[]).map((row) => ({
     id: row.id,
@@ -71,7 +75,8 @@ export async function listCompanies(): Promise<CompanySummary[]> {
     branchCount: Number(row.branch_count),
     userCount: Number(row.user_count),
     ownerFullName: row.owner_full_name,
-    ownerEmail: row.owner_email
+    ownerEmail: row.owner_email,
+    contactPhone: row.contact_phone
   }));
 }
 

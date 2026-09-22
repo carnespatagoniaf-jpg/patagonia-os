@@ -59,6 +59,7 @@ Deno.serve(async (req) => {
     const branchName = String(body.branchName ?? "").trim();
     const ownerFullName = String(body.ownerFullName ?? "").trim();
     const ownerEmail = String(body.ownerEmail ?? "").trim().toLowerCase();
+    const contactPhone = String(body.contactPhone ?? "").trim();
 
     if (!companyName) throw new Error("El nombre del negocio es obligatorio");
     if (!branchName) throw new Error("El nombre de la sucursal es obligatorio");
@@ -67,7 +68,7 @@ Deno.serve(async (req) => {
 
     const { data: company, error: companyErr } = await admin
       .from("companies")
-      .insert({ name: companyName })
+      .insert({ name: companyName, contact_phone: contactPhone || null })
       .select("id")
       .single();
     if (companyErr || !company) throw new Error(companyErr?.message ?? "No se pudo crear la empresa");
