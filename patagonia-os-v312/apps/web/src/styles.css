@@ -298,6 +298,14 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 
 .print-only-header { display: none; }
 
+/* Lista angosta para el cierre de turno impreso -- una tabla de 4-5
+   columnas en el rollo de una térmica (58/80mm) se aplasta tanto que el
+   texto se corta letra por letra y el monto termina afuera del papel
+   (bug real reportado, visto en una foto del ticket). En pantalla se
+   sigue viendo la tabla de siempre (con .no-print acá abajo); esto solo
+   se muestra al imprimir. */
+.print-only-list { display: none; }
+
 /* Comprobante de Mostrador -- formateado como un ticket real (encabezado
    centrado, renglones alineados, total grande) en vez de una tabla
    genérica, tanto en pantalla como al imprimir. Sigue siendo un
@@ -355,6 +363,11 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   }
   .no-print { display: none !important; }
   .print-only-header { display: block !important; }
+  .print-only-list { display: block !important; }
+  .print-row { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; padding: 4px 0; border-bottom: 1px dashed #ccc; }
+  .print-row .print-row-label { min-width: 0; overflow-wrap: break-word; }
+  .print-row .print-row-amount { white-space: nowrap; font-weight: 700; }
+  .print-row-detail { font-size: 12px; color: #444; margin: 0 0 4px; overflow-wrap: break-word; }
 
   @page { margin: 8mm; }
   /* El ancho de página real lo define la impresora elegida en el diálogo

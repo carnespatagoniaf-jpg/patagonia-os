@@ -1235,6 +1235,7 @@ export function Sale() {
         setCloseDetail(activeShiftSales);
         setCloseAdjustments(cajaAdjustments);
         setCloseVales(posShiftVales);
+        setCloseSupplierPayments([]);
         setAccountReconcileInput({});
         setShift(null);
         setShiftSales([]);
@@ -2546,7 +2547,7 @@ export function Sale() {
               <p className="muted" style={{ margin: 0, marginBottom: 6, fontWeight: 800, textTransform: "uppercase", fontSize: 12 }}>
                 Movimientos de caja del turno
               </p>
-              <table className="data-table">
+              <table className="data-table no-print">
                 <thead>
                   <tr><th>Hora</th><th>Tipo</th><th>Cuenta</th><th>Motivo</th><th className="num">Monto</th></tr>
                 </thead>
@@ -2562,6 +2563,19 @@ export function Sale() {
                   ))}
                 </tbody>
               </table>
+              <div className="print-only-list">
+                {closeAdjustments.map((adj) => (
+                  <div key={adj.id}>
+                    <div className="print-row">
+                      <span className="print-row-label">
+                        {new Date(adj.createdAt).toLocaleTimeString("es-AR")} · {adj.movementType === "transferencia" ? "Traspaso" : adj.direction === "in" ? "Ingreso" : "Egreso"} · {adj.accountName}
+                      </span>
+                      <span className="print-row-amount">{adj.direction === "in" ? "" : "-"}{formatMoney(adj.amount)}</span>
+                    </div>
+                    {adj.notes && <p className="print-row-detail">{adj.notes}</p>}
+                  </div>
+                ))}
+              </div>
               <p style={{ margin: "8px 0 0" }}>
                 Total sacado de caja (egresos y traspasos):{" "}
                 <strong>
@@ -2575,7 +2589,7 @@ export function Sale() {
               <p className="muted" style={{ margin: 0, marginBottom: 6, fontWeight: 800, textTransform: "uppercase", fontSize: 12 }}>
                 Vales a empleados del turno
               </p>
-              <table className="data-table">
+              <table className="data-table no-print">
                 <thead>
                   <tr><th>Hora</th><th>Empleado</th><th>Detalle</th><th className="num">Monto</th></tr>
                 </thead>
@@ -2590,6 +2604,17 @@ export function Sale() {
                   ))}
                 </tbody>
               </table>
+              <div className="print-only-list">
+                {closeVales.map((v) => (
+                  <div key={v.id}>
+                    <div className="print-row">
+                      <span className="print-row-label">{new Date(v.createdAt).toLocaleTimeString("es-AR")} · {v.employeeName}</span>
+                      <span className="print-row-amount">{formatMoney(v.amount)}</span>
+                    </div>
+                    {v.detail && <p className="print-row-detail">{v.detail}</p>}
+                  </div>
+                ))}
+              </div>
               <p style={{ margin: "8px 0 0" }}>
                 Total en vales: <strong>{formatMoney(closeVales.reduce((sum, v) => sum + v.amount, 0))}</strong>
               </p>
@@ -2600,7 +2625,7 @@ export function Sale() {
               <p className="muted" style={{ margin: 0, marginBottom: 6, fontWeight: 800, textTransform: "uppercase", fontSize: 12 }}>
                 Pagos a proveedores del turno
               </p>
-              <table className="data-table">
+              <table className="data-table no-print">
                 <thead>
                   <tr><th>Hora</th><th>Proveedor</th><th>Cuenta</th><th>Detalle</th><th className="num">Monto</th></tr>
                 </thead>
@@ -2616,12 +2641,23 @@ export function Sale() {
                   ))}
                 </tbody>
               </table>
+              <div className="print-only-list">
+                {closeSupplierPayments.map((p) => (
+                  <div key={p.id}>
+                    <div className="print-row">
+                      <span className="print-row-label">{new Date(p.createdAt).toLocaleTimeString("es-AR")} · {p.supplierName} · {p.accountName}</span>
+                      <span className="print-row-amount">{formatMoney(p.amount)}</span>
+                    </div>
+                    {p.notes && <p className="print-row-detail">{p.notes}</p>}
+                  </div>
+                ))}
+              </div>
               <p style={{ margin: "8px 0 0" }}>
                 Total en pagos a proveedores: <strong>{formatMoney(closeSupplierPayments.reduce((sum, p) => sum + p.amount, 0))}</strong>
               </p>
             </div>
           )}
-          <table className="data-table">
+          <table className="data-table no-print">
             <thead>
               <tr><th>Hora</th><th>Producto</th><th className="num">Cant.</th><th className="num">Subtotal</th><th>Pago</th></tr>
             </thead>
@@ -2639,6 +2675,24 @@ export function Sale() {
               )}
             </tbody>
           </table>
+          <div className="print-only-list">
+            {closeDetail.map((sale) => (
+              <div key={sale.id} style={{ marginBottom: 6 }}>
+                <div className="print-row">
+                  <span className="print-row-label">
+                    {new Date(sale.createdAt).toLocaleTimeString("es-AR")} · {sale.payments.map((p) => p.accountName).join(" + ")}
+                    {sale.voidedAt ? " · ANULADA" : ""}
+                  </span>
+                  <span className="print-row-amount">{formatMoney(sale.total)}</span>
+                </div>
+                {sale.items.map((item, idx) => (
+                  <p className="print-row-detail" key={idx}>
+                    {item.productName} ({item.quantity} {UNIT_LABELS[item.unit]}) {formatMoney(item.lineTotal)}
+                  </p>
+                ))}
+              </div>
+            ))}
+          </div>
           {closeDetail.length === 0 && <p className="muted">No hubo ventas en este turno.</p>}
         </section>
       )}
