@@ -874,4 +874,15 @@
       if (e.key === 'Escape') closeLightbox();
     });
   })();
+
+  // Conversion de Google Ads: se dispara solo al clickear un link de
+  // WhatsApp (es la unica forma de "contacto" que tiene esta pagina hoy,
+  // no hay formulario), nunca al cargar la pagina.
+  document.querySelectorAll('a[href*="wa.me"]').forEach(function (link) {
+    link.addEventListener('click', function () {
+      if (typeof gtag === 'function') {
+        gtag('event', 'conversion', { send_to: 'AW-18468458491/L7ezCPzUwoEdEPufueZE' });
+      }
+    });
+  });
 </script>
