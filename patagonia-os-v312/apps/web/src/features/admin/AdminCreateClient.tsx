@@ -8,7 +8,7 @@ import { createClient, deleteClient, listCompanies, setCompanyActive, type Compa
 function buildWelcomeMessage(companyName: string, result: CreateClientResult) {
   return `¡Hola! Ya está listo el acceso a Patagonia OS para ${companyName}.
 
-Entrá en: https://patagoniasystem.com.ar
+Entrá en: https://app.patagoniasystem.com.ar
 Usuario: ${result.email}
 Contraseña temporal: ${result.tempPassword}
 
