@@ -128,11 +128,15 @@ export function Customers() {
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [notes, setNotes] = useState("");
+  const [locality, setLocality] = useState("");
+  const [province, setProvince] = useState("");
 
   const [editingCustomer, setEditingCustomer] = useState(false);
   const [editName, setEditName] = useState("");
   const [editPhone, setEditPhone] = useState("");
   const [editNotesField, setEditNotesField] = useState("");
+  const [editLocality, setEditLocality] = useState("");
+  const [editProvince, setEditProvince] = useState("");
   const [editTermDays, setEditTermDays] = useState("");
   const [editActive, setEditActive] = useState(true);
 
@@ -157,6 +161,8 @@ export function Customers() {
       setEditName(selectedCustomer.name);
       setEditPhone(selectedCustomer.phone ?? "");
       setEditNotesField(selectedCustomer.notes ?? "");
+      setEditLocality(selectedCustomer.locality ?? "");
+      setEditProvince(selectedCustomer.province ?? "");
       setEditTermDays(selectedCustomer.paymentTermDays ? String(selectedCustomer.paymentTermDays) : "");
       setEditActive(selectedCustomer.active);
       setEditingCustomer(false);
@@ -180,6 +186,8 @@ export function Customers() {
         name: editName.trim(),
         phone: editPhone.trim() || undefined,
         notes: editNotesField.trim() || undefined,
+        locality: editLocality.trim() || undefined,
+        province: editProvince.trim() || undefined,
         paymentTermDays: termDays,
         active: editActive
       });
@@ -227,10 +235,18 @@ export function Customers() {
     setBusy(true);
     try {
       if (!name.trim()) throw new Error("El nombre es obligatorio.");
-      const result = await create({ name: name.trim(), phone: phone.trim() || undefined, notes: notes.trim() || undefined });
+      const result = await create({
+        name: name.trim(),
+        phone: phone.trim() || undefined,
+        notes: notes.trim() || undefined,
+        locality: locality.trim() || undefined,
+        province: province.trim() || undefined
+      });
       setName("");
       setPhone("");
       setNotes("");
+      setLocality("");
+      setProvince("");
       selectCustomer(result.id);
       setMessage("Cliente creado.");
     } catch (err) {
@@ -452,6 +468,8 @@ export function Customers() {
           <div className="cash-banner-form" style={{ marginTop: 16, flexWrap: "wrap" }}>
             <input placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} />
             <input placeholder="Teléfono (opcional)" value={phone} onChange={(e) => setPhone(e.target.value)} />
+            <input placeholder="Localidad (opcional)" value={locality} onChange={(e) => setLocality(e.target.value)} />
+            <input placeholder="Provincia (opcional)" value={province} onChange={(e) => setProvince(e.target.value)} />
             <input placeholder="Nota (opcional)" value={notes} onChange={(e) => setNotes(e.target.value)} />
             <button disabled={busy} onClick={handleCreateCustomer}>Agregar cliente</button>
           </div>
@@ -469,6 +487,9 @@ export function Customers() {
               <span>Pagado <b>{formatMoney(balance?.totalPaid ?? 0)}</b></span>
               <strong>Saldo (te debe) <b>{formatMoney(balance?.balance ?? 0)}</b></strong>
               <span>Plazo de pago <b>{selectedCustomer.paymentTermDays ? `${selectedCustomer.paymentTermDays} días` : "sin definir"}</b></span>
+              {(selectedCustomer.locality || selectedCustomer.province) && (
+                <span>Ubicación <b>{[selectedCustomer.locality, selectedCustomer.province].filter(Boolean).join(", ")}</b></span>
+              )}
               <button className="secondary" style={{ marginTop: 10 }} onClick={() => setEditingCustomer(true)}>Editar</button>
             </div>
           )}
@@ -476,6 +497,8 @@ export function Customers() {
             <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
               <input placeholder="Nombre" value={editName} onChange={(e) => setEditName(e.target.value)} />
               <input placeholder="Teléfono" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} />
+              <input placeholder="Localidad" value={editLocality} onChange={(e) => setEditLocality(e.target.value)} />
+              <input placeholder="Provincia" value={editProvince} onChange={(e) => setEditProvince(e.target.value)} />
               <input placeholder="Nota" value={editNotesField} onChange={(e) => setEditNotesField(e.target.value)} />
               <input
                 type="number"

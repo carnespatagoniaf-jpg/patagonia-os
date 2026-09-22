@@ -7,6 +7,8 @@ interface CustomerRow {
   name: string;
   phone: string | null;
   notes: string | null;
+  locality: string | null;
+  province: string | null;
   payment_term_days: number | null;
   active: boolean;
 }
@@ -18,6 +20,8 @@ function mapCustomer(row: CustomerRow): Customer {
     name: row.name,
     phone: row.phone ?? undefined,
     notes: row.notes ?? undefined,
+    locality: row.locality ?? undefined,
+    province: row.province ?? undefined,
     paymentTermDays: row.payment_term_days ?? undefined,
     active: row.active
   };
@@ -26,7 +30,7 @@ function mapCustomer(row: CustomerRow): Customer {
 export async function listCustomers(includeInactive = false): Promise<Customer[]> {
   if (!supabase) return [];
 
-  let query = supabase.from("customers").select("id,branch_id,name,phone,notes,payment_term_days,active").order("name");
+  let query = supabase.from("customers").select("id,branch_id,name,phone,notes,locality,province,payment_term_days,active").order("name");
   if (!includeInactive) query = query.eq("active", true);
 
   const { data, error } = await query;
@@ -39,6 +43,8 @@ export interface CreateCustomerInput {
   name: string;
   phone?: string;
   notes?: string;
+  locality?: string;
+  province?: string;
 }
 
 export async function createCustomer(input: CreateCustomerInput): Promise<{ id: string }> {
@@ -48,7 +54,9 @@ export async function createCustomer(input: CreateCustomerInput): Promise<{ id: 
     p_branch_id: input.branchId,
     p_name: input.name,
     p_phone: input.phone ?? null,
-    p_notes: input.notes ?? null
+    p_notes: input.notes ?? null,
+    p_locality: input.locality ?? null,
+    p_province: input.province ?? null
   });
 
   if (error) throw error;
@@ -60,6 +68,8 @@ export interface UpdateCustomerInput {
   name: string;
   phone?: string;
   notes?: string;
+  locality?: string;
+  province?: string;
   paymentTermDays?: number;
   active: boolean;
 }
@@ -73,7 +83,9 @@ export async function updateCustomer(input: UpdateCustomerInput): Promise<void> 
     p_phone: input.phone ?? null,
     p_notes: input.notes ?? null,
     p_payment_term_days: input.paymentTermDays ?? null,
-    p_active: input.active
+    p_active: input.active,
+    p_locality: input.locality ?? null,
+    p_province: input.province ?? null
   });
 
   if (error) throw error;

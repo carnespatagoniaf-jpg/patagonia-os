@@ -335,6 +335,8 @@ export interface Customer {
   name: string;
   phone?: string;
   notes?: string;
+  locality?: string;
+  province?: string;
   paymentTermDays?: number;
   active: boolean;
 }
