@@ -1,7 +1,7 @@
-import { useCallback, useEffect, useState } from "react";
+import { Fragment, useCallback, useEffect, useState } from "react";
 import { LockKeyhole } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
-import { createClient, deleteClient, listCompanies, setCompanyActive, type CompanySummary, type CreateClientResult } from "./admin-service";
+import { PROVINCES, createClient, deleteClient, listCompanies, setCompanyActive, setCompanyLocation, type CompanySummary, type CreateClientResult } from "./admin-service";
 
 /** Mensaje listo para pegar en WhatsApp/mail y mandarle al dueño nuevo --
  * evita tener que copiar el usuario y la contraseña por separado a mano. */
@@ -25,10 +25,18 @@ interface Draft {
   ownerFullName: string;
   ownerEmail: string;
   contactPhone: string;
+  province: string;
+  city: string;
 }
 
 function emptyDraft(): Draft {
-  return { companyName: "", branchName: "", ownerFullName: "", ownerEmail: "", contactPhone: "" };
+  return { companyName: "", branchName: "", ownerFullName: "", ownerEmail: "", contactPhone: "", province: "", city: "" };
+}
+
+const NO_LOCATION = "Sin ubicación";
+
+function locationLabel(company: CompanySummary) {
+  return [company.city, company.province].filter(Boolean).join(", ") || "-";
 }
 
 export function AdminCreateClient() {
@@ -44,6 +52,10 @@ export function AdminCreateClient() {
   const [companiesLoading, setCompaniesLoading] = useState(true);
   const [togglingId, setTogglingId] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
+  const [editingLocationId, setEditingLocationId] = useState<string | null>(null);
+  const [editProvince, setEditProvince] = useState("");
+  const [editCity, setEditCity] = useState("");
+  const [savingLocation, setSavingLocation] = useState(false);
 
   const reloadCompanies = useCallback(async () => {
     setCompaniesLoading(true);
@@ -67,6 +79,25 @@ export function AdminCreateClient() {
       setMessage(error instanceof Error ? error.message : "No se pudo actualizar el cliente.");
     } finally {
       setTogglingId(null);
+    }
+  }
+
+  function startEditLocation(company: CompanySummary) {
+    setEditingLocationId(company.id);
+    setEditProvince(company.province ?? "");
+    setEditCity(company.city ?? "");
+  }
+
+  async function saveLocation(company: CompanySummary) {
+    setSavingLocation(true);
+    try {
+      await setCompanyLocation(company.id, editProvince, editCity);
+      setEditingLocationId(null);
+      await reloadCompanies();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo guardar la ubicación.");
+    } finally {
+      setSavingLocation(false);
     }
   }
 
@@ -106,6 +137,13 @@ export function AdminCreateClient() {
         ownerEmail: draft.ownerEmail.trim(),
         contactPhone: draft.contactPhone.trim() || undefined
       });
+      if (draft.province || draft.city.trim()) {
+        try {
+          await setCompanyLocation(created.companyId, draft.province, draft.city);
+        } catch {
+          setMessage("El cliente se creó, pero no se pudo guardar la ubicación. Cargala desde la tabla.");
+        }
+      }
       setResult(created);
       setResultCompanyName(draft.companyName.trim());
       setCopied(false);
@@ -119,12 +157,39 @@ export function AdminCreateClient() {
   }
 
   const activeCompanies = companies.filter((c) => c.active);
+  const activeGroups = Array.from(
+    activeCompanies.reduce((map, c) => {
+      const key = c.province ?? NO_LOCATION;
+      map.set(key, [...(map.get(key) ?? []), c]);
+      return map;
+    }, new Map<string, CompanySummary[]>())
+  ).sort(([a], [b]) => (a === NO_LOCATION ? 1 : b === NO_LOCATION ? -1 : a.localeCompare(b, "es")));
   const inactiveCompanies = companies.filter((c) => !c.active);
 
   function renderCompanyRow(company: CompanySummary) {
     return (
       <tr key={company.id}>
         <td>{company.name}</td>
+        <td>
+          {editingLocationId === company.id ? (
+            <div style={{ display: "grid", gap: 4, minWidth: 150 }}>
+              <select value={editProvince} onChange={(e) => setEditProvince(e.target.value)}>
+                <option value="">Provincia…</option>
+                {PROVINCES.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+              <input placeholder="Ciudad" value={editCity} onChange={(e) => setEditCity(e.target.value)} />
+              <div style={{ display: "flex", gap: 4 }}>
+                <button disabled={savingLocation} onClick={() => void saveLocation(company)}>{savingLocation ? "…" : "Guardar"}</button>
+                <button className="secondary" onClick={() => setEditingLocationId(null)}>Cancelar</button>
+              </div>
+            </div>
+          ) : (
+            <span>
+              {locationLabel(company)}{" "}
+              <button className="secondary" style={{ padding: "0 6px", fontSize: 12 }} onClick={() => startEditLocation(company)}>Editar</button>
+            </span>
+          )}
+        </td>
         <td>{company.ownerFullName ?? "-"}</td>
         <td>{company.ownerEmail ?? "-"}</td>
         <td>{company.contactPhone ?? "-"}</td>
@@ -198,6 +263,17 @@ export function AdminCreateClient() {
               <input value={draft.ownerEmail} onChange={(e) => setDraft({ ...draft, ownerEmail: e.target.value })} type="email" required />
             </label>
             <label>
+              Provincia (opcional, uso interno)
+              <select value={draft.province} onChange={(e) => setDraft({ ...draft, province: e.target.value })}>
+                <option value="">Sin especificar</option>
+                {PROVINCES.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+            </label>
+            <label>
+              Ciudad (opcional)
+              <input value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} />
+            </label>
+            <label>
               Teléfono de contacto (opcional, uso interno)
               <input value={draft.contactPhone} onChange={(e) => setDraft({ ...draft, contactPhone: e.target.value })} />
             </label>
@@ -222,6 +298,7 @@ export function AdminCreateClient() {
           <thead>
             <tr>
               <th>Negocio</th>
+              <th>Ubicación</th>
               <th>Dueño</th>
               <th>Email</th>
               <th>Teléfono</th>
@@ -231,7 +308,16 @@ export function AdminCreateClient() {
               <th></th>
             </tr>
           </thead>
-          <tbody>{activeCompanies.map(renderCompanyRow)}</tbody>
+          <tbody>
+            {activeGroups.map(([province, group]) => (
+              <Fragment key={province}>
+                <tr>
+                  <th colSpan={9} style={{ textAlign: "left", background: "var(--surface-2, #f3f3f3)" }}>{province} ({group.length})</th>
+                </tr>
+                {group.map(renderCompanyRow)}
+              </Fragment>
+            ))}
+          </tbody>
         </table>
         {activeCompanies.length === 0 && !companiesLoading && <p className="muted">Todavía no diste de alta ningún cliente.</p>}
       </section>
@@ -247,6 +333,7 @@ export function AdminCreateClient() {
               <thead>
                 <tr>
                   <th>Negocio</th>
+              <th>Ubicación</th>
                   <th>Dueño</th>
                   <th>Email</th>
                   <th>Teléfono</th>

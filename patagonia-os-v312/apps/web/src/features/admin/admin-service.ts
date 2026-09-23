@@ -55,6 +55,21 @@ export interface CompanySummary {
   /** Teléfono de contacto guardado a mano al crear el cliente -- uso interno
    * nuestro (para ubicar a quien pidió la demo), no lo ve el cliente. */
   contactPhone: string | null;
+  province: string | null;
+  city: string | null;
+}
+
+export const PROVINCES = [
+  "Buenos Aires", "CABA", "Catamarca", "Chaco", "Chubut", "Córdoba", "Corrientes", "Entre Ríos", "Formosa", "Jujuy",
+  "La Pampa", "La Rioja", "Mendoza", "Misiones", "Neuquén", "Río Negro", "Salta", "San Juan", "San Luis",
+  "Santa Cruz", "Santa Fe", "Santiago del Estero", "Tierra del Fuego", "Tucumán"
+] as const;
+
+export async function setCompanyLocation(companyId: string, province: string, city: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("set_company_location", { p_company_id: companyId, p_province: province, p_city: city });
+  if (error) throw error;
 }
 
 export async function listCompanies(): Promise<CompanySummary[]> {
@@ -66,6 +81,7 @@ export async function listCompanies(): Promise<CompanySummary[]> {
   interface Row {
     id: string; name: string; active: boolean; created_at: string; branch_count: number; user_count: number;
     owner_full_name: string | null; owner_email: string | null; contact_phone: string | null;
+    province: string | null; city: string | null;
   }
   return ((data ?? []) as Row[]).map((row) => ({
     id: row.id,
@@ -76,7 +92,9 @@ export async function listCompanies(): Promise<CompanySummary[]> {
     userCount: Number(row.user_count),
     ownerFullName: row.owner_full_name,
     ownerEmail: row.owner_email,
-    contactPhone: row.contact_phone
+    contactPhone: row.contact_phone,
+    province: row.province,
+    city: row.city
   }));
 }
 
