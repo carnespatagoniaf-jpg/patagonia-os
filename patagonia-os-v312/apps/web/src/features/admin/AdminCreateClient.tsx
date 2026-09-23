@@ -1,5 +1,5 @@
-import { Fragment, useCallback, useEffect, useState } from "react";
-import { LockKeyhole } from "lucide-react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
+import { Building2, LockKeyhole, MapPin, Plus, Search } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import { PROVINCES, createClient, deleteClient, listCompanies, setCompanyActive, setCompanyLocation, type CompanySummary, type CreateClientResult } from "./admin-service";
 
@@ -35,8 +35,13 @@ function emptyDraft(): Draft {
 
 const NO_LOCATION = "Sin ubicación";
 
-function locationLabel(company: CompanySummary) {
-  return [company.city, company.province].filter(Boolean).join(", ") || "-";
+function groupByProvince(list: CompanySummary[]) {
+  const map = new Map<string, CompanySummary[]>();
+  for (const c of list) {
+    const key = c.province ?? NO_LOCATION;
+    map.set(key, [...(map.get(key) ?? []), c]);
+  }
+  return Array.from(map).sort(([a], [b]) => (a === NO_LOCATION ? 1 : b === NO_LOCATION ? -1 : a.localeCompare(b, "es")));
 }
 
 export function AdminCreateClient() {
@@ -47,6 +52,8 @@ export function AdminCreateClient() {
   const [result, setResult] = useState<CreateClientResult | null>(null);
   const [resultCompanyName, setResultCompanyName] = useState("");
   const [copied, setCopied] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [search, setSearch] = useState("");
 
   const [companies, setCompanies] = useState<CompanySummary[]>([]);
   const [companiesLoading, setCompaniesLoading] = useState(true);
@@ -141,7 +148,7 @@ export function AdminCreateClient() {
         try {
           await setCompanyLocation(created.companyId, draft.province, draft.city);
         } catch {
-          setMessage("El cliente se creó, pero no se pudo guardar la ubicación. Cargala desde la tabla.");
+          setMessage("El cliente se creó, pero no se pudo guardar la ubicación. Cargala desde la lista.");
         }
       }
       setResult(created);
@@ -156,199 +163,162 @@ export function AdminCreateClient() {
     }
   }
 
-  const activeCompanies = companies.filter((c) => c.active);
-  const activeGroups = Array.from(
-    activeCompanies.reduce((map, c) => {
-      const key = c.province ?? NO_LOCATION;
-      map.set(key, [...(map.get(key) ?? []), c]);
-      return map;
-    }, new Map<string, CompanySummary[]>())
-  ).sort(([a], [b]) => (a === NO_LOCATION ? 1 : b === NO_LOCATION ? -1 : a.localeCompare(b, "es")));
-  const inactiveCompanies = companies.filter((c) => !c.active);
+  const term = search.trim().toLowerCase();
+  const matches = (c: CompanySummary) =>
+    !term || [c.name, c.ownerFullName, c.ownerEmail, c.city, c.province, c.contactPhone].some((v) => v?.toLowerCase().includes(term));
 
-  function renderCompanyRow(company: CompanySummary) {
+  const activeCompanies = useMemo(() => companies.filter((c) => c.active), [companies]);
+  const inactiveCompanies = companies.filter((c) => !c.active && matches(c));
+  const activeGroups = groupByProvince(activeCompanies.filter(matches));
+  const provinceCount = new Set(activeCompanies.map((c) => c.province).filter(Boolean)).size;
+  const withoutLocation = activeCompanies.filter((c) => !c.province).length;
+
+  function renderCard(company: CompanySummary) {
+    const editing = editingLocationId === company.id;
     return (
-      <tr key={company.id}>
-        <td>{company.name}</td>
-        <td>
-          {editingLocationId === company.id ? (
-            <div style={{ display: "grid", gap: 4, minWidth: 150 }}>
-              <select value={editProvince} onChange={(e) => setEditProvince(e.target.value)}>
-                <option value="">Provincia…</option>
-                {PROVINCES.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
-              <input placeholder="Ciudad" value={editCity} onChange={(e) => setEditCity(e.target.value)} />
-              <div style={{ display: "flex", gap: 4 }}>
-                <button disabled={savingLocation} onClick={() => void saveLocation(company)}>{savingLocation ? "…" : "Guardar"}</button>
-                <button className="secondary" onClick={() => setEditingLocationId(null)}>Cancelar</button>
-              </div>
-            </div>
-          ) : (
-            <span>
-              {locationLabel(company)}{" "}
-              <button className="secondary" style={{ padding: "0 6px", fontSize: 12 }} onClick={() => startEditLocation(company)}>Editar</button>
-            </span>
+      <article key={company.id} className={`admin-card${company.active ? "" : " admin-card-off"}`}>
+        <header className="admin-card-head">
+          <h3>{company.name}</h3>
+          {editing ? null : (
+            <button className="admin-link" onClick={() => startEditLocation(company)}>
+              <MapPin size={13} />
+              {[company.city, company.province].filter(Boolean).join(", ") || "Agregar ubicación"}
+            </button>
           )}
-        </td>
-        <td>{company.ownerFullName ?? "-"}</td>
-        <td>{company.ownerEmail ?? "-"}</td>
-        <td>{company.contactPhone ?? "-"}</td>
-        <td className="num">{company.branchCount}</td>
-        <td className="num">{company.userCount}</td>
-        <td>{formatDate(company.createdAt)}</td>
-        <td style={{ display: "flex", gap: 6 }}>
-          <button
-            className="secondary"
-            disabled={togglingId === company.id}
-            onClick={() => toggleActive(company)}
-          >
+        </header>
+
+        {editing && (
+          <div className="admin-edit-location">
+            <select value={editProvince} onChange={(e) => setEditProvince(e.target.value)}>
+              <option value="">Provincia…</option>
+              {PROVINCES.map((p) => <option key={p} value={p}>{p}</option>)}
+            </select>
+            <input placeholder="Ciudad" value={editCity} onChange={(e) => setEditCity(e.target.value)} />
+            <div className="admin-actions">
+              <button disabled={savingLocation} onClick={() => void saveLocation(company)}>{savingLocation ? "…" : "Guardar"}</button>
+              <button className="secondary" onClick={() => setEditingLocationId(null)}>Cancelar</button>
+            </div>
+          </div>
+        )}
+
+        <dl className="admin-card-data">
+          <div><dt>Dueño</dt><dd>{company.ownerFullName ?? "-"}</dd></div>
+          <div><dt>Email</dt><dd>{company.ownerEmail ?? "-"}</dd></div>
+          <div><dt>Teléfono</dt><dd>{company.contactPhone ?? "-"}</dd></div>
+        </dl>
+
+        <div className="admin-chips">
+          <span>{company.branchCount} {company.branchCount === 1 ? "sucursal" : "sucursales"}</span>
+          <span>{company.userCount} {company.userCount === 1 ? "usuario" : "usuarios"}</span>
+          <span>Alta {formatDate(company.createdAt)}</span>
+        </div>
+
+        <div className="admin-actions">
+          <button className="secondary" disabled={togglingId === company.id} onClick={() => void toggleActive(company)}>
             {togglingId === company.id ? "…" : company.active ? "Desactivar" : "Activar"}
           </button>
-          <button
-            className="secondary"
-            style={{ color: "#8a1f11" }}
-            disabled={deletingId === company.id}
-            onClick={() => void handleDeleteClient(company)}
-          >
+          <button className="danger" disabled={deletingId === company.id} onClick={() => void handleDeleteClient(company)}>
             {deletingId === company.id ? "…" : "Borrar"}
           </button>
-        </td>
-      </tr>
+        </div>
+      </article>
     );
   }
 
   return (
-    <main className="login-page" style={{ alignItems: "flex-start", paddingTop: 48, paddingBottom: 48 }}>
-      <div style={{ display: "grid", gap: 24, width: "min(880px, 100%)" }}>
-      <section className="login-card" style={{ width: "min(430px, 100%)", margin: "0 auto" }}>
-        <div className="login-logo"><LockKeyhole /></div>
-        <p className="eyebrow">PATAGONIA OS · ADMIN</p>
-        <h1>Dar de alta un cliente</h1>
-        <p className="muted">Crea la empresa, su primera sucursal y el login del dueño.</p>
-
-        {result ? (
-          <div className="message" style={{ borderColor: "#2f9e44" }}>
-            Cliente creado. Login del dueño: <strong>{result.email}</strong>
-            <br />
-            Contraseña temporal (copiala ahora, no se vuelve a mostrar):{" "}
-            <code style={{ fontSize: 16, fontWeight: 700 }}>{result.tempPassword}</code>
-            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
-              <button
-                onClick={() => {
-                  void navigator.clipboard.writeText(buildWelcomeMessage(resultCompanyName, result));
-                  setCopied(true);
-                }}
-              >
-                {copied ? "¡Copiado!" : "Copiar mensaje para el cliente"}
-              </button>
-              <button className="secondary" onClick={() => setResult(null)}>Crear otro cliente</button>
-            </div>
+    <main className="admin-page">
+      <header className="admin-header">
+        <div className="admin-brand">
+          <div className="login-logo" style={{ margin: 0 }}><LockKeyhole /></div>
+          <div>
+            <p className="eyebrow">PATAGONIA OS · ADMIN</p>
+            <h1>Clientes</h1>
           </div>
-        ) : (
-          <form onSubmit={submit}>
-            <label>
-              Nombre del negocio
-              <input value={draft.companyName} onChange={(e) => setDraft({ ...draft, companyName: e.target.value })} required />
-            </label>
-            <label>
-              Nombre de la primera sucursal
-              <input value={draft.branchName} onChange={(e) => setDraft({ ...draft, branchName: e.target.value })} required />
-            </label>
-            <label>
-              Nombre del dueño
-              <input value={draft.ownerFullName} onChange={(e) => setDraft({ ...draft, ownerFullName: e.target.value })} required />
-            </label>
-            <label>
-              Email del dueño
-              <input value={draft.ownerEmail} onChange={(e) => setDraft({ ...draft, ownerEmail: e.target.value })} type="email" required />
-            </label>
-            <label>
-              Provincia (opcional, uso interno)
-              <select value={draft.province} onChange={(e) => setDraft({ ...draft, province: e.target.value })}>
-                <option value="">Sin especificar</option>
-                {PROVINCES.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
-            </label>
-            <label>
-              Ciudad (opcional)
-              <input value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} />
-            </label>
-            <label>
-              Teléfono de contacto (opcional, uso interno)
-              <input value={draft.contactPhone} onChange={(e) => setDraft({ ...draft, contactPhone: e.target.value })} />
-            </label>
-            <button className="charge-button" disabled={busy}>
-              {busy ? "Creando…" : "Crear cliente"}
-            </button>
-          </form>
-        )}
-
-        {message && <div className="message warning">{message}</div>}
-
-        <button className="login-link-button" onClick={() => void signOut()}>Salir</button>
-      </section>
-
-      <section className="panel">
-        <div className="panel-title">
-          <h2>Clientes activos</h2>
-          <span>{companiesLoading ? "Cargando…" : `${activeCompanies.length}`}</span>
         </div>
+        <div className="admin-actions">
+          <button onClick={() => { setShowForm((v) => !v); setResult(null); }}>
+            <Plus size={16} style={{ verticalAlign: "-3px" }} /> {showForm ? "Cerrar" : "Nuevo cliente"}
+          </button>
+          <button className="secondary" onClick={() => void signOut()}>Salir</button>
+        </div>
+      </header>
 
-        <table className="data-table">
-          <thead>
-            <tr>
-              <th>Negocio</th>
-              <th>Ubicación</th>
-              <th>Dueño</th>
-              <th>Email</th>
-              <th>Teléfono</th>
-              <th className="num">Sucursales</th>
-              <th className="num">Usuarios</th>
-              <th>Alta</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {activeGroups.map(([province, group]) => (
-              <Fragment key={province}>
-                <tr>
-                  <th colSpan={9} style={{ textAlign: "left", background: "var(--surface-2, #f3f3f3)" }}>{province} ({group.length})</th>
-                </tr>
-                {group.map(renderCompanyRow)}
-              </Fragment>
-            ))}
-          </tbody>
-        </table>
-        {activeCompanies.length === 0 && !companiesLoading && <p className="muted">Todavía no diste de alta ningún cliente.</p>}
-      </section>
+      <div className="admin-kpis">
+        <div className="kpi-card"><span>Clientes activos</span><strong>{activeCompanies.length}</strong></div>
+        <div className="kpi-card"><span>Provincias</span><strong>{provinceCount}</strong></div>
+        <div className="kpi-card"><span>Sin ubicación</span><strong>{withoutLocation}</strong></div>
+      </div>
 
-      {inactiveCompanies.length > 0 && (
-        <section className="panel">
-          <details>
-            <summary className="panel-title" style={{ cursor: "pointer" }}>
-              <h2>Clientes desactivados</h2>
-              <span>{inactiveCompanies.length}</span>
-            </summary>
-            <table className="data-table" style={{ marginTop: 12 }}>
-              <thead>
-                <tr>
-                  <th>Negocio</th>
-              <th>Ubicación</th>
-                  <th>Dueño</th>
-                  <th>Email</th>
-                  <th>Teléfono</th>
-                  <th className="num">Sucursales</th>
-                  <th className="num">Usuarios</th>
-                  <th>Alta</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>{inactiveCompanies.map(renderCompanyRow)}</tbody>
-            </table>
-          </details>
+      {(showForm || result) && (
+        <section className="panel admin-form-panel">
+          <div className="panel-title">
+            <h2>{result ? "Cliente creado" : "Dar de alta un cliente"}</h2>
+          </div>
+          {result ? (
+            <div className="message" style={{ borderColor: "#2f9e44" }}>
+              Login del dueño: <strong>{result.email}</strong>
+              <br />
+              Contraseña temporal (copiala ahora, no se vuelve a mostrar):{" "}
+              <code style={{ fontSize: 16, fontWeight: 700 }}>{result.tempPassword}</code>
+              <div className="admin-actions" style={{ marginTop: 10 }}>
+                <button
+                  onClick={() => {
+                    void navigator.clipboard.writeText(buildWelcomeMessage(resultCompanyName, result));
+                    setCopied(true);
+                  }}
+                >
+                  {copied ? "¡Copiado!" : "Copiar mensaje para el cliente"}
+                </button>
+                <button className="secondary" onClick={() => setResult(null)}>Crear otro cliente</button>
+              </div>
+            </div>
+          ) : (
+            <form onSubmit={submit} className="admin-form">
+              <label>Nombre del negocio<input value={draft.companyName} onChange={(e) => setDraft({ ...draft, companyName: e.target.value })} required /></label>
+              <label>Nombre de la primera sucursal<input value={draft.branchName} onChange={(e) => setDraft({ ...draft, branchName: e.target.value })} required /></label>
+              <label>Nombre del dueño<input value={draft.ownerFullName} onChange={(e) => setDraft({ ...draft, ownerFullName: e.target.value })} required /></label>
+              <label>Email del dueño<input value={draft.ownerEmail} onChange={(e) => setDraft({ ...draft, ownerEmail: e.target.value })} type="email" required /></label>
+              <label>
+                Provincia (opcional)
+                <select value={draft.province} onChange={(e) => setDraft({ ...draft, province: e.target.value })}>
+                  <option value="">Sin especificar</option>
+                  {PROVINCES.map((p) => <option key={p} value={p}>{p}</option>)}
+                </select>
+              </label>
+              <label>Ciudad (opcional)<input value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} /></label>
+              <label>Teléfono de contacto (opcional, uso interno)<input value={draft.contactPhone} onChange={(e) => setDraft({ ...draft, contactPhone: e.target.value })} /></label>
+              <div className="admin-form-submit">
+                <button className="charge-button" disabled={busy}>{busy ? "Creando…" : "Crear cliente"}</button>
+              </div>
+            </form>
+          )}
         </section>
       )}
+
+      {message && <div className="message warning">{message}</div>}
+
+      <div className="admin-search">
+        <Search size={16} />
+        <input placeholder="Buscar por negocio, dueño, mail, ciudad o provincia" value={search} onChange={(e) => setSearch(e.target.value)} />
       </div>
+
+      {companiesLoading && companies.length === 0 && <p className="muted">Cargando…</p>}
+      {!companiesLoading && activeCompanies.length === 0 && <p className="muted">Todavía no diste de alta ningún cliente.</p>}
+      {!companiesLoading && activeCompanies.length > 0 && activeGroups.length === 0 && <p className="muted">Ningún cliente coincide con la búsqueda.</p>}
+
+      {activeGroups.map(([province, group]) => (
+        <Fragment key={province}>
+          <h2 className="admin-group-title"><Building2 size={16} /> {province} <span>{group.length}</span></h2>
+          <div className="admin-grid">{group.map(renderCard)}</div>
+        </Fragment>
+      ))}
+
+      {inactiveCompanies.length > 0 && (
+        <details className="admin-inactive">
+          <summary className="admin-group-title">Clientes desactivados <span>{inactiveCompanies.length}</span></summary>
+          <div className="admin-grid" style={{ marginTop: 12 }}>{inactiveCompanies.map(renderCard)}</div>
+        </details>
+      )}
     </main>
   );
 }

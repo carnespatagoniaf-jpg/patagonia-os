@@ -393,3 +393,62 @@ button:disabled { opacity: .55; cursor: not-allowed; }
   .receipt-ticket .ticket-item-detail b { color: #000; }
   .receipt-ticket .ticket-footer { font-size: 12px; }
 }
+
+/* Panel de plataforma (AdminCreateClient) */
+.admin-page { max-width: 1100px; margin: 0 auto; padding: 32px 20px 60px; display: grid; gap: 18px; }
+.admin-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.admin-brand { display: flex; align-items: center; gap: 14px; }
+.admin-brand h1 { margin: 2px 0 0; font-size: 26px; }
+.admin-actions { display: flex; gap: 8px; flex-wrap: wrap; }
+.admin-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.admin-kpis .kpi-card { padding: 16px 20px; }
+.admin-form-panel { max-width: 720px; }
+.admin-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
+.admin-form label { display: grid; gap: 6px; font-weight: 800; font-size: 13px; }
+.admin-form input, .admin-form select, .admin-edit-location input, .admin-edit-location select {
+  padding: 10px 12px; border: 1px solid #d6dce5; border-radius: 10px; background: white;
+}
+.admin-form-submit { grid-column: 1 / -1; }
+.admin-search {
+  display: flex; align-items: center; gap: 10px; background: white; border: 1px solid #d6dce5;
+  border-radius: 12px; padding: 0 14px; color: #697386;
+}
+.admin-search input { flex: 1; border: 0; outline: 0; padding: 12px 0; background: transparent; }
+.admin-group-title {
+  display: flex; align-items: center; gap: 8px; margin: 10px 0 0; font-size: 16px; color: #18202b;
+}
+.admin-group-title span {
+  background: #fff1f1; color: #8b1e1e; border-radius: 999px; padding: 2px 10px; font-size: 12px; font-weight: 800;
+}
+.admin-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; }
+.admin-card {
+  background: white; border: 1px solid #e5e7eb; border-radius: 16px; padding: 18px;
+  box-shadow: 0 8px 28px rgba(24,32,43,.05); display: grid; gap: 12px; align-content: start;
+}
+.admin-card-off { opacity: .7; }
+.admin-card-head h3 { margin: 0 0 4px; font-size: 17px; }
+.admin-link {
+  display: inline-flex; align-items: center; gap: 4px; background: transparent; border: 0; padding: 0;
+  color: #8b1e1e; font-size: 13px; font-weight: 600;
+}
+.admin-link:hover { text-decoration: underline; }
+.admin-edit-location { display: grid; gap: 8px; }
+.admin-card-data { margin: 0; display: grid; gap: 6px; }
+.admin-card-data > div { display: grid; grid-template-columns: 70px 1fr; gap: 8px; font-size: 13px; }
+.admin-card-data dt { color: #697386; }
+.admin-card-data dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }
+.admin-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.admin-chips span { background: #f2f4f7; color: #47505c; border-radius: 999px; padding: 3px 10px; font-size: 12px; }
+.admin-inactive summary { cursor: pointer; list-style: none; }
+@media (max-width: 640px) {
+  .admin-kpis { grid-template-columns: 1fr; }
+  .admin-form { grid-template-columns: 1fr; }
+  .admin-grid { grid-template-columns: 1fr; }
+}
+.admin-page .admin-actions button {
+  background: #8b1e1e; color: white; border: 1px solid #8b1e1e; border-radius: 10px;
+  padding: 8px 14px; font-size: 13px; font-weight: 700;
+}
+.admin-page .admin-actions button.secondary { background: white; color: #47505c; border-color: #d6dce5; }
+.admin-page .admin-actions button.danger { background: white; color: #b42318; border-color: #f3d0cc; }
+.admin-page .admin-actions button:hover:not(:disabled) { filter: brightness(.96); }
