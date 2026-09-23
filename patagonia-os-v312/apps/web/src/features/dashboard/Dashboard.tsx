@@ -133,7 +133,7 @@ export function Dashboard() {
             <div className="empty-chart">
               <TrendingUp size={42} />
               <strong>Sin ventas en los últimos 7 días</strong>
-              <span>{isSupabaseConfigured ? "Cargá ventas desde Turnos o Mostrador" : "Supabase pendiente de conexión"}</span>
+              <span>{isSupabaseConfigured ? "Cargá ventas desde Mostrador" : "Supabase pendiente de conexión"}</span>
             </div>
           )}
         </div>
