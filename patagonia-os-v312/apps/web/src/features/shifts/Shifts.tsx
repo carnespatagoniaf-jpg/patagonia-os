@@ -63,7 +63,13 @@ export function Shifts() {
     setClosingCountedCash(shift?.closingCountedCash !== undefined ? String(shift.closingCountedCash) : "");
   }, [shift]);
 
-  const cashAccount = useMemo(() => accounts.find((a) => a.paymentMethod === "cash"), [accounts]);
+  // Si hay más de una cuenta "Efectivo" (poco común, pero posible), el
+  // arqueo automático no sabe a cuál de las dos corresponde cada venta/
+  // salida sin cuenta explícita en pantalla -- mejor no mostrar un
+  // "esperado" que puede estar mal que mostrar uno incompleto sin avisar
+  // (mismo criterio que ya usa Mostrador para este mismo caso).
+  const cashAccounts = useMemo(() => accounts.filter((a) => a.paymentMethod === "cash"), [accounts]);
+  const cashAccount = cashAccounts.length === 1 ? cashAccounts[0] : undefined;
 
   const salesTotal = useMemo(() => sales.reduce((sum, s) => sum + s.amount, 0), [sales]);
   const outflowsTotal = useMemo(() => outflows.reduce((sum, o) => sum + o.amount, 0), [outflows]);
