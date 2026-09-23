@@ -1125,7 +1125,13 @@ export function Sale() {
         items: itemsPayload,
         payments: paymentsPayload,
         discountAmount: saleDiscountValue,
-        surchargeAmount: saleSurchargeValue
+        surchargeAmount: saleSurchargeValue,
+        // Generada una sola vez acá -- si esta venta termina en la cola
+        // offline, el reintento reusa el mismo payload (con la misma
+        // clave), así el servidor puede reconocer un reintento y nunca
+        // duplicar la venta aunque la confirmación se haya perdido en el
+        // camino de vuelta.
+        idempotencyKey: crypto.randomUUID()
       };
 
       // Si no hay conexión, createPosSale rechaza por una falla de red (no

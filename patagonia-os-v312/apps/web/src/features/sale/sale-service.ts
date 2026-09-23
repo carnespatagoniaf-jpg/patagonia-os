@@ -23,6 +23,11 @@ export interface CreatePosSaleInput {
   payments: CreatePosSalePaymentInput[];
   discountAmount: number;
   surchargeAmount: number;
+  /** Generado una sola vez por intento de venta (crypto.randomUUID()) y
+   * reusado en cada reintento de la cola offline (ver offline-queue.ts) --
+   * si el servidor ya tiene una venta con esta clave, devuelve esa misma
+   * en vez de crear otra, así un reintento nunca duplica la venta. */
+  idempotencyKey: string;
 }
 
 export interface CreatePosSaleResult {
@@ -43,7 +48,8 @@ export async function createPosSale(input: CreatePosSaleInput): Promise<CreatePo
     p_payments: input.payments.map((p) => ({ account_id: p.accountId, amount: p.amount, reference: p.reference ?? null })),
     p_pos_shift_id: input.posShiftId,
     p_discount_amount: input.discountAmount,
-    p_surcharge_amount: input.surchargeAmount
+    p_surcharge_amount: input.surchargeAmount,
+    p_idempotency_key: input.idempotencyKey
   });
   if (error) throw error;
   return { saleId: data.sale_id, total: Number(data.total) };
