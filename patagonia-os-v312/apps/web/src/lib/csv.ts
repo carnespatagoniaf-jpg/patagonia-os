@@ -1,6 +1,10 @@
 function escapeCsvCell(value: string | number): string {
-  const text = String(value);
-  return /[",\n;]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  let text = String(value);
+  // Un texto que empieza con = + - @ lo interpreta Excel como fórmula (un nombre
+  // o nota cargado a propósito podría ejecutar algo al abrir el archivo). Se le
+  // antepone un apóstrofe; los números reales (incluso negativos) no se tocan.
+  if (typeof value === "string" && text !== "-" && /^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+  return /[",\r\n;]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
 }
 
 /** Excel en español interpreta CSV con `;` como separador por defecto, no

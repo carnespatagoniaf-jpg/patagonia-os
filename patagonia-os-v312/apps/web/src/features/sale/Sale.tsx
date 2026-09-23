@@ -111,6 +111,17 @@ interface MovementReceiptState {
 
 const AUTO_PRINT_KEY = "patagonia-auto-print-enabled";
 
+/** Pasadas estas horas se avisa que el turno hay que cerrarlo: la plata de las
+ * ventas no llega a Tesorería hasta el cierre, y un turno de días descuadra
+ * el arqueo y le pone a todo la fecha del día en que finalmente se cierre. */
+const STALE_SHIFT_HOURS = 18;
+
+function formatShiftStart(openedAt: string): string {
+  const opened = new Date(openedAt);
+  if (opened.toDateString() === new Date().toDateString()) return opened.toLocaleTimeString("es-AR");
+  return opened.toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+}
+
 /** Por caja/equipo (localStorage), no por empresa -- cada mostrador puede
  * tener o no una impresora conectada. Por defecto apagado: a quien nunca
  * lo prendió no le tiene que aparecer un diálogo de impresión de la nada. */
@@ -1679,6 +1690,12 @@ export function Sale() {
         </div>
       )}
 
+      {shift && shift.id !== "demo-shift" && Date.now() - new Date(shift.openedAt).getTime() > STALE_SHIFT_HOURS * 3_600_000 && (
+        <div className="message warning">
+          <strong>Este turno está abierto desde el {formatShiftStart(shift.openedAt)}.</strong> La plata de estas ventas no llega a Tesorería hasta que lo cierres, y el arqueo de caja pierde sentido. Cerralo con el botón "Cerrar turno" de la derecha y abrí uno nuevo.
+        </div>
+      )}
+
       {shiftLoading ? (
         <p className="muted">Cargando turno…</p>
       ) : !shift ? (
@@ -2042,7 +2059,7 @@ export function Sale() {
           <aside className="panel shift-card" style={{ position: "sticky", top: 18 }}>
             <div className="panel-title">
               <h2>Turno</h2>
-              <span className="muted" style={{ fontSize: 12 }}>desde {new Date(shift.openedAt).toLocaleTimeString("es-AR")}</span>
+              <span className="muted" style={{ fontSize: 12 }}>desde {formatShiftStart(shift.openedAt)}</span>
             </div>
 
             {canSeeShiftTotals && showShiftTotals && (

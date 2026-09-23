@@ -1,5 +1,14 @@
+/** Fecha en la hora local de la compu (no UTC): en Argentina, pasadas las
+ * 21:00, toISOString() ya devuelve el día siguiente. */
+export function localDateIso(date: Date = new Date()) {
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, "0");
+  const d = String(date.getDate()).padStart(2, "0");
+  return `${y}-${m}-${d}`;
+}
+
 export function todayIso() {
-  return new Date().toISOString().slice(0, 10);
+  return localDateIso();
 }
 
 export function addDaysIso(date: string, days: number) {

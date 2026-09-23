@@ -19,11 +19,19 @@ if "%CHROME_PATH%"=="" (
 echo Chrome encontrado en: %CHROME_PATH%
 echo.
 
+set "ICON_DIR=%LocalAppData%\PatagoniaOS"
+if not exist "%ICON_DIR%" mkdir "%ICON_DIR%"
+set "ICON_PATH=%ICON_DIR%\patagonia-icon.ico"
+
+echo Descargando el logo...
+powershell -NoProfile -Command "try { Invoke-WebRequest -Uri 'https://app.patagoniasystem.com.ar/patagonia-icon.ico' -OutFile '%ICON_PATH%' -UseBasicParsing } catch { exit 1 }"
+if not exist "%ICON_PATH%" set "ICON_PATH=%CHROME_PATH%"
+
 powershell -NoProfile -Command ^
   "$s = (New-Object -ComObject WScript.Shell).CreateShortcut('%USERPROFILE%\Desktop\Patagonia OS (Kiosco).lnk');" ^
   "$s.TargetPath = '%CHROME_PATH%';" ^
   "$s.Arguments = '--kiosk-printing https://app.patagoniasystem.com.ar';" ^
-  "$s.IconLocation = '%CHROME_PATH%';" ^
+  "$s.IconLocation = '%ICON_PATH%';" ^
   "$s.Description = 'Patagonia OS - Mostrador con impresion automatica de tickets';" ^
   "$s.Save()"
 

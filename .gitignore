@@ -1,0 +1,6 @@
+# Local Netlify folder
+.netlify
+
+# Supabase CLI temporal
+supabase/.temp
+patagonia-os-v312/supabase/.temp

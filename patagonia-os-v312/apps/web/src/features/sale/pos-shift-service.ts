@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { localDateIso } from "../shifts/format";
 
 export interface PosShift {
   id: string;
@@ -279,6 +280,7 @@ export interface MostradorSaleEntry {
 }
 
 interface PosSaleRangeRow {
+  id: string;
   amount: number;
   account_id: string;
   pos_sales: { created_at: string; voided_at: string | null; branch_id: string };
@@ -291,17 +293,34 @@ interface PosSaleRangeRow {
 export async function listPosSalesInRange(branchId: string, fromDate: string, toDate: string): Promise<MostradorSaleEntry[]> {
   if (!supabase) return [];
 
-  const { data, error } = await supabase
-    .from("pos_sale_payments")
-    .select("amount,account_id,pos_sales!inner(created_at,voided_at,branch_id)")
-    .eq("pos_sales.branch_id", branchId)
-    .is("pos_sales.voided_at", null)
-    .gte("pos_sales.created_at", `${fromDate}T00:00:00.000Z`)
-    .lte("pos_sales.created_at", `${toDate}T23:59:59.999Z`);
+  // Los límites son el día completo en hora LOCAL (no UTC): en Argentina una
+  // venta de las 22:00 ya es "mañana" en UTC y caía en el día equivocado. Además
+  // se pagina de a 1000 filas: PostgREST corta en 1000 sin avisar, y un rango
+  // con muchas ventas devolvía un total incompleto.
+  const fromIso = new Date(`${fromDate}T00:00:00`).toISOString();
+  const toIso = new Date(`${toDate}T23:59:59.999`).toISOString();
+  const PAGE_SIZE = 1000;
+  const rows: PosSaleRangeRow[] = [];
 
-  if (error) throw error;
-  return ((data ?? []) as unknown as PosSaleRangeRow[]).map((row) => ({
-    date: row.pos_sales.created_at.slice(0, 10),
+  for (let start = 0; ; start += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("pos_sale_payments")
+      .select("id,amount,account_id,pos_sales!inner(created_at,voided_at,branch_id)")
+      .eq("pos_sales.branch_id", branchId)
+      .is("pos_sales.voided_at", null)
+      .gte("pos_sales.created_at", fromIso)
+      .lte("pos_sales.created_at", toIso)
+      .order("id")
+      .range(start, start + PAGE_SIZE - 1);
+
+    if (error) throw error;
+    const page = (data ?? []) as unknown as PosSaleRangeRow[];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) break;
+  }
+
+  return rows.map((row) => ({
+    date: localDateIso(new Date(row.pos_sales.created_at)),
     accountId: row.account_id,
     amount: Number(row.amount)
   }));
