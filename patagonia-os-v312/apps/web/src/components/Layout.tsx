@@ -3,6 +3,7 @@ import { BarChart3, Beef, Boxes, Download, FileText, HandCoins, Handshake, Histo
 import { useAuth } from "../features/auth/AuthProvider";
 import { canAccessPage, type Page } from "../features/auth/permissions";
 import { useActiveBranch } from "../features/branches/BranchProvider";
+import { TrialBanner } from "./TrialBanner";
 
 export type { Page };
 
@@ -211,7 +212,10 @@ export function Layout({ page, onPageChange, children }: Props) {
         </div>
       </aside>
 
-      <main className="main-content">{children}</main>
+      <main className="main-content">
+        <TrialBanner />
+        {children}
+      </main>
     </div>
   );
 }

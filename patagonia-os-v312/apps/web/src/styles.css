@@ -400,7 +400,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .admin-brand { display: flex; align-items: center; gap: 14px; }
 .admin-brand h1 { margin: 2px 0 0; font-size: 26px; }
 .admin-actions { display: flex; gap: 8px; flex-wrap: wrap; }
-.admin-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+.admin-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
 .admin-kpis .kpi-card { padding: 16px 20px; }
 .admin-form-panel { max-width: 720px; }
 .admin-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
@@ -452,3 +452,16 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .admin-page .admin-actions button.secondary { background: white; color: #47505c; border-color: #d6dce5; }
 .admin-page .admin-actions button.danger { background: white; color: #b42318; border-color: #f3d0cc; }
 .admin-page .admin-actions button:hover:not(:disabled) { filter: brightness(.96); }
+.admin-trial-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; }
+.admin-trial { border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 800; }
+.admin-trial-ok { background: #eef7ef; color: #176329; }
+.admin-trial-soon { background: #fff5e6; color: #8a4b00; }
+.admin-trial-expired { background: #fdecea; color: #b42318; }
+.admin-trial-none { background: #f2f4f7; color: #47505c; }
+.admin-trial-alert {
+  background: #fff5e6; border: 1px solid #f0d9b5; border-radius: 14px; padding: 14px 18px; color: #5c3a00; display: grid; gap: 8px;
+}
+.admin-trial-alert ul { margin: 0; padding-left: 18px; display: grid; gap: 4px; }
+.trial-banner { margin-bottom: 14px; font-weight: 600; }
+.message.trial-expired { background: #fdecea; color: #b42318; }
+@media (max-width: 900px) { .admin-kpis { grid-template-columns: repeat(2, 1fr); } }

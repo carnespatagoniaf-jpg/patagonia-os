@@ -1,7 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Building2, LockKeyhole, MapPin, Plus, Search } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
-import { PROVINCES, createClient, deleteClient, listCompanies, setCompanyActive, setCompanyLocation, type CompanySummary, type CreateClientResult } from "./admin-service";
+import { PROVINCES, createClient, deleteClient, listCompanies, setCompanyActive, setCompanyLocation, setCompanyTrial, type CompanySummary, type CreateClientResult } from "./admin-service";
 
 /** Mensaje listo para pegar en WhatsApp/mail y mandarle al dueño nuevo --
  * evita tener que copiar el usuario y la contraseña por separado a mano. */
@@ -34,6 +34,23 @@ function emptyDraft(): Draft {
 }
 
 const NO_LOCATION = "Sin ubicación";
+const TRIAL_DAYS = 7;
+const DAY_MS = 86_400_000;
+
+/** null = sin vencimiento (cliente pago o excepción). */
+function trialDaysLeft(company: CompanySummary): number | null {
+  if (!company.trialEndsAt) return null;
+  return Math.ceil((new Date(company.trialEndsAt).getTime() - Date.now()) / DAY_MS);
+}
+
+function trialLabel(days: number) {
+  if (days <= 0) return "Prueba vencida";
+  return days === 1 ? "Prueba: vence mañana" : `Prueba: ${days} días`;
+}
+
+function trialTone(days: number) {
+  return days <= 0 ? "admin-trial-expired" : days <= 2 ? "admin-trial-soon" : "admin-trial-ok";
+}
 
 function groupByProvince(list: CompanySummary[]) {
   const map = new Map<string, CompanySummary[]>();
@@ -63,6 +80,7 @@ export function AdminCreateClient() {
   const [editProvince, setEditProvince] = useState("");
   const [editCity, setEditCity] = useState("");
   const [savingLocation, setSavingLocation] = useState(false);
+  const [trialBusyId, setTrialBusyId] = useState<string | null>(null);
 
   const reloadCompanies = useCallback(async () => {
     setCompaniesLoading(true);
@@ -86,6 +104,18 @@ export function AdminCreateClient() {
       setMessage(error instanceof Error ? error.message : "No se pudo actualizar el cliente.");
     } finally {
       setTogglingId(null);
+    }
+  }
+
+  async function changeTrial(company: CompanySummary, trialEndsAt: Date | null) {
+    setTrialBusyId(company.id);
+    try {
+      await setCompanyTrial(company.id, trialEndsAt ? trialEndsAt.toISOString() : null);
+      await reloadCompanies();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo actualizar la prueba.");
+    } finally {
+      setTrialBusyId(null);
     }
   }
 
@@ -170,6 +200,10 @@ export function AdminCreateClient() {
   const activeCompanies = useMemo(() => companies.filter((c) => c.active), [companies]);
   const inactiveCompanies = companies.filter((c) => !c.active && matches(c));
   const activeGroups = groupByProvince(activeCompanies.filter(matches));
+  const trialAlerts = activeCompanies
+    .map((c) => ({ company: c, days: trialDaysLeft(c) }))
+    .filter((x): x is { company: CompanySummary; days: number } => x.days !== null && x.days <= 2)
+    .sort((a, b) => a.days - b.days);
   const provinceCount = new Set(activeCompanies.map((c) => c.province).filter(Boolean)).size;
   const withoutLocation = activeCompanies.filter((c) => !c.province).length;
 
@@ -206,6 +240,38 @@ export function AdminCreateClient() {
           <div><dt>Email</dt><dd>{company.ownerEmail ?? "-"}</dd></div>
           <div><dt>Teléfono</dt><dd>{company.contactPhone ?? "-"}</dd></div>
         </dl>
+
+        {(() => {
+          const days = trialDaysLeft(company);
+          const busy = trialBusyId === company.id;
+          return (
+            <div className="admin-trial-row">
+              {days === null ? (
+                <span className="admin-trial admin-trial-none">Sin vencimiento</span>
+              ) : (
+                <span className={`admin-trial ${trialTone(days)}`}>{trialLabel(days)}</span>
+              )}
+              <div className="admin-actions">
+                {days === null ? (
+                  <button className="secondary" disabled={busy} onClick={() => void changeTrial(company, new Date(Date.now() + TRIAL_DAYS * DAY_MS))}>
+                    Iniciar prueba de {TRIAL_DAYS} días
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      className="secondary"
+                      disabled={busy}
+                      onClick={() => void changeTrial(company, new Date(Math.max(Date.now(), new Date(company.trialEndsAt!).getTime()) + TRIAL_DAYS * DAY_MS))}
+                    >
+                      +{TRIAL_DAYS} días
+                    </button>
+                    <button className="secondary" disabled={busy} onClick={() => void changeTrial(company, null)}>Sin vencimiento</button>
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        })()}
 
         <div className="admin-chips">
           <span>{company.branchCount} {company.branchCount === 1 ? "sucursal" : "sucursales"}</span>
@@ -246,6 +312,7 @@ export function AdminCreateClient() {
       <div className="admin-kpis">
         <div className="kpi-card"><span>Clientes activos</span><strong>{activeCompanies.length}</strong></div>
         <div className="kpi-card"><span>Provincias</span><strong>{provinceCount}</strong></div>
+        <div className="kpi-card"><span>Pruebas por vencer</span><strong>{trialAlerts.length}</strong></div>
         <div className="kpi-card"><span>Sin ubicación</span><strong>{withoutLocation}</strong></div>
       </div>
 
@@ -296,6 +363,22 @@ export function AdminCreateClient() {
       )}
 
       {message && <div className="message warning">{message}</div>}
+
+      {trialAlerts.length > 0 && (
+        <section className="admin-trial-alert">
+          <strong>Prueba gratuita por vencer o vencida</strong>
+          <ul>
+            {trialAlerts.map(({ company, days }) => (
+              <li key={company.id}>
+                <span className={`admin-trial ${trialTone(days)}`}>{trialLabel(days)}</span> {company.name}
+                {company.contactPhone ? ` · ${company.contactPhone}` : ""}
+                {company.ownerEmail ? ` · ${company.ownerEmail}` : ""}
+              </li>
+            ))}
+          </ul>
+          <span className="muted">No se bloquea nada al vencer: podés extender los días o dejarlo sin vencimiento desde cada tarjeta.</span>
+        </section>
+      )}
 
       <div className="admin-search">
         <Search size={16} />
