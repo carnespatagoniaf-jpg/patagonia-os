@@ -126,8 +126,8 @@ export function parseWeightBarcode(code: string, config: ScaleConfig = DEFAULT_S
 export function parseTicketTotalBarcode(rawCode: string): number | null {
   // Muchos lectores devuelven un EAN-13 que empieza en 0 como UPC-A de 12
   // dígitos (sin ese primer cero) -- pasó con un cliente real. Se repone.
-  const code = /^d{12}$/.test(rawCode) ? `0${rawCode}` : rawCode;
-  if (!/^d{13}$/.test(code) || !code.startsWith("00000")) return null;
+  const code = /^[0-9]{12}$/.test(rawCode) ? `0${rawCode}` : rawCode;
+  if (!/^[0-9]{13}$/.test(code) || !code.startsWith("00000")) return null;
 
   const digits = code.split("").map(Number);
   const sum = digits.slice(0, 12).reduce((acc, d, i) => acc + d * (i % 2 === 0 ? 1 : 3), 0);
