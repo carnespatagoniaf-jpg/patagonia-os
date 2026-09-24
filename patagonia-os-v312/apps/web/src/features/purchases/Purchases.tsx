@@ -502,39 +502,6 @@ export function Purchases() {
 
       {selectedSupplier && (
         <>
-          <section className="panel print-area" style={{ marginTop: 18 }}>
-            <div className="panel-title">
-              <h2>Detalle de cuenta corriente</h2>
-              <button className="secondary no-print" onClick={handlePrintLedger}>Imprimir</button>
-            </div>
-            <p className="muted print-only-header">
-              {selectedSupplier.name} · {selectedSupplier.category}
-            </p>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Fecha</th>
-                  <th>Comprobante</th>
-                  <th className="num">Debe (compras)</th>
-                  <th className="num">Haber (pagos)</th>
-                  <th className="num">Saldo</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ledger.map((row) => (
-                  <tr key={row.key}>
-                    <td>{row.date}</td>
-                    <td>{row.detail}</td>
-                    <td className="num">{row.debit > 0 ? formatMoney(row.debit) : "-"}</td>
-                    <td className="num">{row.credit > 0 ? formatMoney(row.credit) : "-"}</td>
-                    <td className="num">{formatMoney(row.balance)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {ledger.length === 0 && <p className="muted">Todavía no hay movimientos para este proveedor.</p>}
-          </section>
-
           <section className="panel no-print" style={{ marginTop: 18 }}>
             <div className="panel-title">
               <h2>Nueva compra</h2>
@@ -821,6 +788,39 @@ export function Purchases() {
               {payments.length === 0 && <p className="muted">Todavía no hay pagos registrados.</p>}
             </section>
           </div>
+
+          <section className="panel print-area" style={{ marginTop: 18 }}>
+            <div className="panel-title">
+              <h2>Detalle de cuenta corriente</h2>
+              <button className="secondary no-print" onClick={handlePrintLedger}>Imprimir</button>
+            </div>
+            <p className="muted print-only-header">
+              {selectedSupplier.name} · {selectedSupplier.category}
+            </p>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Comprobante</th>
+                  <th className="num">Debe (compras)</th>
+                  <th className="num">Haber (pagos)</th>
+                  <th className="num">Saldo</th>
+                </tr>
+              </thead>
+              <tbody>
+                {ledger.map((row) => (
+                  <tr key={row.key}>
+                    <td>{row.date}</td>
+                    <td>{row.detail}</td>
+                    <td className="num">{row.debit > 0 ? formatMoney(row.debit) : "-"}</td>
+                    <td className="num">{row.credit > 0 ? formatMoney(row.credit) : "-"}</td>
+                    <td className="num">{formatMoney(row.balance)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            {ledger.length === 0 && <p className="muted">Todavía no hay movimientos para este proveedor.</p>}
+          </section>
         </>
       )}
     </>
