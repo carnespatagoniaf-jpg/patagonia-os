@@ -504,6 +504,24 @@ export function Purchases() {
         <>
           <section className="panel no-print" style={{ marginTop: 18 }}>
             <div className="panel-title">
+              <h2>Registrar pago a {selectedSupplier.name}</h2>
+            </div>
+              <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
+                <input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
+                <input type="text" inputMode="decimal" placeholder="Monto" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
+                <select value={paymentAccountId} onChange={(e) => setPaymentAccountId(e.target.value)}>
+                  <option value="">Pagar desde…</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+                <input placeholder="Nota" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} />
+                <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
+              </div>
+          </section>
+
+          <section className="panel no-print" style={{ marginTop: 18 }}>
+            <div className="panel-title">
               <h2>Nueva compra</h2>
             </div>
             <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 18 }}>
@@ -724,19 +742,6 @@ export function Purchases() {
               <div className="panel-title">
                 <h2>Pagos</h2>
               </div>
-              <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 14 }}>
-                <input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
-                <input type="text" inputMode="decimal" placeholder="Monto" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
-                <select value={paymentAccountId} onChange={(e) => setPaymentAccountId(e.target.value)}>
-                  <option value="">Pagar desde…</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-                <input placeholder="Nota" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} />
-                <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
-              </div>
-
               <table className="data-table">
                 <thead>
                   <tr><th>Fecha</th><th className="num">Monto</th><th>Cuenta</th><th>Nota</th><th></th></tr>
