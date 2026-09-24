@@ -560,86 +560,6 @@ export function Customers() {
 
       {selectedCustomer && (
         <>
-          <section className={`panel${printCharge ? "" : " print-area"}`} style={{ marginTop: 18 }}>
-            <div className="panel-title">
-              <h2>Detalle de cuenta corriente</h2>
-              <button className="secondary no-print" onClick={handlePrint}>Imprimir</button>
-            </div>
-            <p className="muted print-only-header">{selectedCustomer.name}</p>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Fecha</th>
-                  <th>Concepto</th>
-                  <th className="num">Venta</th>
-                  <th className="num">Pago</th>
-                  <th className="num">Saldo</th>
-                  <th className="no-print"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {ledger.map((row) =>
-                  editingRowKey === row.key ? (
-                    <Fragment key={row.key}>
-                      <tr className="no-print">
-                        <td><input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} /></td>
-                        <td>
-                          {row.type === "charge" ? (
-                            <input placeholder="Detalle" value={editReason} onChange={(e) => setEditReason(e.target.value)} />
-                          ) : (
-                            <input placeholder="Nota" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
-                          )}
-                        </td>
-                        <td colSpan={2}>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            className="num"
-                            value={editAmount}
-                            onChange={(e) => setEditAmount(e.target.value)}
-                            style={{ width: 100 }}
-                          />{" "}
-                          {row.type === "payment" && (
-                            <select value={editAccountId} onChange={(e) => setEditAccountId(e.target.value)}>
-                              <option value="">Entra a…</option>
-                              {accounts.map((a) => (
-                                <option key={a.id} value={a.id}>{a.name}</option>
-                              ))}
-                            </select>
-                          )}
-                        </td>
-                        <td colSpan={2}>
-                          <button disabled={busy} onClick={() => handleSaveRow(row)}>Guardar</button>{" "}
-                          <button className="secondary" disabled={busy} onClick={() => setEditingRowKey(null)}>Cancelar</button>
-                        </td>
-                      </tr>
-                    </Fragment>
-                  ) : (
-                    <tr key={row.key}>
-                      <td>{row.date}</td>
-                      <td>{row.detail}</td>
-                      <td className="num">{row.debit > 0 ? formatMoney(row.debit) : "-"}</td>
-                      <td className="num">{row.credit > 0 ? formatMoney(row.credit) : "-"}</td>
-                      <td className="num">{formatMoney(row.balance)}</td>
-                      <td className="no-print">
-                        {row.type === "charge" && (
-                          <>
-                            <button className="secondary" disabled={remitoBusyId === row.id} onClick={() => handleShowRemito(row)}>
-                              {remitoBusyId === row.id ? "…" : "Remito"}
-                            </button>{" "}
-                          </>
-                        )}
-                        <button className="secondary" disabled={busy} onClick={() => startEditRow(row)}>Editar</button>{" "}
-                        <button className="secondary" disabled={busy} onClick={() => handleDeleteRow(row)}>Borrar</button>
-                      </td>
-                    </tr>
-                  )
-                )}
-              </tbody>
-            </table>
-            {ledger.length === 0 && !detailLoading && <p className="muted">Todavía no hay movimientos para este cliente.</p>}
-          </section>
-
           <div className="content-grid" style={{ marginTop: 18 }}>
             <section className="panel">
               <div className="panel-title">
@@ -775,6 +695,86 @@ export function Customers() {
               </div>
             </section>
           </div>
+
+          <section className={`panel${printCharge ? "" : " print-area"}`} style={{ marginTop: 18 }}>
+            <div className="panel-title">
+              <h2>Detalle de cuenta corriente</h2>
+              <button className="secondary no-print" onClick={handlePrint}>Imprimir</button>
+            </div>
+            <p className="muted print-only-header">{selectedCustomer.name}</p>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Fecha</th>
+                  <th>Concepto</th>
+                  <th className="num">Venta</th>
+                  <th className="num">Pago</th>
+                  <th className="num">Saldo</th>
+                  <th className="no-print"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {ledger.map((row) =>
+                  editingRowKey === row.key ? (
+                    <Fragment key={row.key}>
+                      <tr className="no-print">
+                        <td><input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} /></td>
+                        <td>
+                          {row.type === "charge" ? (
+                            <input placeholder="Detalle" value={editReason} onChange={(e) => setEditReason(e.target.value)} />
+                          ) : (
+                            <input placeholder="Nota" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
+                          )}
+                        </td>
+                        <td colSpan={2}>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            className="num"
+                            value={editAmount}
+                            onChange={(e) => setEditAmount(e.target.value)}
+                            style={{ width: 100 }}
+                          />{" "}
+                          {row.type === "payment" && (
+                            <select value={editAccountId} onChange={(e) => setEditAccountId(e.target.value)}>
+                              <option value="">Entra a…</option>
+                              {accounts.map((a) => (
+                                <option key={a.id} value={a.id}>{a.name}</option>
+                              ))}
+                            </select>
+                          )}
+                        </td>
+                        <td colSpan={2}>
+                          <button disabled={busy} onClick={() => handleSaveRow(row)}>Guardar</button>{" "}
+                          <button className="secondary" disabled={busy} onClick={() => setEditingRowKey(null)}>Cancelar</button>
+                        </td>
+                      </tr>
+                    </Fragment>
+                  ) : (
+                    <tr key={row.key}>
+                      <td>{row.date}</td>
+                      <td>{row.detail}</td>
+                      <td className="num">{row.debit > 0 ? formatMoney(row.debit) : "-"}</td>
+                      <td className="num">{row.credit > 0 ? formatMoney(row.credit) : "-"}</td>
+                      <td className="num">{formatMoney(row.balance)}</td>
+                      <td className="no-print">
+                        {row.type === "charge" && (
+                          <>
+                            <button className="secondary" disabled={remitoBusyId === row.id} onClick={() => handleShowRemito(row)}>
+                              {remitoBusyId === row.id ? "…" : "Remito"}
+                            </button>{" "}
+                          </>
+                        )}
+                        <button className="secondary" disabled={busy} onClick={() => startEditRow(row)}>Editar</button>{" "}
+                        <button className="secondary" disabled={busy} onClick={() => handleDeleteRow(row)}>Borrar</button>
+                      </td>
+                    </tr>
+                  )
+                )}
+              </tbody>
+            </table>
+            {ledger.length === 0 && !detailLoading && <p className="muted">Todavía no hay movimientos para este cliente.</p>}
+          </section>
         </>
       )}
     </>

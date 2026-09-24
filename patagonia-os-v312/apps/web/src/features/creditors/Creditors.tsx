@@ -381,6 +381,48 @@ export function Creditors() {
 
       {selectedCreditor && (
         <>
+          <div className="content-grid" style={{ marginTop: 18 }}>
+            <section className="panel">
+              <div className="panel-title">
+                <h2>Nueva deuda</h2>
+              </div>
+              <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10 }}>
+                <input type="date" value={debtDate} onChange={(e) => setDebtDate(e.target.value)} />
+                <input type="text" inputMode="decimal" placeholder="Monto" value={debtAmount} onChange={(e) => setDebtAmount(e.target.value)} />
+                <select value={debtAccountId} onChange={(e) => setDebtAccountId(e.target.value)}>
+                  <option value="">Sin cuenta / no entró plata</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>Entró a {a.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
+                <input placeholder="Motivo (ej. préstamo, mercadería)" value={debtReason} onChange={(e) => setDebtReason(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
+                <button disabled={busy} onClick={handleAddDebt}>{busy ? "Cargando…" : "Cargar deuda"}</button>
+              </div>
+            </section>
+
+            <section className="panel">
+              <div className="panel-title">
+                <h2>Registrar pago</h2>
+              </div>
+              <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10 }}>
+                <input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
+                <input type="text" inputMode="decimal" placeholder="Monto" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
+                <select value={paymentAccountId} onChange={(e) => setPaymentAccountId(e.target.value)}>
+                  <option value="">Pagar desde…</option>
+                  {accounts.map((a) => (
+                    <option key={a.id} value={a.id}>{a.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
+                <input placeholder="Nota (opcional)" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
+                <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
+              </div>
+            </section>
+          </div>
+
           <section className="panel print-area" style={{ marginTop: 18 }}>
             <div className="panel-title">
               <h2>Detalle de cuenta corriente</h2>
@@ -451,48 +493,6 @@ export function Creditors() {
             </table>
             {ledger.length === 0 && !detailLoading && <p className="muted">Todavía no hay movimientos para este acreedor.</p>}
           </section>
-
-          <div className="content-grid" style={{ marginTop: 18 }}>
-            <section className="panel">
-              <div className="panel-title">
-                <h2>Nueva deuda</h2>
-              </div>
-              <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10 }}>
-                <input type="date" value={debtDate} onChange={(e) => setDebtDate(e.target.value)} />
-                <input type="text" inputMode="decimal" placeholder="Monto" value={debtAmount} onChange={(e) => setDebtAmount(e.target.value)} />
-                <select value={debtAccountId} onChange={(e) => setDebtAccountId(e.target.value)}>
-                  <option value="">Sin cuenta / no entró plata</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>Entró a {a.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
-                <input placeholder="Motivo (ej. préstamo, mercadería)" value={debtReason} onChange={(e) => setDebtReason(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
-                <button disabled={busy} onClick={handleAddDebt}>{busy ? "Cargando…" : "Cargar deuda"}</button>
-              </div>
-            </section>
-
-            <section className="panel">
-              <div className="panel-title">
-                <h2>Registrar pago</h2>
-              </div>
-              <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10 }}>
-                <input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
-                <input type="text" inputMode="decimal" placeholder="Monto" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
-                <select value={paymentAccountId} onChange={(e) => setPaymentAccountId(e.target.value)}>
-                  <option value="">Pagar desde…</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
-                <input placeholder="Nota (opcional)" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
-                <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
-              </div>
-            </section>
-          </div>
         </>
       )}
     </>
