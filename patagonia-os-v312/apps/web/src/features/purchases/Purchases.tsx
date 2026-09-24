@@ -517,21 +517,36 @@ export function Purchases() {
               </div>
             </div>
 
-            <div style={{ display: "grid", gap: 10 }}>
+            <div className="purchase-lines">
+              <div className="purchase-line purchase-line-head">
+                <span>Producto</span>
+                <span>Cantidad</span>
+                <span>Unidad</span>
+                <span>Precio unitario</span>
+                <span className="num">Subtotal</span>
+                <span></span>
+              </div>
               {lines.map((line) => {
                 const selectedProduct = products.find((p) => p.id === line.productId);
                 const productMatches = !line.productId && line.description.trim()
                   ? products.filter((p) => p.name.toLowerCase().includes(line.description.toLowerCase())).slice(0, 8)
                   : [];
+                const qty = Number(line.quantity);
+                const price = parseAmount(line.unitPrice);
+                const subtotal = Number.isFinite(qty) && Number.isFinite(price) ? qty * price : 0;
                 return (
-                  <div key={line.key} style={{ border: "1px solid #eef0f3", borderRadius: 10, padding: 14 }}>
-                    <div className="field" style={{ marginBottom: 12 }}>
-                      <span>Producto</span>
+                  <div key={line.key} className="purchase-line">
+                    <div className="purchase-line-product">
                       {selectedProduct ? (
-                        <span style={{ display: "flex", alignItems: "center", gap: 8, padding: "11px 0" }}>
-                          <strong>{selectedProduct.name}</strong>
-                          <button className="secondary" onClick={() => updateLine(line.key, { productId: "", description: "" })}>Cambiar</button>
-                        </span>
+                        <>
+                          <span className="purchase-line-picked">
+                            <strong>{selectedProduct.name}</strong>
+                            <button className="secondary" onClick={() => updateLine(line.key, { productId: "", description: "" })}>Cambiar</button>
+                          </span>
+                          <small className="muted">
+                            Costo {formatMoney(selectedProduct.cost)} · Margen {marginPercent(selectedProduct.cost, selectedProduct.priceRetail)}% · Venta {formatMoney(selectedProduct.priceRetail)}
+                          </small>
+                        </>
                       ) : (
                         <div className="pos-search-wrap">
                           <input
@@ -561,49 +576,34 @@ export function Purchases() {
                         </div>
                       )}
                     </div>
-                    <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
-                      <div className="field" style={{ width: 110 }}>
-                        <span>Cantidad</span>
-                        <input
-                          type="number"
-                          min={line.unit === "kg" ? "0.001" : "1"}
-                          step={line.unit === "kg" ? "0.001" : "1"}
-                          value={line.quantity}
-                          onChange={(e) => updateLine(line.key, { quantity: e.target.value })}
-                        />
-                      </div>
-                      <div className="field" style={{ width: 110 }}>
-                        <span>Unidad</span>
-                        <select value={line.unit} onChange={(e) => updateLine(line.key, { unit: e.target.value as "kg" | "unit" })}>
-                          <option value="kg">kg</option>
-                          <option value="unit">unidad</option>
-                        </select>
-                      </div>
-                      <div className="field" style={{ width: 140 }}>
-                        <span>Precio unitario</span>
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          value={line.unitPrice}
-                          onChange={(e) => updateLine(line.key, { unitPrice: e.target.value })}
-                        />
-                      </div>
-                      <button className="danger" onClick={() => removeLine(line.key)}>Quitar</button>
-                    </div>
-                    {!selectedProduct && (
-                      <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
-                        Escribí un nombre y tocá afuera o Esc para escribir una descripción libre sin elegir ningún producto de la lista.
-                      </p>
-                    )}
-                    {selectedProduct && (
-                      <p className="muted" style={{ margin: "10px 0 0" }}>
-                        Costo registrado: {formatMoney(selectedProduct.cost)} · Margen: {marginPercent(selectedProduct.cost, selectedProduct.priceRetail)}% · Venta: {formatMoney(selectedProduct.priceRetail)}
-                      </p>
-                    )}
+                    <input
+                      type="number"
+                      aria-label="Cantidad"
+                      min={line.unit === "kg" ? "0.001" : "1"}
+                      step={line.unit === "kg" ? "0.001" : "1"}
+                      value={line.quantity}
+                      onChange={(e) => updateLine(line.key, { quantity: e.target.value })}
+                    />
+                    <select aria-label="Unidad" value={line.unit} onChange={(e) => updateLine(line.key, { unit: e.target.value as "kg" | "unit" })}>
+                      <option value="kg">kg</option>
+                      <option value="unit">unidad</option>
+                    </select>
+                    <input
+                      type="text"
+                      aria-label="Precio unitario"
+                      inputMode="decimal"
+                      value={line.unitPrice}
+                      onChange={(e) => updateLine(line.key, { unitPrice: e.target.value })}
+                    />
+                    <strong className="num purchase-line-subtotal">{subtotal > 0 ? formatMoney(subtotal) : "-"}</strong>
+                    <button className="danger" aria-label="Quitar ítem" onClick={() => removeLine(line.key)}>✕</button>
                   </div>
                 );
               })}
             </div>
+            <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
+              Para una descripción libre (sin elegir un producto de la lista): escribí el nombre y tocá afuera o Esc.
+            </p>
 
             <div style={{ marginTop: 12 }}>
               <button className="secondary" onClick={addLine}>+ Agregar ítem</button>

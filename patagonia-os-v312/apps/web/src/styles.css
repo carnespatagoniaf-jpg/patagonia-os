@@ -465,3 +465,24 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .trial-banner { margin-bottom: 14px; font-weight: 600; }
 .message.trial-expired { background: #fdecea; color: #b42318; }
 @media (max-width: 900px) { .admin-kpis { grid-template-columns: repeat(2, 1fr); } }
+
+/* Nueva compra: una fila compacta por ítem (antes una tarjeta enorme cada uno) */
+.purchase-lines { display: grid; gap: 6px; }
+.purchase-line {
+  display: grid; grid-template-columns: minmax(200px, 1fr) 100px 100px 130px 120px 40px; gap: 8px; align-items: start;
+  padding: 6px 0; border-bottom: 1px solid #eef0f3;
+}
+.purchase-line-head { font-size: 12px; font-weight: 800; color: #47505c; border-bottom: 2px solid #e5e7eb; padding-bottom: 6px; }
+.purchase-line-head .num { text-align: right; }
+.purchase-line input, .purchase-line select { padding: 9px; border: 1px solid #d6dce5; border-radius: 10px; width: 100%; min-width: 0; box-sizing: border-box; background: white; }
+.purchase-line-product { display: grid; gap: 2px; min-width: 0; }
+.purchase-line-picked { display: flex; align-items: center; gap: 8px; padding: 6px 0 0; flex-wrap: wrap; }
+.purchase-line-picked button { padding: 2px 8px; font-size: 12px; }
+.purchase-line-product small { font-size: 12px; }
+.purchase-line-subtotal { text-align: right; padding-top: 10px; }
+.purchase-line .danger { padding: 8px 0; }
+@media (max-width: 760px) {
+  .purchase-line-head { display: none; }
+  .purchase-line { grid-template-columns: 1fr 1fr; }
+  .purchase-line-product { grid-column: 1 / -1; }
+}
