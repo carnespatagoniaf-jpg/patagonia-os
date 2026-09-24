@@ -79,6 +79,10 @@ export function useCarcass() {
     [loadCuts]
   );
 
+  // Sin recargar la tabla: para guardar varios cortes seguidos (plantilla) y
+  // recargar una sola vez al final, en vez de una vez por corte.
+  const saveCutSilent = useCallback((input: SaveCarcassCutInput) => saveCarcassCut(input), []);
+
   const removeCut = useCallback(
     async (cutId: string, batchId: string) => {
       await deleteCarcassCut(cutId);
@@ -99,6 +103,7 @@ export function useCarcass() {
     saveBatch,
     removeBatch,
     saveCut,
+    saveCutSilent,
     removeCut
   };
 }

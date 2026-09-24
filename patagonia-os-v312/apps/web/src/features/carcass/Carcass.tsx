@@ -16,7 +16,7 @@ function formatMoney(value: number) {
 const ANIMAL_TYPES = ["Vaca / media res", "Cerdo", "Pollo", "Mocho", "Otro"];
 
 export function Carcass() {
-  const { batches, loading, error, saveBatch, removeBatch, cuts, cutsLoading, loadCuts, saveCut, removeCut } = useCarcass();
+  const { batches, loading, error, saveBatch, removeBatch, cuts, cutsLoading, loadCuts, saveCut, saveCutSilent, removeCut } = useCarcass();
   const { templates, save: saveTemplate, remove: removeTemplate } = useCarcassTemplates();
   const { suppliers } = useSuppliers();
   const { branchId } = useActiveBranch();
@@ -45,6 +45,7 @@ export function Carcass() {
   const [newTplYield, setNewTplYield] = useState("");
   const [newTplProductId, setNewTplProductId] = useState("");
   const [generatingCuts, setGeneratingCuts] = useState(false);
+  const [generateProgress, setGenerateProgress] = useState("");
   const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
   const [editTplCutName, setEditTplCutName] = useState("");
   const [editTplYield, setEditTplYield] = useState("");
@@ -100,19 +101,27 @@ export function Carcass() {
 
     setGeneratingCuts(true);
     try {
-      for (const t of templateRows) {
-        const product = t.productId ? products.find((p) => p.id === t.productId) : undefined;
-        await saveCut({
-          batchId,
-          cutName: t.cutName,
-          productId: t.productId,
-          weight: carcassTemplateCutWeight(forTotalWeight, t.yieldPercent),
-          unitPrice: product?.priceRetail ?? 0
-        });
+      // Se guardan todos sin recargar la tabla entre uno y otro (antes se
+      // recargaba y reordenaba después de cada corte, y se veía trabado).
+      try {
+        for (const [index, t] of templateRows.entries()) {
+          setGenerateProgress(`${index + 1}/${templateRows.length}`);
+          const product = t.productId ? products.find((p) => p.id === t.productId) : undefined;
+          await saveCutSilent({
+            batchId,
+            cutName: t.cutName,
+            productId: t.productId,
+            weight: carcassTemplateCutWeight(forTotalWeight, t.yieldPercent),
+            unitPrice: product?.priceRetail ?? 0
+          });
+        }
+      } finally {
+        await loadCuts(batchId);
       }
       return templateRows.length;
     } finally {
       setGeneratingCuts(false);
+      setGenerateProgress("");
     }
   }
 
@@ -134,7 +143,6 @@ export function Carcass() {
 
       if (!wasEditing) {
         const generated = await generateCutsFromTemplate(result.id, animalType, weightValue);
-        await loadCuts(result.id);
         setMessage(
           generated > 0
             ? `Res cargada y ${generated} cortes generados desde la plantilla de "${animalType}" — revisá los pesos con la balanza real.`
@@ -484,7 +492,7 @@ export function Carcass() {
             <h2>Cortes de {selectedBatch.animalType} — {selectedBatch.batchDate}</h2>
             <div className="no-print" style={{ display: "flex", gap: 8 }}>
               <button className="secondary" disabled={generatingCuts} onClick={handleGenerateCutsForSelectedBatch}>
-                {generatingCuts ? "Generando…" : "Generar cortes desde plantilla"}
+                {generatingCuts ? `Generando… ${generateProgress}` : "Generar cortes desde plantilla"}
               </button>
               <button className="secondary" onClick={handlePrint}>Imprimir</button>
             </div>
