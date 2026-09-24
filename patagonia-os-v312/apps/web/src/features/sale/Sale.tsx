@@ -901,7 +901,7 @@ export function Sale() {
     // confundirían con el PLU 1) y solo si no hay un producto con ese código.
     const ticketTotal = parseTicketTotalBarcode(raw);
     if (ticketTotal !== null && !products.some((p) => p.code === raw)) {
-      const key = `ticket-${raw}`;
+      const key = `ticket-${raw.padStart(13, "0")}`;
       if (cart.some((l) => l.key === key)) {
         setMessage("Ese ticket de la balanza ya está cargado en esta venta.");
       } else {
