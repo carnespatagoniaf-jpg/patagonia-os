@@ -398,6 +398,31 @@ export function Carcass() {
             <h2>Reses cargadas</h2>
             <span>{loading ? "Cargando…" : `${batches.length}`}</span>
           </div>
+          {showBatchForm ? (
+            <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 16 }}>
+              <input type="date" value={batchDate} onChange={(e) => setBatchDate(e.target.value)} />
+              <select value={animalType} onChange={(e) => setAnimalType(e.target.value)}>
+                {ANIMAL_TYPES.map((t) => (
+                  <option key={t} value={t}>{t}</option>
+                ))}
+              </select>
+              <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+                <option value="">Proveedor (opcional)…</option>
+                {suppliers.map((s) => (
+                  <option key={s.id} value={s.id}>{s.name}</option>
+                ))}
+              </select>
+              <input type="number" min="0" step="0.001" placeholder="Peso total (kg)" value={totalWeight} onChange={(e) => setTotalWeight(e.target.value)} />
+              <input type="text" inputMode="decimal" placeholder="Precio por kg ($)" value={pricePerKg} onChange={(e) => setPricePerKg(e.target.value)} />
+              <button onClick={handleSaveBatch}>{editingBatchId ? "Guardar cambio" : "Guardar res"}</button>
+              <button className="secondary" onClick={resetBatchForm}>Cancelar</button>
+            </div>
+          ) : (
+            <button className="secondary" style={{ marginBottom: 16 }} onClick={() => setShowBatchForm(true)}>
+              + Agregar res
+            </button>
+          )}
+
           <table className="data-table">
             <thead>
               <tr><th>Fecha</th><th>Tipo</th><th className="num">Peso</th><th className="num">$/kg</th><th className="num">Compra</th><th></th></tr>
@@ -425,30 +450,6 @@ export function Carcass() {
           </table>
           {batches.length === 0 && !loading && <p className="muted">Todavía no cargaste ninguna res.</p>}
 
-          {showBatchForm ? (
-            <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 16 }}>
-              <input type="date" value={batchDate} onChange={(e) => setBatchDate(e.target.value)} />
-              <select value={animalType} onChange={(e) => setAnimalType(e.target.value)}>
-                {ANIMAL_TYPES.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-              <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-                <option value="">Proveedor (opcional)…</option>
-                {suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-              <input type="number" min="0" step="0.001" placeholder="Peso total (kg)" value={totalWeight} onChange={(e) => setTotalWeight(e.target.value)} />
-              <input type="text" inputMode="decimal" placeholder="Precio por kg ($)" value={pricePerKg} onChange={(e) => setPricePerKg(e.target.value)} />
-              <button onClick={handleSaveBatch}>{editingBatchId ? "Guardar cambio" : "Guardar res"}</button>
-              <button className="secondary" onClick={resetBatchForm}>Cancelar</button>
-            </div>
-          ) : (
-            <button className="secondary" style={{ marginTop: 16 }} onClick={() => setShowBatchForm(true)}>
-              + Agregar res
-            </button>
-          )}
           {showBatchForm && (
             <p className="muted" style={{ marginTop: 10 }}>Costo total calculado: {formatMoney(computedTotalCost)}</p>
           )}

@@ -335,6 +335,27 @@ export function Employees() {
             <h2>Empleados</h2>
             <span>{loading ? "Cargando…" : `${employees.length} activos`}</span>
           </div>
+          {showNewForm ? (
+            <div className="cash-banner-form" style={{ marginBottom: 16, flexWrap: "wrap" }}>
+              <input placeholder="Nombre" value={newName} onChange={(e) => setNewName(e.target.value)} />
+              <input type="text" inputMode="decimal" placeholder="Sueldo base" value={newSalary} onChange={(e) => setNewSalary(e.target.value)} />
+              <select value={newSalaryPeriod} onChange={(e) => setNewSalaryPeriod(e.target.value as SalaryPeriod)}>
+                <option value="monthly">Por mes</option>
+                <option value="biweekly">Por quincena</option>
+                <option value="weekly">Por semana</option>
+                <option value="daily">Por día</option>
+              </select>
+              <input type="text" inputMode="decimal" placeholder="Premio fijo (opcional)" value={newBonusAmount} onChange={(e) => setNewBonusAmount(e.target.value)} />
+              <input placeholder="Motivo del premio fijo" value={newBonusReason} onChange={(e) => setNewBonusReason(e.target.value)} />
+              <button onClick={handleCreate}>Guardar empleado</button>
+              <button className="secondary" onClick={() => setShowNewForm(false)}>Cancelar</button>
+            </div>
+          ) : (
+            <button className="secondary" style={{ marginBottom: 16 }} onClick={() => setShowNewForm(true)}>
+              + Agregar empleado
+            </button>
+          )}
+
           <table className="data-table">
             <thead>
               <tr><th>Nombre</th><th className="num">Sueldo</th><th></th></tr>
@@ -357,26 +378,6 @@ export function Employees() {
             </tbody>
           </table>
 
-          {showNewForm ? (
-            <div className="cash-banner-form" style={{ marginTop: 16, flexWrap: "wrap" }}>
-              <input placeholder="Nombre" value={newName} onChange={(e) => setNewName(e.target.value)} />
-              <input type="text" inputMode="decimal" placeholder="Sueldo base" value={newSalary} onChange={(e) => setNewSalary(e.target.value)} />
-              <select value={newSalaryPeriod} onChange={(e) => setNewSalaryPeriod(e.target.value as SalaryPeriod)}>
-                <option value="monthly">Por mes</option>
-                <option value="biweekly">Por quincena</option>
-                <option value="weekly">Por semana</option>
-                <option value="daily">Por día</option>
-              </select>
-              <input type="text" inputMode="decimal" placeholder="Premio fijo (opcional)" value={newBonusAmount} onChange={(e) => setNewBonusAmount(e.target.value)} />
-              <input placeholder="Motivo del premio fijo" value={newBonusReason} onChange={(e) => setNewBonusReason(e.target.value)} />
-              <button onClick={handleCreate}>Guardar empleado</button>
-              <button className="secondary" onClick={() => setShowNewForm(false)}>Cancelar</button>
-            </div>
-          ) : (
-            <button className="secondary" style={{ marginTop: 16 }} onClick={() => setShowNewForm(true)}>
-              + Agregar empleado
-            </button>
-          )}
         </section>
 
         <section className="panel">

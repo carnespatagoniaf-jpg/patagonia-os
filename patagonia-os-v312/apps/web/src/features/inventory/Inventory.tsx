@@ -376,6 +376,62 @@ export function Inventory() {
           </div>
         )}
 
+        {showNewForm ? (
+          <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 16 }}>
+            <input placeholder="Código" value={newDraft.code} onChange={(e) => setNewDraft({ ...newDraft, code: e.target.value })} style={{ width: 100 }} />
+            <input placeholder="Nombre" value={newDraft.name} onChange={(e) => setNewDraft({ ...newDraft, name: e.target.value })} />
+            <select value={newDraft.categoryId} onChange={(e) => setNewDraft({ ...newDraft, categoryId: e.target.value })}>
+              <option value="">Sin categoría</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+            <select value={newDraft.unit} onChange={(e) => setNewDraft({ ...newDraft, unit: e.target.value as Product["unit"] })}>
+              <option value="kg">kg</option>
+              <option value="unit">unidad</option>
+              <option value="box">caja</option>
+            </select>
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="Costo"
+              value={newDraft.cost}
+              onChange={(e) => onCostOrMarginChange(newDraft, setNewDraft, "cost")(e.target.value)}
+              style={{ width: 100 }}
+            />
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="Margen %"
+              value={newDraft.margin}
+              onChange={(e) => onCostOrMarginChange(newDraft, setNewDraft, "margin")(e.target.value)}
+              style={{ width: 90 }}
+            />
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="Precio venta"
+              value={newDraft.priceRetail}
+              onChange={(e) => onPriceChange(newDraft, setNewDraft)(e.target.value)}
+              style={{ width: 100 }}
+            />
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="Stock mínimo"
+              value={newDraft.minStock}
+              onChange={(e) => setNewDraft({ ...newDraft, minStock: e.target.value })}
+              style={{ width: 100 }}
+            />
+            <button onClick={handleCreate}>Guardar producto</button>
+            <button className="secondary" onClick={() => { setShowNewForm(false); setNewDraft(emptyDraft()); }}>Cancelar</button>
+          </div>
+        ) : (
+          <button className="secondary" style={{ marginBottom: 16 }} onClick={() => setShowNewForm(true)}>
+            + Agregar producto
+          </button>
+        )}
+
         <table className="data-table">
           <thead>
             <tr>
@@ -532,61 +588,6 @@ export function Inventory() {
         </table>
         {visibleProducts.length === 0 && !loading && <p className="muted">No hay productos para mostrar.</p>}
 
-        {showNewForm ? (
-          <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 16 }}>
-            <input placeholder="Código" value={newDraft.code} onChange={(e) => setNewDraft({ ...newDraft, code: e.target.value })} style={{ width: 100 }} />
-            <input placeholder="Nombre" value={newDraft.name} onChange={(e) => setNewDraft({ ...newDraft, name: e.target.value })} />
-            <select value={newDraft.categoryId} onChange={(e) => setNewDraft({ ...newDraft, categoryId: e.target.value })}>
-              <option value="">Sin categoría</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-            <select value={newDraft.unit} onChange={(e) => setNewDraft({ ...newDraft, unit: e.target.value as Product["unit"] })}>
-              <option value="kg">kg</option>
-              <option value="unit">unidad</option>
-              <option value="box">caja</option>
-            </select>
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="Costo"
-              value={newDraft.cost}
-              onChange={(e) => onCostOrMarginChange(newDraft, setNewDraft, "cost")(e.target.value)}
-              style={{ width: 100 }}
-            />
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="Margen %"
-              value={newDraft.margin}
-              onChange={(e) => onCostOrMarginChange(newDraft, setNewDraft, "margin")(e.target.value)}
-              style={{ width: 90 }}
-            />
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="Precio venta"
-              value={newDraft.priceRetail}
-              onChange={(e) => onPriceChange(newDraft, setNewDraft)(e.target.value)}
-              style={{ width: 100 }}
-            />
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="Stock mínimo"
-              value={newDraft.minStock}
-              onChange={(e) => setNewDraft({ ...newDraft, minStock: e.target.value })}
-              style={{ width: 100 }}
-            />
-            <button onClick={handleCreate}>Guardar producto</button>
-            <button className="secondary" onClick={() => { setShowNewForm(false); setNewDraft(emptyDraft()); }}>Cancelar</button>
-          </div>
-        ) : (
-          <button className="secondary" style={{ marginTop: 16 }} onClick={() => setShowNewForm(true)}>
-            + Agregar producto
-          </button>
-        )}
       </section>
     </>
   );
