@@ -123,7 +123,10 @@ export function parseWeightBarcode(code: string, config: ScaleConfig = DEFAULT_S
  * Se exige el dígito verificador EAN-13 válido y los 5 ceros iniciales para
  * no confundirlo con una etiqueta de un solo producto ni con un código común.
  */
-export function parseTicketTotalBarcode(code: string): number | null {
+export function parseTicketTotalBarcode(rawCode: string): number | null {
+  // Muchos lectores devuelven un EAN-13 que empieza en 0 como UPC-A de 12
+  // dígitos (sin ese primer cero) -- pasó con un cliente real. Se repone.
+  const code = /^d{12}$/.test(rawCode) ? `0${rawCode}` : rawCode;
   if (!/^d{13}$/.test(code) || !code.startsWith("00000")) return null;
 
   const digits = code.split("").map(Number);
