@@ -114,6 +114,27 @@ export function parseWeightBarcode(code: string, config: ScaleConfig = DEFAULT_S
 }
 
 /**
+ * Ticket de TOTAL de balanzas tipo caja (ej. Kretz Aura Eco 2): un solo
+ * ticket con varios productos pesados, cuyo código de barras trae el importe
+ * final y nada más -- sin PLU ni peso, así que no se puede saber qué
+ * productos lo componen. Formato confirmado con un ticket real: EAN-13 =
+ * "00000" + importe en centavos (7 dígitos) + dígito verificador. Ej.
+ * 0000014550003 = $14.550,00 (el ticket mostraba "TOTAL = 14550.00$").
+ * Se exige el dígito verificador EAN-13 válido y los 5 ceros iniciales para
+ * no confundirlo con una etiqueta de un solo producto ni con un código común.
+ */
+export function parseTicketTotalBarcode(code: string): number | null {
+  if (!/^d{13}$/.test(code) || !code.startsWith("00000")) return null;
+
+  const digits = code.split("").map(Number);
+  const sum = digits.slice(0, 12).reduce((acc, d, i) => acc + d * (i % 2 === 0 ? 1 : 3), 0);
+  if ((10 - (sum % 10)) % 10 !== digits[12]) return null;
+
+  const cents = parseInt(code.slice(5, 12), 10);
+  return cents > 0 ? cents / 100 : null;
+}
+
+/**
  * Asistente de calibración: el carnicero escanea una etiqueta de SU
  * balanza y dice qué peso (o importe) mostraba -- se prueban las
  * combinaciones de formato más comunes (largo de prefijo, largo de PLU,

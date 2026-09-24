@@ -45,6 +45,7 @@ import {
   deleteBranchScaleConfig,
   detectScaleConfig,
   getBranchScaleConfig,
+  parseTicketTotalBarcode,
   parseWeightBarcode,
   saveBranchScaleConfig,
   type ScaleConfig,
@@ -894,6 +895,24 @@ export function Sale() {
     const raw = search.trim();
     if (!raw) return;
 
+    // Ticket de total de una balanza tipo caja (Kretz Aura): trae solo el
+    // importe, no los productos -- va como línea manual, sin descontar stock.
+    // Se evalúa antes que la etiqueta por PLU (los 5 ceros iniciales la
+    // confundirían con el PLU 1) y solo si no hay un producto con ese código.
+    const ticketTotal = parseTicketTotalBarcode(raw);
+    if (ticketTotal !== null && !products.some((p) => p.code === raw)) {
+      const key = `ticket-${raw}`;
+      if (cart.some((l) => l.key === key)) {
+        setMessage("Ese ticket de la balanza ya está cargado en esta venta.");
+      } else {
+        setCart((current) => [...current, { key, kind: "manual", name: "Ticket de balanza", unit: "unit", quantity: 1, unitPrice: ticketTotal }]);
+        setMessage(`Ticket de balanza cargado: ${formatMoney(ticketTotal)}.`);
+      }
+      setSearch("");
+      setHighlightedIndex(-1);
+      return;
+    }
+
     const scanned = parseWeightBarcode(raw, scaleConfig);
     if (scanned) {
       const match = products.find((p) => (p.active ?? true) && p.code === scanned.plu);
@@ -1603,7 +1622,7 @@ export function Sale() {
                 Poné cualquier producto en la balanza, anotá lo que te muestra, escaneá acá la etiqueta que imprime, y decinos ese valor -- el sistema detecta el formato solo, sin que tengas que entender nada técnico.
               </p>
               <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
-                Ojo: esto sirve para etiquetas de UN producto por código (con su PLU). Un ticket que junta varios productos en un solo total sin código por producto no se puede leer así -- ahí conviene cargar cada producto a mano buscándolo por nombre en Mostrador.
+                Ojo: esto sirve para etiquetas de UN producto por código (con su PLU). Los tickets de total de las balanzas tipo caja (Kretz Aura) se leen solos al escanearlos en Mostrador, sin calibrar nada: entran como una línea "Ticket de balanza" con el importe, sin descontar stock.
               </p>
               <div style={{ display: "grid", gap: 10, maxWidth: 420 }}>
                 <div style={{ display: "flex", gap: 16, fontSize: 14 }}>
