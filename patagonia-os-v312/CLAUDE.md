@@ -14,14 +14,14 @@ Run from the repo root (npm workspaces, Node >= 20):
 npm install
 npm run dev         # runs @patagonia/web (vite) only
 npm run build        # builds domain -> web -> api, in that order
-npm run test          # runs @patagonia/domain tests only (node --test)
+npm run test          # builds and tests @patagonia/domain (node --test), then runs the @patagonia/web unit tests (tsx + node --test, src/**/*.test.ts)
 npm run typecheck    # typechecks web and api
 npm run lint          # lints web only
 ```
 
 To work on a single workspace, use `-w`, e.g. `npm run dev -w @patagonia/api` (runs `tsx src/server.ts`, default port 8787). `@patagonia/domain` has no dev/lint script; its `build` (`tsc -p tsconfig.json`) must run before its `test` script, since tests run against compiled output in `dist/`, not source.
 
-There is no root-level test runner beyond the domain package; `apps/web` and `apps/api` have no unit test scripts defined. `npm run lint -w @patagonia/web` currently fails in this checkout (`eslint.config.js` missing — pre-existing, unrelated to feature work). `npm run test:e2e` (root script) runs `tests/e2e/smoke.mjs` — read-only Playwright smoke checks (login, permission gating, platform-admin landing) against a **real** site + Supabase account, not mocks; needs `.env.test` (gitignored, see `.env.test.example`) with real credentials, and skips with a clear message if that file is missing.
+`apps/web` has unit tests for its pure logic (scale barcode parsing incl. the Kretz Aura "ticket de total", `parseAmount`, CSV escaping, Argentina date helpers) — keep pure logic free of `lib/supabase` imports so it stays testable (that's why `scale-barcode.ts` was split out of `scale-config-service.ts`); test files are excluded from `tsc`. `apps/api` has no unit test scripts. `npm run lint -w @patagonia/web` currently fails in this checkout (`eslint.config.js` missing — pre-existing, unrelated to feature work). `npm run test:e2e` (root script) runs `tests/e2e/smoke.mjs` — read-only Playwright smoke checks (login, permission gating, platform-admin landing) against a **real** site + Supabase account, not mocks; needs `.env.test` (gitignored, see `.env.test.example`) with real credentials, and skips with a clear message if that file is missing.
 
 ## Architecture
 
