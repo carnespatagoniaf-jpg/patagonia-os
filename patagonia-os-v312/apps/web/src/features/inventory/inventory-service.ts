@@ -115,3 +115,19 @@ export async function adjustProductStock(input: AdjustProductStockInput): Promis
   if (error) throw error;
   return { previous: Number(data.previous), counted: Number(data.counted), delta: Number(data.delta) };
 }
+
+export interface BulkPriceChange {
+  id: string;
+  priceRetail: number;
+  cost: number;
+}
+
+export async function bulkUpdateProductPrices(changes: BulkPriceChange[]): Promise<{ updated: number }> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.rpc("bulk_update_product_prices", {
+    p_items: changes.map((c) => ({ product_id: c.id, price_retail: c.priceRetail, cost: c.cost }))
+  });
+  if (error) throw error;
+  return { updated: Number((data as { updated?: number } | null)?.updated ?? 0) };
+}

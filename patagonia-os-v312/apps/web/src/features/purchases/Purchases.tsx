@@ -3,7 +3,8 @@ import type { PaymentMethod, Product } from "@patagonia/domain";
 import { marginPercent, purchaseTotal } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
-import { listProductsForBranch } from "../inventory/inventory-service";
+import { bulkUpdateProductPrices, listProductsForBranch } from "../inventory/inventory-service";
+import { LOW_MARGIN_ALERT, costChangesFromPurchase } from "../inventory/price-tools";
 import { useSuppliers } from "./useSuppliers";
 import { usePurchases } from "./usePurchases";
 import { useTreasury } from "../shifts/useTreasury";
@@ -72,6 +73,7 @@ export function Purchases() {
   const { accounts } = useTreasury();
 
   const [products, setProducts] = useState<Product[]>(isSupabaseConfigured ? [] : demoProducts);
+  const [updateCosts, setUpdateCosts] = useState(true);
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
   const [supplierName, setSupplierName] = useState("");
   const [supplierCategory, setSupplierCategory] = useState("");
@@ -224,7 +226,27 @@ export function Purchases() {
       await createPurchase(selectedSupplierId, purchaseDate, invoiceNumber.trim() || undefined, parsed);
       setLines([emptyLine()]);
       setInvoiceNumber("");
-      setMessage("Compra registrada.");
+
+      // Con inflación el costo del producto se desactualiza si nadie lo edita a
+      // mano: se actualiza con el precio de esta compra (opcional, tildado por defecto).
+      let costNote = "";
+      if (updateCosts && isSupabaseConfigured) {
+        const changes = costChangesFromPurchase(products, parsed);
+        if (changes.length > 0) {
+          try {
+            await bulkUpdateProductPrices(changes.map((c) => ({ id: c.id, priceRetail: c.priceRetail, cost: c.newCost })));
+            if (branchId) setProducts(await listProductsForBranch(branchId));
+            const low = changes.filter((c) => c.priceRetail > 0 && c.newMargin < LOW_MARGIN_ALERT);
+            costNote = ` Costo actualizado en ${changes.length} producto${changes.length === 1 ? "" : "s"}.`;
+            if (low.length > 0) {
+              costNote += ` Ojo, quedaron con margen bajo (menos de ${LOW_MARGIN_ALERT}%): ${low.map((c) => c.name).join(", ")}. Revisá el precio en Stock → Actualizar precios.`;
+            }
+          } catch {
+            costNote = " No se pudo actualizar el costo de los productos (la compra sí quedó registrada).";
+          }
+        }
+      }
+      setMessage(`Compra registrada.${costNote}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo registrar la compra.");
     } finally {
@@ -631,7 +653,12 @@ export function Purchases() {
               <strong>Total <b>{formatMoney(draftTotal)}</b></strong>
             </div>
 
-            <button className="charge-button" style={{ marginTop: 14 }} disabled={busy} onClick={handleCreatePurchase}>
+            <label className="price-tools-check" style={{ marginTop: 14 }}>
+              <input type="checkbox" checked={updateCosts} onChange={(e) => setUpdateCosts(e.target.checked)} />
+              Actualizar el costo de los productos con los precios de esta compra
+            </label>
+
+            <button className="charge-button" style={{ marginTop: 6 }} disabled={busy} onClick={handleCreatePurchase}>
               {busy ? "Registrando…" : "Registrar compra"}
             </button>
           </section>

@@ -16,6 +16,7 @@ import {
 import { parseAmount } from "../../lib/money";
 import { downloadScaleExportCsv } from "./scale-export";
 import { ScaleSyncPanel } from "./ScaleSyncPanel";
+import { PriceTools } from "./PriceTools";
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
@@ -328,6 +329,8 @@ export function Inventory() {
         <p className="muted" style={{ margin: "-8px 0 14px", fontSize: 12 }}>
           CSV para importar en el software de PC de la balanza (Kretz Simplex/iTegra) -- formato de prueba, todavía sin confirmar contra el importador real.
         </p>
+
+        <PriceTools products={products} categories={categories} onApplied={reload} />
 
         {showCategoryManager && (
           <div className="panel" style={{ marginBottom: 16, padding: 14 }}>

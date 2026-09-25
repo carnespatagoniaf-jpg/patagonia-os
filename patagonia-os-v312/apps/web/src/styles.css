@@ -512,3 +512,13 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .help-chat-form input { flex: 1; min-width: 0; padding: 10px 12px; border: 1px solid #d6dce5; border-radius: 10px; }
 .help-chat-form button { background: #8b1e1e; color: white; border: 0; border-radius: 10px; padding: 0 14px; display: grid; place-items: center; }
 .help-chat-note { margin: 0; padding: 0 12px 10px; font-size: 11px; color: #697386; }
+
+/* Actualización de precios (inflación) */
+.price-tools { border: 1px solid #eef0f3; border-radius: 12px; padding: 16px; margin-top: 12px; background: #fcfcfd; }
+.price-tools-modes { display: grid; gap: 6px; margin-bottom: 12px; font-size: 14px; }
+.price-tools-modes label { display: flex; align-items: center; gap: 8px; }
+.price-tools-preview { max-height: 320px; overflow: auto; border: 1px solid #eef0f3; border-radius: 10px; background: white; }
+.price-tools-warning { margin: 10px 0 0; color: #8a4b00; background: #fff5e6; border-radius: 10px; padding: 8px 12px; font-size: 13px; }
+.price-tools-badge { margin-left: 8px; background: #fdecea; color: #b42318; border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 800; }
+.price-tools-check { display: flex; align-items: center; justify-content: flex-start; gap: 8px; padding-bottom: 12px; font-size: 14px; width: auto; }
+.price-tools-apply { margin-top: 12px; background: #8b1e1e; color: white; border: 0; border-radius: 10px; padding: 10px 18px; font-weight: 800; }
