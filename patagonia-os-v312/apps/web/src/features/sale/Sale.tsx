@@ -52,6 +52,8 @@ import {
   type ScaleConfig,
   type ScalePayloadType
 } from "./scale-config-service";
+import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
+import { ScaleWeightSettings } from "./ScaleWeightSettings";
 import { getMostradorPin, setMostradorPin } from "./company-settings-service";
 
 const UNIT_LABELS: Record<Product["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
@@ -252,6 +254,7 @@ export function Sale() {
   const movementReceiptRef = useRef<HTMLDivElement | null>(null);
 
   const [showManualForm, setShowManualForm] = useState(false);
+  const [weighing, setWeighing] = useState(false);
   const [manualDesc, setManualDesc] = useState("");
   const [manualPrice, setManualPrice] = useState("");
   const [manualQty, setManualQty] = useState("1");
@@ -851,6 +854,28 @@ export function Sale() {
     searchInputRef.current?.focus();
   }
 
+  /** Agregar un producto elegido por nombre o código. Si hay balanza por cable
+   * activada y el producto es por kg, el peso lo trae la balanza; si no se
+   * puede leer, NO se agrega nada (mejor que vender 1 kg por error). */
+  async function addProductFromSearch(product: Product) {
+    if (product.unit !== "kg" || !isWeightScaleEnabled()) {
+      quickAdd(product);
+      return;
+    }
+    if (weighing) return;
+    setWeighing(true);
+    setMessage("Leyendo la balanza…");
+    try {
+      const { frame } = await readScaleWeight();
+      quickAdd(product, frame.weightKg);
+      setMessage(`${product.name}: ${frame.weightKg.toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg (peso de la balanza).`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No pude leer la balanza.");
+    } finally {
+      setWeighing(false);
+    }
+  }
+
   function addManualItem() {
     setMessage("");
     const desc = manualDesc.trim();
@@ -939,13 +964,13 @@ export function Sale() {
 
     const exactCode = products.find((p) => (p.active ?? true) && p.code.toLowerCase() === raw.toLowerCase());
     if (exactCode) {
-      quickAdd(exactCode);
+      void addProductFromSearch(exactCode);
       return;
     }
 
     const picked = searchMatches[activeMatchIndex];
     if (picked) {
-      quickAdd(picked);
+      void addProductFromSearch(picked);
       return;
     }
 
@@ -1619,6 +1644,8 @@ export function Sale() {
               )}
             </div>
 
+            <ScaleWeightSettings />
+
             <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 18 }}>
               <p style={{ margin: "0 0 8px", fontWeight: 700 }}>Balanza</p>
               <p className="muted" style={{ margin: "0 0 4px", fontSize: 13 }}>
@@ -1766,7 +1793,7 @@ export function Sale() {
                       type="button"
                       className={`pos-dropdown-item${idx === activeMatchIndex ? " active" : ""}`}
                       onMouseEnter={() => setHighlightedIndex(idx)}
-                      onClick={() => quickAdd(product)}
+                      onClick={() => void addProductFromSearch(product)}
                     >
                       <span>{product.name} <span className="muted">({UNIT_LABELS[product.unit]})</span></span>
                       <strong>{formatMoney(product.priceRetail)}</strong>
@@ -1836,7 +1863,7 @@ export function Sale() {
                             <td>{product.code}</td>
                             <td>{product.name} <span className="muted">({UNIT_LABELS[product.unit]})</span></td>
                             <td className="num">{formatMoney(product.priceRetail)}</td>
-                            <td><button className="secondary" onClick={() => quickAdd(product)}>+ Agregar</button></td>
+                            <td><button className="secondary" onClick={() => void addProductFromSearch(product)}>+ Agregar</button></td>
                           </tr>
                         ))}
                       </Fragment>

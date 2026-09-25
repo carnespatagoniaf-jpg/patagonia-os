@@ -9,6 +9,9 @@ interface SerialPortInfo {
 
 interface SerialOptions {
   baudRate: number;
+  dataBits?: 7 | 8;
+  stopBits?: 1 | 2;
+  parity?: "none" | "even" | "odd";
 }
 
 interface SerialPort {

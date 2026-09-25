@@ -522,3 +522,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .price-tools-badge { margin-left: 8px; background: #fdecea; color: #b42318; border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 800; }
 .price-tools-check { display: flex; align-items: center; justify-content: flex-start; gap: 8px; padding-bottom: 12px; font-size: 14px; width: auto; }
 .price-tools-apply { margin-top: 12px; background: #8b1e1e; color: white; border: 0; border-radius: 10px; padding: 10px 18px; font-weight: 800; }
+
+/* Peso directo de la balanza */
+.scale-weight-pill { margin-left: 6px; padding: 2px 10px; border-radius: 999px; background: #f2f4f7; color: #47505c; font-size: 12px; font-weight: 800; }
+.scale-weight-on { background: #eef7ef; color: #176329; }
