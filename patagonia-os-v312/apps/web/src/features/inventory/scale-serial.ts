@@ -89,6 +89,8 @@ const EOT = 0x04;
 
 export interface ScaleSerialSettings {
   baudRate: number;
+  /** Bits de stop: 1 en la Report LT; 2 en la Kretz Aura Eco (manual, sección 16.5). */
+  stopBits: 1 | 2;
   equipmentId: string; // 2 dígitos, "01" confirmado contra esta balanza
   /** Carácter que identifica la familia de equipo -- 'C' confirmado contra
    * una Report LT real (probamos A, B, D, K también: ninguna respondió
@@ -100,7 +102,7 @@ export interface ScaleSerialSettings {
   altaCommand: string;
 }
 
-export const DEFAULT_SCALE_SERIAL_SETTINGS: ScaleSerialSettings = { baudRate: 115200, equipmentId: "01", deviceType: "C", altaCommand: "2005" };
+export const DEFAULT_SCALE_SERIAL_SETTINGS: ScaleSerialSettings = { baudRate: 115200, stopBits: 1, equipmentId: "01", deviceType: "C", altaCommand: "2005" };
 
 const SETTINGS_KEY = "patagonia-scale-serial-settings";
 
@@ -127,7 +129,9 @@ export function isScaleSerialSupported(): boolean {
 }
 
 let cachedPort: SerialPort | null = null;
-let cachedPortOpenBaud: number | null = null;
+let cachedPortOpenKey: string | null = null;
+/** Tiempo de espera de la respuesta; la detección automática lo baja para probar rápido. */
+let frameTimeoutMs = 2000;
 
 export async function isScalePortPaired(): Promise<boolean> {
   if (!isScaleSerialSupported()) return false;
@@ -154,13 +158,13 @@ export async function connectScalePort(): Promise<void> {
     throw new Error("Este navegador no soporta comunicación serie directa (usá Chrome o Edge).");
   }
   cachedPort = null;
-  cachedPortOpenBaud = null;
+  cachedPortOpenKey = null;
   await pickPort();
 }
 
 export function forgetScalePort(): void {
   cachedPort = null;
-  cachedPortOpenBaud = null;
+  cachedPortOpenKey = null;
 }
 
 function checksum(bytes: number[]): [number, number] {
@@ -197,12 +201,14 @@ function fixedDigits(value: number, width: number): string {
 }
 
 async function ensureOpen(port: SerialPort, baudRate: number): Promise<void> {
-  if (port.readable && port.writable && cachedPortOpenBaud === baudRate) return;
+  const stopBits = getScaleSerialSettings().stopBits;
+  const key = `${baudRate}/${stopBits}`;
+  if (port.readable && port.writable && cachedPortOpenKey === key) return;
   if (port.readable || port.writable) {
     await port.close();
   }
-  await port.open({ baudRate });
-  cachedPortOpenBaud = baudRate;
+  await port.open({ baudRate, dataBits: 8, stopBits, parity: "none" });
+  cachedPortOpenKey = key;
 }
 
 async function writeFrame(port: SerialPort, frame: Uint8Array, baudRate: number): Promise<Uint8Array> {
@@ -218,7 +224,7 @@ async function writeFrame(port: SerialPort, frame: Uint8Array, baudRate: number)
   const reader = port.readable!.getReader();
   try {
     const chunks: number[] = [];
-    const deadline = Date.now() + 2000;
+    const deadline = Date.now() + frameTimeoutMs;
     while (Date.now() < deadline) {
       const timeLeft = deadline - Date.now();
       if (timeLeft <= 0) break;
@@ -253,7 +259,7 @@ async function writeFrameResilient(port: SerialPort, frame: Uint8Array, baudRate
     } catch {
       // ya estaba cerrado/roto -- no importa
     }
-    cachedPortOpenBaud = null;
+    cachedPortOpenKey = null;
     try {
       return await writeFrame(port, frame, baudRate);
     } catch {
@@ -297,6 +303,70 @@ const RESPONSE_CODE_LABELS: Record<string, string> = {
 export function describeResponseCode(code: string | null): string {
   if (code === null) return "sin respuesta";
   return RESPONSE_CODE_LABELS[code] ?? "código desconocido (no está en la tabla que tenemos)";
+}
+
+export interface ScaleAutoDetectResult {
+  found: boolean;
+  settings?: ScaleSerialSettings;
+  rawResponseHex?: string;
+  attempts: number;
+}
+
+/**
+ * Detección automática: prueba el test de conexión (comando 0001) con las
+ * combinaciones de velocidad / bits de stop / letra de equipo / ID que usan las
+ * balanzas Kretz, hasta que alguna responda algo. Guarda la que anduvo. La
+ * Report LT usa 115200 con 1 bit de stop; la Aura Eco usa 9600 con 2 (manual,
+ * sección 16.5) y tiene que estar en el menú COMUNI → MODO = "Datos".
+ */
+export async function autoDetectScale(onProgress: (text: string) => void, shouldStop: () => boolean = () => false): Promise<ScaleAutoDetectResult> {
+  const original = getScaleSerialSettings();
+  const port = await pickPort();
+
+  const links: { baudRate: number; stopBits: 1 | 2 }[] = [
+    { baudRate: 9600, stopBits: 2 },
+    { baudRate: 9600, stopBits: 1 },
+    { baudRate: 115200, stopBits: 1 },
+    { baudRate: 19200, stopBits: 1 },
+    { baudRate: 38400, stopBits: 1 },
+    { baudRate: 57600, stopBits: 1 },
+    { baudRate: 4800, stopBits: 1 },
+    { baudRate: 19200, stopBits: 2 },
+    { baudRate: 115200, stopBits: 2 }
+  ];
+  const attempts: ScaleSerialSettings[] = [];
+  for (const link of links) attempts.push({ ...original, ...link, deviceType: "C", equipmentId: "01" });
+  for (const link of links.slice(0, 3)) {
+    for (const deviceType of ["A", "B", "D", "E", "K"]) attempts.push({ ...original, ...link, deviceType, equipmentId: "01" });
+    for (const equipmentId of ["00", "02"]) attempts.push({ ...original, ...link, deviceType: "C", equipmentId });
+  }
+
+  const previousTimeout = frameTimeoutMs;
+  frameTimeoutMs = 800;
+  let count = 0;
+  try {
+    for (const candidate of attempts) {
+      if (shouldStop()) break;
+      count++;
+      onProgress(`Probando ${count}/${attempts.length}: ${candidate.baudRate} baudios, ${candidate.stopBits} bit(s) de stop, equipo "${candidate.deviceType}${candidate.equipmentId}"…`);
+      saveScaleSerialSettings(candidate);
+      cachedPortOpenKey = null;
+      try {
+        const frame = buildFrame(candidate.deviceType, candidate.equipmentId, "0001", "");
+        const response = await writeFrame(port, frame, candidate.baudRate);
+        if (response.length > 0) {
+          return { found: true, settings: candidate, rawResponseHex: toHex(response), attempts: count };
+        }
+      } catch {
+        // un error de lectura en esta combinación no impide probar la siguiente
+        cachedPortOpenKey = null;
+      }
+    }
+    saveScaleSerialSettings(original);
+    return { found: false, attempts: count };
+  } finally {
+    frameTimeoutMs = previousTimeout;
+  }
 }
 
 /** Comando 0001 (test de conexión) -- confirma que el cable y la velocidad
@@ -404,7 +474,7 @@ async function buildPluFrame(
     throw new Error(`El código "${product.code}" de "${product.name}" es demasiado largo para ser un PLU de balanza (parece un EAN/código de barras, no un PLU corto).`);
   }
 
-  const settings = { deviceType, equipmentId, altaCommand, baudRate };
+  const settings = { ...getScaleSerialSettings(), deviceType, equipmentId, altaCommand, baudRate };
   const existing = await readExistingPluFields(port, settings, pluDigits);
 
   const pluNumber = fixedDigits(pluDigits, 6);
@@ -797,7 +867,7 @@ export async function syncProductsToScale(
       } catch {
         // ya estaba cerrado/roto -- no importa, el próximo ensureOpen lo reabre igual
       }
-      cachedPortOpenBaud = null;
+      cachedPortOpenKey = null;
     }
     onProgress?.(i + 1, toSend.length);
   }

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { formatMoney } from "../shifts/format";
 import {
+  autoDetectScale,
   checkScaleCompatibility,
   connectScalePort,
   deleteScalePlu,
@@ -73,6 +74,29 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
       );
     } catch (err) {
       setScaleLog(err instanceof Error ? err.message : "Falló la prueba de conexión.");
+    } finally {
+      setScaleBusy(false);
+    }
+  }
+
+  async function handleAutoDetect() {
+    setScaleBusy(true);
+    setScaleLog("Buscando la configuración de tu balanza… no la desconectes ni cierres esta pantalla.");
+    try {
+      const result = await autoDetectScale((text) => setScaleLog(text));
+      if (result.found && result.settings) {
+        setScaleSettings(result.settings);
+        setScaleLog(
+          `¡Encontré tu balanza! Respondió con ${result.settings.baudRate} baudios, ${result.settings.stopBits} bit(s) de stop y equipo "${result.settings.deviceType}${result.settings.equipmentId}" (respuesta: ${result.rawResponseHex}). Ya quedó guardado: ahora usá "Verificar compatibilidad".`
+        );
+      } else {
+        setScaleSettings(getScaleSerialSettings());
+        setScaleLog(
+          `Probé ${result.attempts} combinaciones y la balanza no respondió a ninguna. Revisá: 1) el cable (derecho, 1 a 1), 2) que la balanza esté en el menú COMUNI → MODO = "Datos" (la Aura) o el modo de comunicación con PC (otras Kretz), 3) que el adaptador USB tenga su driver instalado. Si todo está bien, mandá una captura de esta pantalla al equipo de Patagonia OS.`
+        );
+      }
+    } catch (err) {
+      setScaleLog(err instanceof Error ? err.message : "Falló la detección automática.");
     } finally {
       setScaleBusy(false);
     }
@@ -213,6 +237,9 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
               <button disabled={scaleBusy || !isScaleSerialSupported()} onClick={handleConnectScale}>
                 {scalePortReady ? "Volver a elegir puerto" : "Conectar balanza"}
               </button>
+              <button disabled={scaleBusy || !isScaleSerialSupported() || !scalePortReady} onClick={handleAutoDetect}>
+                Detectar mi balanza automáticamente
+              </button>
               <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handlePingScale}>
                 Probar conexión
               </button>
@@ -235,6 +262,13 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
                       {[2400, 4800, 9600, 19200, 38400, 57600, 115200].map((rate) => (
                         <option key={rate} value={rate}>{rate}</option>
                       ))}
+                    </select>
+                  </label>
+                  <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                    Bits de stop
+                    <select value={scaleSettings.stopBits} onChange={(e) => updateScaleSettings({ stopBits: Number(e.target.value) === 2 ? 2 : 1 })}>
+                      <option value={1}>1</option>
+                      <option value={2}>2</option>
                     </select>
                   </label>
                   <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
