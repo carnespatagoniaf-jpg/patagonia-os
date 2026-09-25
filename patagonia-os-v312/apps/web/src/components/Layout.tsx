@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { BarChart3, Beef, Boxes, Download, FileText, HandCoins, Handshake, History, KeyRound, Upload, LogOut, PackagePlus, Receipt, Tag, TrendingUp, Users, Wallet } from "lucide-react";
+import { BarChart3, Beef, Boxes, Download, FileText, HandCoins, Handshake, History, KeyRound, Menu, Upload, LogOut, PackagePlus, Receipt, Tag, TrendingUp, Users, Wallet } from "lucide-react";
 import { useAuth } from "../features/auth/AuthProvider";
 import { canAccessPage, type Page } from "../features/auth/permissions";
 import { useActiveBranch } from "../features/branches/BranchProvider";
@@ -172,13 +172,28 @@ function ChangePasswordForm() {
 
 export function Layout({ page, onPageChange, children }: Props) {
   const { profile, signOut } = useAuth();
+  const [menuOpen, setMenuOpen] = useState(false);
   const visibleGroups = navGroups
     .map((group) => ({ ...group, items: group.items.filter((item) => canAccessPage(profile, item.page)) }))
     .filter((group) => group.items.length > 0);
 
+  const currentLabel = navGroups.flatMap((g) => g.items).find((i) => i.page === page)?.label ?? "Patagonia OS";
+  function goTo(target: Page) {
+    onPageChange(target);
+    setMenuOpen(false);
+  }
+
   return (
     <div className="app-shell">
-      <aside className="sidebar">
+      <header className="mobile-topbar no-print">
+        <button className="mobile-menu-btn" onClick={() => setMenuOpen(true)} aria-label="Abrir menú">
+          <Menu size={22} />
+        </button>
+        <strong className="mobile-topbar-title">{currentLabel}</strong>
+        <span className="mobile-topbar-brand">PATAGONIA OS</span>
+      </header>
+      {menuOpen && <div className="drawer-backdrop no-print" onClick={() => setMenuOpen(false)} />}
+      <aside className={menuOpen ? "sidebar open" : "sidebar"}>
         <div>
           <div className="brand">PATAGONIA OS</div>
           <div className="branch">
@@ -195,7 +210,7 @@ export function Layout({ page, onPageChange, children }: Props) {
                 <button
                   key={target}
                   className={page === target ? "nav-item active" : "nav-item"}
-                  onClick={() => onPageChange(target)}
+                  onClick={() => goTo(target)}
                 >
                   <Icon size={19} />
                   {label}
