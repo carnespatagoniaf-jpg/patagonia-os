@@ -55,6 +55,7 @@ import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
 import { ScaleWeightSettings } from "./ScaleWeightSettings";
 import { CloseSummaryView, MovementReceiptView, ReceiptView } from "./SaleReceipts";
 import { ShiftPanel } from "./ShiftPanel";
+import { SaleConfigPanel } from "./SaleConfigPanel";
 import { getMostradorPin, setMostradorPin } from "./company-settings-service";
 import { buildCloseTicket as buildCloseTicketBytes, buildMovementTicket as buildMovementTicketBytes, buildReceiptTicket as buildReceiptTicketBytes } from "./sale-tickets";
 import { type TicketLine, type PaymentRow, type ReceiptLine, type ReceiptState, type MovementReceiptState, UNIT_LABELS, STALE_SHIFT_HOURS, formatShiftStart, getAutoPrintEnabled, saveAutoPrintEnabled, loadStoredReceipt, saveStoredReceipt } from "./sale-model";
@@ -93,8 +94,6 @@ export function Sale() {
   const [mostradorPin, setMostradorPinValue] = useState<string | null>(null);
   const [pinUnlocked, setPinUnlocked] = useState(false);
   const [pinPromptFor, setPinPromptFor] = useState<null | "movements" | "caja">(null);
-  const [pinSettingInput, setPinSettingInput] = useState("");
-  const [pinSettingBusy, setPinSettingBusy] = useState(false);
   // Arranca siempre oculto, incluso para quien SÍ puede verlo -- la idea no
   // es solo "que el cajero no tenga permiso", sino que el número de ventas
   // no quede pegado en la pantalla todo el tiempo, porque cualquiera que
@@ -183,11 +182,6 @@ export function Sale() {
 
   const [scaleConfig, setScaleConfig] = useState<ScaleConfig>(DEFAULT_SCALE_CONFIG);
   const [scaleConfigCalibrated, setScaleConfigCalibrated] = useState(false);
-  const [scaleWizardCode, setScaleWizardCode] = useState("");
-  const [scaleWizardWeight, setScaleWizardWeight] = useState("");
-  const [scaleWizardPayload, setScaleWizardPayload] = useState<ScalePayloadType>("weight");
-  const [scaleWizardBusy, setScaleWizardBusy] = useState(false);
-  const [scaleWizardResult, setScaleWizardResult] = useState<"idle" | "success" | "not_found">("idle");
 
   const grossTotal = cart.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
   const itemDiscountTotal = cart.reduce((sum, line) => sum + (parseAmount(itemDiscounts[line.key] || "0") || 0), 0);
@@ -415,24 +409,6 @@ export function Sale() {
     reveal();
   }
 
-  async function handleSavePin(value: string | null = pinSettingInput) {
-    if (value && !/^\d{4}$/.test(value)) {
-      setMessage("El PIN tiene que ser de 4 dígitos.");
-      return;
-    }
-    setPinSettingBusy(true);
-    try {
-      await setMostradorPin(value || null);
-      setMostradorPinValue(value || null);
-      setPinSettingInput("");
-      setMessage(value ? "PIN guardado." : "PIN sacado -- ya no va a pedir nada.");
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo guardar el PIN.");
-    } finally {
-      setPinSettingBusy(false);
-    }
-  }
-
   async function handleDeleteAdjustment(id: string) {
     setDeletingMovementId(id);
     try {
@@ -456,49 +432,6 @@ export function Sale() {
       setMessage(err instanceof Error ? err.message : "No se pudo borrar el vale.");
     } finally {
       setDeletingMovementId(null);
-    }
-  }
-
-  async function handleCalibrateScale() {
-    setScaleWizardResult("idle");
-    if (!branchId) return;
-    const code = scaleWizardCode.trim();
-    const enteredValue = parseAmount(scaleWizardWeight || "0") || Number(scaleWizardWeight);
-    if (!code) { setMessage("Escaneá una etiqueta de tu balanza primero."); return; }
-    if (!Number.isFinite(enteredValue) || enteredValue <= 0) {
-      setMessage(scaleWizardPayload === "weight" ? "Ingresá el peso que mostró la balanza." : "Ingresá el importe que mostró la balanza.");
-      return;
-    }
-    setScaleWizardBusy(true);
-    try {
-      const detected = detectScaleConfig(code, enteredValue, scaleWizardPayload);
-      if (!detected) {
-        setScaleWizardResult("not_found");
-        return;
-      }
-      await saveBranchScaleConfig(branchId, detected);
-      setScaleConfig(detected);
-      setScaleConfigCalibrated(true);
-      setScaleWizardResult("success");
-      setScaleWizardCode("");
-      setScaleWizardWeight("");
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo guardar la configuración de la balanza.");
-    } finally {
-      setScaleWizardBusy(false);
-    }
-  }
-
-  async function handleResetScaleConfig() {
-    if (!branchId) return;
-    try {
-      await deleteBranchScaleConfig(branchId);
-      setScaleConfig(DEFAULT_SCALE_CONFIG);
-      setScaleConfigCalibrated(false);
-      setScaleWizardResult("idle");
-      setMessage("Se borró la calibración de la balanza -- vuelve al formato Kretz por defecto.");
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo borrar la configuración.");
     }
   }
 
@@ -1189,136 +1122,34 @@ export function Sale() {
           className="secondary"
           title="Configuración de impresora y balanza"
           aria-label="Configuración de impresora y balanza"
-          onClick={() => { setShowConfigPanel((v) => !v); setScaleWizardResult("idle"); }}
+          onClick={() => setShowConfigPanel((v) => !v)}
           style={{ padding: "10px 12px" }}
         >
           <Settings size={18} />
         </button>
       </header>
 
-      {showConfigPanel && (
-        <section className="panel" style={{ marginBottom: 18 }}>
-          <div className="panel-title">
-            <h2>Configuración</h2>
-          </div>
-          <div style={{ display: "grid", gap: 18 }}>
-            <div>
-              <p style={{ margin: "0 0 8px", fontWeight: 700 }}>Impresora</p>
-              <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
-                <input
-                  type="checkbox"
-                  checked={autoPrintEnabled}
-                  onChange={(e) => {
-                    setAutoPrintEnabled(e.target.checked);
-                    saveAutoPrintEnabled(e.target.checked);
-                  }}
-                />
-                Imprimir el comprobante automáticamente al cobrar
-              </label>
-              <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
-                Si conectaste una impresora térmica abajo, el ticket sale ahí directo, sin ningún diálogo ni clic extra. Si no conectaste ninguna, al cobrar se abre el diálogo de impresión de Windows -- ahí elegís tu impresora por su nombre y confirmás "Imprimir" (ningún navegador permite saltear ese clic sin una impresora conectada por USB, es una protección de seguridad). Si no tenés impresora, dejalo apagado y nunca te va a aparecer nada solo.
-              </p>
-              {isThermalPrintSupported() && (
-                <div style={{ marginTop: 10 }}>
-                  <button className="secondary" disabled={thermalConnectBusy} onClick={handleConnectThermalPrinter}>
-                    {thermalConnectBusy ? "Conectando…" : thermalPaired ? "Volver a elegir impresora térmica" : "Conectar impresora térmica (USB)"}
-                  </button>
-                  <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
-                    {thermalPaired
-                      ? "Impresora térmica conectada en este navegador -- el ticket va a salir ahí solo, sin diálogo, mientras esté prendido \"Imprimir automáticamente\"."
-                      : "Conectala una sola vez (elegila de la lista que te va a mostrar Chrome) para que el ticket salga solo al cobrar, sin ningún diálogo -- igual que se conecta la balanza en Stock."}
-                  </p>
-                  <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>
-                    ¿La conexión directa no funcionó (suele pasar cuando Windows ya tiene un driver instalado para esa impresora)? Descargá este script y ejecutalo en la PC del Mostrador -- configura un acceso directo especial que aprueba la impresión sola, sin mostrar ningún diálogo:{" "}
-                    <a href="/kiosco-impresora.bat" download>kiosco-impresora.bat</a>
-                  </p>
-                </div>
-              )}
-            </div>
-
-            <ScaleWeightSettings />
-
-            <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 18 }}>
-              <p style={{ margin: "0 0 8px", fontWeight: 700 }}>Balanza</p>
-              <p className="muted" style={{ margin: "0 0 4px", fontSize: 13 }}>
-                {scaleConfigCalibrated ? "Tu balanza ya está calibrada." : "Todavía no calibraste tu balanza (usando el formato Kretz por defecto)."}
-              </p>
-              <p className="muted" style={{ margin: "0 0 4px", fontSize: 13 }}>
-                Poné cualquier producto en la balanza, anotá lo que te muestra, escaneá acá la etiqueta que imprime, y decinos ese valor -- el sistema detecta el formato solo, sin que tengas que entender nada técnico.
-              </p>
-              <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
-                Ojo: esto sirve para etiquetas de UN producto por código (con su PLU). Los tickets de total de las balanzas tipo caja (Kretz Aura) se leen solos al escanearlos en Mostrador, sin calibrar nada: entran como una línea "Ticket de balanza" con el importe, sin descontar stock.
-              </p>
-              <div style={{ display: "grid", gap: 10, maxWidth: 420 }}>
-                <div style={{ display: "flex", gap: 16, fontSize: 14 }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <input type="radio" checked={scaleWizardPayload === "weight"} onChange={() => setScaleWizardPayload("weight")} />
-                    Mi balanza muestra el <b>peso</b>
-                  </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    <input type="radio" checked={scaleWizardPayload === "amount"} onChange={() => setScaleWizardPayload("amount")} />
-                    Mi balanza muestra el <b>importe</b> final
-                  </label>
-                </div>
-                <input
-                  placeholder="Escaneá acá la etiqueta de la balanza…"
-                  value={scaleWizardCode}
-                  onChange={(e) => setScaleWizardCode(e.target.value)}
-                />
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder={scaleWizardPayload === "weight" ? "¿Qué peso mostró la balanza? (ej. 0,472)" : "¿Qué importe mostró la balanza? (ej. 1250)"}
-                  value={scaleWizardWeight}
-                  onChange={(e) => setScaleWizardWeight(e.target.value)}
-                />
-                <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-                  <button disabled={scaleWizardBusy} onClick={handleCalibrateScale}>{scaleWizardBusy ? "Detectando…" : "Detectar formato"}</button>
-                  {scaleConfigCalibrated && (
-                    <button className="secondary" onClick={handleResetScaleConfig}>Borrar calibración</button>
-                  )}
-                </div>
-                {scaleWizardResult === "success" && (
-                  <p style={{ margin: 0, color: "#1a7a3c", fontWeight: 700 }}>Listo, detectado y guardado -- probá escanear otra etiqueta para confirmar.</p>
-                )}
-                {scaleWizardResult === "not_found" && (
-                  <p style={{ margin: 0, color: "#8a4b00", fontWeight: 700 }}>
-                    No pudimos detectar el formato solos con esa etiqueta. Probá de nuevo con otro producto/peso distinto, o escribinos y lo configuramos nosotros.
-                  </p>
-                )}
-              </div>
-            </div>
-
-            {canSeeShiftTotals && (
-              <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 18 }}>
-                <p style={{ margin: "0 0 8px", fontWeight: 700 }}>PIN para ver movimientos</p>
-                <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
-                  {mostradorPin
-                    ? "Configurado -- hay que tipearlo para revelar \"Ver movimientos\" y \"Ver movimientos de caja\", así no queda a la vista de cualquiera que pase por el mostrador."
-                    : "Sin configurar -- \"Ver movimientos\" y \"Ver movimientos de caja\" se revelan con un clic, sin pedir nada."}
-                </p>
-                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                  <input
-                    type="password"
-                    inputMode="numeric"
-                    maxLength={4}
-                    placeholder="Nuevo PIN (4 dígitos)"
-                    value={pinSettingInput}
-                    onChange={(e) => setPinSettingInput(e.target.value)}
-                    style={{ width: 160 }}
-                  />
-                  <button disabled={pinSettingBusy} onClick={() => handleSavePin()}>Guardar</button>
-                  {mostradorPin && (
-                    <button className="secondary" disabled={pinSettingBusy} onClick={() => void handleSavePin(null)}>
-                      Sacar PIN
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-        </section>
-      )}
+      <SaleConfigPanel
+        visible={showConfigPanel}
+        branchId={branchId}
+        canSeeShiftTotals={canSeeShiftTotals}
+        autoPrintEnabled={autoPrintEnabled}
+        onAutoPrintChange={(enabled) => {
+          setAutoPrintEnabled(enabled);
+          saveAutoPrintEnabled(enabled);
+        }}
+        thermalPaired={thermalPaired}
+        thermalConnectBusy={thermalConnectBusy}
+        onConnectThermal={handleConnectThermalPrinter}
+        scaleConfigCalibrated={scaleConfigCalibrated}
+        onScaleConfigChange={(config) => {
+          setScaleConfig(config ?? DEFAULT_SCALE_CONFIG);
+          setScaleConfigCalibrated(config !== null);
+        }}
+        mostradorPin={mostradorPin}
+        onPinChange={setMostradorPinValue}
+        onMessage={setMessage}
+      />
 
       {message && <div className="message">{message}</div>}
 
