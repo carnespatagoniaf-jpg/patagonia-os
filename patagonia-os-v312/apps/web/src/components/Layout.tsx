@@ -4,6 +4,7 @@ import { useAuth } from "../features/auth/AuthProvider";
 import { canAccessPage, type Page } from "../features/auth/permissions";
 import { useActiveBranch } from "../features/branches/BranchProvider";
 import { TrialBanner } from "./TrialBanner";
+import { HelpChat } from "../features/help/HelpChat";
 
 export type { Page };
 
@@ -216,6 +217,7 @@ export function Layout({ page, onPageChange, children }: Props) {
         <TrialBanner />
         {children}
       </main>
+      {import.meta.env.VITE_HELP_CHAT === "1" && <HelpChat />}
     </div>
   );
 }
