@@ -1,0 +1,35 @@
+# Verificacion automatica: pruebas, tipos y compilacion en cada push a main y en cada PR.
+# El repo vive un nivel arriba de la carpeta del proyecto (patagonia-os-v312).
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: patagonia-os-v312
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: patagonia-os-v312/package-lock.json
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Pruebas (dominio + web)
+        run: npm test
+
+      - name: Tipos (web y api)
+        run: npm run typecheck
+
+      - name: Compilar
+        run: npm run build
