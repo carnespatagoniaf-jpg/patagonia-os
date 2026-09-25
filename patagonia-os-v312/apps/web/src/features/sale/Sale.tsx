@@ -54,6 +54,7 @@ import {
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
 import { ScaleWeightSettings } from "./ScaleWeightSettings";
 import { CloseSummaryView, MovementReceiptView, ReceiptView } from "./SaleReceipts";
+import { ShiftPanel } from "./ShiftPanel";
 import { getMostradorPin, setMostradorPin } from "./company-settings-service";
 import { buildCloseTicket as buildCloseTicketBytes, buildMovementTicket as buildMovementTicketBytes, buildReceiptTicket as buildReceiptTicketBytes } from "./sale-tickets";
 import { type TicketLine, type PaymentRow, type ReceiptLine, type ReceiptState, type MovementReceiptState, UNIT_LABELS, STALE_SHIFT_HOURS, formatShiftStart, getAutoPrintEnabled, saveAutoPrintEnabled, loadStoredReceipt, saveStoredReceipt } from "./sale-model";
@@ -92,8 +93,6 @@ export function Sale() {
   const [mostradorPin, setMostradorPinValue] = useState<string | null>(null);
   const [pinUnlocked, setPinUnlocked] = useState(false);
   const [pinPromptFor, setPinPromptFor] = useState<null | "movements" | "caja">(null);
-  const [pinInput, setPinInput] = useState("");
-  const [pinError, setPinError] = useState("");
   const [pinSettingInput, setPinSettingInput] = useState("");
   const [pinSettingBusy, setPinSettingBusy] = useState(false);
   // Arranca siempre oculto, incluso para quien SÍ puede verlo -- la idea no
@@ -164,12 +163,6 @@ export function Sale() {
   const chargeButtonRef = useRef<HTMLButtonElement | null>(null);
 
   const [showCajaForm, setShowCajaForm] = useState(false);
-  const [cajaDirection, setCajaDirection] = useState<"in" | "out">("out");
-  const [cajaAccountId, setCajaAccountId] = useState("");
-  const [cajaAmount, setCajaAmount] = useState("");
-  const [cajaReason, setCajaReason] = useState("");
-  const [cajaDestAccountId, setCajaDestAccountId] = useState("");
-  const [cajaBusy, setCajaBusy] = useState(false);
 
   const [showMovementsList, setShowMovementsList] = useState(false);
   const [cajaAdjustments, setCajaAdjustments] = useState<PosShiftAdjustment[]>([]);
@@ -177,18 +170,8 @@ export function Sale() {
   const [deletingMovementId, setDeletingMovementId] = useState<string | null>(null);
 
   const [showSupplierForm, setShowSupplierForm] = useState(false);
-  const [supplierId, setSupplierId] = useState("");
-  const [supplierAccountId, setSupplierAccountId] = useState("");
-  const [supplierAmount, setSupplierAmount] = useState("");
-  const [supplierNotes, setSupplierNotes] = useState("");
-  const [supplierBusy, setSupplierBusy] = useState(false);
 
   const [showValeForm, setShowValeForm] = useState(false);
-  const [valeEmployeeId, setValeEmployeeId] = useState("");
-  const [valeAccountId, setValeAccountId] = useState("");
-  const [valeAmount, setValeAmount] = useState("");
-  const [valeDetail, setValeDetail] = useState("");
-  const [valeBusy, setValeBusy] = useState(false);
 
   const [thermalPrintBusy, setThermalPrintBusy] = useState(false);
   const [thermalConnectBusy, setThermalConnectBusy] = useState(false);
@@ -387,61 +370,6 @@ export function Sale() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pendingSales.length]);
 
-  async function handleCajaMovement() {
-    setMessage("");
-    if (!cajaAccountId) { setMessage("Elegí una cuenta."); return; }
-    const amount = parseAmount(cajaAmount || "0") || 0;
-    if (!(amount > 0)) { setMessage("El monto debe ser mayor que cero."); return; }
-    if (!cajaReason.trim()) { setMessage("Ingresá un motivo."); return; }
-    const isTransfer = cajaDirection === "out" && !!cajaDestAccountId;
-    if (isTransfer && !shift) { setMessage("No hay un turno abierto."); return; }
-    setCajaBusy(true);
-    try {
-      const accountName = accounts.find((a) => a.id === cajaAccountId)?.name ?? "-";
-      let receiptTitle: string;
-      if (isTransfer && shift) {
-        const destName = accounts.find((a) => a.id === cajaDestAccountId)?.name ?? "-";
-        await registerPosShiftTransfer({
-          posShiftId: shift.id,
-          fromAccountId: cajaAccountId,
-          toAccountId: cajaDestAccountId,
-          amount,
-          reason: cajaReason.trim()
-        });
-        receiptTitle = `TRASPASO A ${destName.toUpperCase()}`;
-      } else {
-        const posShiftId = shift && isSupabaseConfigured ? shift.id : undefined;
-        await adjust({ accountId: cajaAccountId, amount, direction: cajaDirection, reason: cajaReason.trim(), posShiftId });
-        receiptTitle = cajaDirection === "in" ? "INGRESO DE CAJA" : "EGRESO DE CAJA";
-      }
-      const movementReceiptData: MovementReceiptState = {
-        title: receiptTitle,
-        date: new Date().toISOString(),
-        amount,
-        accountName,
-        detail: cajaReason.trim()
-      };
-      // Idem al comentario en checkout() pero al revés -- si queda un
-      // ticket de venta viejo en pantalla, sacarlo para que no compita con
-      // este comprobante al imprimir.
-      setReceipt(null);
-      setMovementReceipt(movementReceiptData);
-      await autoPrintMovementReceipt(movementReceiptData);
-      await reloadShiftMovements();
-      setCajaAccountId("");
-      setCajaAmount("");
-      setCajaReason("");
-      setCajaDestAccountId("");
-      setShowCajaForm(false);
-    } catch (err) {
-      const raw = err instanceof Error ? err.message : typeof err === "object" && err !== null ? JSON.stringify(err) : String(err);
-      const code = (err as { code?: string })?.code;
-      setMessage(`No se pudo registrar el movimiento de caja. [detalle: ${raw}${code ? ` · code ${code}` : ""}]`);
-    } finally {
-      setCajaBusy(false);
-    }
-  }
-
   async function reloadShiftMovements() {
     if (!shift || !isSupabaseConfigured) return;
     try {
@@ -451,6 +379,22 @@ export function Sale() {
     } catch {
       // La lista de movimientos es informativa -- si falla no bloquea nada.
     }
+  }
+
+  /** Comprobante de un movimiento (caja, pago a proveedor, vale): saca el ticket
+   * de venta viejo de pantalla para que no compita al imprimir, muestra este y,
+   * si corresponde, lo imprime solo. */
+  async function publishMovementReceipt(data: MovementReceiptState) {
+    setReceipt(null);
+    setMovementReceipt(data);
+    await autoPrintMovementReceipt(data);
+  }
+
+  function handlePinSuccess() {
+    setPinUnlocked(true);
+    if (pinPromptFor === "movements") setShowShiftMovements(true);
+    else if (pinPromptFor === "caja") setShowMovementsList(true);
+    setPinPromptFor(null);
   }
 
   /** "Ver movimientos" y "Ver movimientos de caja" -- si hay un PIN
@@ -465,25 +409,10 @@ export function Sale() {
       return;
     }
     if (mostradorPin && !pinUnlocked) {
-      setPinInput("");
-      setPinError("");
       setPinPromptFor(kind);
       return;
     }
     reveal();
-  }
-
-  function confirmPin() {
-    if (pinInput.trim() !== mostradorPin) {
-      setPinError("PIN incorrecto.");
-      return;
-    }
-    setPinUnlocked(true);
-    if (pinPromptFor === "movements") setShowShiftMovements(true);
-    else if (pinPromptFor === "caja") setShowMovementsList(true);
-    setPinPromptFor(null);
-    setPinInput("");
-    setPinError("");
   }
 
   async function handleSavePin(value: string | null = pinSettingInput) {
@@ -527,105 +456,6 @@ export function Sale() {
       setMessage(err instanceof Error ? err.message : "No se pudo borrar el vale.");
     } finally {
       setDeletingMovementId(null);
-    }
-  }
-
-  async function handleSupplierPayment() {
-    setMessage("");
-    if (!shift) { setMessage("No hay un turno abierto."); return; }
-    if (!supplierId) { setMessage("Elegí un proveedor."); return; }
-    if (!supplierAccountId) { setMessage("Elegí una cuenta."); return; }
-    const amount = parseAmount(supplierAmount || "0") || 0;
-    if (!(amount > 0)) { setMessage("El monto debe ser mayor que cero."); return; }
-    setSupplierBusy(true);
-    try {
-      const result = await registerSupplierPaymentFromPosShift({
-        supplierId,
-        posShiftId: shift.id,
-        accountId: supplierAccountId,
-        amount,
-        notes: supplierNotes.trim() || undefined
-      });
-      const supplierName = suppliers.find((s) => s.id === supplierId)?.name ?? "-";
-      const supplierAccountName = accounts.find((a) => a.id === supplierAccountId)?.name ?? "-";
-      setMessage(
-        `Pago a ${supplierName} registrado.${result.balance !== null ? ` Saldo restante: ${formatMoney(result.balance)}.` : ""}`
-      );
-      const movementReceiptData: MovementReceiptState = {
-        title: "PAGO A PROVEEDOR",
-        date: new Date().toISOString(),
-        amount,
-        accountName: supplierAccountName,
-        detail: supplierNotes.trim() || "Pago a proveedor",
-        counterpartLabel: "Proveedor",
-        counterpartName: supplierName
-      };
-      // Idem al comentario en checkout() pero al revés -- si queda un
-      // ticket de venta viejo en pantalla, sacarlo para que no compita con
-      // este comprobante al imprimir.
-      setReceipt(null);
-      setMovementReceipt(movementReceiptData);
-      await autoPrintMovementReceipt(movementReceiptData);
-      setSupplierId("");
-      setSupplierAccountId("");
-      setSupplierAmount("");
-      setSupplierNotes("");
-      setShowSupplierForm(false);
-    } catch (err) {
-      const raw = err instanceof Error ? err.message : typeof err === "object" && err !== null ? JSON.stringify(err) : String(err);
-      const code = (err as { code?: string })?.code;
-      setMessage(`No se pudo registrar el pago al proveedor. [detalle: ${raw}${code ? ` · code ${code}` : ""}]`);
-    } finally {
-      setSupplierBusy(false);
-    }
-  }
-
-  async function handleEmployeeVale() {
-    setMessage("");
-    if (!shift) { setMessage("No hay un turno abierto."); return; }
-    if (!valeEmployeeId) { setMessage("Elegí un empleado."); return; }
-    if (!valeAccountId) { setMessage("Elegí una cuenta."); return; }
-    const amount = parseAmount(valeAmount || "0") || 0;
-    if (!(amount > 0)) { setMessage("El monto debe ser mayor que cero."); return; }
-    setValeBusy(true);
-    try {
-      await registerEmployeeValeFromPosShift({
-        employeeId: valeEmployeeId,
-        posShiftId: shift.id,
-        accountId: valeAccountId,
-        amount,
-        detail: valeDetail.trim() || undefined
-      });
-      const employeeName = employees.find((e) => e.id === valeEmployeeId)?.fullName ?? "-";
-      const valeAccountName = accounts.find((a) => a.id === valeAccountId)?.name ?? "-";
-      setMessage(`Vale de ${employeeName} registrado -- se descuenta de su próxima liquidación de sueldo.`);
-      const movementReceiptData: MovementReceiptState = {
-        title: "VALE A EMPLEADO",
-        date: new Date().toISOString(),
-        amount,
-        accountName: valeAccountName,
-        detail: valeDetail.trim() || "Vale de adelanto",
-        counterpartLabel: "Empleado",
-        counterpartName: employeeName
-      };
-      // Idem al comentario en checkout() pero al revés -- si queda un
-      // ticket de venta viejo en pantalla, sacarlo para que no compita con
-      // este comprobante al imprimir.
-      setReceipt(null);
-      setMovementReceipt(movementReceiptData);
-      await autoPrintMovementReceipt(movementReceiptData);
-      await reloadShiftMovements();
-      setValeEmployeeId("");
-      setValeAccountId("");
-      setValeAmount("");
-      setValeDetail("");
-      setShowValeForm(false);
-    } catch (err) {
-      const raw = err instanceof Error ? err.message : typeof err === "object" && err !== null ? JSON.stringify(err) : String(err);
-      const code = (err as { code?: string })?.code;
-      setMessage(`No se pudo registrar el vale. [detalle: ${raw}${code ? ` · code ${code}` : ""}]`);
-    } finally {
-      setValeBusy(false);
     }
   }
 
@@ -1870,307 +1700,55 @@ export function Sale() {
             )}
           </section>
 
-          <aside className="panel shift-card" style={{ position: "sticky", top: 18 }}>
-            <div className="panel-title">
-              <h2>Turno</h2>
-              <span className="muted" style={{ fontSize: 12 }}>desde {formatShiftStart(shift.openedAt)}</span>
-            </div>
-
-            {canSeeShiftTotals && showShiftTotals && (
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
-                <div style={{ background: "#f8f9fb", borderRadius: 12, padding: "12px 14px" }}>
-                  <p className="muted" style={{ margin: 0, fontSize: 12 }}>Ventas</p>
-                  <strong style={{ fontSize: 22 }}>{activeShiftSales.length}</strong>
-                </div>
-                <div style={{ background: "#f8f9fb", borderRadius: 12, padding: "12px 14px" }}>
-                  <p className="muted" style={{ margin: 0, fontSize: 12 }}>Acumulado</p>
-                  <strong style={{ fontSize: 22 }}>{formatMoney(shiftTotal)}</strong>
-                </div>
-              </div>
-            )}
-
-            <div style={{ display: "grid", gap: 8 }}>
-              {canSeeShiftTotals && (
-                <button className="pos-toolbar-btn" onClick={() => setShowShiftTotals((v) => !v)}>
-                  {showShiftTotals ? "Ocultar total del turno" : "Ver total del turno"}
-                </button>
-              )}
-              {canSeeShiftTotals && (
-                <button className="pos-toolbar-btn" onClick={() => requestReveal("movements")}>
-                  {showShiftMovements ? "Ocultar movimientos" : "Ver movimientos"}
-                </button>
-              )}
-              {canManageTreasury && (
-                <button className="pos-toolbar-btn" onClick={() => requestReveal("caja")}>
-                  {showMovementsList ? "Ocultar caja/vales" : "Ver movimientos de caja"}
-                </button>
-              )}
-              {pinPromptFor && (
-                <div className="panel" style={{ padding: 14 }}>
-                  <p style={{ margin: "0 0 8px", fontWeight: 700 }}>Ingresá el PIN para ver esto</p>
-                  <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                    <input
-                      type="password"
-                      inputMode="numeric"
-                      maxLength={4}
-                      placeholder="PIN"
-                      autoFocus
-                      value={pinInput}
-                      onChange={(e) => setPinInput(e.target.value)}
-                      onKeyDown={(e) => { if (e.key === "Enter") confirmPin(); }}
-                      style={{ width: 80 }}
-                    />
-                    <button onClick={confirmPin}>Confirmar</button>
-                    <button className="secondary" onClick={() => setPinPromptFor(null)}>Cancelar</button>
-                  </div>
-                  {pinError && <p style={{ color: "#a52424", margin: "6px 0 0" }}>{pinError}</p>}
-                </div>
-              )}
-              {canManageTreasury && (
-                <button className="pos-toolbar-btn" onClick={() => setShowCajaForm((v) => !v)}>
-                  {showCajaForm ? "Cancelar movimiento de caja" : "+ Movimiento de caja"}
-                </button>
-              )}
-              {canManageTreasury && (
-                <button className="pos-toolbar-btn" onClick={() => setShowSupplierForm((v) => !v)}>
-                  {showSupplierForm ? "Cancelar pago a proveedor" : "+ Pago a proveedor"}
-                </button>
-              )}
-              {canManageTreasury && (
-                <button className="pos-toolbar-btn" onClick={() => setShowValeForm((v) => !v)}>
-                  {showValeForm ? "Cancelar vale a empleado" : "+ Vale a empleado"}
-                </button>
-              )}
-              {!showCloseConfirm && (
-                <button
-                  className="pos-toolbar-btn"
-                  onClick={() => {
-                    if (pendingSales.length > 0) {
-                      setMessage("Todavía hay ventas sin subir al servidor -- sincronizalas antes de cerrar el turno para que el total esté completo.");
-                      return;
-                    }
-                    setShowCloseConfirm(true);
-                  }}
-                >
-                  Cerrar turno
-                </button>
-              )}
-            </div>
-
-            {canSeeShiftTotals && showShiftMovements && (
-              shiftSales.length > 0 ? (
-                <table className="data-table" style={{ marginTop: 14 }}>
-                  <thead>
-                    <tr><th>Hora</th><th className="num">Total</th><th></th><th></th></tr>
-                  </thead>
-                  <tbody>
-                    {shiftSales.map((s) => (
-                      <tr key={s.id} style={s.voidedAt ? { opacity: 0.5, textDecoration: "line-through" } : undefined}>
-                        <td>{new Date(s.createdAt).toLocaleTimeString("es-AR")}</td>
-                        <td className="num">{formatMoney(s.total)}</td>
-                        <td>{s.voidedAt ? "Anulada" : ""}</td>
-                        <td>
-                          {!s.voidedAt && (
-                            <button className="secondary" disabled={busy} onClick={() => handleVoidSale(s.id)}>Anular</button>
-                          )}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              ) : (
-                <p className="muted" style={{ marginTop: 14 }}>Todavía no hay ventas en este turno.</p>
-              )
-            )}
-
-            {canManageTreasury && showMovementsList && (
-              <div style={{ marginTop: 14 }}>
-                <p className="muted" style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 12, textTransform: "uppercase" }}>Caja</p>
-                {cajaAdjustments.length > 0 ? (
-                  <table className="data-table">
-                    <thead>
-                      <tr><th>Hora</th><th>Cuenta</th><th>Motivo</th><th className="num">Monto</th><th></th></tr>
-                    </thead>
-                    <tbody>
-                      {cajaAdjustments.map((m) => (
-                        <tr key={m.id}>
-                          <td>{new Date(m.createdAt).toLocaleTimeString("es-AR")}</td>
-                          <td>{m.accountName}</td>
-                          <td>{m.notes ?? "-"}</td>
-                          <td className="num">{m.direction === "in" ? "+" : "-"}{formatMoney(m.amount)}</td>
-                          <td>
-                            <button
-                              className="secondary"
-                              disabled={deletingMovementId === m.id}
-                              onClick={() => handleDeleteAdjustment(m.id)}
-                            >
-                              {deletingMovementId === m.id ? "…" : "Borrar"}
-                            </button>
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <p className="muted" style={{ fontSize: 13 }}>Sin movimientos de caja en este turno.</p>
-                )}
-
-                <p className="muted" style={{ margin: "14px 0 6px", fontWeight: 700, fontSize: 12, textTransform: "uppercase" }}>Vales a empleados</p>
-                {posShiftVales.length > 0 ? (
-                  <table className="data-table">
-                    <thead>
-                      <tr><th>Hora</th><th>Empleado</th><th>Detalle</th><th className="num">Monto</th><th></th></tr>
-                    </thead>
-                    <tbody>
-                      {posShiftVales.map((v) => (
-                        <tr key={v.id}>
-                          <td>{new Date(v.createdAt).toLocaleTimeString("es-AR")}</td>
-                          <td>{v.employeeName}</td>
-                          <td>{v.detail}{v.liquidated && <span className="muted"> · Liquidado</span>}</td>
-                          <td className="num">{formatMoney(v.amount)}</td>
-                          <td>
-                            {!v.liquidated && (
-                              <button
-                                className="secondary"
-                                disabled={deletingMovementId === v.id}
-                                onClick={() => handleDeleteVale(v.id)}
-                              >
-                                {deletingMovementId === v.id ? "…" : "Borrar"}
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                ) : (
-                  <p className="muted" style={{ fontSize: 13 }}>Sin vales cargados en este turno.</p>
-                )}
-              </div>
-            )}
-
-            {canManageTreasury && showCajaForm && (
-              <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
-                <select value={cajaDirection} onChange={(e) => setCajaDirection(e.target.value as "in" | "out")}>
-                  <option value="out">Egreso</option>
-                  <option value="in">Ingreso</option>
-                </select>
-                <select value={cajaAccountId} onChange={(e) => setCajaAccountId(e.target.value)}>
-                  <option value="">Cuenta…</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-                {cajaDirection === "out" && (
-                  <select value={cajaDestAccountId} onChange={(e) => setCajaDestAccountId(e.target.value)}>
-                    <option value="">¿Va a otra cuenta? (opcional, ej. Caja fuerte)</option>
-                    {accounts.filter((a) => a.id !== cajaAccountId).map((a) => (
-                      <option key={a.id} value={a.id}>{a.name}</option>
-                    ))}
-                  </select>
-                )}
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="Monto"
-                  value={cajaAmount}
-                  onChange={(e) => setCajaAmount(e.target.value)}
-                />
-                <input
-                  placeholder="Motivo"
-                  value={cajaReason}
-                  onChange={(e) => setCajaReason(e.target.value)}
-                />
-                {cajaDestAccountId && (
-                  <p className="muted" style={{ margin: 0, fontSize: 12 }}>
-                    Va a quedar como traspaso: sale de acá (cuenta este turno) y entra a la otra cuenta -- el cierre de caja va a restar esta salida del efectivo esperado.
-                  </p>
-                )}
-                <button disabled={cajaBusy} onClick={handleCajaMovement}>{cajaBusy ? "Guardando…" : "Registrar"}</button>
-              </div>
-            )}
-
-            {canManageTreasury && showSupplierForm && (
-              <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
-                <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-                  <option value="">Proveedor…</option>
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-                <select value={supplierAccountId} onChange={(e) => setSupplierAccountId(e.target.value)}>
-                  <option value="">Pagar desde…</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="Monto"
-                  value={supplierAmount}
-                  onChange={(e) => setSupplierAmount(e.target.value)}
-                />
-                <input
-                  placeholder="Nota (opcional)"
-                  value={supplierNotes}
-                  onChange={(e) => setSupplierNotes(e.target.value)}
-                />
-                <button disabled={supplierBusy} onClick={handleSupplierPayment}>{supplierBusy ? "Guardando…" : "Registrar"}</button>
-              </div>
-            )}
-
-            {canManageTreasury && showValeForm && (
-              <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
-                <select value={valeEmployeeId} onChange={(e) => setValeEmployeeId(e.target.value)}>
-                  <option value="">Empleado…</option>
-                  {employees.map((e) => (
-                    <option key={e.id} value={e.id}>{e.fullName}</option>
-                  ))}
-                </select>
-                <select value={valeAccountId} onChange={(e) => setValeAccountId(e.target.value)}>
-                  <option value="">Sale de…</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="Monto"
-                  value={valeAmount}
-                  onChange={(e) => setValeAmount(e.target.value)}
-                />
-                <input
-                  placeholder="Detalle (opcional)"
-                  value={valeDetail}
-                  onChange={(e) => setValeDetail(e.target.value)}
-                />
-                <p className="muted" style={{ margin: 0, fontSize: 12 }}>Se descuenta de la próxima liquidación de sueldo del empleado.</p>
-                <button disabled={valeBusy} onClick={handleEmployeeVale}>{valeBusy ? "Guardando…" : "Registrar"}</button>
-              </div>
-            )}
-
-            {showCloseConfirm && (
-              <div style={{ marginTop: 14 }}>
-                <p className="muted">¿Cerrar el turno y cargar {formatMoney(shiftTotal)} a Tesorería? No se puede deshacer.</p>
-                <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
-                  <label className="muted" style={{ fontSize: 13 }}>Efectivo contado (arqueo) $</label>
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder="0"
-                    value={closingCountedCashInput}
-                    onChange={(e) => setClosingCountedCashInput(e.target.value)}
-                  />
-                </div>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <button disabled={busy} onClick={handleCloseShift}>{busy ? "Cerrando…" : "Confirmar cierre"}</button>
-                  <button className="secondary" onClick={() => setShowCloseConfirm(false)}>Cancelar</button>
-                </div>
-              </div>
-            )}
-          </aside>
+          <ShiftPanel
+            shift={shift}
+            canSeeShiftTotals={canSeeShiftTotals}
+            canManageTreasury={canManageTreasury}
+            busy={busy}
+            accounts={accounts}
+            suppliers={suppliers}
+            employees={employees}
+            adjust={adjust}
+            activeSalesCount={activeShiftSales.length}
+            shiftTotal={shiftTotal}
+            shiftSales={shiftSales}
+            showShiftTotals={showShiftTotals}
+            onToggleShiftTotals={() => setShowShiftTotals((v) => !v)}
+            showShiftMovements={showShiftMovements}
+            showMovementsList={showMovementsList}
+            onRequestReveal={requestReveal}
+            pinPromptFor={pinPromptFor}
+            mostradorPin={mostradorPin}
+            onPinSuccess={handlePinSuccess}
+            onPinCancel={() => setPinPromptFor(null)}
+            cajaAdjustments={cajaAdjustments}
+            posShiftVales={posShiftVales}
+            deletingMovementId={deletingMovementId}
+            onDeleteAdjustment={handleDeleteAdjustment}
+            onDeleteVale={handleDeleteVale}
+            onVoidSale={handleVoidSale}
+            onMovementsChanged={reloadShiftMovements}
+            showCajaForm={showCajaForm}
+            onToggleCajaForm={() => setShowCajaForm((v) => !v)}
+            showSupplierForm={showSupplierForm}
+            onToggleSupplierForm={() => setShowSupplierForm((v) => !v)}
+            showValeForm={showValeForm}
+            onToggleValeForm={() => setShowValeForm((v) => !v)}
+            showCloseConfirm={showCloseConfirm}
+            onRequestClose={() => {
+              if (pendingSales.length > 0) {
+                setMessage("Todavía hay ventas sin subir al servidor -- sincronizalas antes de cerrar el turno para que el total esté completo.");
+                return;
+              }
+              setShowCloseConfirm(true);
+            }}
+            closingCountedCashInput={closingCountedCashInput}
+            onCountedCashChange={setClosingCountedCashInput}
+            onConfirmClose={handleCloseShift}
+            onCancelClose={() => setShowCloseConfirm(false)}
+            onMessage={setMessage}
+            publishReceipt={publishMovementReceipt}
+          />
         </div>
       )}
 
