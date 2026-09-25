@@ -3,7 +3,6 @@ import { Settings } from "lucide-react";
 import type { Product, TreasuryAccount } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
-import { POS_LAST_RECEIPT_KEY } from "../../lib/pos-receipt-storage";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { useAuth } from "../auth/AuthProvider";
 import { can } from "../auth/permissions";
@@ -54,120 +53,10 @@ import {
 } from "./scale-config-service";
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
 import { ScaleWeightSettings } from "./ScaleWeightSettings";
+import { CloseSummaryView, MovementReceiptView, ReceiptView } from "./SaleReceipts";
 import { getMostradorPin, setMostradorPin } from "./company-settings-service";
-
-const UNIT_LABELS: Record<Product["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
-
-interface TicketLine {
-  key: string;
-  kind: "product" | "manual";
-  productId?: string;
-  name: string;
-  unit: Product["unit"];
-  quantity: number;
-  unitPrice: number;
-}
-
-interface PaymentRow {
-  accountId: string;
-  amount: string;
-  /** Cupón o número de operación -- se pide solo si la cuenta elegida no
-   * es efectivo (ver checkout()), para que no se pueda marcar "Tarjeta" o
-   * "Transferencia" sin tener el comprobante real en la mano. */
-  reference: string;
-}
-
-interface ReceiptLine {
-  name: string;
-  unit: Product["unit"];
-  quantity: number;
-  unitPrice: number;
-  discountAmount: number;
-}
-
-interface ReceiptState {
-  items: ReceiptLine[];
-  saleDiscount: number;
-  saleSurcharge: number;
-  total: number;
-  soldAt: string;
-  paymentSummary: string;
-  amountTendered: number | null;
-  change: number | null;
-  /** true si esta venta se guardó localmente porque no había conexión al
-   * cobrar -- todavía no llegó al servidor, se sube sola cuando vuelva
-   * internet (ver features/sale/offline-queue.ts). */
-  pending?: boolean;
-}
-
-/** Comprobante imprimible para movimientos que no son una venta -- caja,
- * pago a proveedor, vale a empleado -- con renglón de firma, para que el
- * proveedor o el empleado firmen que recibieron la plata. */
-interface MovementReceiptState {
-  title: string;
-  date: string;
-  amount: number;
-  accountName: string;
-  detail: string;
-  counterpartLabel?: string;
-  counterpartName?: string;
-}
-
-const AUTO_PRINT_KEY = "patagonia-auto-print-enabled";
-
-/** Pasadas estas horas se avisa que el turno hay que cerrarlo: la plata de las
- * ventas no llega a Tesorería hasta el cierre, y un turno de días descuadra
- * el arqueo y le pone a todo la fecha del día en que finalmente se cierre. */
-const STALE_SHIFT_HOURS = 18;
-
-function formatShiftStart(openedAt: string): string {
-  const opened = new Date(openedAt);
-  if (opened.toDateString() === new Date().toDateString()) return opened.toLocaleTimeString("es-AR");
-  return opened.toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-}
-
-/** Por caja/equipo (localStorage), no por empresa -- cada mostrador puede
- * tener o no una impresora conectada. Por defecto apagado: a quien nunca
- * lo prendió no le tiene que aparecer un diálogo de impresión de la nada. */
-function getAutoPrintEnabled(): boolean {
-  try {
-    return localStorage.getItem(AUTO_PRINT_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
-
-function saveAutoPrintEnabled(enabled: boolean): void {
-  try {
-    localStorage.setItem(AUTO_PRINT_KEY, enabled ? "1" : "0");
-  } catch {
-    // localStorage lleno o bloqueado -- no es crítico.
-  }
-}
-
-/** El "Último comprobante" vivía solo en el estado de React -- al salir de
- * Mostrador (a Turnos, Productos, lo que sea) el componente se desmonta y
- * se perdía, aunque la venta ya esté guardada. sessionStorage lo mantiene
- * mientras dure la pestaña/turno, sin guardarlo para siempre. AuthProvider
- * limpia esta misma clave al cerrar sesión, para que no quede pegado el
- * comprobante de una empresa al entrar con otra cuenta en la misma pestaña. */
-function loadStoredReceipt(): ReceiptState | null {
-  try {
-    const raw = sessionStorage.getItem(POS_LAST_RECEIPT_KEY);
-    return raw ? (JSON.parse(raw) as ReceiptState) : null;
-  } catch {
-    return null;
-  }
-}
-
-function saveStoredReceipt(receipt: ReceiptState | null): void {
-  try {
-    if (receipt) sessionStorage.setItem(POS_LAST_RECEIPT_KEY, JSON.stringify(receipt));
-    else sessionStorage.removeItem(POS_LAST_RECEIPT_KEY);
-  } catch {
-    // sessionStorage lleno o bloqueado -- no es crítico.
-  }
-}
+import { buildCloseTicket as buildCloseTicketBytes, buildMovementTicket as buildMovementTicketBytes, buildReceiptTicket as buildReceiptTicketBytes } from "./sale-tickets";
+import { type TicketLine, type PaymentRow, type ReceiptLine, type ReceiptState, type MovementReceiptState, UNIT_LABELS, STALE_SHIFT_HOURS, formatShiftStart, getAutoPrintEnabled, saveAutoPrintEnabled, loadStoredReceipt, saveStoredReceipt } from "./sale-model";
 
 export function Sale() {
   const { branchId, branches, activeBranch } = useActiveBranch();
@@ -1342,37 +1231,18 @@ export function Sale() {
     for (let i = 0; i < copies; i++) window.print();
   }
 
-  function buildReceiptTicket(receiptToPrint: ReceiptState): Uint8Array {
-    const settings = getThermalPrintSettings();
-    const branchName = branches.find((b) => b.id === branchId)?.name;
-    const t = new TicketBuilder();
-    if (settings.font !== "auto") t.font(settings.font);
-    t.bodySize(settings, true);
-    t.align("center").bold(true).line("COMPROBANTE INTERNO").bold(false);
-    if (branchName) t.line(branchName);
-    t.align("left").separator("-", settings.lineWidth);
-    t.line(new Date(receiptToPrint.soldAt).toLocaleString("es-AR"));
-    t.separator("-", settings.lineWidth);
-    for (const item of receiptToPrint.items) {
-      const lineTotal = item.quantity * item.unitPrice - item.discountAmount;
-      t.line(item.name);
-      t.line(`  ${item.quantity} ${UNIT_LABELS[item.unit]} x ${formatMoney(item.unitPrice)} = ${formatMoney(lineTotal)}`);
-    }
-    t.separator("-", settings.lineWidth);
-    if (receiptToPrint.saleDiscount > 0) t.line(`Descuento: -${formatMoney(receiptToPrint.saleDiscount)}`);
-    if (receiptToPrint.saleSurcharge > 0) t.line(`Recargo: +${formatMoney(receiptToPrint.saleSurcharge)}`);
-    t.bodySize(settings, false);
-    t.bold(true).doubleSize(true).line(`TOTAL ${formatMoney(receiptToPrint.total)}`).doubleSize(false).bold(false);
-    t.bodySize(settings, true);
-    t.line(`Pago: ${receiptToPrint.paymentSummary}`);
-    if (receiptToPrint.amountTendered !== null) {
-      t.line(`Recibido: ${formatMoney(receiptToPrint.amountTendered)}  Vuelto: ${formatMoney(Math.max(receiptToPrint.change ?? 0, 0))}`);
-    }
-    t.feed(1).align("center").line("Gracias por su compra");
-    t.bodySize(settings, false);
-    t.cut();
-    return t.build();
-  }
+  const currentBranchName = () => branches.find((b) => b.id === branchId)?.name;
+  const buildReceiptTicket = (r: ReceiptState) => buildReceiptTicketBytes(r, currentBranchName());
+  const buildMovementTicket = (m: MovementReceiptState) => buildMovementTicketBytes(m, currentBranchName());
+  const buildCloseTicket = () =>
+    buildCloseTicketBytes({
+      summary: closeSummary,
+      branchName: currentBranchName(),
+      accounts,
+      adjustments: closeAdjustments,
+      vales: closeVales,
+      supplierPayments: closeSupplierPayments
+    });
 
   async function handleThermalPrint() {
     if (!receipt) return;
@@ -1422,88 +1292,6 @@ export function Sale() {
     }
   }
 
-  /** Ticket del cierre de turno para la térmica: total, arqueo, cada cuenta,
-   * y el detalle de movimientos de caja, vales y pagos a proveedores para
-   * que quede en papel qué salió de la caja durante el turno. */
-  function buildCloseTicket(): Uint8Array {
-    const settings = getThermalPrintSettings();
-    const width = settings.lineWidth;
-    const row = (left: string, right: string) => {
-      const room = Math.max(width - right.length - 1, 1);
-      return left.slice(0, room).padEnd(room) + " " + right;
-    };
-    const branchName = branches.find((b) => b.id === branchId)?.name;
-    const summary = closeSummary;
-    const t = new TicketBuilder();
-    if (settings.font !== "auto") t.font(settings.font);
-    t.bodySize(settings, true);
-    t.align("center").bold(true).line("CIERRE DE TURNO").bold(false);
-    if (branchName) t.line(branchName);
-    t.align("left").separator("-", width);
-    t.line(new Date().toLocaleString("es-AR"));
-    if (summary) {
-      t.separator("-", width);
-      t.bold(true).line(row("Total del turno", formatMoney(summary.total))).bold(false);
-      t.line("ARQUEO DE EFECTIVO");
-      if (summary.breakdown) {
-        t.line(row("Fondo inicial", formatMoney(summary.breakdown.openingCash)));
-        t.line(row("+ Ventas efectivo", formatMoney(summary.breakdown.cashSales)));
-        if (summary.breakdown.cashInflows > 0) t.line(row("+ Ingresos de caja", formatMoney(summary.breakdown.cashInflows)));
-        t.line(row("- Salidas efectivo", formatMoney(summary.breakdown.cashOutflows)));
-      }
-      t.line(row("Esperado", formatMoney(summary.expectedCash)));
-      if (summary.countedCash !== null) {
-        t.line(row("Contado", formatMoney(summary.countedCash)));
-        t.bold(true).line(row("Diferencia", formatMoney(summary.difference ?? 0))).bold(false);
-      } else {
-        t.line("Sin conteo de efectivo.");
-      }
-      if (summary.byAccount.length > 0) {
-        t.separator("-", width);
-        t.line("POR CUENTA");
-        summary.byAccount.forEach((r) => {
-          t.line(row(accounts.find((a) => a.id === r.accountId)?.name ?? "Cuenta", formatMoney(r.amount)));
-        });
-      }
-    }
-    if (closeAdjustments.length > 0) {
-      t.separator("-", width);
-      t.line("MOVIMIENTOS DE CAJA");
-      closeAdjustments.forEach((a) => {
-        const kind = a.movementType === "transferencia" ? "Traspaso" : a.direction === "in" ? "Ingreso" : "Egreso";
-        const hour = new Date(a.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
-        t.line(row(hour + " " + kind, (a.direction === "in" ? "" : "-") + formatMoney(a.amount)));
-        if (a.notes) t.line("  " + a.notes);
-      });
-      const totalOut = closeAdjustments.filter((a) => a.direction === "out").reduce((sum, a) => sum + a.amount, 0);
-      t.bold(true).line(row("Total sacado", formatMoney(totalOut))).bold(false);
-    }
-    if (closeVales.length > 0) {
-      t.separator("-", width);
-      t.line("VALES A EMPLEADOS");
-      closeVales.forEach((v) => {
-        t.line(row(v.employeeName, formatMoney(v.amount)));
-        if (v.detail) t.line("  " + v.detail);
-      });
-      t.bold(true).line(row("Total vales", formatMoney(closeVales.reduce((sum, v) => sum + v.amount, 0)))).bold(false);
-    }
-    if (closeSupplierPayments.length > 0) {
-      t.separator("-", width);
-      t.line("PAGOS A PROVEEDORES");
-      closeSupplierPayments.forEach((p) => {
-        t.line(row(p.supplierName, formatMoney(p.amount)));
-        if (p.notes) t.line("  " + p.notes);
-      });
-      t.bold(true).line(row("Total pagos", formatMoney(closeSupplierPayments.reduce((sum, p) => sum + p.amount, 0)))).bold(false);
-    }
-    t.separator("-", width);
-    t.feed(3);
-    t.align("center").line("Firma: _______________________");
-    t.bodySize(settings, false);
-    t.cut();
-    return t.build();
-  }
-
   async function handleCloseTicketPrint() {
     setMessage("");
     setThermalPrintBusy(true);
@@ -1514,32 +1302,6 @@ export function Sale() {
     } finally {
       setThermalPrintBusy(false);
     }
-  }
-
-  function buildMovementTicket(mov: MovementReceiptState): Uint8Array {
-    const settings = getThermalPrintSettings();
-    const branchName = branches.find((b) => b.id === branchId)?.name;
-    const t = new TicketBuilder();
-    if (settings.font !== "auto") t.font(settings.font);
-    t.bodySize(settings, true);
-    t.align("center").bold(true).line(mov.title).bold(false);
-    if (branchName) t.line(branchName);
-    t.align("left").separator("-", settings.lineWidth);
-    t.line(new Date(mov.date).toLocaleString("es-AR"));
-    t.separator("-", settings.lineWidth);
-    t.line(`Cuenta: ${mov.accountName}`);
-    if (mov.counterpartName) t.line(`${mov.counterpartLabel}: ${mov.counterpartName}`);
-    if (mov.detail) t.line(mov.detail);
-    t.separator("-", settings.lineWidth);
-    t.bodySize(settings, false);
-    t.bold(true).doubleSize(true).line(`MONTO ${formatMoney(mov.amount)}`).doubleSize(false).bold(false);
-    t.bodySize(settings, true);
-    t.feed(3);
-    t.align("center").line("Firma: _______________________");
-    t.line("Aclaración y DNI:");
-    t.bodySize(settings, false);
-    t.cut();
-    return t.build();
   }
 
   /** Se imprime solo al cobrar -- pero SOLO si el local activó "Imprimir
@@ -2413,363 +2175,39 @@ export function Sale() {
       )}
 
       {receipt && (
-        <section className="panel print-area receipt-ticket" style={{ marginTop: 18 }}>
-          <div className="panel-title">
-            <h2>Último comprobante</h2>
-            <div className="no-print ticket-actions">
-              <button className="ticket-action-btn" onClick={() => handlePrint()}>Reimprimir</button>
-              <button className="ticket-action-btn" onClick={() => handlePrint(2)}>2 copias</button>
-              {isThermalPrintSupported() && (
-                <button className="ticket-action-btn" disabled={thermalPrintBusy} onClick={handleThermalPrint}>
-                  {thermalPrintBusy ? "Imprimiendo…" : "Térmica"}
-                </button>
-              )}
-            </div>
-          </div>
-
-          <div className="ticket-header">
-            <strong>{branches.find((b) => b.id === branchId)?.name ?? "Patagonia OS"}</strong>
-            <p>Comprobante interno · no válido como factura</p>
-            <p>{new Date(receipt.soldAt).toLocaleString("es-AR")}</p>
-            {receipt.pending && <p className="no-print" style={{ color: "#8a4b00", fontWeight: 700 }}>⏳ Guardada sin conexión, pendiente de subir</p>}
-          </div>
-
-          <div className="ticket-rule" />
-          <div className="ticket-items">
-            {receipt.items.map((item, idx) => (
-              <div className="ticket-item" key={idx}>
-                <span className="ticket-item-name">{item.name}</span>
-                <span className="ticket-item-detail">
-                  <span>{item.quantity} {UNIT_LABELS[item.unit]} x {formatMoney(item.unitPrice)}</span>
-                  <b>{formatMoney(item.quantity * item.unitPrice - item.discountAmount)}</b>
-                </span>
-              </div>
-            ))}
-          </div>
-          <div className="ticket-rule" />
-
-          {(receipt.saleDiscount > 0 || receipt.saleSurcharge > 0) && (
-            <p className="ticket-line-sm">
-              {receipt.saleDiscount > 0 && `Descuento -${formatMoney(receipt.saleDiscount)} `}
-              {receipt.saleSurcharge > 0 && `Recargo +${formatMoney(receipt.saleSurcharge)}`}
-            </p>
-          )}
-          <div className="ticket-total"><span>TOTAL</span><strong>{formatMoney(receipt.total)}</strong></div>
-          <p className="ticket-line-sm">Pago: {receipt.paymentSummary}</p>
-          {receipt.amountTendered !== null && (
-            <p className="ticket-line-sm">
-              Recibido {formatMoney(receipt.amountTendered)} · Vuelto {formatMoney(Math.max(receipt.change ?? 0, 0))}
-            </p>
-          )}
-          <p className="ticket-footer print-only-header">Gracias por su compra</p>
-        </section>
+        <ReceiptView
+          receipt={receipt}
+          branchName={currentBranchName() ?? "Patagonia OS"}
+          thermalPrintBusy={thermalPrintBusy}
+          onPrint={handlePrint}
+          onThermalPrint={handleThermalPrint}
+        />
       )}
 
       {movementReceipt && (
-        <section ref={movementReceiptRef} className="panel print-area receipt-ticket" style={{ marginTop: 18 }}>
-          <div className="panel-title">
-            <h2>Comprobante</h2>
-            <div className="no-print ticket-actions">
-              <button className="ticket-action-btn" onClick={() => handlePrint()}>Imprimir</button>
-              <button className="ticket-action-btn" onClick={() => setMovementReceipt(null)}>Cerrar</button>
-            </div>
-          </div>
-
-          <div className="ticket-header">
-            <strong>{branches.find((b) => b.id === branchId)?.name ?? "Patagonia OS"}</strong>
-            <p>{movementReceipt.title}</p>
-            <p>{new Date(movementReceipt.date).toLocaleString("es-AR")}</p>
-          </div>
-
-          <div className="ticket-rule" />
-          <p className="ticket-line-sm">Cuenta: {movementReceipt.accountName}</p>
-          {movementReceipt.counterpartName && (
-            <p className="ticket-line-sm">{movementReceipt.counterpartLabel}: {movementReceipt.counterpartName}</p>
-          )}
-          <p className="ticket-line-sm">{movementReceipt.detail}</p>
-          <div className="ticket-total"><span>MONTO</span><strong>{formatMoney(movementReceipt.amount)}</strong></div>
-          <div className="ticket-rule" />
-
-          <div style={{ marginTop: 48 }}>
-            <p style={{ borderTop: "1px solid #000", paddingTop: 4, textAlign: "center", margin: 0 }}>Firma</p>
-            <p className="muted" style={{ textAlign: "center", fontSize: 12, margin: "2px 0 0" }}>Aclaración y DNI</p>
-          </div>
-        </section>
+        <MovementReceiptView
+          ref={movementReceiptRef}
+          movementReceipt={movementReceipt}
+          branchName={currentBranchName() ?? "Patagonia OS"}
+          onPrint={() => handlePrint()}
+          onClose={() => setMovementReceipt(null)}
+        />
       )}
 
       {closeSummary && (
-        <section className="panel print-area" style={{ marginTop: 18 }}>
-          <div className="panel-title">
-            <h2>Detalle del turno cerrado</h2>
-            <div className="no-print" style={{ display: "flex", gap: 8 }}>
-              {isThermalPrintSupported() && (
-                <button className="secondary" disabled={thermalPrintBusy} onClick={handleCloseTicketPrint}>
-                  {thermalPrintBusy ? "Imprimiendo…" : "Ticket (térmica)"}
-                </button>
-              )}
-              <button className="secondary" onClick={() => handlePrint()}>Imprimir</button>
-            </div>
-          </div>
-          <p className="muted print-only-header">Cerrado {new Date().toLocaleString("es-AR")}</p>
-          <p><strong>Total del turno: {formatMoney(closeSummary.total)}</strong></p>
-          <div className="panel" style={{ padding: 14, marginBottom: 16 }}>
-            <p className="muted" style={{ margin: 0, marginBottom: 6, fontWeight: 800, textTransform: "uppercase", fontSize: 12 }}>Arqueo de caja</p>
-            {closeSummary.breakdown && (
-              <>
-                <p style={{ margin: "4px 0" }}>Fondo inicial: <strong>{formatMoney(closeSummary.breakdown.openingCash)}</strong></p>
-                <p style={{ margin: "4px 0" }}>+ Ventas en efectivo: <strong>{formatMoney(closeSummary.breakdown.cashSales)}</strong></p>
-                {closeSummary.breakdown.cashInflows > 0 && (
-                  <p style={{ margin: "4px 0" }}>+ Ingresos de caja: <strong>{formatMoney(closeSummary.breakdown.cashInflows)}</strong></p>
-                )}
-                <p style={{ margin: "4px 0" }}>- Salidas de efectivo (vales, pagos, egresos): <strong>{formatMoney(closeSummary.breakdown.cashOutflows)}</strong></p>
-              </>
-            )}
-            <p style={{ margin: "4px 0" }}>Efectivo esperado: <strong>{formatMoney(closeSummary.expectedCash)}</strong></p>
-            {closeSummary.breakdown && closeSummary.breakdown.noncashOutflows > 0 && (
-              <p className="num-negative" style={{ margin: "6px 0", fontWeight: 700 }}>
-                Ojo: {formatMoney(closeSummary.breakdown.noncashOutflows)} en vales/pagos/egresos de este turno se cargaron con una cuenta que no es de efectivo, por eso NO se restaron del efectivo esperado. Si esa plata salió del cajón, tiene que cargarse con la cuenta Efectivo.
-              </p>
-            )}
-            {closeSummary.countedCash !== null ? (
-              <>
-                <p style={{ margin: "4px 0" }}>Efectivo contado: <strong>{formatMoney(closeSummary.countedCash)}</strong></p>
-                <p style={{ margin: "4px 0" }}>
-                  Diferencia:{" "}
-                  <strong className={(closeSummary.difference ?? 0) < 0 ? "num-negative" : (closeSummary.difference ?? 0) > 0 ? "num-positive" : undefined}>
-                    {formatMoney(closeSummary.difference ?? 0)}
-                  </strong>
-                </p>
-              </>
-            ) : (
-              <p className="muted" style={{ margin: "4px 0" }}>No se cargó el conteo de efectivo al cerrar.</p>
-            )}
-          </div>
-          {closeSummary.byAccount.length > 0 && (
-            <table className="data-table" style={{ marginBottom: 16 }}>
-              <thead>
-                <tr>
-                  <th>Cuenta</th>
-                  <th className="num">Ventas</th>
-                  <th className="num">Monto</th>
-                  <th className="num no-print">Real (posnet/resumen)</th>
-                  <th className="num no-print">Diferencia</th>
-                </tr>
-              </thead>
-              <tbody>
-                {closeSummary.byAccount.map((row) => {
-                  const account = accounts.find((a) => a.id === row.accountId);
-                  const cashRowCount = closeSummary.byAccount.filter((r) => accounts.find((a) => a.id === r.accountId)?.paymentMethod === "cash").length;
-                  // Fila de efectivo: lo que se cuenta (caja fuerte) sale de las
-                  // ventas en efectivo MENOS lo que salió de esa plata -- vales,
-                  // pagos a proveedores y egresos que no fueron a la caja fuerte.
-                  // Sin esto la diferencia daba negativa por todo lo pagado.
-                  const isCashRow = account?.paymentMethod === "cash" && cashRowCount === 1 && closeSummary.breakdown !== null;
-                  const otherOutflows = isCashRow
-                    ? closeAdjustments
-                        .filter((a) => a.direction === "out" && a.movementType === "ajuste" && a.accountName === account?.name && !/caja\s*f|fuerte/i.test(a.notes ?? ""))
-                        .reduce((sum, a) => sum + a.amount, 0)
-                    : 0;
-                  const cashDeductions = isCashRow && closeSummary.breakdown
-                    ? closeSummary.breakdown.cashVales + closeSummary.breakdown.cashSupplierPayments + otherOutflows
-                    : 0;
-                  const expectedAmount = row.amount - cashDeductions;
-                  const realInput = accountReconcileInput[row.accountId] ?? "";
-                  const realValue = realInput.trim() ? parseAmount(realInput) : null;
-                  const diff = realValue !== null && Number.isFinite(realValue) ? realValue - expectedAmount : null;
-                  return (
-                    <Fragment key={row.accountId}>
-                    <tr>
-                      <td>{account?.name ?? row.accountId}</td>
-                      <td className="num">{row.salesCount}</td>
-                      <td className="num">{formatMoney(row.amount)}</td>
-                      <td className="num no-print">
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          placeholder="$"
-                          style={{ width: 110, textAlign: "right" }}
-                          value={realInput}
-                          onChange={(e) => setAccountReconcileInput({ ...accountReconcileInput, [row.accountId]: e.target.value })}
-                        />
-                      </td>
-                      <td className="num no-print">
-                        {diff !== null && (
-                          <strong className={diff < 0 ? "num-negative" : diff > 0 ? "num-positive" : undefined}>
-                            {formatMoney(diff)}
-                          </strong>
-                        )}
-                      </td>
-                    </tr>
-                    {isCashRow && closeSummary.breakdown && (
-                      <tr className="no-print">
-                        <td colSpan={5} className="muted" style={{ fontSize: 13 }}>
-                          Lo que tiene que dar la caja fuerte: ventas {formatMoney(row.amount)}
-                          {closeSummary.breakdown.cashVales > 0 && ` − vales ${formatMoney(closeSummary.breakdown.cashVales)}`}
-                          {closeSummary.breakdown.cashSupplierPayments > 0 && ` − pagos a proveedores ${formatMoney(closeSummary.breakdown.cashSupplierPayments)}`}
-                          {otherOutflows > 0 && ` − otras salidas ${formatMoney(otherOutflows)}`}
-                          {" = "}<strong>{formatMoney(expectedAmount)}</strong>. Los movimientos con "caja fuerte" en el motivo se cuentan como depósito, no como salida.
-                        </td>
-                      </tr>
-                    )}
-                    </Fragment>
-                  );
-                })}
-              </tbody>
-            </table>
-          )}
-          {closeAdjustments.length > 0 && (
-            <div className="panel" style={{ padding: 14, marginBottom: 16 }}>
-              <p className="muted" style={{ margin: 0, marginBottom: 6, fontWeight: 800, textTransform: "uppercase", fontSize: 12 }}>
-                Movimientos de caja del turno
-              </p>
-              <table className="data-table no-print">
-                <thead>
-                  <tr><th>Hora</th><th>Tipo</th><th>Cuenta</th><th>Motivo</th><th className="num">Monto</th></tr>
-                </thead>
-                <tbody>
-                  {closeAdjustments.map((adj) => (
-                    <tr key={adj.id}>
-                      <td>{new Date(adj.createdAt).toLocaleTimeString("es-AR")}</td>
-                      <td>{adj.movementType === "transferencia" ? "Traspaso" : adj.direction === "in" ? "Ingreso" : "Egreso"}</td>
-                      <td>{adj.accountName}</td>
-                      <td>{adj.notes ?? "-"}</td>
-                      <td className="num">{adj.direction === "in" ? "" : "-"}{formatMoney(adj.amount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="print-only-list">
-                {closeAdjustments.map((adj) => (
-                  <div key={adj.id}>
-                    <div className="print-row">
-                      <span className="print-row-label">
-                        {new Date(adj.createdAt).toLocaleTimeString("es-AR")} · {adj.movementType === "transferencia" ? "Traspaso" : adj.direction === "in" ? "Ingreso" : "Egreso"} · {adj.accountName}
-                      </span>
-                      <span className="print-row-amount">{adj.direction === "in" ? "" : "-"}{formatMoney(adj.amount)}</span>
-                    </div>
-                    {adj.notes && <p className="print-row-detail">{adj.notes}</p>}
-                  </div>
-                ))}
-              </div>
-              <p style={{ margin: "8px 0 0" }}>
-                Total sacado de caja (egresos y traspasos):{" "}
-                <strong>
-                  {formatMoney(closeAdjustments.filter((a) => a.direction === "out").reduce((sum, a) => sum + a.amount, 0))}
-                </strong>
-              </p>
-            </div>
-          )}
-          {closeVales.length > 0 && (
-            <div className="panel" style={{ padding: 14, marginBottom: 16 }}>
-              <p className="muted" style={{ margin: 0, marginBottom: 6, fontWeight: 800, textTransform: "uppercase", fontSize: 12 }}>
-                Vales a empleados del turno
-              </p>
-              <table className="data-table no-print">
-                <thead>
-                  <tr><th>Hora</th><th>Empleado</th><th>Detalle</th><th className="num">Monto</th></tr>
-                </thead>
-                <tbody>
-                  {closeVales.map((v) => (
-                    <tr key={v.id}>
-                      <td>{new Date(v.createdAt).toLocaleTimeString("es-AR")}</td>
-                      <td>{v.employeeName}</td>
-                      <td>{v.detail || "-"}</td>
-                      <td className="num">{formatMoney(v.amount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="print-only-list">
-                {closeVales.map((v) => (
-                  <div key={v.id}>
-                    <div className="print-row">
-                      <span className="print-row-label">{new Date(v.createdAt).toLocaleTimeString("es-AR")} · {v.employeeName}</span>
-                      <span className="print-row-amount">{formatMoney(v.amount)}</span>
-                    </div>
-                    {v.detail && <p className="print-row-detail">{v.detail}</p>}
-                  </div>
-                ))}
-              </div>
-              <p style={{ margin: "8px 0 0" }}>
-                Total en vales: <strong>{formatMoney(closeVales.reduce((sum, v) => sum + v.amount, 0))}</strong>
-              </p>
-            </div>
-          )}
-          {closeSupplierPayments.length > 0 && (
-            <div className="panel" style={{ padding: 14, marginBottom: 16 }}>
-              <p className="muted" style={{ margin: 0, marginBottom: 6, fontWeight: 800, textTransform: "uppercase", fontSize: 12 }}>
-                Pagos a proveedores del turno
-              </p>
-              <table className="data-table no-print">
-                <thead>
-                  <tr><th>Hora</th><th>Proveedor</th><th>Cuenta</th><th>Detalle</th><th className="num">Monto</th></tr>
-                </thead>
-                <tbody>
-                  {closeSupplierPayments.map((p) => (
-                    <tr key={p.id}>
-                      <td>{new Date(p.createdAt).toLocaleTimeString("es-AR")}</td>
-                      <td>{p.supplierName}</td>
-                      <td>{p.accountName}</td>
-                      <td>{p.notes || "-"}</td>
-                      <td className="num">{formatMoney(p.amount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div className="print-only-list">
-                {closeSupplierPayments.map((p) => (
-                  <div key={p.id}>
-                    <div className="print-row">
-                      <span className="print-row-label">{new Date(p.createdAt).toLocaleTimeString("es-AR")} · {p.supplierName} · {p.accountName}</span>
-                      <span className="print-row-amount">{formatMoney(p.amount)}</span>
-                    </div>
-                    {p.notes && <p className="print-row-detail">{p.notes}</p>}
-                  </div>
-                ))}
-              </div>
-              <p style={{ margin: "8px 0 0" }}>
-                Total en pagos a proveedores: <strong>{formatMoney(closeSupplierPayments.reduce((sum, p) => sum + p.amount, 0))}</strong>
-              </p>
-            </div>
-          )}
-          <table className="data-table no-print">
-            <thead>
-              <tr><th>Hora</th><th>Producto</th><th className="num">Cant.</th><th className="num">Subtotal</th><th>Pago</th></tr>
-            </thead>
-            <tbody>
-              {closeDetail.flatMap((sale) =>
-                sale.items.map((item, idx) => (
-                  <tr key={`${sale.id}-${idx}`}>
-                    <td>{idx === 0 ? new Date(sale.createdAt).toLocaleTimeString("es-AR") : ""}</td>
-                    <td>{item.productName}</td>
-                    <td className="num">{item.quantity} {UNIT_LABELS[item.unit]}</td>
-                    <td className="num">{formatMoney(item.lineTotal)}</td>
-                    <td>{idx === 0 ? sale.payments.map((p) => p.accountName).join(" + ") : ""}</td>
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-          <div className="print-only-list">
-            {closeDetail.map((sale) => (
-              <div key={sale.id} style={{ marginBottom: 6 }}>
-                <div className="print-row">
-                  <span className="print-row-label">
-                    {new Date(sale.createdAt).toLocaleTimeString("es-AR")} · {sale.payments.map((p) => p.accountName).join(" + ")}
-                    {sale.voidedAt ? " · ANULADA" : ""}
-                  </span>
-                  <span className="print-row-amount">{formatMoney(sale.total)}</span>
-                </div>
-                {sale.items.map((item, idx) => (
-                  <p className="print-row-detail" key={idx}>
-                    {item.productName} ({item.quantity} {UNIT_LABELS[item.unit]}) {formatMoney(item.lineTotal)}
-                  </p>
-                ))}
-              </div>
-            ))}
-          </div>
-          {closeDetail.length === 0 && <p className="muted">No hubo ventas en este turno.</p>}
-        </section>
+        <CloseSummaryView
+          summary={closeSummary}
+          accounts={accounts}
+          adjustments={closeAdjustments}
+          vales={closeVales}
+          supplierPayments={closeSupplierPayments}
+          detail={closeDetail}
+          reconcileInput={accountReconcileInput}
+          onReconcileChange={setAccountReconcileInput}
+          thermalPrintBusy={thermalPrintBusy}
+          onThermalPrint={handleCloseTicketPrint}
+          onPrint={() => handlePrint()}
+        />
       )}
     </>
   );
