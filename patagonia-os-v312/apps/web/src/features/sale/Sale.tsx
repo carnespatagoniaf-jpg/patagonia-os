@@ -46,6 +46,7 @@ import {
   detectScaleConfig,
   getBranchScaleConfig,
   parseTicketTotalBarcode,
+  TICKET_TOTAL_CONFIRM_FROM,
   parseWeightBarcode,
   saveBranchScaleConfig,
   type ScaleConfig,
@@ -904,6 +905,11 @@ export function Sale() {
       const key = `ticket-${raw.padStart(13, "0")}`;
       if (cart.some((l) => l.key === key)) {
         setMessage("Ese ticket de la balanza ya está cargado en esta venta.");
+      } else if (
+        ticketTotal >= TICKET_TOTAL_CONFIRM_FROM &&
+        !window.confirm(`El ticket de la balanza indica ${formatMoney(ticketTotal)}. ¿Coincide con el TOTAL impreso en el ticket?`)
+      ) {
+        setMessage("Ticket de la balanza no cargado. Revisá el importe o cargá los productos a mano.");
       } else {
         setCart((current) => [...current, { key, kind: "manual", name: "Ticket de balanza", unit: "unit", quantity: 1, unitPrice: ticketTotal }]);
         setMessage(`Ticket de balanza cargado: ${formatMoney(ticketTotal)}.`);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { detectScaleConfig, parseTicketTotalBarcode, parseWeightBarcode } from "./scale-barcode";
+import { detectScaleConfig, parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM } from "./scale-barcode";
 
 /** Dígito verificador EAN-13 para los primeros 12 dígitos. */
 function withCheckDigit(first12: string): string {
@@ -39,8 +39,14 @@ describe("parseTicketTotalBarcode (ticket de total de la balanza Kretz Aura)", (
     assert.equal(parseTicketTotalBarcode(withCheckDigit("000009999999")), 99999.99);
   });
 
-  it("límite conocido: el formato confirmado tiene 5 ceros + 7 dígitos, así que $100.000 o más no se lee", () => {
-    assert.equal(parseTicketTotalBarcode(withCheckDigit("000010000000")), null);
+  it("importes de $100.000 o más se leen (campo de 8 dígitos, sin confirmar con ticket real)", () => {
+    assert.equal(parseTicketTotalBarcode(withCheckDigit("000010000000")), 100000);
+    assert.equal(parseTicketTotalBarcode(withCheckDigit("000012345600")), 123456);
+    assert.ok(100000 >= TICKET_TOTAL_CONFIRM_FROM, "desde $100.000 Mostrador pide confirmar contra el TOTAL impreso");
+  });
+
+  it("no lee códigos con menos de 4 ceros iniciales", () => {
+    assert.equal(parseTicketTotalBarcode(withCheckDigit("000112345600")), null);
   });
 });
 
@@ -67,6 +73,26 @@ describe("detectScaleConfig (asistente de calibración)", () => {
     const config = detectScaleConfig(code, 1.25);
     assert.ok(config);
     assert.deepEqual(parseWeightBarcode(code, config), { plu: "12", kind: "weight", weightKg: 1.25 });
+  });
+
+  it("reconoce el formato Kretz por defecto: 1 + PLU 5 + peso 5 + dígito reservado + verificador", () => {
+    const code = withCheckDigit("200012012500");
+    const config = detectScaleConfig(code, 1.25);
+    assert.ok(config);
+    assert.equal(config.weightLength, 5);
+    assert.deepEqual(parseWeightBarcode(code, config), { plu: "12", kind: "weight", weightKg: 1.25 });
+  });
+
+  it("prefiere el formato que solo deja el verificador al final", () => {
+    const config = detectScaleConfig(withCheckDigit("200001201250"), 1.25);
+    assert.ok(config);
+    assert.equal(config.prefixLength + config.pluLength + config.weightLength, 12);
+  });
+
+  it("no filtra campos internos en la configuración devuelta", () => {
+    const config = detectScaleConfig(withCheckDigit("200001201250"), 1.25);
+    assert.ok(config);
+    assert.equal("trailing" in config, false);
   });
 
   it("devuelve null si el peso indicado no coincide con nada", () => {

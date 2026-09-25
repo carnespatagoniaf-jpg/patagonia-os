@@ -65,20 +65,28 @@ export function parseWeightBarcode(code: string, config: ScaleConfig = DEFAULT_S
  * productos lo componen. Formato confirmado con un ticket real: EAN-13 =
  * "00000" + importe en centavos (7 dígitos) + dígito verificador. Ej.
  * 0000014550003 = $14.550,00 (el ticket mostraba "TOTAL = 14550.00$").
- * Se exige el dígito verificador EAN-13 válido y los 5 ceros iniciales para
- * no confundirlo con una etiqueta de un solo producto ni con un código común.
+ * Se exige el dígito verificador EAN-13 válido y los ceros iniciales para no
+ * confundirlo con una etiqueta de un solo producto ni con un código común.
+ *
+ * Solo hay UN ticket real de muestra, con un importe de 5 cifras. Para
+ * importes de $100.000 o más se asume que el campo se ensancha a 8 dígitos
+ * (4 ceros iniciales) -- no está confirmado, por eso desde
+ * TICKET_TOTAL_CONFIRM_FROM el llamador le pide al cajero que verifique el
+ * importe contra el TOTAL impreso antes de cargarlo.
  */
+export const TICKET_TOTAL_CONFIRM_FROM = 100000;
+
 export function parseTicketTotalBarcode(rawCode: string): number | null {
   // Muchos lectores devuelven un EAN-13 que empieza en 0 como UPC-A de 12
   // dígitos (sin ese primer cero) -- pasó con un cliente real. Se repone.
   const code = /^[0-9]{12}$/.test(rawCode) ? `0${rawCode}` : rawCode;
-  if (!/^[0-9]{13}$/.test(code) || !code.startsWith("00000")) return null;
+  if (!/^[0-9]{13}$/.test(code) || !code.startsWith("0000")) return null;
 
   const digits = code.split("").map(Number);
   const sum = digits.slice(0, 12).reduce((acc, d, i) => acc + d * (i % 2 === 0 ? 1 : 3), 0);
   if ((10 - (sum % 10)) % 10 !== digits[12]) return null;
 
-  const cents = parseInt(code.slice(5, 12), 10);
+  const cents = parseInt(code.slice(4, 12), 10);
   return cents > 0 ? cents / 100 : null;
 }
 
@@ -94,24 +102,31 @@ export function detectScaleConfig(code: string, knownValue: number, payloadType:
   const total = code.length;
   const TOLERANCE = payloadType === "weight" ? 0.001 : 0.01;
 
-  const candidates: ScaleConfig[] = [];
+  // "trailing" = dígitos que sobran después del valor: 1 es solo el verificador
+  // (lo más común); 2 o más es un dígito reservado antes del verificador (el
+  // formato Kretz por defecto, 1+5+5 de 13, es así). Se prueban primero los
+  // que solo dejan el verificador.
+  const candidates: (ScaleConfig & { trailing: number })[] = [];
   for (const prefixLength of [1, 2, 0]) {
     for (const pluLength of [5, 4, 6, 3]) {
-      // Se reserva 1 dígito verificador al final -- combinación estándar EAN.
-      const weightLength = total - prefixLength - pluLength - 1;
-      if (weightLength < 3 || weightLength > 6) continue;
-      for (const weightDivisor of [1000, 100, 1]) {
-        candidates.push({ prefixLength, pluLength, weightLength, weightDivisor, totalLength: total, payloadType });
+      for (const weightLength of [3, 4, 5, 6]) {
+        const trailing = total - prefixLength - pluLength - weightLength;
+        if (trailing < 1 || trailing > 3) continue;
+        for (const weightDivisor of [1000, 100, 1]) {
+          candidates.push({ prefixLength, pluLength, weightLength, weightDivisor, totalLength: total, payloadType, trailing });
+        }
       }
     }
   }
+  candidates.sort((a, b) => a.trailing - b.trailing);
 
   for (const candidate of candidates) {
     const result = parseWeightBarcode(code, candidate);
     if (!result) continue;
     const value = result.kind === "weight" ? result.weightKg : result.amount;
     if (Math.abs(value - knownValue) < TOLERANCE) {
-      return candidate;
+      const { trailing: _trailing, ...config } = candidate;
+      return config;
     }
   }
 
