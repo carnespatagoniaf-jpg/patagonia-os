@@ -4,17 +4,30 @@ import { supabase } from "../../lib/supabase";
 export async function listProductsForBranch(branchId: string, includeInactive = false): Promise<Product[]> {
   if (!supabase) return [];
 
-  let query = supabase
-    .from("products_with_stock")
-    .select("id,code,name,unit,cost,price_retail,min_stock,stock,active,category_id")
-    .eq("branch_id", branchId)
-    .order("name");
-  if (!includeInactive) query = query.eq("active", true);
+  // Supabase devuelve como máximo 1000 filas por consulta: se pide por páginas
+  // (orden estable por nombre + id) para no cortar el catálogo en silencio.
+  const PAGE_SIZE = 1000;
+  const rows: {
+    id: string; code: string; name: string; unit: Product["unit"]; cost: number | string; price_retail: number | string;
+    min_stock: number | string; stock: number | string; active: boolean; category_id: string | null;
+  }[] = [];
+  for (let from = 0; ; from += PAGE_SIZE) {
+    let query = supabase
+      .from("products_with_stock")
+      .select("id,code,name,unit,cost,price_retail,min_stock,stock,active,category_id")
+      .eq("branch_id", branchId)
+      .order("name")
+      .order("id")
+      .range(from, from + PAGE_SIZE - 1);
+    if (!includeInactive) query = query.eq("active", true);
 
-  const { data, error } = await query;
-  if (error) throw error;
+    const { data, error } = await query;
+    if (error) throw error;
+    rows.push(...(data ?? []));
+    if (!data || data.length < PAGE_SIZE) break;
+  }
 
-  return (data ?? []).map((row) => ({
+  return rows.map((row) => ({
     id: row.id,
     code: row.code,
     name: row.name,
