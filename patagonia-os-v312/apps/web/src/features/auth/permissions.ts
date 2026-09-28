@@ -14,6 +14,7 @@ export type Permission =
   | "employees.manage"
   | "profitability.view"
   | "carcass.manage"
+  | "recipes.manage"
   | "creditors.manage"
   | "customers.manage"
   | "reports.view"
@@ -69,6 +70,7 @@ export const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> 
     "employees.manage",
     "profitability.view",
     "carcass.manage",
+    "recipes.manage",
     "creditors.manage",
     "customers.manage",
     "reports.view",
@@ -97,6 +99,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   "employees.manage": "Empleados",
   "profitability.view": "Rentabilidad",
   "carcass.manage": "Despiece",
+  "recipes.manage": "Recetas (costos de productos elaborados)",
   "creditors.manage": "Deudas (deudores)",
   "customers.manage": "Clientes",
   "reports.view": "Reportes",
@@ -127,6 +130,7 @@ export const PAGE_PERMISSIONS = {
   employees: "employees.manage",
   profitability: "profitability.view",
   carcass: "carcass.manage",
+  recipes: "recipes.manage",
   creditors: "creditors.manage",
   customers: "customers.manage",
   reports: "reports.view",

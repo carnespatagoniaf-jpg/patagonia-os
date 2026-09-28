@@ -82,6 +82,60 @@ export function priceFromMargin(cost: Money, marginPct: number): Money {
   return roundMoney(cost * (1 + marginPct / 100));
 }
 
+/** Un insumo de una receta: `quantity` es lo que queda NETO en el producto
+ * terminado (en la unidad del insumo), `wastePct` la merma al limpiarlo
+ * (grasa, nervio, hueso). Lo que hay que comprar es el bruto:
+ * neto / (1 - merma). `unitCost` es el costo actual del insumo por su unidad. */
+export interface RecipeIngredientInput {
+  quantity: Quantity;
+  wastePct: number;
+  unitCost: Money;
+}
+
+export interface RecipeCostInput {
+  ingredients: RecipeIngredientInput[];
+  /** Packaging, mano de obra, gas, etc. por lote. */
+  extraCost: Money;
+  /** Cuánto producto terminado sale del lote (en la unidad del producto terminado). */
+  yieldQty: Quantity;
+  /** Margen objetivo sobre el costo, igual que en Stock: precio = costo × (1 + margen/100). */
+  marginPct?: number | null;
+}
+
+export interface RecipeLineCost {
+  /** Cantidad bruta a comprar para que queden `quantity` netos. */
+  grossQuantity: Quantity;
+  cost: Money;
+}
+
+export interface RecipeCostResult {
+  lines: RecipeLineCost[];
+  batchCost: Money;
+  /** Costo por kg o por unidad del producto terminado. 0 si el rinde no es válido. */
+  unitCost: Money;
+  suggestedPrice: Money | null;
+}
+
+/** Costeo de una receta (escandallo). El mismo cálculo, con el mismo redondeo,
+ * lo hace en SQL `apply_recipe_to_product` (migración 097): si se toca uno hay
+ * que tocar el otro y sus pruebas. */
+export function recipeCost(input: RecipeCostInput): RecipeCostResult {
+  const lines = input.ingredients.map((ingredient) => {
+    const keep = 1 - ingredient.wastePct / 100;
+    const grossQuantity = keep > 0 ? ingredient.quantity / keep : 0;
+    return { grossQuantity, cost: roundMoney(grossQuantity * ingredient.unitCost) };
+  });
+  const batchCost = roundMoney(lines.reduce((sum, line) => sum + line.cost, 0) + input.extraCost);
+  const unitCost = input.yieldQty > 0 ? roundMoney(batchCost / input.yieldQty) : 0;
+  const hasMargin = input.marginPct !== null && input.marginPct !== undefined && Number.isFinite(input.marginPct);
+  return {
+    lines,
+    batchCost,
+    unitCost,
+    suggestedPrice: hasMargin && unitCost > 0 ? priceFromMargin(unitCost, input.marginPct as number) : null
+  };
+}
+
 export interface Supplier {
   id: string;
   name: string;

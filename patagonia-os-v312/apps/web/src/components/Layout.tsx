@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { BarChart3, Beef, Boxes, Download, FileText, HandCoins, Handshake, History, KeyRound, Menu, Upload, LogOut, PackagePlus, Receipt, Tag, TrendingUp, Users, Wallet } from "lucide-react";
+import { BarChart3, Beef, Boxes, ChefHat, Download, FileText, HandCoins, Handshake, History, KeyRound, Menu, Upload, LogOut, PackagePlus, Receipt, Tag, TrendingUp, Users, Wallet } from "lucide-react";
 import { useAuth } from "../features/auth/AuthProvider";
 import { canAccessPage, type Page } from "../features/auth/permissions";
 import { useActiveBranch } from "../features/branches/BranchProvider";
@@ -35,7 +35,8 @@ const navGroups: Array<{ heading: string | null; items: NavItem[] }> = [
       { page: "products", label: "Productos", icon: Tag },
       { page: "inventory", label: "Stock", icon: Boxes },
       { page: "purchases", label: "Compras", icon: PackagePlus },
-      { page: "carcass", label: "Despiece", icon: Beef }
+      { page: "carcass", label: "Despiece", icon: Beef },
+      { page: "recipes", label: "Recetas", icon: ChefHat }
     ]
   },
   {

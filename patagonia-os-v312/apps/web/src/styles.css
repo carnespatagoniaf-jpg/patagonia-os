@@ -555,3 +555,8 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .import-skip { background: #f2f4f7; color: #47505c; }
 .import-error { background: #fdecea; color: #b42318; }
 .import-preview { max-height: 380px; overflow: auto; border: 1px solid #eef0f3; border-radius: 10px; background: white; margin-bottom: 12px; }
+
+/* Recetas: resumen de costo de la receta que se está armando */
+.recipe-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 18px; }
+.recipe-summary > div { background: #f7f8fa; border: 1px solid #edf0f4; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
+.recipe-summary strong { font-size: 18px; font-variant-numeric: tabular-nums; }

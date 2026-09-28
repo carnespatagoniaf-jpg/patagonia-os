@@ -7,6 +7,7 @@ import {
   estimatedProfit,
   marginPercent,
   priceFromMargin,
+  recipeCost,
   purchaseTotal,
   Product
 } from "./index.js";
@@ -65,4 +66,52 @@ test("margen es 0 cuando el costo es 0 (evita división por cero)", () => {
 test("calcula el subtotal de un corte por peso x precio", () => {
   // Asado de la media 119: 8.61kg a $16.000/kg -> $137.760 (planilla real de despiece)
   assert.equal(carcassCutLineTotal({ weight: 8.61, unitPrice: 16000 }), 137760);
+});
+
+test("recipeCost: milanesas con merma de limpieza en la nalga", () => {
+  const result = recipeCost({
+    ingredients: [
+      { quantity: 10, wastePct: 8, unitCost: 15000 }, // nalga: hay que comprar 10 / 0,92 = 10,8696 kg
+      { quantity: 20, wastePct: 0, unitCost: 300 }, // huevos
+      { quantity: 2, wastePct: 0, unitCost: 2000 } // pan rallado
+    ],
+    extraCost: 5000,
+    yieldQty: 10,
+    marginPct: 45
+  });
+  assert.equal(result.lines[0].cost, 163043.48);
+  assert.equal(Math.round(result.lines[0].grossQuantity * 10000) / 10000, 10.8696);
+  assert.equal(result.batchCost, 178043.48);
+  assert.equal(result.unitCost, 17804.35);
+  assert.equal(result.suggestedPrice, 25816.31);
+});
+
+test("recipeCost: hamburguesas sin merma, el rinde es la suma de los kilos", () => {
+  const result = recipeCost({
+    ingredients: [
+      { quantity: 1, wastePct: 0, unitCost: 10000 },
+      { quantity: 0.3, wastePct: 0, unitCost: 4000 }
+    ],
+    extraCost: 0,
+    yieldQty: 1.3,
+    marginPct: 60
+  });
+  assert.equal(result.batchCost, 11200);
+  assert.equal(result.unitCost, 8615.38);
+  assert.equal(result.suggestedPrice, 13784.61);
+});
+
+test("recipeCost: sin rinde válido no da costo ni precio, y sin margen no sugiere precio", () => {
+  const sinRinde = recipeCost({ ingredients: [{ quantity: 1, wastePct: 0, unitCost: 100 }], extraCost: 0, yieldQty: 0, marginPct: 30 });
+  assert.equal(sinRinde.unitCost, 0);
+  assert.equal(sinRinde.suggestedPrice, null);
+  const sinMargen = recipeCost({ ingredients: [{ quantity: 1, wastePct: 0, unitCost: 100 }], extraCost: 0, yieldQty: 2 });
+  assert.equal(sinMargen.unitCost, 50);
+  assert.equal(sinMargen.suggestedPrice, null);
+});
+
+test("recipeCost: una merma del 100% no rompe el cálculo", () => {
+  const result = recipeCost({ ingredients: [{ quantity: 1, wastePct: 100, unitCost: 100 }], extraCost: 10, yieldQty: 1 });
+  assert.equal(result.lines[0].grossQuantity, 0);
+  assert.equal(result.batchCost, 10);
 });
