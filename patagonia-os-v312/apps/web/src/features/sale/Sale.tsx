@@ -682,7 +682,7 @@ export function Sale() {
       } else {
         const raw = err instanceof Error ? err.message : String(err);
         setMessage(
-          `No se pudo conectar directo por USB (detalle técnico: ${raw}). Es normal si Windows ya tiene instalado el driver de esta impresora para el diálogo de impresión normal -- en ese caso este camino 100% automático no va a funcionar para este equipo. Usá el modo kiosco como alternativa (link para descargarlo más abajo).`
+          `No se pudo conectar directo por USB (detalle técnico: ${raw}). Es normal si Windows ya tiene instalado el driver de esta impresora para el diálogo de impresión normal -- en ese caso este camino 100% automático no va a funcionar para este equipo. Descargá el script de más abajo (link "kiosco-impresora.bat") y ejecutalo: deja todo listo -- el acceso directo sin diálogo Y el tamaño de papel del rollo -- y al final te explica, paso a paso y en un solo lugar, lo poco que falta hacer a mano.`
         );
       }
     } finally {
