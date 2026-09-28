@@ -261,6 +261,11 @@ try {
   exit 0
 }
 
+# La primera consulta de impresoras carga varios modulos de Windows y puede
+# tardar unos segundos (mas en una PC lenta): se hace ahora, apenas arranca,
+# para que nadie la espere despues, cuando esta cobrando o eligiendo impresora.
+try { Get-PrinterList | Out-Null } catch { }
+
 while ($listener.IsListening) {
   $ctx = $listener.GetContext()
   try {

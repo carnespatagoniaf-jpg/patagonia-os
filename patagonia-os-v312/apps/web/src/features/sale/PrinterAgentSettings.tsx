@@ -70,7 +70,7 @@ export function PrinterAgentSettings() {
     setTestBusy(true);
     try {
       await printBytes(buildTestTicket(getThermalPrintSettings()));
-      setNote("Listo: mandó un ticket de prueba. Si salió bien, ya está: los comprobantes salen solos al cobrar.");
+      setNote("Listo: mandó un ticket de prueba. Si salió bien, tildá 'Imprimir el comprobante automáticamente al cobrar' (arriba) y los comprobantes van a salir solos.");
     } catch (err) {
       setNote(err instanceof Error ? err.message : "No se pudo imprimir el ticket de prueba.");
     } finally {

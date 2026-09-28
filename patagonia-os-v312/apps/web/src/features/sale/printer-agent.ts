@@ -95,12 +95,12 @@ function markAgentEnabled(): void {
  * pregunta si este navegador ya lo había encontrado antes; con `probe: true`
  * (lo pide una persona tocando "buscar") se pregunta siempre. Un "sí" se
  * recuerda 4 s para no preguntar dos veces seguidas; un "no" se vuelve a
- * chequear siempre (una conexión rechazada en localhost es instantánea). */
+ * chequear siempre (una conexión rechazada en localhost es instantánea, así que esperar 8 s solo pesa cuando el programa está arrancando: al prender la PC tarda unos segundos en estar listo y en ese lapso NO hay que caer al diálogo de Windows). */
 export async function pingPrintAgent(options: { probe?: boolean } = {}): Promise<boolean> {
   if (!options.probe && !isAgentEnabled()) return false;
   if (lastUp !== null && Date.now() - lastUp < 4000) return true;
   try {
-    const res = await agentFetch("/ping", undefined, 1500);
+    const res = await agentFetch("/ping", undefined, 8000);
     const body = (await res.json()) as { ok?: boolean };
     if (res.ok && body.ok) {
       lastUp = Date.now();
@@ -115,7 +115,7 @@ export async function pingPrintAgent(options: { probe?: boolean } = {}): Promise
 }
 
 export async function listAgentPrinters(): Promise<AgentPrinter[]> {
-  const res = await agentFetch("/printers", undefined, 5000);
+  const res = await agentFetch("/printers", undefined, 20000);
   const body = (await res.json()) as { ok?: boolean; printers?: AgentPrinter[]; error?: string };
   if (!res.ok || !body.ok) throw new Error(body.error ?? "No se pudo leer la lista de impresoras.");
   return body.printers ?? [];
@@ -134,7 +134,7 @@ export async function printViaAgent(bytes: Uint8Array): Promise<void> {
   const res = await agentFetch(
     `/print?printer=${encodeURIComponent(name)}`,
     { method: "POST", headers: { "Content-Type": "application/octet-stream" }, body: new Blob([bytes as unknown as BlobPart]) },
-    10000
+    30000
   );
   const body = (await res.json().catch(() => ({}))) as { ok?: boolean; error?: string };
   if (!res.ok || !body.ok) throw new Error(body.error ?? "El programa de impresión no pudo imprimir el ticket.");

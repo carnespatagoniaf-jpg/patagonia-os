@@ -38,9 +38,9 @@ if %ERRORLEVEL% NEQ 0 goto :atajo_fallo
 
 echo 4/4 Prendiendolo ahora...
 start "" /min powershell -NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File "%AGENT%"
-ping -n 5 127.0.0.1 >nul
-
-powershell -NoProfile -Command "try { $r = Invoke-RestMethod -Uri 'http://127.0.0.1:9101/ping' -TimeoutSec 3; if ($r.ok) { exit 0 } else { exit 1 } } catch { exit 1 }"
+rem Al arrancar el programa se prepara unos segundos (mas en una PC lenta):
+rem se reintenta hasta 30 segundos antes de decir que no contesta.
+powershell -NoProfile -Command "for ($i = 0; $i -lt 10; $i++) { Start-Sleep -Seconds 3; try { $r = Invoke-RestMethod -Uri 'http://127.0.0.1:9101/ping' -TimeoutSec 4; if ($r.ok) { exit 0 } } catch { } }; exit 1"
 if %ERRORLEVEL% NEQ 0 goto :no_responde
 
 echo.
