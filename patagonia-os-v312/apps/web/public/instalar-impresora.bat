@@ -16,12 +16,21 @@ if not exist "%DIR%" mkdir "%DIR%"
 set "AGENT=%DIR%\patagonia-print-agent.ps1"
 
 echo 1/4 Descargando el programa...
-powershell -NoProfile -Command "try { Invoke-WebRequest -Uri 'https://app.patagoniasystem.com.ar/patagonia-print-agent.ps1' -OutFile $env:AGENT -UseBasicParsing } catch { exit 1 }"
+rem Se baja a un archivo aparte y recien si es el programa de verdad se reemplaza
+rem el instalado: una descarga mala no puede dejar roto el que ya andaba.
+set "AGENT_NEW=%DIR%\patagonia-print-agent.ps1.descarga"
+if exist "%AGENT_NEW%" del "%AGENT_NEW%"
+powershell -NoProfile -Command "try { Invoke-WebRequest -Uri 'https://app.patagoniasystem.com.ar/patagonia-print-agent.ps1' -OutFile $env:AGENT_NEW -UseBasicParsing } catch { exit 1 }"
 if %ERRORLEVEL% NEQ 0 goto :descarga_fallo
-if not exist "%AGENT%" goto :descarga_fallo
+if not exist "%AGENT_NEW%" goto :descarga_fallo
+rem Si el sitio o el WiFi devolvio una pagina en vez del programa, no seguir.
+findstr /b /c:"# Patagonia OS" "%AGENT_NEW%" >nul
+if %ERRORLEVEL% NEQ 0 goto :descarga_fallo
 
 echo 2/4 Frenando la version anterior, si habia...
 powershell -NoProfile -Command "Get-CimInstance Win32_Process | Where-Object { $_.CommandLine -like '*patagonia-print-agent*' -and $_.ProcessId -ne $PID } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force }"
+move /y "%AGENT_NEW%" "%AGENT%" >nul
+if %ERRORLEVEL% NEQ 0 goto :descarga_fallo
 
 echo 3/4 Dejandolo para que arranque solo con Windows...
 powershell -NoProfile -Command "$q = [char]34; $s = (New-Object -ComObject WScript.Shell).CreateShortcut([Environment]::GetFolderPath('Startup') + '\Patagonia OS - impresion.lnk'); $s.TargetPath = 'powershell.exe'; $s.Arguments = '-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File ' + $q + $env:AGENT + $q; $s.WindowStyle = 7; $s.Description = 'Patagonia OS - programa de impresion de tickets'; $s.Save()"
@@ -52,6 +61,7 @@ pause
 exit /b 0
 
 :descarga_fallo
+if exist "%AGENT_NEW%" del "%AGENT_NEW%"
 echo.
 echo No se pudo descargar el programa. Revisa que la PC tenga internet y
 echo volve a ejecutar este archivo. Si sigue igual, contactanos.
