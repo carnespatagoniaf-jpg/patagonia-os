@@ -4,6 +4,7 @@ import { deleteBranchScaleConfig, detectScaleConfig, saveBranchScaleConfig, type
 import { ScaleWeightSettings } from "./ScaleWeightSettings";
 import { setMostradorPin } from "./company-settings-service";
 import { isThermalPrintSupported } from "./thermal-printer";
+import { PrinterAgentSettings } from "./PrinterAgentSettings";
 
 // Panel de configuración de Mostrador (engranaje): impresora, balanza (peso
 // directo y calibración de etiquetas) y PIN. El asistente de calibración y el
@@ -121,24 +122,30 @@ export function SaleConfigPanel({
             Imprimir el comprobante automáticamente al cobrar
           </label>
           <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
-            Si conectaste una impresora térmica abajo, el ticket sale ahí directo, sin ningún diálogo ni clic extra. Si no conectaste ninguna, al cobrar se abre el diálogo de impresión de Windows -- ahí elegís tu impresora por su nombre y confirmás "Imprimir" (ningún navegador permite saltear ese clic sin una impresora conectada por USB, es una protección de seguridad). Si no tenés impresora, dejalo apagado y nunca te va a aparecer nada solo.
+            Con el programa de impresión instalado (más abajo), el ticket sale directo en tu térmica, sin ningún diálogo ni clic extra. Sin él, al cobrar se abre el diálogo de impresión de Windows -- ahí elegís tu impresora por su nombre y confirmás "Imprimir". Si no tenés impresora, dejalo apagado y nunca te va a aparecer nada solo.
           </p>
-          {isThermalPrintSupported() && (
+          <PrinterAgentSettings />
+          <details style={{ marginTop: 14 }}>
+            <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 700 }}>
+              Otras formas de conectar la impresora (solo si el programa de impresión no te sirve)
+            </summary>
             <div style={{ marginTop: 10 }}>
-              <button className="secondary" disabled={thermalConnectBusy} onClick={onConnectThermal}>
-                {thermalConnectBusy ? "Conectando…" : thermalPaired ? "Volver a elegir impresora térmica" : "Conectar impresora térmica (USB)"}
-              </button>
-              <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
-                {thermalPaired
-                  ? "Impresora térmica conectada en este navegador -- el ticket va a salir ahí solo, sin diálogo, mientras esté prendido \"Imprimir automáticamente\"."
-                  : "Conectala una sola vez (elegila de la lista que te va a mostrar Chrome) para que el ticket salga solo al cobrar, sin ningún diálogo -- igual que se conecta la balanza en Stock."}
-              </p>
+              {isThermalPrintSupported() && (
+                <>
+                  <button className="secondary" disabled={thermalConnectBusy} onClick={onConnectThermal}>
+                    {thermalConnectBusy ? "Conectando…" : thermalPaired ? "Volver a elegir impresora térmica" : "Conectar impresora térmica (USB directo)"}
+                  </button>
+                  <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
+                    Conexión USB directa desde Chrome. Solo anda si Windows no le puso ningún driver a la impresora; si tira "Access denied", usá el programa de impresión.
+                  </p>
+                </>
+              )}
               <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>
-                ¿La conexión directa no funcionó (suele pasar cuando Windows ya tiene un driver instalado para esa impresora)? Descargá este script y ejecutalo en la PC del Mostrador -- configura un acceso directo especial que aprueba la impresión sola, sin mostrar ningún diálogo:{" "}
+                Modo kiosco (usa el driver de Windows, por eso solo sirve si el driver es el correcto de la impresora):{" "}
                 <a href="/kiosco-impresora.bat" download>kiosco-impresora.bat</a>
               </p>
             </div>
-          )}
+          </details>
         </div>
 
         <ScaleWeightSettings />

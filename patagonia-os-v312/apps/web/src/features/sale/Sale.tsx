@@ -18,6 +18,7 @@ import { closePosShift, deletePosShiftAdjustment, getOpenPosShift, listPosShiftA
 import { formatMoney } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
 import { buildTestTicket, getThermalPrintSettings, isThermalPrinterPaired, printBytes } from "./thermal-printer";
+import { pingPrintAgent } from "./printer-agent";
 import { DEFAULT_SCALE_CONFIG, getBranchScaleConfig, type ScaleConfig } from "./scale-config-service";
 import { CloseSummaryView, MovementReceiptView, ReceiptView } from "./SaleReceipts";
 import { ShiftPanel } from "./ShiftPanel";
@@ -682,7 +683,7 @@ export function Sale() {
       } else {
         const raw = err instanceof Error ? err.message : String(err);
         setMessage(
-          `No se pudo conectar directo por USB (detalle técnico: ${raw}). Es normal si Windows ya tiene instalado el driver de esta impresora para el diálogo de impresión normal -- en ese caso este camino 100% automático no va a funcionar para este equipo. Descargá el script de más abajo (link "kiosco-impresora.bat") y ejecutalo: deja todo listo -- el acceso directo sin diálogo Y el tamaño de papel del rollo -- y al final te explica, paso a paso y en un solo lugar, lo poco que falta hacer a mano.`
+          `No se pudo conectar directo por USB (detalle técnico: ${raw}). Es normal si Windows ya tiene instalado el driver de esta impresora para el diálogo de impresión normal -- en ese caso este camino 100% automático no va a funcionar para este equipo. No hace falta insistir con este botón: instalá el "programa de impresión" (arriba, en esta misma Configuración, dice "Impresora de tickets") -- funciona con cualquier térmica y cualquier driver de Windows.`
         );
       }
     } finally {
@@ -721,8 +722,15 @@ export function Sale() {
       try {
         await printBytes(buildReceiptTicket(receiptToPrint));
         return;
-      } catch {
-        // térmica emparejada pero falló el envío -- cae al diálogo de abajo.
+      } catch (err) {
+        // Con el programa de impresión instalado no se cae al diálogo: si el
+        // driver de Windows es el equivocado ese diálogo imprime metros de
+        // basura. Se avisa el motivo real y el comprobante queda en pantalla.
+        if (await pingPrintAgent()) {
+          setMessage(err instanceof Error ? err.message : "No se pudo imprimir el ticket.");
+          return;
+        }
+        // térmica emparejada por USB pero falló el envío -- cae al diálogo de abajo.
       }
     }
     // Pequeña espera para que el DOM termine de pintar el comprobante nuevo
@@ -738,8 +746,12 @@ export function Sale() {
       try {
         await printBytes(buildMovementTicket(mov));
         return;
-      } catch {
-        // térmica emparejada pero falló el envío -- cae al diálogo de abajo.
+      } catch (err) {
+        if (await pingPrintAgent()) {
+          setMessage(err instanceof Error ? err.message : "No se pudo imprimir el ticket.");
+          return;
+        }
+        // térmica emparejada por USB pero falló el envío -- cae al diálogo de abajo.
       }
     }
     setTimeout(() => window.print(), 150);

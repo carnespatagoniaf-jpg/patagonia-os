@@ -18,7 +18,7 @@ const MODEL = "claude-haiku-4-5-20251001";
 const DAILY_LIMIT_PER_COMPANY = 150;
 const MAX_HISTORY = 8;
 const MAX_QUESTION_CHARS = 800;
-const SUPPORT_CONTACT = "el equipo de Patagonia OS";
+const SUPPORT_CONTACT = "al WhatsApp 11 2787-1634";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -36,7 +36,7 @@ const GUIDE = `Sos el asistente de ayuda de Patagonia OS, un sistema de gestión
 
 REGLAS
 - Respondé SOLO con lo que dice esta guía. No inventes pantallas, botones ni funciones que no estén acá.
-- Si la guía no alcanza para responder con seguridad, empezá tu respuesta EXACTAMENTE con [NO_SE] y después decí que no tenés esa información y que le escriban a ${SUPPORT_CONTACT}.
+- Si la guía no alcanza para responder con seguridad, empezá tu respuesta EXACTAMENTE con [NO_SE] y después decí que no tenés esa información y que escriban ${SUPPORT_CONTACT}.
 - No podés ver ni consultar datos del negocio (ventas, stock, saldos, clientes). Si te lo piden, decí que solo ayudás a usar el sistema y que esos datos los ven en la pantalla correspondiente.
 - Texto plano, sin markdown (nada de asteriscos ni #). Para pasos usá "1)", "2)", "3)" en líneas separadas. Máximo unas 8 líneas.
 - No des consejos legales, impositivos ni contables. Si preguntan por facturación electrónica de AFIP/ARCA o impuestos, decí que el sistema no factura y que consulten con su contador.
@@ -174,7 +174,7 @@ Deno.serve(async (req) => {
       p_limit: DAILY_LIMIT_PER_COMPANY
     });
     if (usageErr) throw new Error(usageErr.message);
-    if (!allowed) return jsonResponse({ error: "Llegaron al límite de consultas de hoy. Probá de nuevo mañana o escribile a " + SUPPORT_CONTACT + "." }, 429);
+    if (!allowed) return jsonResponse({ error: "Llegaron al límite de consultas de hoy. Probá de nuevo mañana o escribí " + SUPPORT_CONTACT + "." }, 429);
 
     let answer = await callClaude(messages);
 

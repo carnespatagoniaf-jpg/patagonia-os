@@ -6,6 +6,8 @@
  * dispositivo una vez por navegador (después queda recordado).
  */
 
+import { pingPrintAgent, printViaAgent } from "./printer-agent";
+
 const ESC = 0x1b;
 const GS = 0x1d;
 const LF = 0x0a;
@@ -23,6 +25,9 @@ export function isThermalPrintSupported(): boolean {
  * que se puede llamar sin gesto del usuario (por ejemplo, para decidir
  * solo si el auto-print va por la térmica o cae al diálogo del navegador). */
 export async function isThermalPrinterPaired(): Promise<boolean> {
+  // El programa de impresión (ver printer-agent.ts) es el camino preferido:
+  // si está corriendo, la térmica está lista sin emparejar nada por USB.
+  if (await pingPrintAgent()) return true;
   if (!isThermalPrintSupported()) return false;
   if (cachedDevice) return true;
   const known = await navigator.usb.getDevices();
@@ -242,6 +247,14 @@ function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
 }
 
 export async function printBytes(bytes: Uint8Array): Promise<void> {
+  // Si el programa de impresión está instalado se usa siempre (anda con
+  // cualquier marca y cualquier driver). Si está y falla, el error se muestra
+  // tal cual en vez de caer a WebUSB/diálogo: con un driver equivocado el
+  // diálogo de Windows imprime metros de basura.
+  if (await pingPrintAgent()) {
+    await printViaAgent(bytes);
+    return;
+  }
   if (!isThermalPrintSupported()) {
     throw new Error("Este navegador no soporta impresión USB directa (usá Chrome o Edge).");
   }
