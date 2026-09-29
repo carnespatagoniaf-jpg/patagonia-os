@@ -32,6 +32,8 @@ export function Carcass() {
   const [supplierId, setSupplierId] = useState("");
   const [totalWeight, setTotalWeight] = useState("");
   const [pricePerKg, setPricePerKg] = useState("");
+  const [batchBoxCount, setBatchBoxCount] = useState("1");
+  const [batchBoxWeight, setBatchBoxWeight] = useState("");
 
   const [cutName, setCutName] = useState("");
   const [cutWeight, setCutWeight] = useState("");
@@ -87,11 +89,36 @@ export function Carcass() {
   const weightValue = Number(totalWeight || "0");
   const pricePerKgValue = parseAmount(pricePerKg || "0");
   const computedTotalCost = Number.isFinite(weightValue) && Number.isFinite(pricePerKgValue) ? weightValue * pricePerKgValue : 0;
+  const batchBoxTotal = Math.round((Number(batchBoxCount) || 0) * (Number(batchBoxWeight) || 0) * 1000) / 1000;
+
+  // Mismo peso de referencia que "Peso de referencia" en la Plantilla de
+  // cortes (misma clave de localStorage por tipo de animal) -- si ya lo
+  // cargaste ahí, acá aparece solo. Sirve para lo que se compra por unidad
+  // igual (ej. cajones de pollo de 20 kg cada uno): poné cuántos cajones y
+  // el sistema calcula el peso total.
+  useEffect(() => {
+    if (!showBatchForm) return;
+    try {
+      setBatchBoxWeight(localStorage.getItem(`patagonia-carcass-ref-weight-${animalType}`) ?? "");
+    } catch {
+      setBatchBoxWeight("");
+    }
+  }, [animalType, showBatchForm]);
+
+  function handleBatchBoxWeightChange(value: string) {
+    setBatchBoxWeight(value);
+    try {
+      localStorage.setItem(`patagonia-carcass-ref-weight-${animalType}`, value);
+    } catch {
+      // sin localStorage no se recuerda entre sesiones, no es grave
+    }
+  }
 
   function resetBatchForm() {
     setEditingBatchId(null);
     setBatchDate(todayIso());
     setAnimalType(ANIMAL_TYPES[0]);
+    setBatchBoxCount("1");
     setSupplierId("");
     setTotalWeight("");
     setPricePerKg("");
@@ -520,24 +547,49 @@ export function Carcass() {
             <span>{loading ? "Cargando…" : `${batches.length}`}</span>
           </div>
           {showBatchForm ? (
-            <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 16 }}>
-              <input type="date" value={batchDate} onChange={(e) => setBatchDate(e.target.value)} />
-              <select value={animalType} onChange={(e) => setAnimalType(e.target.value)}>
-                {ANIMAL_TYPES.map((t) => (
-                  <option key={t} value={t}>{t}</option>
-                ))}
-              </select>
-              <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-                <option value="">Proveedor (opcional)…</option>
-                {suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}</option>
-                ))}
-              </select>
-              <input type="number" min="0" step="0.001" placeholder="Peso total (kg)" value={totalWeight} onChange={(e) => setTotalWeight(e.target.value)} />
-              <input type="text" inputMode="decimal" placeholder="Precio por kg ($)" value={pricePerKg} onChange={(e) => setPricePerKg(e.target.value)} />
-              <button onClick={handleSaveBatch}>{editingBatchId ? "Guardar cambio" : "Guardar res"}</button>
-              <button className="secondary" onClick={resetBatchForm}>Cancelar</button>
-            </div>
+            <>
+              <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10 }}>
+                <input type="date" value={batchDate} onChange={(e) => setBatchDate(e.target.value)} />
+                <select value={animalType} onChange={(e) => setAnimalType(e.target.value)}>
+                  {ANIMAL_TYPES.map((t) => (
+                    <option key={t} value={t}>{t}</option>
+                  ))}
+                </select>
+                <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+                  <option value="">Proveedor (opcional)…</option>
+                  {suppliers.map((s) => (
+                    <option key={s.id} value={s.id}>{s.name}</option>
+                  ))}
+                </select>
+                <input type="number" min="0" step="0.001" placeholder="Peso total (kg)" value={totalWeight} onChange={(e) => setTotalWeight(e.target.value)} />
+                <input type="text" inputMode="decimal" placeholder="Precio por kg ($)" value={pricePerKg} onChange={(e) => setPricePerKg(e.target.value)} />
+                <button onClick={handleSaveBatch}>{editingBatchId ? "Guardar cambio" : "Guardar res"}</button>
+                <button className="secondary" onClick={resetBatchForm}>Cancelar</button>
+              </div>
+              <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 16, alignItems: "center" }}>
+                <span className="muted" style={{ fontSize: 13 }}>¿Varias unidades iguales (ej. cajones de pollo)?</span>
+                <input type="number" min="1" step="1" value={batchBoxCount} onChange={(e) => setBatchBoxCount(e.target.value)} style={{ width: 55 }} />
+                <span className="muted">de</span>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.001"
+                  placeholder={`peso c/u "${animalType}" (kg)`}
+                  value={batchBoxWeight}
+                  onChange={(e) => handleBatchBoxWeightChange(e.target.value)}
+                  style={{ width: 150 }}
+                />
+                <span className="muted">kg</span>
+                <button
+                  type="button"
+                  className="secondary"
+                  disabled={batchBoxTotal <= 0}
+                  onClick={() => setTotalWeight(String(batchBoxTotal))}
+                >
+                  Usar como peso total ({batchBoxTotal} kg)
+                </button>
+              </div>
+            </>
           ) : (
             <button className="secondary" style={{ marginBottom: 16 }} onClick={() => setShowBatchForm(true)}>
               + Agregar res
