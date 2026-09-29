@@ -51,6 +51,21 @@ export function Carcass() {
   const [editTplYield, setEditTplYield] = useState("");
   const [editTplProductId, setEditTplProductId] = useState("");
 
+  // Un carnicero piensa en kilos, no en %: se puede cargar cada corte de la
+  // plantilla directo en kg de un animal "de referencia" (ej. "mi mocho
+  // pesa 100 kg"), y acá se convierte a % para guardarlo -- la plantilla
+  // sigue siendo en % puertas adentro porque después se aplica a reses de
+  // cualquier peso real, no solo al de referencia. Queda guardado en este
+  // navegador por tipo de animal, para no tener que volver a escribirlo.
+  const [yieldInputMode, setYieldInputMode] = useState<"kg" | "percent">(() => {
+    try {
+      return localStorage.getItem("patagonia-carcass-yield-mode") === "percent" ? "percent" : "kg";
+    } catch {
+      return "kg";
+    }
+  });
+  const [templateRefWeight, setTemplateRefWeight] = useState("");
+
   useEffect(() => {
     if (selectedId) void loadCuts(selectedId);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -231,12 +246,64 @@ export function Carcass() {
 
   const templatesForType = templates.filter((t) => t.animalType === templateAnimalType);
   const templateYieldSum = templatesForType.reduce((sum, t) => sum + t.yieldPercent, 0);
+  const refWeight = Number(templateRefWeight) || 0;
+
+  // Trae/guarda el peso de referencia de este tipo de animal, por navegador
+  // -- así cada tipo (Mocho, Cerdo, Pollo...) recuerda el suyo.
+  useEffect(() => {
+    try {
+      setTemplateRefWeight(localStorage.getItem(`patagonia-carcass-ref-weight-${templateAnimalType}`) ?? "");
+    } catch {
+      setTemplateRefWeight("");
+    }
+  }, [templateAnimalType]);
+
+  function handleRefWeightChange(value: string) {
+    setTemplateRefWeight(value);
+    try {
+      localStorage.setItem(`patagonia-carcass-ref-weight-${templateAnimalType}`, value);
+    } catch {
+      // sin localStorage no se recuerda entre sesiones, no es grave
+    }
+  }
+
+  function handleYieldModeChange(mode: "kg" | "percent") {
+    setYieldInputMode(mode);
+    try {
+      localStorage.setItem("patagonia-carcass-yield-mode", mode);
+    } catch {
+      // no es grave
+    }
+  }
+
+  /** Convierte lo que escribió la persona (kg o %, según el modo elegido) al
+   * % que en verdad guarda la plantilla. En modo kg hace falta el peso de
+   * referencia. */
+  function parseYieldInput(raw: string): number {
+    const value = Number(raw);
+    if (yieldInputMode === "percent") {
+      if (!Number.isFinite(value) || value <= 0 || value > 100) throw new Error("Ingresá un % de rendimiento válido.");
+      return value;
+    }
+    if (refWeight <= 0) throw new Error(`Primero poné el peso de referencia del "${templateAnimalType}" (arriba), para poder cargar los cortes en kg.`);
+    if (!Number.isFinite(value) || value <= 0) throw new Error("Ingresá un peso en kg válido.");
+    const pct = (value / refWeight) * 100;
+    if (pct > 100) throw new Error(`Ese corte pesaría más que el animal entero de referencia (${refWeight} kg).`);
+    return pct;
+  }
+
+  /** Kg que representa un % con el peso de referencia actual, para mostrarlo
+   * al lado del % guardado (aunque se esté en modo %, así uno ve la
+   * equivalencia). null si todavía no hay peso de referencia cargado. */
+  function yieldPercentToKg(pct: number): number | null {
+    if (refWeight <= 0) return null;
+    return Math.round(((pct / 100) * refWeight) * 1000) / 1000;
+  }
 
   async function handleAddTemplateCut() {
     try {
       if (!newTplCutName.trim()) throw new Error("Ingresá el nombre del corte.");
-      const yieldPercent = Number(newTplYield);
-      if (!Number.isFinite(yieldPercent) || yieldPercent <= 0 || yieldPercent > 100) throw new Error("Ingresá un % de rendimiento válido.");
+      const yieldPercent = parseYieldInput(newTplYield);
       await saveTemplate({
         animalType: templateAnimalType,
         cutName: newTplCutName.trim(),
@@ -256,15 +323,15 @@ export function Carcass() {
   function startEditTemplateCut(t: (typeof templatesForType)[number]) {
     setEditingTemplateId(t.id);
     setEditTplCutName(t.cutName);
-    setEditTplYield(String(t.yieldPercent));
+    const kg = yieldInputMode === "kg" ? yieldPercentToKg(t.yieldPercent) : null;
+    setEditTplYield(kg !== null ? String(kg) : String(t.yieldPercent));
     setEditTplProductId(t.productId ?? "");
   }
 
   async function handleSaveTemplateEdit(id: string, sortOrder: number) {
     try {
       if (!editTplCutName.trim()) throw new Error("Ingresá el nombre del corte.");
-      const yieldPercent = Number(editTplYield);
-      if (!Number.isFinite(yieldPercent) || yieldPercent <= 0 || yieldPercent > 100) throw new Error("Ingresá un % de rendimiento válido.");
+      const yieldPercent = parseYieldInput(editTplYield);
       await saveTemplate({
         id,
         animalType: templateAnimalType,
@@ -322,19 +389,51 @@ export function Carcass() {
             <h2>Plantilla de cortes esperados</h2>
           </div>
           <p className="muted" style={{ marginTop: -8, marginBottom: 14 }}>
-            Cargá una vez, por tipo de animal, qué cortes esperás y qué % del peso total representa cada uno. Al cargar una res nueva de ese tipo, se generan solos con el peso proporcional — vos después los ajustás con la balanza real. El % no tiene que sumar 100: el resto es hueso, grasa y merma normal.
+            Cargá una vez, por tipo de animal, qué cortes esperás y cuánto pesa cada uno. Al cargar una res nueva de ese tipo, se generan solos con el peso proporcional — vos después los ajustás con la balanza real. No hace falta que sumen el peso entero: el resto queda como merma esperada (hueso, grasa, descarte).
           </p>
-          <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 14 }}>
+          <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10, alignItems: "center" }}>
             <select value={templateAnimalType} onChange={(e) => setTemplateAnimalType(e.target.value)}>
               {ANIMAL_TYPES.map((t) => (
                 <option key={t} value={t}>{t}</option>
               ))}
             </select>
+            <label className="muted" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              Cargar cortes en:
+              <select value={yieldInputMode} onChange={(e) => handleYieldModeChange(e.target.value as "kg" | "percent")}>
+                <option value="kg">Kilos</option>
+                <option value="percent">%</option>
+              </select>
+            </label>
+            {yieldInputMode === "kg" && (
+              <label className="muted" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                Peso de referencia de un "{templateAnimalType}" (kg)
+                <input
+                  type="number"
+                  min="0"
+                  step="0.1"
+                  placeholder="ej. 100"
+                  value={templateRefWeight}
+                  onChange={(e) => handleRefWeightChange(e.target.value)}
+                  style={{ width: 90 }}
+                />
+              </label>
+            )}
           </div>
+          {yieldInputMode === "kg" && (
+            <p className="muted" style={{ marginTop: -4, marginBottom: 14, fontSize: 13 }}>
+              Poné el peso típico de un "{templateAnimalType}" (por ejemplo, si tus mochos rondan los 100 kg, poné 100). Con eso ya podés cargar cada corte directo en kilos — el sistema hace la cuenta del % solo, y cuando cargues una res real de otro peso, ajusta los kilos de cada corte en proporción.
+            </p>
+          )}
 
           <table className="data-table">
             <thead>
-              <tr><th>Corte</th><th className="num">% del peso</th><th>Producto (stock)</th><th></th></tr>
+              <tr>
+                <th>Corte</th>
+                <th className="num">{yieldInputMode === "kg" ? "Peso (kg)" : "% del peso"}</th>
+                {yieldInputMode === "percent" && refWeight > 0 && <th className="num">≈ kg</th>}
+                <th>Producto (stock)</th>
+                <th></th>
+              </tr>
             </thead>
             <tbody>
               {templatesForType.map((t) =>
@@ -342,8 +441,17 @@ export function Carcass() {
                   <tr key={t.id}>
                     <td><input value={editTplCutName} onChange={(e) => setEditTplCutName(e.target.value)} /></td>
                     <td className="num">
-                      <input type="number" min="0" max="100" step="0.1" value={editTplYield} onChange={(e) => setEditTplYield(e.target.value)} style={{ width: 80, textAlign: "right" }} />
+                      <input
+                        type="number"
+                        min="0"
+                        max={yieldInputMode === "percent" ? "100" : undefined}
+                        step={yieldInputMode === "kg" ? "0.1" : "0.1"}
+                        value={editTplYield}
+                        onChange={(e) => setEditTplYield(e.target.value)}
+                        style={{ width: 80, textAlign: "right" }}
+                      />
                     </td>
+                    {yieldInputMode === "percent" && refWeight > 0 && <td className="num muted">{yieldPercentToKg(t.yieldPercent)}</td>}
                     <td>
                       <select value={editTplProductId} onChange={(e) => setEditTplProductId(e.target.value)}>
                         <option value="">Sin producto (no suma stock)</option>
@@ -360,7 +468,10 @@ export function Carcass() {
                 ) : (
                   <tr key={t.id}>
                     <td>{t.cutName}</td>
-                    <td className="num">{t.yieldPercent}%</td>
+                    <td className="num">
+                      {yieldInputMode === "kg" ? (yieldPercentToKg(t.yieldPercent) ?? `${t.yieldPercent}%`) : `${t.yieldPercent}%`}
+                    </td>
+                    {yieldInputMode === "percent" && refWeight > 0 && <td className="num muted">{yieldPercentToKg(t.yieldPercent)}</td>}
                     <td>{t.productId ? (products.find((p) => p.id === t.productId)?.name ?? "Sí") : "-"}</td>
                     <td>
                       <button className="secondary" onClick={() => startEditTemplateCut(t)}>Editar</button>{" "}
@@ -374,13 +485,23 @@ export function Carcass() {
           {templatesForType.length === 0 && <p className="muted">Todavía no hay cortes en la plantilla de "{templateAnimalType}".</p>}
           {templatesForType.length > 0 && (
             <p className="muted" style={{ marginTop: 8 }}>
-              Suma de la plantilla: {templateYieldSum}% del peso total — el {Math.round((100 - templateYieldSum) * 10) / 10}% restante queda como merma esperada (hueso, grasa, descarte).
+              Suma de la plantilla: {templateYieldSum}% del peso total
+              {refWeight > 0 && ` (≈ ${yieldPercentToKg(templateYieldSum)} kg de ${refWeight} kg)`} — el resto queda como merma esperada (hueso, grasa, descarte).
             </p>
           )}
 
           <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 16 }}>
             <input placeholder="Corte (ej. Bola de lomo)" value={newTplCutName} onChange={(e) => setNewTplCutName(e.target.value)} />
-            <input type="number" min="0" max="100" step="0.1" placeholder="% del peso" value={newTplYield} onChange={(e) => setNewTplYield(e.target.value)} style={{ width: 120 }} />
+            <input
+              type="number"
+              min="0"
+              max={yieldInputMode === "percent" ? "100" : undefined}
+              step="0.1"
+              placeholder={yieldInputMode === "kg" ? "Peso (kg)" : "% del peso"}
+              value={newTplYield}
+              onChange={(e) => setNewTplYield(e.target.value)}
+              style={{ width: 120 }}
+            />
             <select value={newTplProductId} onChange={(e) => setNewTplProductId(e.target.value)}>
               <option value="">Sin producto (no suma stock)</option>
               {products.map((product) => (
