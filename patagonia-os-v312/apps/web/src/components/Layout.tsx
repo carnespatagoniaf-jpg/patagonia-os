@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { BarChart3, Beef, Boxes, ChefHat, Download, FileText, HandCoins, Handshake, History, KeyRound, Menu, Upload, LogOut, PackagePlus, Receipt, Tag, TrendingUp, Users, Wallet } from "lucide-react";
+import { BarChart3, Beef, Boxes, ChefHat, Download, FileText, HandCoins, Handshake, History, KeyRound, MapPin, Menu, Upload, LogOut, PackagePlus, Receipt, Tag, TrendingUp, Users, Wallet } from "lucide-react";
 import { useAuth } from "../features/auth/AuthProvider";
 import { canAccessPage, type Page } from "../features/auth/permissions";
 import { useActiveBranch } from "../features/branches/BranchProvider";
@@ -50,6 +50,7 @@ const navGroups: Array<{ heading: string | null; items: NavItem[] }> = [
   {
     heading: "Equipo",
     items: [
+      { page: "branches", label: "Sucursales", icon: MapPin },
       { page: "employees", label: "Empleados", icon: Users },
       { page: "users", label: "Usuarios", icon: KeyRound }
     ]

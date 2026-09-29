@@ -12,6 +12,7 @@ import {
   listTreasuryMovements,
   registerTreasuryExpense,
   setTreasuryAccountActive,
+  setTreasuryAccountBranch,
   transferTreasuryFunds,
   type AdjustTreasuryAccountInput,
   type CreateTreasuryAccountInput,
@@ -48,7 +49,7 @@ export function useTreasury() {
     setError(null);
     try {
       const [accountList, allAccountList, balanceList, movementList] = await Promise.all([
-        listTreasuryAccounts(),
+        listTreasuryAccounts(branchId ?? undefined),
         listAllTreasuryAccounts(),
         listTreasuryBalances(),
         listTreasuryMovements()
@@ -62,7 +63,7 @@ export function useTreasury() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [branchId]);
 
   useEffect(() => {
     void reload();
@@ -202,5 +203,19 @@ export function useTreasury() {
     [reload]
   );
 
-  return { accounts, allAccounts, balances, movements, loading, error, create, adjust, transfer, registerExpense, removeExpense, setActive, reload };
+  const setAccountBranch = useCallback(
+    async (accountId: string, newBranchId: string | null) => {
+      if (!isSupabaseConfigured) {
+        setAccounts((current) => current.map((a) => (a.id === accountId ? { ...a, branchId: newBranchId ?? undefined } : a)));
+        setAllAccounts((current) => current.map((a) => (a.id === accountId ? { ...a, branchId: newBranchId ?? undefined } : a)));
+        return;
+      }
+
+      await setTreasuryAccountBranch(accountId, newBranchId);
+      await reload();
+    },
+    [reload]
+  );
+
+  return { accounts, allAccounts, balances, movements, loading, error, create, adjust, transfer, registerExpense, removeExpense, setActive, setAccountBranch, reload };
 }

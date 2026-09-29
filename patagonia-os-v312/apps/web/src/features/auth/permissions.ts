@@ -122,6 +122,7 @@ export function can(profile: UserProfile | null, permission: Permission) {
 export const PAGE_PERMISSIONS = {
   dashboard: "dashboard.view",
   sale: "pos.sell",
+  branches: "branches.manage",
   products: "products.view",
   shifts: "sales.create",
   inventory: "inventory.view",

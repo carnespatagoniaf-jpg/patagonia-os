@@ -200,6 +200,10 @@ export interface TreasuryAccount {
   paymentMethod?: PaymentMethod;
   initialBalance: Money;
   active: boolean;
+  /** Sucursal dueña de la cuenta, o undefined si es compartida por todas
+   * (el comportamiento de siempre). */
+  branchId?: string;
+  branchName?: string;
 }
 
 export type TreasuryMovementDirection = "in" | "out";

@@ -7,6 +7,8 @@ interface TreasuryAccountRow {
   payment_method: PaymentMethod | null;
   initial_balance: number;
   active: boolean;
+  branch_id: string | null;
+  branches: { name: string } | null;
 }
 
 function mapAccount(row: TreasuryAccountRow): TreasuryAccount {
@@ -15,21 +17,30 @@ function mapAccount(row: TreasuryAccountRow): TreasuryAccount {
     name: row.name,
     paymentMethod: row.payment_method ?? undefined,
     initialBalance: Number(row.initial_balance),
-    active: row.active
+    active: row.active,
+    branchId: row.branch_id ?? undefined,
+    branchName: row.branches?.name ?? undefined
   };
 }
 
-export async function listTreasuryAccounts(): Promise<TreasuryAccount[]> {
+/** `branchId` filtra a las cuentas compartidas (branch_id null) más las de
+ * esa sucursal puntual -- así cada sucursal ve las suyas y las que se
+ * reparten entre todas, no las de otro local. Sin `branchId` (Tesorería,
+ * dueño/admin) trae todas. */
+export async function listTreasuryAccounts(branchId?: string): Promise<TreasuryAccount[]> {
   if (!supabase) return [];
 
-  const { data, error } = await supabase
+  let query = supabase
     .from("treasury_accounts")
-    .select("id,name,payment_method,initial_balance,active")
+    .select("id,name,payment_method,initial_balance,active,branch_id,branches(name)")
     .eq("active", true)
     .order("name");
+  if (branchId) query = query.or(`branch_id.is.null,branch_id.eq.${branchId}`);
+
+  const { data, error } = await query;
 
   if (error) throw error;
-  return (data ?? []).map(mapAccount);
+  return ((data ?? []) as unknown as TreasuryAccountRow[]).map(mapAccount);
 }
 
 /** Incluye cuentas inactivas — se usa solo para el listado de Saldos en Tesorería (activar/desactivar), no para los selectores de cobro/ajuste/transferencia. */
@@ -38,17 +49,19 @@ export async function listAllTreasuryAccounts(): Promise<TreasuryAccount[]> {
 
   const { data, error } = await supabase
     .from("treasury_accounts")
-    .select("id,name,payment_method,initial_balance,active")
+    .select("id,name,payment_method,initial_balance,active,branch_id,branches(name)")
     .order("name");
 
   if (error) throw error;
-  return (data ?? []).map(mapAccount);
+  return ((data ?? []) as unknown as TreasuryAccountRow[]).map(mapAccount);
 }
 
 export interface CreateTreasuryAccountInput {
   name: string;
   paymentMethod?: PaymentMethod;
   initialBalance: number;
+  /** Sucursal dueña de la cuenta, o undefined para una cuenta compartida por todas. */
+  branchId?: string;
 }
 
 export async function createTreasuryAccount(input: CreateTreasuryAccountInput): Promise<TreasuryAccount> {
@@ -57,7 +70,8 @@ export async function createTreasuryAccount(input: CreateTreasuryAccountInput): 
   const { data, error } = await supabase.rpc("create_treasury_account", {
     p_name: input.name,
     p_payment_method: input.paymentMethod ?? null,
-    p_initial_balance: input.initialBalance
+    p_initial_balance: input.initialBalance,
+    p_branch_id: input.branchId ?? null
   });
 
   if (error) throw error;
@@ -66,8 +80,16 @@ export async function createTreasuryAccount(input: CreateTreasuryAccountInput): 
     name: data.name,
     paymentMethod: input.paymentMethod,
     initialBalance: input.initialBalance,
-    active: true
+    active: true,
+    branchId: input.branchId
   };
+}
+
+export async function setTreasuryAccountBranch(accountId: string, branchId: string | null): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("set_treasury_account_branch", { p_account_id: accountId, p_branch_id: branchId });
+  if (error) throw error;
 }
 
 export interface TreasuryAccountBalance {

@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import type { PaymentMethod } from "@patagonia/domain";
 import { useTreasury } from "./useTreasury";
 import { useShifts } from "./useShifts";
+import { useActiveBranch } from "../branches/BranchProvider";
 import { addDaysIso, formatMoney, todayIso } from "./format";
 import { parseAmount } from "../../lib/money";
 import type { ShiftRangeRow } from "./shifts-service";
@@ -44,8 +45,9 @@ const EXPENSE_CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
 );
 
 export function Treasury() {
-  const { accounts, allAccounts, balances, movements, loading, error, create, adjust, transfer, registerExpense, removeExpense, setActive } = useTreasury();
+  const { accounts, allAccounts, balances, movements, loading, error, create, adjust, transfer, registerExpense, removeExpense, setActive, setAccountBranch } = useTreasury();
   const { loadRange } = useShifts();
+  const { branches } = useActiveBranch();
 
   const [message, setMessage] = useState("");
 
@@ -86,6 +88,8 @@ export function Treasury() {
   const [accountName, setAccountName] = useState("");
   const [accountPaymentMethod, setAccountPaymentMethod] = useState<PaymentMethod | "">("");
   const [accountInitialBalance, setAccountInitialBalance] = useState("");
+  const [accountBranchId, setAccountBranchId] = useState("");
+  const [branchBusyId, setBranchBusyId] = useState("");
 
   const [adjustAccountId, setAdjustAccountId] = useState("");
   const [adjustDirection, setAdjustDirection] = useState<"in" | "out">("out");
@@ -116,14 +120,26 @@ export function Treasury() {
       const initialBalance = accountInitialBalance ? parseAmount(accountInitialBalance) : 0;
       if (!Number.isFinite(initialBalance) || initialBalance < 0) throw new Error("El saldo inicial no puede ser negativo.");
       if (!accountPaymentMethod) throw new Error("Elegí si la cuenta es Efectivo o Pagos digitales.");
-      await create({ name: accountName.trim(), paymentMethod: accountPaymentMethod, initialBalance });
+      await create({ name: accountName.trim(), paymentMethod: accountPaymentMethod, initialBalance, branchId: accountBranchId || undefined });
       setAccountName("");
       setAccountPaymentMethod("");
       setAccountInitialBalance("");
+      setAccountBranchId("");
       setShowNewAccountForm(false);
       setMessage("Cuenta creada.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo crear la cuenta.");
+    }
+  }
+
+  async function handleChangeAccountBranch(accountId: string, newBranchId: string) {
+    setBranchBusyId(accountId);
+    try {
+      await setAccountBranch(accountId, newBranchId || null);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo cambiar la sucursal de la cuenta.");
+    } finally {
+      setBranchBusyId("");
     }
   }
 
@@ -240,6 +256,19 @@ export function Treasury() {
               <div className="kpi-card" key={balance.accountId}>
                 <span>{balance.name}{!isActive ? " (inactiva)" : ""}</span>
                 <strong>{formatMoney(balance.balance)}</strong>
+                {account && branches.length > 1 && (
+                  <select
+                    value={account.branchId ?? ""}
+                    disabled={branchBusyId === account.id}
+                    onChange={(e) => void handleChangeAccountBranch(account.id, e.target.value)}
+                    style={{ marginTop: 8, fontSize: 12 }}
+                  >
+                    <option value="">Compartida (todas las sucursales)</option>
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>Solo {b.name}</option>
+                    ))}
+                  </select>
+                )}
                 {account && (
                   <button className="secondary" style={{ marginTop: 8 }} onClick={() => handleToggleActive(account.id, !isActive)}>
                     {isActive ? "Desactivar" : "Activar"}
@@ -251,6 +280,7 @@ export function Treasury() {
         </div>
         <p className="muted" style={{ fontSize: 12, marginTop: 10 }}>
           Las cuentas no se pueden borrar (los movimientos históricos quedarían sin cuenta) — se desactivan: dejan de aparecer para cobrar, ajustar o transferir, pero el historial y los saldos viejos se mantienen intactos.
+          {branches.length > 1 && " Una cuenta \"Compartida\" la ve y la usa cualquier sucursal; una cuenta de una sola sucursal solo aparece para cobrar en esa sucursal."}
         </p>
         {showNewAccountForm ? (
           <div style={{ marginTop: 16 }}>
@@ -278,6 +308,17 @@ export function Treasury() {
                   onChange={(e) => setAccountInitialBalance(e.target.value)}
                 />
               </div>
+              {branches.length > 1 && (
+                <div>
+                  <label className="muted" style={{ display: "block", marginBottom: 4 }}>Sucursal</label>
+                  <select value={accountBranchId} onChange={(e) => setAccountBranchId(e.target.value)}>
+                    <option value="">Compartida (todas las sucursales)</option>
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>Solo {b.name}</option>
+                    ))}
+                  </select>
+                </div>
+              )}
               <button onClick={handleCreateAccount} style={{ alignSelf: "flex-end" }}>Guardar cuenta</button>
               <button className="secondary" onClick={() => setShowNewAccountForm(false)} style={{ alignSelf: "flex-end" }}>Cancelar</button>
             </div>
