@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useActiveBranch } from "../branches/BranchProvider";
+import { useAuth } from "../auth/AuthProvider";
+import { can } from "../auth/permissions";
 import { downloadCsv, toCsv } from "../../lib/csv";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { listProductsForBranch } from "../inventory/inventory-service";
@@ -29,6 +31,7 @@ const PREVIEW_LIMIT = 300;
 
 export function ImportData() {
   const { branchId } = useActiveBranch();
+  const { profile } = useAuth();
   const [kind, setKind] = useState<ImportKind>("products");
   const [table, setTable] = useState<Table | null>(null);
   const [fileName, setFileName] = useState("");
@@ -162,7 +165,7 @@ export function ImportData() {
 
       <section className="panel">
         <div className="import-tabs">
-          {(Object.keys(KIND_LABELS) as ImportKind[]).map((k) => (
+          {(Object.keys(KIND_LABELS) as ImportKind[]).filter((k) => k !== "customers" || can(profile, "customers.manage")).map((k) => (
             <button key={k} className={k === kind ? "" : "secondary"} onClick={() => reset(k)}>{KIND_LABELS[k]}</button>
           ))}
         </div>

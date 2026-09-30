@@ -3,6 +3,8 @@ import type { PaymentMethod } from "@patagonia/domain";
 import { useTreasury } from "./useTreasury";
 import { useShifts } from "./useShifts";
 import { useActiveBranch } from "../branches/BranchProvider";
+import { useAuth } from "../auth/AuthProvider";
+import { planAllows } from "../auth/permissions";
 import { addDaysIso, formatMoney, todayIso } from "./format";
 import { parseAmount } from "../../lib/money";
 import type { ShiftRangeRow } from "./shifts-service";
@@ -47,7 +49,11 @@ const EXPENSE_CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
 export function Treasury() {
   const { accounts, allAccounts, balances, movements, loading, error, create, adjust, transfer, registerExpense, removeExpense, setActive, setAccountBranch } = useTreasury();
   const { loadRange } = useShifts();
-  const { branches } = useActiveBranch();
+  const { branches: allBranches } = useActiveBranch();
+  const { profile } = useAuth();
+  // Separar cuentas por sucursal es del plan Full: con otro plan se trabaja
+  // como si hubiera una sola (todas las cuentas compartidas).
+  const branches = planAllows(profile, "full") ? allBranches : allBranches.slice(0, 1);
 
   const [message, setMessage] = useState("");
 

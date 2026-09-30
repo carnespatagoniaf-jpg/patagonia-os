@@ -10,11 +10,14 @@ import {
   type ScaleReading
 } from "./scale-weight";
 import { describeRawFrame } from "./scale-weight-parser";
+import { useAuth } from "../auth/AuthProvider";
+import { planAllows } from "../auth/permissions";
 
 /** Sección del engranaje de Mostrador para leer el peso directo de la balanza
  * Kretz Aura por cable. Solo se activa después de una prueba confirmada: el
  * cajero compara lo que leyó el sistema con la pantalla de la balanza. */
 export function ScaleWeightSettings() {
+  const { profile } = useAuth();
   const [enabled, setEnabled] = useState(isWeightScaleEnabled());
   const [paired, setPaired] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -24,6 +27,9 @@ export function ScaleWeightSettings() {
   useEffect(() => {
     void isWeightScalePaired().then(setPaired);
   }, []);
+
+  // La balanza por cable es del plan Estándar en adelante.
+  if (!planAllows(profile, "estandar")) return null;
 
   if (!isWeightScaleSupported()) {
     return (

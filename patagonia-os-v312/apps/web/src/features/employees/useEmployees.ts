@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import type { Employee, PayrollAdjustment, PayrollLiquidation } from "@patagonia/domain";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
+import { useAuth } from "../auth/AuthProvider";
+import { planAllows } from "../auth/permissions";
 import {
   createEmployee,
   createPayrollAdjustment,
@@ -36,6 +38,8 @@ const DEMO_EMPLOYEES: Employee[] = [
 
 export function useEmployees() {
   const { branchId } = useActiveBranch();
+  const { profile } = useAuth();
+  const employeesInPlan = planAllows(profile, "estandar");
 
   const [employees, setEmployees] = useState<Employee[]>(isSupabaseConfigured ? [] : DEMO_EMPLOYEES);
   const [loading, setLoading] = useState(isSupabaseConfigured);
@@ -48,6 +52,11 @@ export function useEmployees() {
 
   const reload = useCallback(async () => {
     if (!isSupabaseConfigured) return;
+    if (!employeesInPlan) {
+      setEmployees([]);
+      setLoading(false);
+      return;
+    }
     setLoading(true);
     setError(null);
     try {
@@ -57,7 +66,7 @@ export function useEmployees() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [employeesInPlan]);
 
   useEffect(() => {
     void reload();

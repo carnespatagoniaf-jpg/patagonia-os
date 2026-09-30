@@ -2,7 +2,11 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Building2, LockKeyhole, MapPin, Plus, Search } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import { AdminScaleReports } from "./AdminScaleReports";
-import { PROVINCES, createClient, deleteClient, listCompanies, setCompanyActive, setCompanyLocation, setCompanyTrial, type CompanySummary, type CreateClientResult } from "./admin-service";
+import { PROVINCES, createClient, deleteClient, listCompanies, listCompanyPlans, setCompanyActive, setCompanyLocation, setCompanyPlan, setCompanyTrial, type CompanyPlanInfo, type CompanySummary, type CreateClientResult } from "./admin-service";
+import { PLAN_LABELS, PLAN_LIMITS, type Plan } from "../auth/permissions";
+
+const PLAN_OPTIONS: Plan[] = ["basico", "estandar", "full"];
+const PLAN_PRICES: Record<Plan, string> = { basico: "$20.000", estandar: "$39.000", full: "$69.000" };
 
 /** Mensaje listo para pegar en WhatsApp/mail y mandarle al dueño nuevo --
  * evita tener que copiar el usuario y la contraseña por separado a mano. */
@@ -28,10 +32,11 @@ interface Draft {
   contactPhone: string;
   province: string;
   city: string;
+  plan: Plan;
 }
 
 function emptyDraft(): Draft {
-  return { companyName: "", branchName: "", ownerFullName: "", ownerEmail: "", contactPhone: "", province: "", city: "" };
+  return { companyName: "", branchName: "", ownerFullName: "", ownerEmail: "", contactPhone: "", province: "", city: "", plan: "estandar" };
 }
 
 const NO_LOCATION = "Sin ubicación";
@@ -82,11 +87,19 @@ export function AdminCreateClient() {
   const [editCity, setEditCity] = useState("");
   const [savingLocation, setSavingLocation] = useState(false);
   const [trialBusyId, setTrialBusyId] = useState<string | null>(null);
+  const [plans, setPlans] = useState<Record<string, CompanyPlanInfo>>({});
+  const [planBusyId, setPlanBusyId] = useState<string | null>(null);
 
   const reloadCompanies = useCallback(async () => {
     setCompaniesLoading(true);
     try {
       setCompanies(await listCompanies());
+      try {
+        setPlans(await listCompanyPlans());
+      } catch {
+        // Base sin la migración 101 todavía: la lista de clientes igual se ve.
+        setPlans({});
+      }
     } finally {
       setCompaniesLoading(false);
     }
@@ -105,6 +118,29 @@ export function AdminCreateClient() {
       setMessage(error instanceof Error ? error.message : "No se pudo actualizar el cliente.");
     } finally {
       setTogglingId(null);
+    }
+  }
+
+  async function changePlan(company: CompanySummary, plan: Plan) {
+    const info = plans[company.id];
+    const limits = PLAN_LIMITS[plan];
+    const overBranches = info && limits.maxBranches !== null && info.activeBranches > limits.maxBranches;
+    const overUsers = info && limits.maxUsers !== null && info.activeUsers > limits.maxUsers;
+    if (overBranches || overUsers) {
+      const detail = [
+        overBranches ? `${info.activeBranches} sucursales (el plan permite ${limits.maxBranches})` : "",
+        overUsers ? `${info.activeUsers} usuarios (el plan permite ${limits.maxUsers})` : ""
+      ].filter(Boolean).join(" y ");
+      if (!window.confirm(`${company.name} tiene ${detail}. No se borra ni se desactiva nada: solo no va a poder agregar más. ¿Pasarlo igual a ${PLAN_LABELS[plan]}?`)) return;
+    }
+    setPlanBusyId(company.id);
+    try {
+      await setCompanyPlan(company.id, plan);
+      await reloadCompanies();
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo cambiar el plan.");
+    } finally {
+      setPlanBusyId(null);
     }
   }
 
@@ -175,6 +211,11 @@ export function AdminCreateClient() {
         ownerEmail: draft.ownerEmail.trim(),
         contactPhone: draft.contactPhone.trim() || undefined
       });
+      try {
+        await setCompanyPlan(created.companyId, draft.plan);
+      } catch {
+        setMessage("El cliente se creó, pero no se pudo guardar el plan. Elegilo desde su tarjeta.");
+      }
       if (draft.province || draft.city.trim()) {
         try {
           await setCompanyLocation(created.companyId, draft.province, draft.city);
@@ -274,6 +315,26 @@ export function AdminCreateClient() {
           );
         })()}
 
+        {plans[company.id] && (() => {
+          const info = plans[company.id];
+          const limits = PLAN_LIMITS[info.plan];
+          const limitText = (count: number, max: number | null, one: string, many: string) =>
+            `${count}${max !== null ? `/${max}` : ""} ${count === 1 && max === null ? one : many}`;
+          return (
+            <div className="admin-trial-row">
+              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <strong>Plan</strong>
+                <select value={info.plan} disabled={planBusyId === company.id} onChange={(e) => void changePlan(company, e.target.value as Plan)}>
+                  {PLAN_OPTIONS.map((p) => <option key={p} value={p}>{PLAN_LABELS[p]} ({PLAN_PRICES[p]})</option>)}
+                </select>
+              </label>
+              <span className="muted" style={{ fontSize: 13 }}>
+                {limitText(info.activeBranches, limits.maxBranches, "sucursal", "sucursales")} · {limitText(info.activeUsers, limits.maxUsers, "usuario", "usuarios")}
+              </span>
+            </div>
+          );
+        })()}
+
         <div className="admin-chips">
           <span>{company.branchCount} {company.branchCount === 1 ? "sucursal" : "sucursales"}</span>
           <span>{company.userCount} {company.userCount === 1 ? "usuario" : "usuarios"}</span>
@@ -354,6 +415,12 @@ export function AdminCreateClient() {
                 </select>
               </label>
               <label>Ciudad (opcional)<input value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} /></label>
+              <label>
+                Plan
+                <select value={draft.plan} onChange={(e) => setDraft({ ...draft, plan: e.target.value as Plan })}>
+                  {PLAN_OPTIONS.map((p) => <option key={p} value={p}>{PLAN_LABELS[p]} ({PLAN_PRICES[p]})</option>)}
+                </select>
+              </label>
               <label>Teléfono de contacto (opcional, uso interno)<input value={draft.contactPhone} onChange={(e) => setDraft({ ...draft, contactPhone: e.target.value })} /></label>
               <div className="admin-form-submit">
                 <button className="charge-button" disabled={busy}>{busy ? "Creando…" : "Crear cliente"}</button>

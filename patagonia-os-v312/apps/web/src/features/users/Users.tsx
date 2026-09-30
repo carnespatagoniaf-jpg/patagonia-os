@@ -1,6 +1,7 @@
 import { Fragment, useState } from "react";
 import { useActiveBranch } from "../branches/BranchProvider";
-import { PERMISSION_LABELS, rolePermissions, type Permission } from "../auth/permissions";
+import { PERMISSION_LABELS, planAllows, rolePermissions, type Permission } from "../auth/permissions";
+import { useAuth } from "../auth/AuthProvider";
 import { useUsers } from "./useUsers";
 import type { CompanyUser, CreateStaffUserResult, StaffRole } from "./users-service";
 
@@ -32,6 +33,7 @@ function randomPassword() {
 
 export function Users() {
   const { branches } = useActiveBranch();
+  const { profile } = useAuth();
   const { users, loading, error, create, update, remove } = useUsers();
 
   const [message, setMessage] = useState("");
@@ -238,7 +240,7 @@ export function Users() {
                     </>
                   )}
                 </tr>
-                {editingId === user.id && (
+                {editingId === user.id && planAllows(profile, "full") && (
                   <tr>
                     <td colSpan={5} style={{ background: "#f8f5f2" }}>
                       <p className="muted" style={{ margin: "4px 0 8px" }}>

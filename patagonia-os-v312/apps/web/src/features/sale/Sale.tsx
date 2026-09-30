@@ -5,7 +5,7 @@ import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { useAuth } from "../auth/AuthProvider";
-import { can } from "../auth/permissions";
+import { can, planAllows } from "../auth/permissions";
 import { listProductsForBranch } from "../inventory/inventory-service";
 import { listProductCategories, type ProductCategory } from "../inventory/product-categories-service";
 import { useTreasury } from "../shifts/useTreasury";
@@ -849,6 +849,7 @@ export function Sale() {
             shift={shift}
             canSeeShiftTotals={canSeeShiftTotals}
             canManageTreasury={canManageTreasury}
+            canUseEmployees={planAllows(profile, "estandar")}
             busy={busy}
             accounts={accounts}
             suppliers={suppliers}

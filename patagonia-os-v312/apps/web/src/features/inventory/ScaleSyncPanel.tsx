@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { useAuth } from "../auth/AuthProvider";
+import { planAllows } from "../auth/permissions";
 import { formatMoney } from "../shifts/format";
 import {
   autoDetectScale,
@@ -27,6 +29,7 @@ import {
  * puede tocar el cajero porque Stock es una pantalla que no ve -- así que
  * este panel también vive en Productos, que el cajero sí puede abrir. */
 export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] }) {
+  const { profile } = useAuth();
   const [showScalePanel, setShowScalePanel] = useState(false);
   const [scaleSettings, setScaleSettings] = useState<ScaleSerialSettings>(getScaleSerialSettings());
   const [scalePortReady, setScalePortReady] = useState(false);
@@ -212,6 +215,9 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
       setScaleBusy(false);
     }
   }
+
+  // La balanza por cable es del plan Estándar en adelante.
+  if (!planAllows(profile, "estandar")) return null;
 
   return (
     <>

@@ -1,7 +1,7 @@
 import { useState, type ReactNode } from "react";
 import { BarChart3, Beef, Boxes, ChefHat, Download, FileText, HandCoins, Handshake, History, KeyRound, MapPin, Menu, Upload, LogOut, PackagePlus, Receipt, Scale, Tag, TrendingUp, Users, Wallet } from "lucide-react";
 import { useAuth } from "../features/auth/AuthProvider";
-import { canAccessPage, type Page } from "../features/auth/permissions";
+import { PLAN_LABELS, canAccessPage, planAllows, profilePlan, type Page } from "../features/auth/permissions";
 import { useActiveBranch } from "../features/branches/BranchProvider";
 import { TrialBanner } from "./TrialBanner";
 import { HelpChat } from "../features/help/HelpChat";
@@ -202,6 +202,9 @@ export function Layout({ page, onPageChange, children }: Props) {
           <div className="branch">
             {profile?.full_name ?? "Usuario"} · {profile?.role ?? "sin rol"}
           </div>
+          {(profile?.role === "owner" || profile?.role === "admin") && profile?.plan && (
+            <div className="branch" style={{ marginTop: 2 }}>Plan {PLAN_LABELS[profilePlan(profile)]}</div>
+          )}
           <BranchSwitcher />
         </div>
 
@@ -236,7 +239,7 @@ export function Layout({ page, onPageChange, children }: Props) {
         <TrialBanner />
         {children}
       </main>
-      {import.meta.env.VITE_HELP_CHAT === "1" && <HelpChat />}
+      {import.meta.env.VITE_HELP_CHAT === "1" && planAllows(profile, "estandar") && <HelpChat />}
     </div>
   );
 }

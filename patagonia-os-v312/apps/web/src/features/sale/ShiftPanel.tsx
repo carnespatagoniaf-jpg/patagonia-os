@@ -339,6 +339,8 @@ export interface ShiftPanelProps {
   shift: PosShift;
   canSeeShiftTotals: boolean;
   canManageTreasury: boolean;
+  /** Empleados (vales) es del plan Estándar en adelante. */
+  canUseEmployees: boolean;
   busy: boolean;
   accounts: TreasuryAccount[];
   suppliers: Suppliers;
@@ -436,7 +438,7 @@ export function ShiftPanel(p: ShiftPanelProps) {
             {p.showSupplierForm ? "Cancelar pago a proveedor" : "+ Pago a proveedor"}
           </button>
         )}
-        {canManageTreasury && (
+        {canManageTreasury && p.canUseEmployees && (
           <button className="pos-toolbar-btn" onClick={p.onToggleValeForm}>
             {p.showValeForm ? "Cancelar vale a empleado" : "+ Vale a empleado"}
           </button>

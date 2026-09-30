@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import type { Plan } from "../auth/permissions";
 
 export interface CreateClientInput {
   companyName: string;
@@ -106,6 +107,33 @@ export async function listCompanies(): Promise<CompanySummary[]> {
     city: row.city,
     trialEndsAt: row.trial_ends_at
   }));
+}
+
+/** Plan de cada cliente + sucursales y usuarios activos (migración 101). */
+export interface CompanyPlanInfo {
+  plan: Plan;
+  activeBranches: number;
+  activeUsers: number;
+}
+
+export async function listCompanyPlans(): Promise<Record<string, CompanyPlanInfo>> {
+  if (!supabase) return {};
+
+  const { data, error } = await supabase.rpc("list_company_plans");
+  if (error) throw error;
+
+  const result: Record<string, CompanyPlanInfo> = {};
+  for (const row of (data ?? []) as { company_id: string; plan: Plan; active_branches: number; active_users: number }[]) {
+    result[row.company_id] = { plan: row.plan, activeBranches: Number(row.active_branches), activeUsers: Number(row.active_users) };
+  }
+  return result;
+}
+
+export async function setCompanyPlan(companyId: string, plan: Plan): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("set_company_plan", { p_company_id: companyId, p_plan: plan });
+  if (error) throw error;
 }
 
 export async function setCompanyActive(companyId: string, active: boolean): Promise<void> {

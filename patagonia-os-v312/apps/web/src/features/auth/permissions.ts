@@ -112,8 +112,54 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   "scales.manage": "Balanzas"
 };
 
+/** Planes que se venden (migración 101). El plan de la empresa se chequea
+ * también en la base (require_plan en cada función + RLS); esto es para no
+ * mostrar lo que el plan no incluye. */
+export type Plan = "basico" | "estandar" | "full";
+
+export const PLAN_LABELS: Record<Plan, string> = { basico: "Básico", estandar: "Estándar", full: "Full" };
+
+/** Mismos límites que plan_limits() en la base (null = sin límite). */
+export const PLAN_LIMITS: Record<Plan, { maxBranches: number | null; maxUsers: number | null }> = {
+  basico: { maxBranches: 1, maxUsers: 3 },
+  estandar: { maxBranches: 2, maxUsers: 8 },
+  full: { maxBranches: null, maxUsers: null }
+};
+
+const PLAN_RANK: Record<Plan, number> = { basico: 1, estandar: 2, full: 3 };
+
+/** Permisos que solo existen desde cierto plan. Lo que no está acá va en todos. */
+const PERMISSION_MIN_PLAN: Partial<Record<Permission, Plan>> = {
+  "customers.manage": "estandar",
+  "employees.manage": "estandar",
+  "carcass.manage": "estandar",
+  "recipes.manage": "estandar",
+  "profitability.view": "estandar",
+  "creditors.manage": "estandar",
+  "scales.manage": "estandar"
+};
+
+/** Páginas que piden un plan más alto que su permiso (ej. Sucursales: el
+ * permiso branches.manage también maneja el selector de sucursal, que
+ * Estándar necesita, pero la pantalla de resumen es de Full). */
+const PAGE_MIN_PLAN: Partial<Record<string, Plan>> = { branches: "full" };
+
+/** Plan de la empresa del usuario. Sin dato (modo demo, o la base todavía
+ * sin la migración 101) cuenta como Full: nunca se le saca algo a nadie por
+ * un dato que falta. */
+export function profilePlan(profile: UserProfile | null): Plan {
+  const plan = profile?.plan;
+  return plan === "basico" || plan === "estandar" || plan === "full" ? plan : "full";
+}
+
+export function planAllows(profile: UserProfile | null, min: Plan): boolean {
+  return PLAN_RANK[profilePlan(profile)] >= PLAN_RANK[min];
+}
+
 export function can(profile: UserProfile | null, permission: Permission) {
   if (!profile) return false;
+  const minPlan = PERMISSION_MIN_PLAN[permission];
+  if (minPlan && !planAllows(profile, minPlan)) return false;
   const permissions = rolePermissions[profile.role];
   const grantedByRole = permissions.includes("*") || permissions.includes(permission);
   if (!grantedByRole) return false;
@@ -148,6 +194,8 @@ export const PAGE_PERMISSIONS = {
 export type Page = keyof typeof PAGE_PERMISSIONS;
 
 export function canAccessPage(profile: UserProfile | null, page: Page) {
+  const minPlan = PAGE_MIN_PLAN[page];
+  if (minPlan && !planAllows(profile, minPlan)) return false;
   return can(profile, PAGE_PERMISSIONS[page]);
 }
 

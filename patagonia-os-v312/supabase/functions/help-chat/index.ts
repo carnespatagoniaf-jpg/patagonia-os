@@ -44,6 +44,7 @@ REGLAS
 
 MENÚ Y QUIÉN VE QUÉ
 Las secciones del menú de la izquierda son: Inicio, Mostrador, Clientes, Productos, Stock, Compras, Despiece, Recetas, Balanzas, Tesorería, Deudas, Rentabilidad, Sucursales, Empleados, Usuarios, Reportes, Exportar, Importar. Cada persona ve solo lo que su rol permite. El Cajero/a ve Mostrador y Productos. El Encargado ve Inicio, Stock, Compras y Reportes. El Administrador ve todo lo del negocio. Además, a cada persona se le puede ocultar algo puntual sin cambiarle el rol (en Usuarios → Editar). Si alguien no ve una sección, es por su rol o porque se la ocultaron: el dueño o administrador lo cambia en Usuarios.
+Además, cada negocio tiene un plan (Básico, Estándar o Full) y algunas secciones dependen del plan. Básico: Mostrador, Productos, Stock, Compras, Tesorería, Reportes, Exportar, Importar (productos y proveedores), impresora de tickets y etiquetas de balanza; 1 sucursal y hasta 3 usuarios. Estándar suma Clientes (fiado), Despiece, Recetas, Balanzas (conexión por cable), Rentabilidad, Empleados, Deudas, este chat y "Enviar a soporte"; hasta 2 sucursales y 8 usuarios. Full suma la pantalla Sucursales (resumen de todos los locales, transferir stock, cuentas de Tesorería por sucursal), ocultarle secciones a una persona en Usuarios, y no tiene límite de sucursales ni usuarios. Si aparece "Esto está en el plan …" o "Tu plan … permite hasta …", es por el plan: para cambiarlo, el dueño escribe ${SUPPORT_CONTACT}. El plan del negocio se ve abajo del nombre del usuario, arriba a la izquierda (solo para dueño y administrador).
 
 PRODUCTOS Y STOCK (pantalla "Stock")
 - Para agregar un producto: menú Stock → botón "+ Agregar producto" (arriba de la lista) → completar Código, Nombre, Categoría, Unidad (kg, unidad o caja), Costo, Margen % y Precio de venta, y Stock mínimo → "Guardar producto".
@@ -190,6 +191,17 @@ Deno.serve(async (req) => {
       .eq("id", callerAuth.user.id)
       .maybeSingle();
     if (!profile || !profile.active) return jsonResponse({ error: "Perfil inválido" }, 403);
+
+    // El chat es del plan Estándar en adelante (migración 101). Si la columna
+    // todavía no existe o no se pudo leer, se deja pasar.
+    const { data: company, error: companyErr } = await admin
+      .from("companies")
+      .select("plan")
+      .eq("id", profile.company_id)
+      .maybeSingle();
+    if (!companyErr && company?.plan === "basico") {
+      return jsonResponse({ error: "El chat de ayuda está en el plan Estándar. Pedíselo a Patagonia OS." }, 403);
+    }
 
     const body = await req.json();
     const raw: unknown[] = Array.isArray(body.messages) ? body.messages.slice(-MAX_HISTORY) : [];
