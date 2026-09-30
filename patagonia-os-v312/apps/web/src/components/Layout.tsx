@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { BarChart3, Beef, Boxes, ChefHat, Download, FileText, HandCoins, Handshake, History, KeyRound, MapPin, Menu, Upload, LogOut, PackagePlus, Receipt, Scale, Tag, TrendingUp, Users, Wallet } from "lucide-react";
+import { BarChart3, Beef, Boxes, ChefHat, Download, FileText, HandCoins, Handshake, History, KeyRound, Landmark, MapPin, Menu, Upload, LogOut, PackagePlus, Receipt, Scale, Tag, TrendingUp, Users, Wallet } from "lucide-react";
 import { useAuth } from "../features/auth/AuthProvider";
 import { PLAN_LABELS, canAccessPage, planAllows, profilePlan, type Page } from "../features/auth/permissions";
 import { useActiveBranch } from "../features/branches/BranchProvider";
@@ -44,6 +44,7 @@ const navGroups: Array<{ heading: string | null; items: NavItem[] }> = [
     heading: "Finanzas",
     items: [
       { page: "treasury", label: "Tesorería", icon: Wallet },
+      { page: "reconciliation", label: "Conciliación", icon: Landmark },
       { page: "creditors", label: "Deudas", icon: HandCoins },
       { page: "profitability", label: "Rentabilidad", icon: TrendingUp }
     ]
