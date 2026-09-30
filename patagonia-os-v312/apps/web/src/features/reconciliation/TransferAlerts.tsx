@@ -10,7 +10,7 @@ const money = new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS
 const fmt = (n: number) => money.format(n);
 const fmtDate = (iso: string) => iso.slice(0, 10).split("-").reverse().join("/");
 
-export function TransferAlerts({ alerts }: { alerts: TransferAlert[] }) {
+export function TransferAlerts({ alerts, days }: { alerts: TransferAlert[]; days: number }) {
   if (alerts.length === 0) return null;
   const total = alerts.reduce((s, a) => s + a.amount, 0);
   const byCashier = new Map<string, { count: number; total: number }>();
@@ -26,7 +26,7 @@ export function TransferAlerts({ alerts }: { alerts: TransferAlert[] }) {
         ⚠ {alerts.length} {alerts.length === 1 ? "cobro que no llegó" : "cobros que no llegaron"} al banco · {fmt(total)}
       </p>
       <p style={{ margin: "0 0 10px", fontSize: 13 }}>
-        Se cobraron en Mostrador como transferencia o QR hace más de 3 días y en el resumen del banco no aparece nada parecido. Puede ser un comprobante falso, un cobro cargado en la cuenta equivocada o con otro importe. Revisalos con quien cobró.
+        Se cobraron en Mostrador como transferencia o QR hace más de {days} {days === 1 ? "día" : "días"} y en el resumen del banco no aparece nada parecido. Puede ser un comprobante falso, un cobro cargado en la cuenta equivocada o con otro importe. Revisalos con quien cobró.
       </p>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 10 }}>
         {Array.from(byCashier.entries()).map(([cashier, r]) => (

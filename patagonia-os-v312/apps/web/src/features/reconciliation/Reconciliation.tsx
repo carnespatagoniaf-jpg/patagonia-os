@@ -41,6 +41,9 @@ import {
   listReconRules,
   markCardDeposits,
   saveReconAccount,
+  setReconAlertSettings,
+  getReconReminders,
+  type ReconReminder,
   setBankLineIgnored,
   undoBankMatch,
   type ReconAccount,
@@ -99,7 +102,12 @@ interface ConfigDraft {
   accountIds: string[];
   cardIds: string[];
   mainId: string;
+  alertsEnabled: boolean;
+  alertDays: number;
+  reminderDays: number;
 }
+
+const NEW_CONFIG: ConfigDraft = { id: null, name: "", accountIds: [], cardIds: [], mainId: "", alertsEnabled: true, alertDays: 3, reminderDays: 7 };
 
 export function Reconciliation() {
   const { branchId } = useActiveBranch();
@@ -126,6 +134,7 @@ export function Reconciliation() {
   const [categoryByLine, setCategoryByLine] = useState<Record<string, string>>({});
   const [rules, setRules] = useState<BankRule[]>([]);
   const [alerts, setAlerts] = useState<TransferAlert[]>([]);
+  const [reminder, setReminder] = useState<ReconReminder | null>(null);
   const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
   /** Línea o grupo con el formulario "¿Qué es?" abierto. */
   const [ruleTarget, setRuleTarget] = useState<{ key: string; lines: StoredBankLine[] } | null>(null);
@@ -137,14 +146,14 @@ export function Reconciliation() {
     const next = selectId ?? (recon.some((r) => r.id === reconId) ? reconId : recon[0]?.id ?? "");
     setReconId(next);
     if (recon.length === 0) {
-      setConfig({ id: null, name: "", accountIds: [], cardIds: [], mainId: "" });
+      setConfig(NEW_CONFIG);
     }
   }
 
   useEffect(() => {
     if (!isSupabaseConfigured) {
       // Modo demostración: se puede probar la lectura del resumen, sin guardar nada.
-      setReconAccounts([{ id: "demo", name: "Banco (demostración)", treasuryAccountIds: [], cardAccountIds: [], mainTreasuryAccountId: "", mapping: null }]);
+      setReconAccounts([{ id: "demo", name: "Banco (demostración)", treasuryAccountIds: [], cardAccountIds: [], mainTreasuryAccountId: "", mapping: null, alertsEnabled: true, alertDays: 3, reminderDays: 7 }]);
       setReconId("demo");
       return;
     }
@@ -162,13 +171,15 @@ export function Reconciliation() {
     if (!recon || !isSupabaseConfigured) return;
     setLoading(true);
     try {
-      const [l, items, r, a] = await Promise.all([
+      const [l, items, r, a, rem] = await Promise.all([
         listBankLines(recon.id, from, to),
         getReconciliationItems(recon.id, addDaysIso(from, -MAX_DAYS_AFTER), to),
         // Si las reglas o las alertas fallan, la conciliación igual tiene que andar.
         listReconRules(recon.id).catch(() => [] as BankRule[]),
-        getTransferAlerts(recon.id).catch(() => [] as TransferAlert[])
+        getTransferAlerts(recon.id).catch(() => [] as TransferAlert[]),
+        getReconReminders().catch(() => [] as ReconReminder[])
       ]);
+      setReminder(rem.find((x) => x.reconAccountId === recon.id) ?? null);
       setLines(l);
       setPayments(items.payments);
       setMovements(items.movements);
@@ -439,12 +450,47 @@ export function Reconciliation() {
             })}
           </tbody>
         </table>
+        <div style={{ ...row, marginTop: 12, display: "grid", gap: 8 }}>
+          <p style={{ margin: 0, fontWeight: 600 }}>Avisos</p>
+          <label style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input type="checkbox" checked={config.alertsEnabled} onChange={(e) => setConfig({ ...config, alertsEnabled: e.target.checked })} />
+            Avisar si un cobro por transferencia o QR no aparece en el banco después de
+            <input
+              type="number"
+              min={1}
+              max={30}
+              step={1}
+              disabled={!config.alertsEnabled}
+              value={config.alertDays}
+              onChange={(e) => setConfig({ ...config, alertDays: Math.min(30, Math.max(1, Math.round(Number(e.target.value) || 1))) })}
+              style={{ width: 64 }}
+            />
+            días
+          </label>
+          <label style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            Recordar en Inicio que hay que subir el resumen si el último tiene más de
+            <input
+              type="number"
+              min={0}
+              max={90}
+              step={1}
+              value={config.reminderDays}
+              onChange={(e) => setConfig({ ...config, reminderDays: Math.min(90, Math.max(0, Math.round(Number(e.target.value) || 0))) })}
+              style={{ width: 64 }}
+            />
+            días (0 = no recordar)
+          </label>
+          <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+            El aviso compara contra el último resumen que se subió: si nadie lo sube, no puede avisar. Por eso está el recordatorio. Subirlo una vez por semana alcanza.
+          </p>
+        </div>
         <div className="cash-banner-form" style={{ marginTop: 12 }}>
           <button
             disabled={busy || !config.name.trim() || config.accountIds.length === 0 || !config.mainId}
             onClick={() =>
               run(async () => {
                 const id = await saveReconAccount({ id: config.id, name: config.name, treasuryAccountIds: config.accountIds, cardAccountIds: config.cardIds, mainTreasuryAccountId: config.mainId });
+                await setReconAlertSettings(id, config.alertsEnabled, config.alertDays, config.reminderDays);
                 setConfig(null);
                 await loadAccounts(id);
               })
@@ -530,11 +576,11 @@ export function Reconciliation() {
             </select>
           </label>
           {recon && (
-            <button className="secondary" onClick={() => setConfig({ id: recon.id, name: recon.name, accountIds: recon.treasuryAccountIds, cardIds: recon.cardAccountIds, mainId: recon.mainTreasuryAccountId })}>
+            <button className="secondary" onClick={() => setConfig({ id: recon.id, name: recon.name, accountIds: recon.treasuryAccountIds, cardIds: recon.cardAccountIds, mainId: recon.mainTreasuryAccountId, alertsEnabled: recon.alertsEnabled, alertDays: recon.alertDays, reminderDays: recon.reminderDays })}>
               Editar
             </button>
           )}
-          <button className="secondary" onClick={() => setConfig({ id: null, name: "", accountIds: [], cardIds: [], mainId: "" })}>+ Otra cuenta del banco</button>
+          <button className="secondary" onClick={() => setConfig(NEW_CONFIG)}>+ Otra cuenta del banco</button>
           <label>Desde <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} /></label>
           <label>Hasta <input type="date" value={to} onChange={(e) => setTo(e.target.value)} /></label>
         </div>
@@ -696,7 +742,14 @@ export function Reconciliation() {
             </div>
           )}
 
-          {isSupabaseConfigured && <TransferAlerts alerts={alerts} />}
+          {isSupabaseConfigured && reminder && (
+            <p className="message warning" style={{ marginTop: 16 }}>
+              {reminder.lastLineDate
+                ? `El último resumen subido llega hasta el ${fmtDate(reminder.lastLineDate)} (hace ${reminder.daysBehind} días). Subí uno nuevo para que el aviso de cobros que no llegaron pueda controlar los días que faltan.`
+                : "Todavía no se subió ningún resumen de esta cuenta: sin eso el aviso de cobros que no llegaron no puede controlar nada."}
+            </p>
+          )}
+          {isSupabaseConfigured && recon.alertsEnabled && <TransferAlerts alerts={alerts} days={recon.alertDays} />}
 
           {renderSuggestionGroup("2. Coincidencias exactas", "Mismo importe al centavo y fecha cercana. Nada queda conciliado hasta que confirmás.", exactSuggestions, false)}
           {renderSuggestionGroup(

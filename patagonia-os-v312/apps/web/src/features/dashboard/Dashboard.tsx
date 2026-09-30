@@ -10,7 +10,7 @@ import { useActiveBranch } from "../branches/BranchProvider";
 import { listCustomerChargesInRange, listCustomersWithBalance } from "../customers/customers-service";
 import { listProductsForBranch } from "../inventory/inventory-service";
 import { listProfitabilityPeriods } from "../profitability/profitability-service";
-import { getTransferAlerts } from "../reconciliation/reconciliation-service";
+import { getReconReminders, getTransferAlerts, type ReconReminder } from "../reconciliation/reconciliation-service";
 import { listPosSalesInRange } from "../sale/pos-shift-service";
 import { addDaysIso, formatMoney, todayIso } from "../shifts/format";
 import { useShifts } from "../shifts/useShifts";
@@ -34,6 +34,7 @@ export function Dashboard() {
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [overdueCustomers, setOverdueCustomers] = useState<{ name: string; balance: number }[]>([]);
   const [transferAlerts, setTransferAlerts] = useState<{ count: number; total: number; oldest: string } | null>(null);
+  const [statementReminders, setStatementReminders] = useState<ReconReminder[]>([]);
 
   useEffect(() => {
     if (!isSupabaseConfigured || !branchId) return;
@@ -103,6 +104,11 @@ export function Dashboard() {
         setTransferAlerts({ count: list.length, total: list.reduce((s, a) => s + a.amount, 0), oldest: list[0].date });
       })
       .catch(() => undefined);
+    getReconReminders()
+      .then((list) => {
+        if (!cancelled) setStatementReminders(list);
+      })
+      .catch(() => undefined);
     return () => {
       cancelled = true;
     };
@@ -160,7 +166,7 @@ export function Dashboard() {
             <h2>Alertas</h2>
             <AlertTriangle size={20} />
           </div>
-          {alerts.length === 0 && overdueCustomers.length === 0 && !transferAlerts ? (
+          {alerts.length === 0 && overdueCustomers.length === 0 && !transferAlerts && statementReminders.length === 0 ? (
             <p className="muted">Sin alertas.</p>
           ) : (
             <>
@@ -175,6 +181,19 @@ export function Dashboard() {
                   </div>
                 </div>
               )}
+              {statementReminders.map((r) => (
+                <div className="alert-row" key={`statement-${r.reconAccountId}`}>
+                  <AlertTriangle size={18} />
+                  <div>
+                    <strong>Subí el resumen de {r.name}</strong>
+                    <span>
+                      {r.lastLineDate
+                        ? `El último llega hasta el ${r.lastLineDate.split("-").reverse().join("/")} (hace ${r.daysBehind} días). Sin eso no se controla si llegaron las transferencias.`
+                        : "Todavía no se subió ninguno. Sin eso no se controla si llegaron las transferencias."}
+                    </span>
+                  </div>
+                </div>
+              ))}
               {overdueCustomers.map((c) => (
                 <div className="alert-row" key={`overdue-${c.name}`}>
                   <AlertTriangle size={18} />

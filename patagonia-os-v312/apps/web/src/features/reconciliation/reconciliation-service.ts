@@ -11,6 +11,11 @@ export interface ReconAccount {
   cardAccountIds: string[];
   mainTreasuryAccountId: string;
   mapping: BankMapping | null;
+  /** Aviso de cobros que no llegaron (migración 107). */
+  alertsEnabled: boolean;
+  alertDays: number;
+  /** Recordar subir el resumen si el último tiene más de estos días (0 = no). */
+  reminderDays: number;
 }
 
 export interface StoredBankLine {
@@ -55,18 +60,50 @@ function client() {
 export async function listReconAccounts(): Promise<ReconAccount[]> {
   const { data, error } = await client()
     .from("bank_reconciliation_accounts")
-    .select("id,name,treasury_account_ids,card_account_ids,main_treasury_account_id,mapping")
+    .select("id,name,treasury_account_ids,card_account_ids,main_treasury_account_id,mapping,alerts_enabled,alert_days,reminder_days")
     .order("name");
   if (error) throw error;
-  type Row = { id: string; name: string; treasury_account_ids: string[]; card_account_ids: string[]; main_treasury_account_id: string; mapping: BankMapping | null };
+  type Row = {
+    id: string; name: string; treasury_account_ids: string[]; card_account_ids: string[]; main_treasury_account_id: string; mapping: BankMapping | null;
+    alerts_enabled: boolean | null; alert_days: number | null; reminder_days: number | null;
+  };
   return ((data ?? []) as Row[]).map((r) => ({
     id: r.id,
     name: r.name,
     treasuryAccountIds: r.treasury_account_ids ?? [],
     cardAccountIds: r.card_account_ids ?? [],
     mainTreasuryAccountId: r.main_treasury_account_id,
-    mapping: r.mapping
+    mapping: r.mapping,
+    alertsEnabled: r.alerts_enabled ?? true,
+    alertDays: r.alert_days ?? 3,
+    reminderDays: r.reminder_days ?? 7
   }));
+}
+
+export async function setReconAlertSettings(reconAccountId: string, alertsEnabled: boolean, alertDays: number, reminderDays: number): Promise<void> {
+  const { error } = await client().rpc("set_reconciliation_alert_settings", {
+    p_recon_account_id: reconAccountId,
+    p_alerts_enabled: alertsEnabled,
+    p_alert_days: alertDays,
+    p_reminder_days: reminderDays
+  });
+  if (error) throw new Error(error.message);
+}
+
+export interface ReconReminder {
+  reconAccountId: string;
+  name: string;
+  /** Hasta qué día llega el último resumen subido (null = nunca se subió). */
+  lastLineDate: string | null;
+  daysBehind: number;
+}
+
+/** Cuentas del banco a las que hace mucho no se les sube el resumen (sin eso el aviso no puede comparar). */
+export async function getReconReminders(): Promise<ReconReminder[]> {
+  const { data, error } = await client().rpc("get_reconciliation_reminders");
+  if (error) throw new Error(error.message);
+  type Row = { recon_account_id: string; name: string; last_line_date: string | null; days_behind: number };
+  return ((data ?? []) as Row[]).map((r) => ({ reconAccountId: r.recon_account_id, name: r.name, lastLineDate: r.last_line_date, daysBehind: Number(r.days_behind) }));
 }
 
 export async function saveReconAccount(input: { id: string | null; name: string; treasuryAccountIds: string[]; cardAccountIds: string[]; mainTreasuryAccountId: string }): Promise<string> {
