@@ -26,7 +26,7 @@ interface SerialPortRequestOptions {
   filters?: { usbVendorId?: number; usbProductId?: number }[];
 }
 
-interface Serial {
+interface Serial extends EventTarget {
   getPorts(): Promise<SerialPort[]>;
   requestPort(options?: SerialPortRequestOptions): Promise<SerialPort>;
 }

@@ -13,6 +13,7 @@ import { Profitability } from "./features/profitability/Profitability";
 import { Carcass } from "./features/carcass/Carcass";
 import { Branches } from "./features/branches/Branches";
 import { Recipes } from "./features/recipes/Recipes";
+import { Scales } from "./features/scales/Scales";
 import { Creditors } from "./features/creditors/Creditors";
 import { Customers } from "./features/customers/Customers";
 import { Export } from "./features/export/Export";
@@ -71,6 +72,7 @@ export default function App() {
         {allowed && page === "carcass" && <Carcass />}
         {allowed && page === "branches" && <Branches />}
         {allowed && page === "recipes" && <Recipes />}
+        {allowed && page === "scales" && <Scales />}
         {allowed && page === "creditors" && <Creditors />}
         {allowed && page === "customers" && <Customers />}
         {allowed && page === "reports" && <Reports />}

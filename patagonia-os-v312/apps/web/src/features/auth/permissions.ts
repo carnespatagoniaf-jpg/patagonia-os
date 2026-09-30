@@ -21,7 +21,8 @@ export type Permission =
   | "users.manage"
   | "branches.manage"
   | "audit.view"
-  | "import.data";
+  | "import.data"
+  | "scales.manage";
 
 // "owner" es interno nuestro (el equipo de Patagonia OS): ve todo, incluidas
 // herramientas todavía en prueba (Auditoría) antes de decidir si pasan a
@@ -76,7 +77,8 @@ export const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> 
     "reports.view",
     "branches.manage",
     "users.manage",
-    "import.data"
+    "import.data",
+    "scales.manage"
   ],
   manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view"],
   cashier: ["pos.sell", "products.view", "sales.create", "pos.treasury"],
@@ -106,7 +108,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   "users.manage": "Usuarios",
   "branches.manage": "Sucursales",
   "audit.view": "Auditoría",
-  "import.data": "Importar desde Excel"
+  "import.data": "Importar desde Excel",
+  "scales.manage": "Balanzas"
 };
 
 export function can(profile: UserProfile | null, permission: Permission) {
@@ -132,6 +135,7 @@ export const PAGE_PERMISSIONS = {
   profitability: "profitability.view",
   carcass: "carcass.manage",
   recipes: "recipes.manage",
+  scales: "scales.manage",
   creditors: "creditors.manage",
   customers: "customers.manage",
   reports: "reports.view",
