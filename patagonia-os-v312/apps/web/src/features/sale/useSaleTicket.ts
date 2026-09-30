@@ -132,18 +132,27 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     });
   })();
 
-  function quickAdd(product: Product, quantity = 1) {
+  function quickAdd(product: Product, quantity = 1, source?: "scale") {
     setMessage("");
     if (!Number.isFinite(quantity) || quantity <= 0) {
       setMessage("La cantidad debe ser mayor que cero.");
       return;
     }
+    // Lo escaneado de un ticket de la balanza va en su propia línea (no se
+    // mezcla con lo buscado a mano) y cuenta cuántos tickets son, para el
+    // control de balanza del cierre.
+    const key = source ? `${product.id}|scale` : product.id;
     setCart((current) => {
-      const existing = current.find((l) => l.key === product.id);
+      const existing = current.find((l) => l.key === key);
       if (existing) {
-        return current.map((l) => (l.key === product.id ? { ...l, quantity: l.quantity + quantity } : l));
+        return current.map((l) =>
+          l.key === key ? { ...l, quantity: l.quantity + quantity, ...(source ? { scaleTickets: (l.scaleTickets ?? 1) + 1 } : {}) } : l
+        );
       }
-      return [...current, { key: product.id, kind: "product", productId: product.id, name: product.name, unit: product.unit, quantity, unitPrice: product.priceRetail }];
+      return [
+        ...current,
+        { key, kind: "product", productId: product.id, name: product.name, unit: product.unit, quantity, unitPrice: product.priceRetail, ...(source ? { source, scaleTickets: 1 } : {}) }
+      ];
     });
     setSearch("");
     setHighlightedIndex(-1);
@@ -234,7 +243,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       ) {
         setMessage("Ticket de la balanza no cargado. Revisá el importe o cargá los productos a mano.");
       } else {
-        setCart((current) => [...current, { key, kind: "manual", name: "Ticket de balanza", unit: "unit", quantity: 1, unitPrice: ticketTotal }]);
+        setCart((current) => [...current, { key, kind: "manual", name: "Ticket de balanza", unit: "unit", quantity: 1, unitPrice: ticketTotal, source: "scale_total", scaleTickets: 1 }]);
         setMessage(`Ticket de balanza cargado: ${formatMoney(ticketTotal)}.`);
       }
       setSearch("");
@@ -247,14 +256,14 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       const match = products.find((p) => (p.active ?? true) && p.code === scanned.plu);
       if (match) {
         if (scanned.kind === "weight") {
-          quickAdd(match, scanned.weightKg);
+          quickAdd(match, scanned.weightKg, "scale");
         } else {
           // La balanza grabó el importe final, no el peso -- se recalcula
           // la cantidad al precio actual del producto (mismo criterio que
           // el peso: el precio no se lee del código, siempre se usa el
           // precio vigente en el sistema).
           const quantity = match.priceRetail > 0 ? scanned.amount / match.priceRetail : 0;
-          if (quantity > 0) quickAdd(match, quantity);
+          if (quantity > 0) quickAdd(match, quantity, "scale");
         }
         return;
       }
