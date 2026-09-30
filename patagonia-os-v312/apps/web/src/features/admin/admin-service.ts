@@ -141,3 +141,51 @@ export async function deleteClient(companyId: string): Promise<void> {
     throw new Error((data as { error?: string })?.error ?? "No se pudo borrar el cliente.");
   }
 }
+
+/** Reportes que mandan los clientes con "Enviar a soporte" desde Balanzas
+ * (migración 100). Solo los ve un administrador de plataforma. */
+export interface ScaleSupportReport {
+  id: string;
+  companyId: string;
+  companyName: string;
+  branchName: string | null;
+  userName: string | null;
+  note: string | null;
+  logText: string;
+  connections: unknown[];
+  userAgent: string | null;
+  createdAt: string;
+  resolvedAt: string | null;
+}
+
+export async function listScaleSupportReports(): Promise<ScaleSupportReport[]> {
+  if (!supabase) return [];
+
+  const { data, error } = await supabase.rpc("list_scale_support_reports");
+  if (error) throw error;
+
+  interface Row {
+    id: string; company_id: string; company_name: string; branch_name: string | null; user_name: string | null;
+    note: string | null; log_text: string; connections: unknown; user_agent: string | null; created_at: string; resolved_at: string | null;
+  }
+  return ((data ?? []) as Row[]).map((row) => ({
+    id: row.id,
+    companyId: row.company_id,
+    companyName: row.company_name,
+    branchName: row.branch_name,
+    userName: row.user_name,
+    note: row.note,
+    logText: row.log_text,
+    connections: Array.isArray(row.connections) ? row.connections : [],
+    userAgent: row.user_agent,
+    createdAt: row.created_at,
+    resolvedAt: row.resolved_at
+  }));
+}
+
+export async function setScaleSupportReportResolved(id: string, resolved: boolean): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("set_scale_support_report_resolved", { p_id: id, p_resolved: resolved });
+  if (error) throw error;
+}

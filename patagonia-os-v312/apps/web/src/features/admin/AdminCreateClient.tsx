@@ -1,6 +1,7 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Building2, LockKeyhole, MapPin, Plus, Search } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
+import { AdminScaleReports } from "./AdminScaleReports";
 import { PROVINCES, createClient, deleteClient, listCompanies, setCompanyActive, setCompanyLocation, setCompanyTrial, type CompanySummary, type CreateClientResult } from "./admin-service";
 
 /** Mensaje listo para pegar en WhatsApp/mail y mandarle al dueño nuevo --
@@ -379,6 +380,8 @@ export function AdminCreateClient() {
           <span className="muted">No se bloquea nada al vencer: podés extender los días o dejarlo sin vencimiento desde cada tarjeta.</span>
         </section>
       )}
+
+      <AdminScaleReports />
 
       <div className="admin-search">
         <Search size={16} />

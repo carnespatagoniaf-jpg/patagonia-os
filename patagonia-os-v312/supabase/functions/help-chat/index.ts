@@ -75,7 +75,7 @@ BALANZAS (menú "Producto y stock" → Balanzas; solo dueño y administrador)
 - Para mandar los precios (Kretz Report / LT): en la balanza guardada tocar "Sincronizar catálogo". El sistema manda los productos activos de uno en uno y comprueba cada precio. Si se corta a la mitad, se vuelve a tocar "Sincronizar catálogo" y manda solo los que faltaron.
 - La balanza de precios se puede enchufar solo para pasar precios y después desenchufar. Al volver a enchufarla el sistema la reconoce solo, sin recargar la página. La tarjeta de la balanza muestra "Conectada" o "No conectada".
 - En cada balanza guardada: "Probar" (prueba rápida), "Diagnosticar" (revisa paso a paso qué anda y qué no) y "Quitar".
-- Si algo falla: abajo de todo, "Actividad reciente (para soporte)" → "Copiar para soporte", y pegar ese texto en un mensaje ${SUPPORT_CONTACT}.
+- Si algo falla: abajo de todo en Balanzas, en "¿Algo no anda? Enviar a soporte", escribir qué pasó (opcional) y tocar "Enviar a soporte". Le llega al equipo de Patagonia OS con lo que pasó con las balanzas de esa PC (no manda ventas, precios ni datos de clientes). Si no se puede enviar, en "Actividad reciente (para soporte)" está "Copiar para soporte" para pegar ese texto en un mensaje ${SUPPORT_CONTACT}.
 
 RECETAS (menú "Producto y stock" → Recetas; solo dueño y administrador)
 - Sirve para productos que se elaboran con otros (milanesas, hamburguesas): se carga qué insumos lleva un lote, la merma de cada uno, cuánto rinde y otros costos, y el sistema calcula el costo por kg o por unidad y un precio sugerido.

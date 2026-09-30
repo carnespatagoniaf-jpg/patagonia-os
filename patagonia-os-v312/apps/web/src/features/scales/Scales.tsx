@@ -26,6 +26,7 @@ import { runScaleDiagnostics, type DiagnosticReport } from "./diagnostics";
 import { getSyncSession, runSafeSync, summarizeSyncSession, type SyncSession } from "./sync";
 import { clearActivityLog, exportActivityLogText, getActivityLog, logScaleActivity, type ScaleActivityEntry } from "./activity-log";
 import type { ScaleWeightReading } from "./types";
+import { buildSupportConnections, submitScaleSupportReport } from "./support-service";
 import { forgetWeightScale, setWeightScaleEnabled, setWeightScalePort } from "../sale/scale-weight";
 
 /** Balanza de peso guardada acá (con lectura confirmada por el cajero) y
@@ -76,6 +77,9 @@ export function Scales() {
   const [syncProgress, setSyncProgress] = useState<Record<string, { done: number; total: number }>>({});
   const [activityLog, setActivityLog] = useState<ScaleActivityEntry[]>([]);
   const [copyMessage, setCopyMessage] = useState("");
+  const [supportNote, setSupportNote] = useState("");
+  const [supportBusy, setSupportBusy] = useState(false);
+  const [supportMessage, setSupportMessage] = useState("");
 
   function refresh() {
     linkWeightScaleToMostrador();
@@ -352,6 +356,25 @@ export function Scales() {
     }
   }
 
+  async function handleSendToSupport() {
+    setSupportBusy(true);
+    setSupportMessage("");
+    try {
+      await submitScaleSupportReport({
+        note: supportNote,
+        logText: exportActivityLogText(),
+        connections: buildSupportConnections(connections, liveIds, rowDiagnostics),
+        branchId: branchId ?? null
+      });
+      setSupportNote("");
+      setSupportMessage("Listo, le llegó al equipo de Patagonia OS. Te vamos a contactar.");
+    } catch (err) {
+      setSupportMessage(`No se pudo enviar: ${(err instanceof Error ? err.message : "error desconocido").replace(/\.$/, "")}. Probá "Copiar para soporte" (abajo) y mandalo por WhatsApp.`);
+    } finally {
+      setSupportBusy(false);
+    }
+  }
+
   function handleRemove(id: string) {
     if (!window.confirm("¿Quitar esta balanza? Vas a tener que volver a conectarla y detectarla si la necesitás de nuevo.")) return;
     const removed = listScaleConnections().find((c) => c.id === id);
@@ -531,6 +554,25 @@ export function Scales() {
           )}
         </div>
       )}
+
+      <div style={{ border: "1px solid #eef0f3", borderRadius: 10, padding: 16, marginTop: 20 }}>
+        <p style={{ margin: "0 0 6px", fontWeight: 700 }}>¿Algo no anda? Enviar a soporte</p>
+        <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
+          Le manda al equipo de Patagonia OS lo que pasó con las balanzas de esta PC (pruebas, errores, qué balanzas hay configuradas). No manda ventas, precios ni datos de clientes.
+        </p>
+        <textarea
+          rows={2}
+          placeholder="Contanos qué pasó (opcional). Ej.: no lee el peso, se corta al pasar precios…"
+          value={supportNote}
+          maxLength={1000}
+          onChange={(e) => setSupportNote(e.target.value)}
+          style={{ width: "100%", boxSizing: "border-box", marginBottom: 10 }}
+        />
+        <button disabled={supportBusy} onClick={() => void handleSendToSupport()}>
+          {supportBusy ? "Enviando…" : "Enviar a soporte"}
+        </button>
+        {supportMessage && <p className="message" style={{ marginTop: 10 }}>{supportMessage}</p>}
+      </div>
 
       <details style={{ marginTop: 20 }}>
         <summary className="secondary" style={{ display: "inline-block", cursor: "pointer", padding: "10px 14px", border: "1px solid #ccc", borderRadius: 6 }}>
