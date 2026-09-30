@@ -132,15 +132,16 @@ export async function getReconciliationItems(reconAccountId: string, from: strin
   };
 }
 
-export async function confirmBankMatch(lineId: string, movementIds: string[], paymentIds: string[], fee: number): Promise<void> {
-  const { error } = await client().rpc("confirm_bank_match", { p_line_id: lineId, p_movement_ids: movementIds, p_payment_ids: paymentIds, p_fee: fee });
+/** adjustment: diferencia banco − sistema de una coincidencia "casi igual" (se registra como ajuste, migración 105). */
+export async function confirmBankMatch(lineId: string, movementIds: string[], paymentIds: string[], fee: number, adjustment = 0): Promise<void> {
+  const { error } = await client().rpc("confirm_bank_match", { p_line_id: lineId, p_movement_ids: movementIds, p_payment_ids: paymentIds, p_fee: fee, p_adjustment: adjustment });
   if (error) throw new Error(error.message);
 }
 
 /** Muchas coincidencias en un solo pedido (todo o nada). */
-export async function confirmBankMatches(matches: { lineId: string; movementIds: string[]; paymentIds: string[] }[]): Promise<number> {
+export async function confirmBankMatches(matches: { lineId: string; movementIds: string[]; paymentIds: string[]; adjustment?: number }[]): Promise<number> {
   const { data, error } = await client().rpc("confirm_bank_matches", {
-    p_matches: matches.map((m) => ({ line_id: m.lineId, movement_ids: m.movementIds, payment_ids: m.paymentIds }))
+    p_matches: matches.map((m) => ({ line_id: m.lineId, movement_ids: m.movementIds, payment_ids: m.paymentIds, adjustment: m.adjustment ?? 0 }))
   });
   if (error) throw new Error(error.message);
   return Number(data);

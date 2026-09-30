@@ -37,7 +37,15 @@ export interface SystemItem {
 export interface MatchSuggestion {
   lineId: string;
   itemIds: string[];
-  kind: "exact";
+  /** "exact": mismo importe al centavo. "near": mismo cobro con unos pesos de diferencia (se revisa). */
+  kind: "exact" | "near";
+  /** banco − sistema (0 en las exactas). Al confirmar una "near" se registra como ajuste. */
+  difference: number;
+}
+
+/** Tope de diferencia para "casi igual": $500 o 2% de lo cobrado, lo que sea mayor (igual que la base, migración 105). */
+export function nearTolerance(amount: number): number {
+  return Math.max(500, Math.abs(amount) * 0.02);
 }
 
 export const MAX_DAYS_BEFORE = 3;
@@ -98,10 +106,100 @@ export function suggestMatches(lines: MatchLine[], items: SystemItem[]): MatchSu
     }
     if (best) {
       used.add(best.id);
-      suggestions.push({ lineId: line.id, itemIds: [best.id], kind: "exact" });
+      suggestions.push({ lineId: line.id, itemIds: [best.id], kind: "exact", difference: 0 });
     }
   }
+
+  // Segunda pasada, como hacen los sistemas contables grandes: "casi
+  // iguales" (mismo signo, fecha cercana, diferencia chica). Se eligen las
+  // parejas de menor diferencia primero, para no robarle el cobro a otra línea.
+  const matchedLines = new Set(suggestions.map((s) => s.lineId));
+  const pairs: { line: MatchLine; item: SystemItem; diff: number; lag: number }[] = [];
+  const freeItems = items.filter((i) => !i.isCard && !used.has(i.id));
+  for (const line of sorted) {
+    if (matchedLines.has(line.id) || isCardDeposit(line)) continue;
+    const lineDay = toDay(line.date);
+    for (const item of freeItems) {
+      if (Math.sign(item.amount) !== Math.sign(line.amount)) continue;
+      const lag = lineDay - toDay(item.date);
+      if (lag < -MAX_DAYS_BEFORE || lag > MAX_DAYS_AFTER) continue;
+      const diff = Math.round((line.amount - item.amount) * 100) / 100;
+      if (diff === 0 || Math.abs(diff) > nearTolerance(item.amount)) continue;
+      pairs.push({ line, item, diff, lag });
+    }
+  }
+  pairs.sort((a, b) => Math.abs(a.diff) - Math.abs(b.diff) || Math.abs(a.lag) - Math.abs(b.lag));
+  for (const p of pairs) {
+    if (matchedLines.has(p.line.id) || used.has(p.item.id)) continue;
+    matchedLines.add(p.line.id);
+    used.add(p.item.id);
+    suggestions.push({ lineId: p.line.id, itemIds: [p.item.id], kind: "near", difference: p.diff });
+  }
   return suggestions;
+}
+
+export type Channel = "transferencias" | "tarjetas" | "billeteras" | "otros";
+
+export const CHANNEL_LABELS: Record<Channel, string> = {
+  transferencias: "Transferencias",
+  tarjetas: "Tarjetas",
+  billeteras: "Billeteras / QR / DEBIN",
+  otros: "Otras entradas"
+};
+
+/** Por dónde entró una línea del banco (según el texto del banco). */
+export function bankChannel(line: Pick<MatchLine, "amount" | "description">): Channel {
+  if (isCardDeposit(line)) return "tarjetas";
+  if (/debin|mercado ?pago|\bmodo\b|\bqr\b|ual[aá]|naranja ?x|brubank|billetera/i.test(line.description)) return "billeteras";
+  if (/transf|transferencia|\btrf\b|\bcvu\b|\bcbu\b/i.test(line.description)) return "transferencias";
+  return "otros";
+}
+
+export interface ChannelRow {
+  channel: Channel;
+  bank: number;
+  bankCount: number;
+  system: number;
+  systemCount: number;
+  difference: number;
+}
+
+/**
+ * Resumen "banco vs sistema" de lo que ENTRÓ en el período, por vía (el
+ * informe que arman las empresas para explicar la diferencia). Solo entradas.
+ */
+export function summarizeByChannel(bankLines: MatchLine[], systemInflows: { amount: number; channel: Channel }[]): ChannelRow[] {
+  const rows = new Map<Channel, ChannelRow>();
+  const row = (channel: Channel) => {
+    let r = rows.get(channel);
+    if (!r) {
+      r = { channel, bank: 0, bankCount: 0, system: 0, systemCount: 0, difference: 0 };
+      rows.set(channel, r);
+    }
+    return r;
+  };
+  for (const line of bankLines) {
+    if (line.amount <= 0) continue;
+    const r = row(bankChannel(line));
+    r.bank += line.amount;
+    r.bankCount++;
+  }
+  for (const item of systemInflows) {
+    if (item.amount <= 0) continue;
+    const r = row(item.channel);
+    r.system += item.amount;
+    r.systemCount++;
+  }
+  const order: Channel[] = ["transferencias", "tarjetas", "billeteras", "otros"];
+  return order
+    .filter((c) => rows.has(c))
+    .map((c) => {
+      const r = rows.get(c)!;
+      r.bank = Math.round(r.bank * 100) / 100;
+      r.system = Math.round(r.system * 100) / 100;
+      r.difference = Math.round((r.bank - r.system) * 100) / 100;
+      return r;
+    });
 }
 
 export interface CardSummary {

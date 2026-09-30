@@ -7,7 +7,11 @@ import { addDaysIso, todayIso } from "../shifts/format";
 import type { Table } from "../import/import-parse";
 import { BANK_FIELD_LABELS, guessBankMapping, parseBankStatement, type BankField, type BankMapping } from "./bank-statement";
 import {
+  CHANNEL_LABELS,
   MAX_DAYS_AFTER,
+  summarizeByChannel,
+  type Channel,
+  type MatchSuggestion,
   daysWaiting,
   groupSimilarLines,
   isCardDeposit,
@@ -243,9 +247,66 @@ export function Reconciliation() {
     };
   }
 
-  async function confirm(lineId: string, ids: string[], fee: number) {
+  async function confirm(lineId: string, ids: string[], fee: number, adjustment = 0) {
     const { paymentIds, movementIds } = splitIds(ids);
-    await confirmBankMatch(lineId, movementIds, paymentIds, fee);
+    await confirmBankMatch(lineId, movementIds, paymentIds, fee, adjustment);
+  }
+
+  // Informe "banco vs sistema" de lo que entró en el período, por vía.
+  const createdByRecon = new Set(lines.map((l) => l.createdMovementId).filter((x): x is string => Boolean(x)));
+  const accountChannel = (accountId: string): Channel =>
+    cardIds.has(accountId) ? "tarjetas" : treasuryAccounts.find((a) => a.id === accountId)?.paymentMethod === "qr" ? "billeteras" : "transferencias";
+  const systemInflows = [
+    ...payments.filter((p) => p.date >= from && p.date <= to).map((p) => ({ amount: p.amount, channel: accountChannel(p.accountId) })),
+    ...movements
+      .filter((m) => m.direction === "in" && m.date >= from && m.date <= to && !createdByRecon.has(m.id))
+      .map((m) => ({ amount: m.amount, channel: m.type === "venta" ? accountChannel(m.accountId) : ("otros" as Channel) }))
+  ];
+  const channelRows = summarizeByChannel(lines, systemInflows);
+  const exactSuggestions = suggestions.filter((s) => s.kind === "exact");
+  const nearSuggestions = suggestions.filter((s) => s.kind === "near");
+
+  function renderSuggestionGroup(title: string, help: string, list: MatchSuggestion[], near: boolean) {
+    if (list.length === 0) return null;
+    const totalDiff = Math.round(list.reduce((sum, s) => sum + s.difference, 0) * 100) / 100;
+    return (
+      <div style={box}>
+        <p style={{ margin: "0 0 8px", fontWeight: 700 }}>{title} ({list.length})</p>
+        <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>{help}</p>
+        <button
+          disabled={busy}
+          style={{ marginBottom: 10 }}
+          onClick={() =>
+            run(async () => {
+              const n = await confirmBankMatches(list.map((s) => ({ lineId: s.lineId, ...splitIds(s.itemIds), adjustment: s.difference })));
+              setMessage(`Listo: ${n} movimientos conciliados${near ? `; diferencia registrada como ajuste: ${fmt(totalDiff)}` : ""}.`);
+              await reload();
+            })
+          }
+        >
+          {busy ? "Confirmando…" : near ? `Confirmar las ${list.length} (diferencia total ${fmt(totalDiff)})` : `Confirmar las ${list.length}`}
+        </button>
+        <details open={near && list.length <= 20}>
+          <summary style={{ cursor: "pointer" }}>Ver el detalle</summary>
+          <div style={{ display: "grid", gap: 6, marginTop: 8, maxHeight: 500, overflowY: "auto" }}>
+            {list.map((s) => {
+              const line = lineById.get(s.lineId);
+              const item = itemById.get(s.itemIds[0]);
+              if (!line || !item) return null;
+              return (
+                <div key={s.lineId} style={{ ...row, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", fontSize: 14 }}>
+                  <span><strong>Banco {fmtDate(line.date)}</strong> {line.description.slice(0, 60)} · <strong>{fmt(line.amount)}</strong></span>
+                  <span className="muted">↔ {fmtDate(item.date)} · {fmt(item.amount)} · {item.label.slice(0, 60)}</span>
+                  {near && <strong style={{ color: "#8a4b00" }}>diferencia {fmt(s.difference)}</strong>}
+                  <button className="secondary" disabled={busy} onClick={() => run(async () => { await confirm(s.lineId, s.itemIds, 0, s.difference); await reload(); })}>Confirmar</button>
+                  <button className="secondary" onClick={() => { setLinkingLineId(line.id); setSelectedIds(new Set()); }}>Otro</button>
+                </div>
+              );
+            })}
+          </div>
+        </details>
+      </div>
+    );
   }
 
   async function handleFile(file: File) {
@@ -551,43 +612,43 @@ export function Reconciliation() {
             </p>
           )}
 
-          {/* 2. Coincidencias */}
-          {suggestions.length > 0 && (
+          {/* Informe: lo que entró según el banco vs según el sistema */}
+          {isSupabaseConfigured && channelRows.length > 0 && (
             <div style={box}>
-              <p style={{ margin: "0 0 8px", fontWeight: 700 }}>2. Coincidencias encontradas ({suggestions.length})</p>
-              <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>Mismo importe, fecha cercana. Nada queda conciliado hasta que confirmás.</p>
-              <button
-                disabled={busy}
-                style={{ marginBottom: 10 }}
-                onClick={() =>
-                  run(async () => {
-                    const n = await confirmBankMatches(suggestions.map((s) => ({ lineId: s.lineId, ...splitIds(s.itemIds) })));
-                    setMessage(`Listo: ${n} movimientos conciliados.`);
-                    await reload();
-                  })
-                }
-              >
-                {busy ? "Confirmando…" : `Confirmar las ${suggestions.length}`}
-              </button>
-              <details>
-                <summary style={{ cursor: "pointer" }}>Ver el detalle</summary>
-                <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
-                  {suggestions.map((s) => {
-                    const line = lineById.get(s.lineId);
-                    const item = itemById.get(s.itemIds[0]);
-                    if (!line || !item) return null;
-                    return (
-                      <div key={s.lineId} style={{ ...row, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", fontSize: 14 }}>
-                        <span><strong>Banco {fmtDate(line.date)}</strong> {line.description.slice(0, 60)} · <strong>{fmt(line.amount)}</strong></span>
-                        <span className="muted">↔ {fmtDate(item.date)} · {item.label.slice(0, 70)}</span>
-                        <button className="secondary" disabled={busy} onClick={() => run(async () => { await confirm(s.lineId, s.itemIds, 0); await reload(); })}>Confirmar</button>
-                        <button className="secondary" onClick={() => { setLinkingLineId(line.id); setSelectedIds(new Set()); }}>Otro</button>
-                      </div>
-                    );
-                  })}
-                </div>
-              </details>
+              <p style={{ margin: "0 0 8px", fontWeight: 700 }}>Lo que entró en el período: banco vs sistema</p>
+              <div style={{ overflowX: "auto" }}>
+                <table className="data-table">
+                  <thead><tr><th>Vía</th><th className="num">Según el banco</th><th className="num">Según el sistema</th><th className="num">Diferencia</th></tr></thead>
+                  <tbody>
+                    {channelRows.map((r) => (
+                      <tr key={r.channel}>
+                        <td>{CHANNEL_LABELS[r.channel]}</td>
+                        <td className="num">{fmt(r.bank)} <span className="muted">({r.bankCount})</span></td>
+                        <td className="num">{fmt(r.system)} <span className="muted">({r.systemCount})</span></td>
+                        <td className={`num ${Math.abs(r.difference) < 1 ? "" : r.difference > 0 ? "num-positive" : "num-negative"}`}>{fmt(r.difference)}</td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td><strong>Total</strong></td>
+                      <td className="num"><strong>{fmt(channelRows.reduce((t, r) => t + r.bank, 0))}</strong></td>
+                      <td className="num"><strong>{fmt(channelRows.reduce((t, r) => t + r.system, 0))}</strong></td>
+                      <td className="num"><strong>{fmt(channelRows.reduce((t, r) => t + r.difference, 0))}</strong></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <p className="muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
+                Diferencia positiva: entró al banco más de lo que registró el sistema (cobros que no pasaron por Mostrador o se cargaron en otra vía). Negativa: el sistema tiene más (en tarjetas es normal: comisiones y lo que todavía no se acreditó). El detalle, abajo.
+              </p>
             </div>
+          )}
+
+          {renderSuggestionGroup("2. Coincidencias exactas", "Mismo importe al centavo y fecha cercana. Nada queda conciliado hasta que confirmás.", exactSuggestions, false)}
+          {renderSuggestionGroup(
+            "2b. Casi iguales (revisalas)",
+            "Parece el mismo cobro con unos pesos de diferencia (por ejemplo, se cargó redondeado). Al confirmar, la diferencia queda registrada en Tesorería como ajuste \"Diferencia de cobro\", a la vista.",
+            nearSuggestions,
+            true
           )}
 
           {/* 3. Tarjetas */}

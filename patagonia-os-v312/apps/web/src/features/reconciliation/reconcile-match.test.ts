@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { daysWaiting, groupSimilarLines, isCardDeposit, isTaxLine, suggestMatches, summarizeCards, type SystemItem } from "./reconcile-match";
+import { bankChannel, daysWaiting, groupSimilarLines, isCardDeposit, isTaxLine, suggestMatches, summarizeByChannel, summarizeCards, type SystemItem } from "./reconcile-match";
 
 const cobro = (id: string, date: string, amount: number, isCard = false): SystemItem => ({ id, source: "payment", date, amount, isCard, label: "Cobro" });
 
@@ -10,7 +10,7 @@ describe("cruce banco ↔ sistema (formatos del Banco Provincia real)", () => {
       [{ id: "L1", date: "2026-09-30", amount: 17839, description: "TRANSF DE CLIENTE (20294029789) VAR" }],
       [cobro("C1", "2026-09-29", 17839)]
     );
-    assert.deepEqual(s, [{ lineId: "L1", itemIds: ["C1"], kind: "exact" }]);
+    assert.deepEqual(s, [{ lineId: "L1", itemIds: ["C1"], kind: "exact", difference: 0 }]);
   });
 
   it("dos transferencias del mismo importe van cada una a su cobro, sin repetir", () => {
@@ -67,6 +67,55 @@ describe("cruce banco ↔ sistema (formatos del Banco Provincia real)", () => {
     assert.equal(groups.length, 1);
     assert.equal(groups[0].lines.length, 3);
     assert.equal(groups[0].total, -600);
+  });
+
+  it("casi igual: mismo cobro con unos pesos de diferencia (caso real: se cargó redondeado)", () => {
+    const s = suggestMatches(
+      [{ id: "L1", date: "2026-09-24", amount: 15227, description: "TRANSF DE CLIENTE" }],
+      [cobro("C1", "2026-09-24", 15200), cobro("C2", "2026-09-24", 15400)]
+    );
+    assert.deepEqual(s, [{ lineId: "L1", itemIds: ["C1"], kind: "near", difference: 27 }]);
+  });
+
+  it("casi igual: primero las exactas, y no se usa un cobro dos veces", () => {
+    const s = suggestMatches(
+      [
+        { id: "L1", date: "2026-09-24", amount: 10000, description: "TRANSF DE A" },
+        { id: "L2", date: "2026-09-24", amount: 10050, description: "TRANSF DE B" }
+      ],
+      [cobro("C1", "2026-09-24", 10000)]
+    );
+    assert.deepEqual(s.map((x) => [x.lineId, x.kind]), [["L1", "exact"]]);
+  });
+
+  it("casi igual: no si la diferencia es grande ($500 o 2%)", () => {
+    const s = suggestMatches([{ id: "L1", date: "2026-09-24", amount: 15800, description: "TRANSF DE X" }], [cobro("C1", "2026-09-24", 15200)]);
+    assert.equal(s.length, 0);
+  });
+
+  it("vía de cada entrada del banco", () => {
+    assert.equal(bankChannel({ amount: 5000, description: "TRANSF DE JUAN (20111111112) VAR" }), "transferencias");
+    assert.equal(bankChannel({ amount: 5000, description: "PAGOS A COMERCIOS VISA - L. 1" }), "tarjetas");
+    assert.equal(bankChannel({ amount: 5000, description: "CR.DEBIN S/C 123" }), "billeteras");
+    assert.equal(bankChannel({ amount: 109.23, description: "ACREDIT INTERESES PERIODO" }), "otros");
+  });
+
+  it("resumen banco vs sistema por vía (solo entradas)", () => {
+    const rows = summarizeByChannel(
+      [
+        { id: "a", date: "2026-09-20", amount: 9812990, description: "TRANSF DE VARIOS" },
+        { id: "b", date: "2026-09-20", amount: 5699956.54, description: "PAGOS A COMERCIOS VISA" },
+        { id: "c", date: "2026-09-20", amount: -500, description: "IMPUESTO" }
+      ],
+      [
+        { amount: 8783177, channel: "transferencias" },
+        { amount: 5922016, channel: "tarjetas" }
+      ]
+    );
+    assert.deepEqual(rows.map((r) => [r.channel, r.bank, r.system, r.difference]), [
+      ["transferencias", 9812990, 8783177, 1029813],
+      ["tarjetas", 5699956.54, 5922016, -222059.46]
+    ]);
   });
 
   it("días esperando", () => {
