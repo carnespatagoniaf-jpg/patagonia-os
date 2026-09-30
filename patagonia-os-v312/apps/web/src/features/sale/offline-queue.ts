@@ -14,6 +14,14 @@ export interface PendingSale {
   input: CreatePosSaleInput;
   status: "pending" | "error";
   errorMessage?: string;
+  /** Empresa del usuario que la cobró -- si en esta PC después entra
+   * alguien de otra empresa, la venta no se le manda con esa sesión. Las
+   * guardadas antes de este campo no lo tienen. */
+  companyId?: string;
+  /** Total cobrado, para mostrarlo en el aviso (las viejas no lo tienen). */
+  total?: number;
+  /** Aviso no-error (p. ej. "esperando que se abra un turno"). */
+  note?: string;
 }
 
 const QUEUE_KEY = "patagonia-pos-offline-queue";
@@ -36,12 +44,13 @@ function saveQueue(queue: PendingSale[]): void {
   }
 }
 
-export function addPendingSale(input: CreatePosSaleInput): PendingSale {
+export function addPendingSale(input: CreatePosSaleInput, extra: { companyId?: string; total?: number } = {}): PendingSale {
   const sale: PendingSale = {
     localId: `offline-${Date.now()}-${Math.random().toString(36).slice(2)}`,
     createdAt: new Date().toISOString(),
     input,
-    status: "pending"
+    status: "pending",
+    ...extra
   };
   saveQueue([...getPendingSales(), sale]);
   return sale;
@@ -52,7 +61,20 @@ export function removePendingSale(localId: string): void {
 }
 
 export function markPendingSaleError(localId: string, message: string): void {
-  saveQueue(getPendingSales().map((s) => (s.localId === localId ? { ...s, status: "error", errorMessage: message } : s)));
+  saveQueue(getPendingSales().map((s) => (s.localId === localId ? { ...s, status: "error", errorMessage: message, note: undefined } : s)));
+}
+
+export function updatePendingSale(localId: string, patch: Partial<Omit<PendingSale, "localId">>): void {
+  saveQueue(getPendingSales().map((s) => (s.localId === localId ? { ...s, ...patch } : s)));
+}
+
+/** El turno donde se cobró ya no está abierto (lo cerraron, quizás desde
+ * otra PC, antes de que la venta llegara). No es un error de la venta: se
+ * sube al turno abierto de esa sucursal. */
+export function isShiftClosedError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const { message } = err as { message?: unknown };
+  return typeof message === "string" && /no hay un turno de mostrador abierto/i.test(message);
 }
 
 /**

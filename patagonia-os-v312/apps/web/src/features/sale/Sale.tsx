@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Settings } from "lucide-react";
+import * as Sentry from "@sentry/react";
 import type { Product } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured, supabase } from "../../lib/supabase";
@@ -14,7 +15,7 @@ import { useSuppliers } from "../purchases/useSuppliers";
 import { useEmployees } from "../employees/useEmployees";
 import { deletePosShiftOutflow, listPosShiftVales, type PosShiftVale } from "../employees/employees-service";
 import { createPosSale, type CreatePosSaleInput } from "./sale-service";
-import { addPendingSale, getPendingSales, isRetryableError, markPendingSaleError, removePendingSale, resetPendingSaleErrors, type PendingSale } from "./offline-queue";
+import { addPendingSale, getPendingSales, isRetryableError, isShiftClosedError, markPendingSaleError, removePendingSale, resetPendingSaleErrors, updatePendingSale, type PendingSale } from "./offline-queue";
 import { closePosShift, deletePosShiftAdjustment, getOpenPosShift, listPosShiftAdjustments, listPosShiftSupplierPayments, type PosShiftSupplierPayment, listPosShiftSales, openPosShift, voidPosSale, type CloseShiftResult, type PosShift, type PosShiftAdjustment, type PosShiftSale } from "./pos-shift-service";
 import { formatMoney } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
@@ -120,6 +121,9 @@ export function Sale() {
   const [autoPrintEnabled, setAutoPrintEnabled] = useState<boolean>(() => getAutoPrintEnabled());
   const [pendingSales, setPendingSales] = useState<PendingSale[]>(() => getPendingSales());
   const [syncingOffline, setSyncingOffline] = useState(false);
+  const syncingRef = useRef(false);
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
 
   const [scaleConfig, setScaleConfig] = useState<ScaleConfig>(DEFAULT_SCALE_CONFIG);
   const [scaleConfigCalibrated, setScaleConfigCalibrated] = useState(false);
@@ -231,18 +235,56 @@ export function Sale() {
     if (movementReceipt) movementReceiptRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [movementReceipt]);
 
+  /** Sube una venta guardada. Si su turno ya se cerró (p. ej. desde otra
+   * PC antes de que llegara), la sube al turno abierto de esa sucursal --
+   * la plata ya se cobró y tiene que figurar en algún lado. La clave de
+   * idempotencia se chequea en el servidor ANTES que el turno, así que si
+   * la venta sí había llegado la primera vez, no se duplica. Si no hay
+   * ningún turno abierto, queda pendiente hasta que se abra uno. */
+  async function uploadPendingSale(sale: PendingSale) {
+    try {
+      await createPosSale(sale.input);
+    } catch (err) {
+      if (!isShiftClosedError(err)) throw err;
+      const open = await getOpenPosShift(sale.input.branchId);
+      if (!open) {
+        updatePendingSale(sale.localId, { note: "su turno ya se cerró; se sube sola apenas abras un turno nuevo" });
+        return;
+      }
+      const input = { ...sale.input, posShiftId: open.id };
+      updatePendingSale(sale.localId, { input });
+      await createPosSale(input);
+    }
+    removePendingSale(sale.localId);
+  }
+
+  /** Descarta a mano una venta que el servidor rechaza por un motivo real
+   * (producto borrado, cuenta de cobro desactivada...), para que no trabe
+   * el cierre del turno para siempre. Queda avisado en Sentry. */
+  function discardPendingSale(sale: PendingSale) {
+    const when = new Date(sale.createdAt).toLocaleString("es-AR");
+    const amount = sale.total != null ? ` de $${sale.total.toLocaleString("es-AR")}` : "";
+    if (!window.confirm(`¿Descartar la venta${amount} de las ${when}?\n\nNo va a quedar registrada en el sistema. Si la cobraste, cargala de nuevo a mano para que el stock y la caja den bien.`)) return;
+    Sentry.captureMessage("Venta offline descartada a mano", { level: "warning", extra: { sale } });
+    removePendingSale(sale.localId);
+    setPendingSales(getPendingSales());
+  }
+
   /** Reintenta mandar al servidor las ventas que quedaron guardadas
    * localmente por falta de conexión. Se corta apenas vuelve a fallar por
    * red (quedan las demás para el próximo intento); si el servidor
    * rechaza una por un motivo real (no de red) se marca como error y se
    * sigue con el resto, para que una venta rara no trabe a las demás. */
   async function syncPendingSales(manual = false) {
-    if (syncingOffline) return;
+    // Ref y no el state: el intervalo y el listener "online" llaman a una
+    // copia vieja de esta función, que vería syncingOffline siempre false.
+    if (syncingRef.current) return;
     // A mano ("Sincronizar ahora") se reintentan también las que quedaron
     // con error; solas, solo las que fallaron por sesión vencida.
     resetPendingSaleErrors(!manual);
     const queue = getPendingSales();
     if (queue.length === 0) return;
+    syncingRef.current = true;
     setSyncingOffline(true);
     try {
       // Si el token venció mientras no había internet, renovarlo ANTES de
@@ -250,17 +292,23 @@ export function Sale() {
       // rechaza (ver isAuthError en offline-queue.ts).
       const { data: sessionData } = supabase ? await supabase.auth.getSession() : { data: { session: null } };
       if (!sessionData.session) return;
+      const companyId = profileRef.current?.company_id;
       for (const sale of queue) {
         if (sale.status === "error") continue;
+        // Cobrada con otra empresa logueada en esta PC: se espera a que
+        // vuelva a entrar alguien de esa empresa, nunca se manda con otra.
+        if (sale.companyId && companyId && sale.companyId !== companyId) continue;
         try {
-          await createPosSale(sale.input);
-          removePendingSale(sale.localId);
+          await uploadPendingSale(sale);
         } catch (err) {
           if (isRetryableError(err)) break;
-          markPendingSaleError(sale.localId, err instanceof Error ? err.message : "No se pudo subir esta venta.");
+          const message = err instanceof Error ? err.message : "No se pudo subir esta venta.";
+          markPendingSaleError(sale.localId, message);
+          Sentry.captureMessage(`Venta offline rechazada por el servidor: ${message}`, { level: "error", extra: { localId: sale.localId, createdAt: sale.createdAt } });
         }
       }
     } finally {
+      syncingRef.current = false;
       setPendingSales(getPendingSales());
       setSyncingOffline(false);
       try {
@@ -285,6 +333,15 @@ export function Sale() {
     // balanza), así que se puede chequear solo al entrar a la página.
     void isThermalPrinterPaired().then(setThermalPaired);
   }, []);
+
+  useEffect(() => {
+    if (pendingSales.length === 0) return;
+    // Cerrar la pestaña no borra la cola, pero avisar igual: mientras haya
+    // ventas sin subir, esta PC es el único lugar donde existen.
+    const onBeforeUnload = (e: BeforeUnloadEvent) => e.preventDefault();
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, [pendingSales.length]);
 
   useEffect(() => {
     if (pendingSales.length === 0) return;
@@ -509,7 +566,7 @@ export function Sale() {
         saleTotal = result.total;
       } catch (err) {
         if (!isRetryableError(err)) throw err;
-        addPendingSale(salePayload);
+        addPendingSale(salePayload, { companyId: profile?.company_id, total });
         setPendingSales(getPendingSales());
         queuedOffline = true;
       }
@@ -824,13 +881,24 @@ export function Sale() {
       {pendingSales.length > 0 && (
         <div className="message warning" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
           <span>
-            {pendingSales.length === 1 ? "1 venta" : `${pendingSales.length} ventas`} guardada{pendingSales.length === 1 ? "" : "s"} en este equipo, pendiente{pendingSales.length === 1 ? "" : "s"} de subir al servidor
-            {pendingSales.some((s) => s.status === "error") && " (alguna quedó con error — tocá \"Sincronizar ahora\" para reintentarla)"}.
+            <strong>
+              {pendingSales.length === 1 ? "1 venta" : `${pendingSales.length} ventas`} guardada{pendingSales.length === 1 ? "" : "s"} solo en esta computadora, pendiente{pendingSales.length === 1 ? "" : "s"} de subir al servidor.
+            </strong>{" "}
+            Se sube{pendingSales.length === 1 ? "" : "n"} sola{pendingSales.length === 1 ? "" : "s"} cuando hay internet. Hasta entonces no borres los datos del navegador ni cambies de navegador en esta PC.
             {pendingSales
-              .filter((s) => s.status === "error")
+              .filter((s) => s.status === "error" || s.note)
               .map((s) => (
-                <span key={s.localId} style={{ display: "block", fontSize: "0.9em" }}>
-                  Venta de las {new Date(s.createdAt).toLocaleTimeString("es-AR")}: {s.errorMessage ?? "error desconocido"}
+                <span key={s.localId} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: "0.9em", marginTop: 6 }}>
+                  <span>
+                    Venta de las {new Date(s.createdAt).toLocaleTimeString("es-AR")}
+                    {s.total != null && ` ($${s.total.toLocaleString("es-AR")})`}:{" "}
+                    {s.status === "error" ? `no se pudo subir — ${s.errorMessage ?? "error desconocido"}. Tocá "Sincronizar ahora" para reintentar.` : s.note}
+                  </span>
+                  {s.status === "error" && (
+                    <button className="secondary" style={{ padding: "2px 8px" }} onClick={() => discardPendingSale(s)}>
+                      Descartar
+                    </button>
+                  )}
                 </span>
               ))}
           </span>

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { isAuthError, isNetworkError, isRetryableError } from "./offline-queue";
+import { isAuthError, isNetworkError, isRetryableError, isShiftClosedError } from "./offline-queue";
 
 test("falla de red (sin code) se reintenta", () => {
   const err = { message: "TypeError: Failed to fetch", code: "" };
@@ -20,4 +20,11 @@ test("sesión vencida (401 anon, caso real 2026-09-30) se reintenta, no queda co
 test("rechazo real del servidor no se reintenta solo", () => {
   assert.equal(isRetryableError({ code: "P0001", message: "No hay un turno de mostrador abierto" }), false);
   assert.equal(isRetryableError({ code: "P0001", message: "Los medios de pago no suman el total de la venta" }), false);
+});
+
+test("turno cerrado (p. ej. desde otra PC) se reconoce para subirla al turno abierto", () => {
+  const err = { code: "P0001", message: "No hay un turno de mostrador abierto" };
+  assert.equal(isShiftClosedError(err), true);
+  assert.equal(isRetryableError(err), false);
+  assert.equal(isShiftClosedError({ code: "P0001", message: "Producto inválido" }), false);
 });
