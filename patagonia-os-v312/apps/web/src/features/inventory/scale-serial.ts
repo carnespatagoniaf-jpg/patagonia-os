@@ -167,6 +167,15 @@ export function forgetScalePort(): void {
   cachedPortOpenKey = null;
 }
 
+// La balanza se enchufa solo para pasar precios y después se desenchufa: al
+// desenchufarla, el puerto guardado queda muerto. Se olvida acá para que al
+// volver a enchufarla el próximo envío tome el puerto nuevo, sin recargar la página.
+if (isScaleSerialSupported()) {
+  navigator.serial.addEventListener("disconnect", (event) => {
+    if (event.target === cachedPort) forgetScalePort();
+  });
+}
+
 function checksum(bytes: number[]): [number, number] {
   const sum = bytes.reduce((acc, b) => (acc + b) & 0xff, 0);
   const high = (sum >> 4) & 0x0f;

@@ -68,6 +68,17 @@ export async function forgetWeightScale(): Promise<void> {
   cachedPort = null;
 }
 
+// Cable desenchufado: el puerto guardado queda muerto. Se olvida para que al
+// volver a enchufarlo la próxima lectura tome el puerto nuevo, sin recargar la página.
+if (isWeightScaleSupported()) {
+  navigator.serial.addEventListener("disconnect", (event) => {
+    if (event.target === cachedPort) {
+      cachedPort = null;
+      portIsOpen = false;
+    }
+  });
+}
+
 async function closePort(): Promise<void> {
   if (cachedPort && portIsOpen) {
     try {

@@ -10,7 +10,9 @@ import {
   getLiveScalePort,
   isScaleManagerSupported,
   listScaleConnections,
+  onScalePortDisconnect,
   reconnectSavedConnections,
+  releaseDisconnectedPort,
   removeScaleConnection,
   requestNewScalePort,
   saveScaleConnection,
@@ -93,6 +95,22 @@ export function Scales() {
     // usuario (getPorts(), no requestPort()), solo vuelve a correr el
     // reconocimiento real de cada driver contra los puertos ya autorizados.
     void reconnectSavedConnections().then(() => refresh());
+
+    // La balanza de precios se enchufa solo para pasar precios: al
+    // desenchufarla se marca "No conectada" en el momento, y al volver a
+    // enchufarla se la reconoce sola (mismo reconocimiento de siempre).
+    const stopDisconnect = onScalePortDisconnect((port) => {
+      if (releaseDisconnectedPort(port)) {
+        log({ kind: "error", message: "Se desenchufó una balanza." });
+        refresh();
+      }
+    });
+    const onConnect = () => void reconnectSavedConnections().then(() => refresh());
+    navigator.serial?.addEventListener("connect", onConnect);
+    return () => {
+      stopDisconnect();
+      navigator.serial?.removeEventListener("connect", onConnect);
+    };
   }, []);
 
   useEffect(() => {

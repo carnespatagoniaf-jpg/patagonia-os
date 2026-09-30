@@ -207,6 +207,19 @@ export function clearLiveScalePort(connectionId: string): void {
   livePorts.delete(connectionId);
 }
 
+/** Cable desenchufado: suelta las conexiones que usaban ese puerto (quedó
+ * muerto). Devuelve si alguna cambió, para que la pantalla se actualice. */
+export function releaseDisconnectedPort(port: SerialPort): boolean {
+  let changed = false;
+  for (const [id, live] of livePorts) {
+    if (live === port) {
+      livePorts.delete(id);
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 /**
  * Al abrir la pantalla de Balanzas (o al recargar la página), ningún
  * `SerialPort` de una sesión anterior sigue en memoria. Web Serial no
