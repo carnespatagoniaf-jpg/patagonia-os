@@ -1,4 +1,6 @@
--- 103 - Conciliación bancaria (Tesorería → Conciliación). Plan Estándar.
+-- 103 - Conciliación bancaria (Tesorería → Conciliación). Plan Full (decisión del
+-- dueño 2026-09-29: las pantallas nuevas arrancan en Full; después se pueden bajar
+-- de plan, nunca subir).
 --
 -- El dueño sube el resumen de su banco o billetera (Excel/CSV de CUALQUIER
 -- banco: el lector está en apps/web/src/features/reconciliation/bank-statement.ts
@@ -87,10 +89,11 @@ begin
       v_table
     );
     execute format('drop policy if exists plan_estandar on public.%I', v_table);
+    execute format('drop policy if exists plan_full on public.%I', v_table);
     execute format(
-      'create policy plan_estandar on public.%I as restrictive for all to authenticated
-         using ((select public.company_plan_allows(''estandar'')))
-         with check ((select public.company_plan_allows(''estandar'')))',
+      'create policy plan_full on public.%I as restrictive for all to authenticated
+         using ((select public.company_plan_allows(''full'')))
+         with check ((select public.company_plan_allows(''full'')))',
       v_table
     );
   end loop;
@@ -144,7 +147,7 @@ declare
   v_amount numeric(14,2);
   v_date date;
 begin
-  perform public.require_plan('estandar');
+  perform public.require_plan('full');
   v_company_id := public.reconciliation_caller_company();
 
   if not exists (select 1 from public.treasury_accounts where id = p_account_id and company_id = v_company_id) then
@@ -224,7 +227,7 @@ declare
   v_fee numeric(14,2) := round(coalesce(p_fee, 0), 2);
   v_fee_movement_id uuid;
 begin
-  perform public.require_plan('estandar');
+  perform public.require_plan('full');
   v_company_id := public.reconciliation_caller_company();
 
   select * into v_line from public.bank_statement_lines where id = p_line_id and company_id = v_company_id for update;
@@ -293,7 +296,7 @@ declare
   v_line public.bank_statement_lines%rowtype;
   v_movement_id uuid;
 begin
-  perform public.require_plan('estandar');
+  perform public.require_plan('full');
   v_company_id := public.reconciliation_caller_company();
 
   select * into v_line from public.bank_statement_lines where id = p_line_id and company_id = v_company_id for update;
@@ -350,7 +353,7 @@ as $$
 declare
   v_company_id uuid;
 begin
-  perform public.require_plan('estandar');
+  perform public.require_plan('full');
   v_company_id := public.reconciliation_caller_company();
 
   update public.bank_statement_lines
@@ -381,7 +384,7 @@ declare
   v_company_id uuid;
   v_line public.bank_statement_lines%rowtype;
 begin
-  perform public.require_plan('estandar');
+  perform public.require_plan('full');
   v_company_id := public.reconciliation_caller_company();
 
   select * into v_line from public.bank_statement_lines where id = p_line_id and company_id = v_company_id for update;

@@ -28,6 +28,7 @@ describe("planes: qué ve cada uno", () => {
       assert.equal(canAccessPage(p, page), true, page);
     }
     assert.equal(canAccessPage(p, "branches"), false);
+    assert.equal(canAccessPage(p, "reconciliation"), false, "Conciliación es de Full");
   });
 
   it("Estándar puede cambiar de sucursal (el selector usa branches.manage)", () => {
@@ -37,7 +38,7 @@ describe("planes: qué ve cada uno", () => {
 
   it("Full ve todo", () => {
     const p = owner("full");
-    for (const page of ["customers", "recipes", "scales", "branches"] as const) {
+    for (const page of ["customers", "recipes", "scales", "branches", "reconciliation"] as const) {
       assert.equal(canAccessPage(p, page), true, page);
     }
   });
