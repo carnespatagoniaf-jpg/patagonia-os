@@ -38,11 +38,12 @@ const navGroups: Array<{ heading: string | null; items: NavItem[] }> = [
       { page: "carcass", label: "Despiece", icon: Beef },
       { page: "recipes", label: "Recetas", icon: ChefHat }
       // "Balanzas" (features/scales, el Scale Manager) está escondida desde el
-      // 2026-09-30: nunca se probó con una balanza real y duplicaba lo que ya
+      // 2026-09-30: duplicaba lo que ya
       // anda (Productos/Stock → "Balanza por cable" y el engranaje de
       // Mostrador). Se vuelve a mostrar agregando acá
       // la entrada de la página "scales" con el ícono Scale (importándolo)
-      // cuando se haya probado en un cliente con balanza.
+      // si se decide que sea el único lugar (el envío de precios se probó una vez
+      // con una Kretz Report LT real; el peso de la Aura, nunca).
     ]
   },
   {
