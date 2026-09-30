@@ -1,15 +1,11 @@
-import { bytesToText, describeRawFrame, parseScaleFrame, type ScaleFrame } from "./scale-weight-parser";
+import type { ScaleFrame } from "./scale-weight-parser";
+import { WEIGHT_PORT_OPTIONS, exchangeWeightFrame, weightReadError } from "./scale-weight-protocol";
 
 // Lectura del peso directo de la balanza Kretz Aura Eco por cable RS-232, con la
-// Web Serial API (Chrome/Edge). Parámetros del manual de la Aura Eco (sección
-// 16.5): 9600 baudios, 8 bits de datos, sin paridad, 2 bits de stop. La balanza
-// tiene que estar en el menú COMUNI -> MODO = "A pedido de peso" (le pedimos el
-// peso mandando una "W"; en modo continuo también anda porque transmite sola).
+// Web Serial API (Chrome/Edge), para Mostrador. Cómo se le pide el peso está en
+// scale-weight-protocol.ts (compartido con la pantalla Balanzas); acá solo se
+// maneja qué puerto usa Mostrador y cuándo se abre.
 
-const PORT_OPTIONS: SerialOptions = { baudRate: 9600, dataBits: 8, stopBits: 2, parity: "none" };
-const REQUEST_BYTE = 0x57; // "W" (el manual acepta P, p, W o w)
-const READ_TIMEOUT_MS = 1800;
-const DRAIN_MS = 60;
 const ENABLED_KEY = "patagonia-weight-scale-enabled";
 
 export interface ScaleReading {
@@ -128,89 +124,15 @@ async function findWeightScalePort(known: SerialPort[]): Promise<SerialPort> {
 async function ensureOpen(port: SerialPort): Promise<void> {
   if (portIsOpen && port.readable && port.writable) return;
   if (port.readable || port.writable) await port.close();
-  await port.open(PORT_OPTIONS);
+  await port.open(WEIGHT_PORT_OPTIONS);
   portIsOpen = true;
-}
-
-type ChunkResult = { value?: Uint8Array; done: boolean; timedOut?: boolean };
-
-/** Lector con tiempo de espera. Mantiene UNA sola lectura pendiente y la reutiliza
- * en la llamada siguiente: si al vencer el tiempo se dejara colgada una lectura
- * y se pidiera otra, la colgada se "comería" los datos que lleguen después. */
-function makeTimedReader(reader: ReadableStreamDefaultReader<Uint8Array>) {
-  let pending: Promise<ChunkResult> | null = null;
-  return (ms: number): Promise<ChunkResult> => {
-    if (!pending) {
-      pending = reader
-        .read()
-        .then((r): ChunkResult => ({ value: r.value, done: r.done }))
-        .catch((): ChunkResult => ({ done: true }));
-    }
-    const current = pending;
-    return Promise.race([
-      current.then((r) => {
-        if (pending === current) pending = null;
-        return r;
-      }),
-      new Promise<ChunkResult>((resolve) => setTimeout(() => resolve({ done: false, timedOut: true }), Math.max(ms, 1)))
-    ]);
-  };
 }
 
 async function readOnce(port: SerialPort): Promise<ScaleReading> {
   await ensureOpen(port);
-  const reader = port.readable!.getReader();
-  const readWithTimeout = makeTimedReader(reader);
-  try {
-    // 1) Descartar lo que haya quedado viejo en el buffer (en modo continuo la
-    //    balanza transmite sola): sin esto se podría leer el peso del producto anterior.
-    for (;;) {
-      const stale = await readWithTimeout(DRAIN_MS);
-      if (stale.timedOut || stale.done || !stale.value?.length) break;
-    }
-
-    // 2) Pedir el peso.
-    const writer = port.writable!.getWriter();
-    try {
-      await writer.write(new Uint8Array([REQUEST_BYTE]));
-    } finally {
-      writer.releaseLock();
-    }
-
-    // 3) Juntar la respuesta hasta tener un mensaje completo.
-    let received: number[] = [];
-    const deadline = Date.now() + READ_TIMEOUT_MS;
-    let frame: ScaleFrame | null = null;
-    while (Date.now() < deadline) {
-      const chunk = await readWithTimeout(deadline - Date.now());
-      if (chunk.done) break;
-      if (chunk.timedOut || !chunk.value) break;
-      received = received.concat(Array.from(chunk.value));
-      frame = parseScaleFrame(bytesToText(received));
-      if (frame) {
-        // En los modos con precio e importe el resto llega enseguida: darle un instante.
-        if (frame.price === undefined) {
-          const more = await readWithTimeout(120);
-          if (more.value) received = received.concat(Array.from(more.value));
-          frame = parseScaleFrame(bytesToText(received)) ?? frame;
-        }
-        break;
-      }
-    }
-
-    const raw = bytesToText(received);
-    if (frame) return { frame, raw };
-    if (received.length === 0) {
-      throw new Error("La balanza no respondió. Revisá el cable, que esté en el menú COMUNI → \"A pedido de peso\", y que el peso esté quieto (estable).");
-    }
-    throw new Error(`Recibí datos de la balanza pero no pude leer el peso: ${describeRawFrame(raw)}`);
-  } finally {
-    try {
-      reader.releaseLock();
-    } catch {
-      // lectura pendiente al cerrar -- el navegador la cancela solo
-    }
-  }
+  const { raw, frame } = await exchangeWeightFrame(port);
+  if (frame) return { frame, raw };
+  throw weightReadError(raw);
 }
 
 /** Lee el peso actual de la balanza. Reintenta una vez reabriendo el puerto (un error de cable/adaptador rompe el stream hasta reabrir). */
