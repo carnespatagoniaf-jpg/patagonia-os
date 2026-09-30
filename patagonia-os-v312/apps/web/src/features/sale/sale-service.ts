@@ -6,6 +6,8 @@ export interface CreatePosSaleItemInput {
   unitPrice?: number;
   quantity: number;
   discountAmount: number;
+  source?: "scale" | "scale_total";
+  scaleTickets?: number;
 }
 
 export interface CreatePosSalePaymentInput {
@@ -40,11 +42,12 @@ export async function createPosSale(input: CreatePosSaleInput): Promise<CreatePo
 
   const { data, error } = await supabase.rpc("create_pos_sale", {
     p_branch_id: input.branchId,
-    p_items: input.items.map((item) =>
-      item.productId
+    p_items: input.items.map((item) => ({
+      ...(item.productId
         ? { product_id: item.productId, quantity: item.quantity, discount_amount: item.discountAmount }
-        : { description: item.description, unit_price: item.unitPrice, quantity: item.quantity, discount_amount: item.discountAmount }
-    ),
+        : { description: item.description, unit_price: item.unitPrice, quantity: item.quantity, discount_amount: item.discountAmount }),
+      ...(item.source ? { source: item.source, scale_tickets: item.scaleTickets ?? 1 } : {})
+    })),
     p_payments: input.payments.map((p) => ({ account_id: p.accountId, amount: p.amount, reference: p.reference ?? null })),
     p_pos_shift_id: input.posShiftId,
     p_discount_amount: input.discountAmount,

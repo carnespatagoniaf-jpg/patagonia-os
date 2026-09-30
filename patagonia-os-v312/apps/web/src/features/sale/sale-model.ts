@@ -14,6 +14,10 @@ export interface TicketLine {
   unit: Product["unit"];
   quantity: number;
   unitPrice: number;
+  /** Vino de escanear un ticket de la balanza (control de balanza, migración 104). */
+  source?: "scale" | "scale_total";
+  /** Cuántos tickets de balanza escaneados representa (dos etiquetas del mismo producto van juntas). */
+  scaleTickets?: number;
 }
 
 export interface PaymentRow {

@@ -6,6 +6,9 @@ import { formatMoney } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
 import { isThermalPrintSupported } from "./thermal-printer";
 import { UNIT_LABELS, type MovementReceiptState, type ReceiptState } from "./sale-model";
+import { compareScaleControl } from "./scale-control";
+import type { ScaleControlState } from "./scale-control-service";
+import { ScaleControlResult } from "./ScaleControl";
 
 // Comprobantes que se muestran (y se imprimen) debajo de Mostrador: el último
 // comprobante de venta, el de un movimiento de caja/pago/vale y el detalle del
@@ -111,8 +114,10 @@ export const MovementReceiptView = forwardRef<HTMLDivElement, {
   );
 });
 
-export function CloseSummaryView({ summary, accounts, adjustments, vales, supplierPayments, detail, reconcileInput, onReconcileChange, thermalPrintBusy, onThermalPrint, onPrint }: {
+export function CloseSummaryView({ summary, accounts, adjustments, vales, supplierPayments, scaleControl, detail, reconcileInput, onReconcileChange, thermalPrintBusy, onThermalPrint, onPrint }: {
   summary: CloseShiftResult;
+  /** Control de balanza guardado en el cierre (migración 104), si se cargó. */
+  scaleControl?: ScaleControlState | null;
   accounts: TreasuryAccount[];
   adjustments: PosShiftAdjustment[];
   vales: PosShiftVale[];
@@ -243,6 +248,14 @@ export function CloseSummaryView({ summary, accounts, adjustments, vales, suppli
             })}
           </tbody>
         </table>
+      )}
+      {scaleControl?.saved && (
+        <div className="panel" style={{ padding: 14, marginBottom: 16 }}>
+          <p className="muted" style={{ margin: 0, marginBottom: 6, fontWeight: 800, textTransform: "uppercase", fontSize: 12 }}>
+            Control de la balanza
+          </p>
+          <ScaleControlResult state={scaleControl} comparison={compareScaleControl(scaleControl.saved, scaleControl.totals)} />
+        </div>
       )}
       {adjustments.length > 0 && (
         <div className="panel" style={{ padding: 14, marginBottom: 16 }}>

@@ -6,6 +6,7 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { useAuth } from "../auth/AuthProvider";
 import { can, planAllows } from "../auth/permissions";
+import { getScaleControl, type ScaleControlState } from "./scale-control-service";
 import { listProductsForBranch } from "../inventory/inventory-service";
 import { listProductCategories, type ProductCategory } from "../inventory/product-categories-service";
 import { useTreasury } from "../shifts/useTreasury";
@@ -86,6 +87,7 @@ export function Sale() {
    * al imprimir el cierre esa plata quedaba invisible (bug real
    * reportado: "no se ve el detalle" de los vales en el papel). */
   const [closeVales, setCloseVales] = useState<PosShiftVale[]>([]);
+  const [closeScaleControl, setCloseScaleControl] = useState<ScaleControlState | null>(null);
   const [closeSupplierPayments, setCloseSupplierPayments] = useState<PosShiftSupplierPayment[]>([]);
   /** Al cerrar, cada cuenta no efectivo (tarjeta/posnet, transferencias)
    * también se puede corroborar contra el resumen real (el ticket del
@@ -207,6 +209,7 @@ export function Sale() {
     void reloadProducts();
     void reloadShift();
     setCloseSummary(null);
+    setCloseScaleControl(null);
     setCloseDetail([]);
     setCloseAdjustments([]);
     setCloseVales([]);
@@ -462,7 +465,9 @@ export function Sale() {
         description: l.kind === "manual" ? l.name : undefined,
         unitPrice: l.kind === "manual" ? l.unitPrice : undefined,
         quantity: l.quantity,
-        discountAmount: itemDiscountsSnapshot[l.key]
+        discountAmount: itemDiscountsSnapshot[l.key],
+        source: l.source,
+        scaleTickets: l.scaleTickets
       }));
       const paymentsPayload = isSplit
         ? payments.map((p) => ({ accountId: p.accountId, amount: parseAmount(p.amount || "0") || 0, reference: p.reference.trim() || undefined }))
@@ -604,6 +609,13 @@ export function Sale() {
       const closingShiftId = shift.id;
       const result = await closePosShift(shift.id, countedCash);
       setCloseSummary(result);
+      try {
+        const control = await getScaleControl(closingShiftId);
+        setCloseScaleControl(control.saved ? control : null);
+      } catch {
+        // informativo (base sin la migración 104): el cierre ya está hecho.
+        setCloseScaleControl(null);
+      }
       try {
         setCloseSupplierPayments(await listPosShiftSupplierPayments(closingShiftId));
       } catch {
@@ -850,6 +862,8 @@ export function Sale() {
             canSeeShiftTotals={canSeeShiftTotals}
             canManageTreasury={canManageTreasury}
             canUseEmployees={planAllows(profile, "estandar")}
+            products={products}
+            scaleConfig={scaleConfig}
             busy={busy}
             accounts={accounts}
             suppliers={suppliers}
@@ -925,6 +939,7 @@ export function Sale() {
           adjustments={closeAdjustments}
           vales={closeVales}
           supplierPayments={closeSupplierPayments}
+          scaleControl={closeScaleControl}
           detail={closeDetail}
           reconcileInput={accountReconcileInput}
           onReconcileChange={setAccountReconcileInput}

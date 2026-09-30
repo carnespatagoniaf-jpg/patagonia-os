@@ -10,6 +10,9 @@ import type { useTreasury } from "../shifts/useTreasury";
 import { registerEmployeeValeFromPosShift, type PosShiftVale } from "../employees/employees-service";
 import { registerPosShiftTransfer, type PosShift, type PosShiftAdjustment, type PosShiftSale } from "./pos-shift-service";
 import { formatShiftStart, type MovementReceiptState } from "./sale-model";
+import type { Product } from "@patagonia/domain";
+import type { ScaleConfig } from "./scale-barcode";
+import { ScaleCloseControl, ScaleVoidForm } from "./ScaleControl";
 
 // Panel "Turno" de Mostrador (columna derecha): total del turno, botones,
 // listas de movimientos y los formularios de caja / pago a proveedor / vale /
@@ -341,6 +344,9 @@ export interface ShiftPanelProps {
   canManageTreasury: boolean;
   /** Empleados (vales) es del plan Estándar en adelante. */
   canUseEmployees: boolean;
+  /** Para "Anular ticket de balanza" (leer el código del ticket). */
+  products: Product[];
+  scaleConfig: ScaleConfig;
   busy: boolean;
   accounts: TreasuryAccount[];
   suppliers: Suppliers;
@@ -390,6 +396,19 @@ export interface ShiftPanelProps {
 export function ShiftPanel(p: ShiftPanelProps) {
   const { shift, canSeeShiftTotals, canManageTreasury } = p;
   const form = { shift, accounts: p.accounts, onMessage: p.onMessage, publishReceipt: p.publishReceipt };
+  const [showScaleVoid, setShowScaleVoid] = useState(false);
+  const [scaleControlStatus, setScaleControlStatus] = useState({ needed: false, saved: false });
+
+  function confirmCloseWithScaleCheck() {
+    if (
+      scaleControlStatus.needed &&
+      !scaleControlStatus.saved &&
+      !window.confirm("No cargaste el control de la balanza (el TOTAL DEL DIA que imprime la balanza). ¿Cerrar el turno igual?")
+    ) {
+      return;
+    }
+    p.onConfirmClose();
+  }
 
   return (
     <aside className="panel shift-card" style={{ position: "sticky", top: 18 }}>
@@ -443,6 +462,9 @@ export function ShiftPanel(p: ShiftPanelProps) {
             {p.showValeForm ? "Cancelar vale a empleado" : "+ Vale a empleado"}
           </button>
         )}
+        <button className="pos-toolbar-btn" onClick={() => setShowScaleVoid((v) => !v)}>
+          {showScaleVoid ? "Cerrar anular ticket de balanza" : "Anular ticket de balanza"}
+        </button>
         {!p.showCloseConfirm && (
           <button className="pos-toolbar-btn" onClick={p.onRequestClose}>
             Cerrar turno
@@ -550,8 +572,18 @@ export function ShiftPanel(p: ShiftPanelProps) {
         </>
       )}
 
+      <ScaleVoidForm
+        visible={showScaleVoid}
+        shift={shift}
+        products={p.products}
+        scaleConfig={p.scaleConfig}
+        onMessage={p.onMessage}
+        onClose={() => setShowScaleVoid(false)}
+      />
+
       {p.showCloseConfirm && (
         <div style={{ marginTop: 14 }}>
+          <ScaleCloseControl shift={shift} onStatusChange={setScaleControlStatus} />
           <p className="muted">¿Cerrar el turno y cargar {formatMoney(p.shiftTotal)} a Tesorería? No se puede deshacer.</p>
           <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
             <label className="muted" style={{ fontSize: 13 }}>Efectivo contado (arqueo) $</label>
@@ -564,7 +596,7 @@ export function ShiftPanel(p: ShiftPanelProps) {
             />
           </div>
           <div style={{ display: "flex", gap: 8 }}>
-            <button disabled={p.busy} onClick={p.onConfirmClose}>{p.busy ? "Cerrando…" : "Confirmar cierre"}</button>
+            <button disabled={p.busy} onClick={confirmCloseWithScaleCheck}>{p.busy ? "Cerrando…" : "Confirmar cierre"}</button>
             <button className="secondary" onClick={p.onCancelClose}>Cancelar</button>
           </div>
         </div>
