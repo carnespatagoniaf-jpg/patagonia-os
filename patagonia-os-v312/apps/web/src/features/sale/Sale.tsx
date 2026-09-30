@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { Settings } from "lucide-react";
 import type { Product } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
-import { isSupabaseConfigured } from "../../lib/supabase";
+import { isSupabaseConfigured, supabase } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { useAuth } from "../auth/AuthProvider";
 import { can, planAllows } from "../auth/permissions";
@@ -14,7 +14,7 @@ import { useSuppliers } from "../purchases/useSuppliers";
 import { useEmployees } from "../employees/useEmployees";
 import { deletePosShiftOutflow, listPosShiftVales, type PosShiftVale } from "../employees/employees-service";
 import { createPosSale, type CreatePosSaleInput } from "./sale-service";
-import { addPendingSale, getPendingSales, isNetworkError, markPendingSaleError, removePendingSale, type PendingSale } from "./offline-queue";
+import { addPendingSale, getPendingSales, isRetryableError, markPendingSaleError, removePendingSale, resetPendingSaleErrors, type PendingSale } from "./offline-queue";
 import { closePosShift, deletePosShiftAdjustment, getOpenPosShift, listPosShiftAdjustments, listPosShiftSupplierPayments, type PosShiftSupplierPayment, listPosShiftSales, openPosShift, voidPosSale, type CloseShiftResult, type PosShift, type PosShiftAdjustment, type PosShiftSale } from "./pos-shift-service";
 import { formatMoney } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
@@ -236,19 +236,27 @@ export function Sale() {
    * red (quedan las demás para el próximo intento); si el servidor
    * rechaza una por un motivo real (no de red) se marca como error y se
    * sigue con el resto, para que una venta rara no trabe a las demás. */
-  async function syncPendingSales() {
+  async function syncPendingSales(manual = false) {
     if (syncingOffline) return;
+    // A mano ("Sincronizar ahora") se reintentan también las que quedaron
+    // con error; solas, solo las que fallaron por sesión vencida.
+    resetPendingSaleErrors(!manual);
     const queue = getPendingSales();
     if (queue.length === 0) return;
     setSyncingOffline(true);
     try {
+      // Si el token venció mientras no había internet, renovarlo ANTES de
+      // mandar nada -- si no, la venta sale como "anon" y el servidor la
+      // rechaza (ver isAuthError en offline-queue.ts).
+      const { data: sessionData } = supabase ? await supabase.auth.getSession() : { data: { session: null } };
+      if (!sessionData.session) return;
       for (const sale of queue) {
         if (sale.status === "error") continue;
         try {
           await createPosSale(sale.input);
           removePendingSale(sale.localId);
         } catch (err) {
-          if (isNetworkError(err)) break;
+          if (isRetryableError(err)) break;
           markPendingSaleError(sale.localId, err instanceof Error ? err.message : "No se pudo subir esta venta.");
         }
       }
@@ -265,8 +273,9 @@ export function Sale() {
 
   useEffect(() => {
     if (getPendingSales().length > 0) void syncPendingSales();
-    window.addEventListener("online", syncPendingSales);
-    return () => window.removeEventListener("online", syncPendingSales);
+    const onOnline = () => void syncPendingSales();
+    window.addEventListener("online", onOnline);
+    return () => window.removeEventListener("online", onOnline);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -499,7 +508,7 @@ export function Sale() {
         const result = await createPosSale(salePayload);
         saleTotal = result.total;
       } catch (err) {
-        if (!isNetworkError(err)) throw err;
+        if (!isRetryableError(err)) throw err;
         addPendingSale(salePayload);
         setPendingSales(getPendingSales());
         queuedOffline = true;
@@ -816,9 +825,16 @@ export function Sale() {
         <div className="message warning" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
           <span>
             {pendingSales.length === 1 ? "1 venta" : `${pendingSales.length} ventas`} guardada{pendingSales.length === 1 ? "" : "s"} en este equipo, pendiente{pendingSales.length === 1 ? "" : "s"} de subir al servidor
-            {pendingSales.some((s) => s.status === "error") && " (alguna quedó con error, revisala)"}.
+            {pendingSales.some((s) => s.status === "error") && " (alguna quedó con error — tocá \"Sincronizar ahora\" para reintentarla)"}.
+            {pendingSales
+              .filter((s) => s.status === "error")
+              .map((s) => (
+                <span key={s.localId} style={{ display: "block", fontSize: "0.9em" }}>
+                  Venta de las {new Date(s.createdAt).toLocaleTimeString("es-AR")}: {s.errorMessage ?? "error desconocido"}
+                </span>
+              ))}
           </span>
-          <button className="secondary" disabled={syncingOffline} onClick={() => void syncPendingSales()}>
+          <button className="secondary" disabled={syncingOffline} onClick={() => void syncPendingSales(true)}>
             {syncingOffline ? "Sincronizando…" : "Sincronizar ahora"}
           </button>
         </div>

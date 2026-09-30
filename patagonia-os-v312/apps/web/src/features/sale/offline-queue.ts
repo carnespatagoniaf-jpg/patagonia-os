@@ -68,3 +68,36 @@ export function isNetworkError(err: unknown): boolean {
   if (typeof err !== "object" || err === null) return false;
   return !("code" in err && (err as { code?: unknown }).code);
 }
+
+/**
+ * Rechazo por sesión vencida o todavía no renovada, no por la venta en sí.
+ * Caso real (2026-09-30, Carnicería la esquina): el equipo estuvo sin
+ * internet, la sesión venció mientras tanto y al volver la conexión el
+ * reintento salió como "anon" antes de que se renovara el token -- el
+ * servidor contestó 401 "permission denied for function create_pos_sale" y
+ * la venta quedó marcada como error para siempre, trabando el cierre del
+ * turno. Esto se reintenta igual que una falla de red.
+ */
+const AUTH_CODES = new Set(["42501", "PGRST301", "PGRST302", "PGRST303"]);
+const AUTH_MESSAGE = /jwt|permission denied for function|no autenticado|not authenticated/i;
+
+export function isAuthError(err: unknown): boolean {
+  if (typeof err !== "object" || err === null) return false;
+  const { code, message } = err as { code?: unknown; message?: unknown };
+  return (typeof code === "string" && AUTH_CODES.has(code)) || (typeof message === "string" && AUTH_MESSAGE.test(message));
+}
+
+/** Se puede volver a intentar más tarde sin que nadie toque nada. */
+export function isRetryableError(err: unknown): boolean {
+  return isNetworkError(err) || isAuthError(err);
+}
+
+/** Vuelve a "pendiente" las ventas con error, para reintentarlas. Seguro:
+ * cada una lleva su clave de idempotencia, el servidor nunca la duplica. */
+export function resetPendingSaleErrors(onlyAuth = false): void {
+  saveQueue(
+    getPendingSales().map((s) =>
+      s.status === "error" && (!onlyAuth || AUTH_MESSAGE.test(s.errorMessage ?? "")) ? { ...s, status: "pending", errorMessage: undefined } : s
+    )
+  );
+}
