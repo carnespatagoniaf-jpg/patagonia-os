@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { BarChart3, Beef, Boxes, ChefHat, Download, FileText, HandCoins, Handshake, History, KeyRound, Landmark, MapPin, Menu, Upload, LogOut, PackagePlus, Receipt, Scale, Tag, TrendingUp, Users, Wallet } from "lucide-react";
+import { BarChart3, Beef, Boxes, ChefHat, Download, FileText, HandCoins, Handshake, History, KeyRound, Landmark, MapPin, Menu, Upload, LogOut, PackagePlus, Receipt, Tag, TrendingUp, Users, Wallet } from "lucide-react";
 import { useAuth } from "../features/auth/AuthProvider";
 import { PLAN_LABELS, canAccessPage, planAllows, profilePlan, type Page } from "../features/auth/permissions";
 import { useActiveBranch } from "../features/branches/BranchProvider";
@@ -36,8 +36,13 @@ const navGroups: Array<{ heading: string | null; items: NavItem[] }> = [
       { page: "inventory", label: "Stock", icon: Boxes },
       { page: "purchases", label: "Compras", icon: PackagePlus },
       { page: "carcass", label: "Despiece", icon: Beef },
-      { page: "recipes", label: "Recetas", icon: ChefHat },
-      { page: "scales", label: "Balanzas", icon: Scale }
+      { page: "recipes", label: "Recetas", icon: ChefHat }
+      // "Balanzas" (features/scales, el Scale Manager) está escondida desde el
+      // 2026-09-30: nunca se probó con una balanza real y duplicaba lo que ya
+      // anda (Productos/Stock → "Balanza por cable" y el engranaje de
+      // Mostrador). Se vuelve a mostrar agregando acá
+      // la entrada de la página "scales" con el ícono Scale (importándolo)
+      // cuando se haya probado en un cliente con balanza.
     ]
   },
   {

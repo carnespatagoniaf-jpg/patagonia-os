@@ -67,9 +67,6 @@ export function ScaleWeightSettings() {
         <li>En la balanza: menú COMUNI → MODO = "A pedido de peso" y puerto RS-232.</li>
         <li>Tocá "Conectar balanza", elegí el puerto, poné un producto en el plato y tocá "Probar lectura".</li>
       </ol>
-      <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
-        Si ya la conectaste en Producto y stock → Balanzas, no hace falta hacerlo de nuevo acá.
-      </p>
 
       <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
         <button

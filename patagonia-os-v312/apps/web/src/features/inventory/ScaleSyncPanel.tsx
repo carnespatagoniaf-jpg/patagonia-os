@@ -1,5 +1,8 @@
 import { useEffect, useState } from "react";
 import { useAuth } from "../auth/AuthProvider";
+import { useActiveBranch } from "../branches/BranchProvider";
+import { exportActivityLogText, logScaleActivity } from "../scales/activity-log";
+import { submitScaleSupportReport } from "../scales/support-service";
 import { planAllows } from "../auth/permissions";
 import { formatMoney } from "../shifts/format";
 import {
@@ -38,6 +41,10 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
   const [scaleLog, setScaleLog] = useState("");
   const [scaleTestCode, setScaleTestCode] = useState("");
   const [showScalePreview, setShowScalePreview] = useState(false);
+  const { branchId } = useActiveBranch();
+  const [supportNote, setSupportNote] = useState("");
+  const [supportBusy, setSupportBusy] = useState(false);
+  const [supportMessage, setSupportMessage] = useState("");
 
   useEffect(() => {
     void isScalePortPaired().then(setScalePortReady);
@@ -51,15 +58,54 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
     saveScaleSerialSettings(next);
   }
 
+  /** Muestra el resultado y lo anota en la actividad de balanzas de esta PC (lo que se manda con "Enviar a soporte"). */
+  function report(text: string) {
+    setScaleLog(text);
+    logScaleActivity({
+      kind: /no respondi|fall|error|no se pudo|❌|no encontr/i.test(text) ? "error" : "test",
+      connectionLabel: `Balanza por cable (${scaleSettings.baudRate} baudios, equipo ${scaleSettings.deviceType}${scaleSettings.equipmentId})`,
+      message: text
+    });
+  }
+
+  async function handleSendToSupport() {
+    setSupportBusy(true);
+    setSupportMessage("");
+    try {
+      await submitScaleSupportReport({
+        note: supportNote,
+        logText: exportActivityLogText(),
+        connections: [
+          {
+            displayName: "Balanza por cable (Productos / Stock)",
+            driverId: "kretz-report-plu (panel Balanza por cable)",
+            status: scalePortReady ? "puerto elegido" : "sin puerto",
+            settings: { ...scaleSettings },
+            confirmedCapabilities: [],
+            pairedAt: "",
+            connectedNow: scalePortReady
+          }
+        ],
+        branchId: branchId ?? null
+      });
+      setSupportNote("");
+      setSupportMessage("Listo, le llegó al equipo de Patagonia OS. Te vamos a contactar.");
+    } catch (err) {
+      setSupportMessage(`No se pudo enviar: ${(err instanceof Error ? err.message : "error desconocido").replace(/.$/, "")}. Sacale una captura a esta pantalla y mandala por WhatsApp.`);
+    } finally {
+      setSupportBusy(false);
+    }
+  }
+
   async function handleConnectScale() {
     setScaleBusy(true);
     setScaleLog("");
     try {
       await connectScalePort();
       setScalePortReady(true);
-      setScaleLog("Puerto conectado. Ahora probá la conexión antes de sincronizar productos.");
+      report("Puerto conectado. Ahora probá la conexión antes de sincronizar productos.");
     } catch (err) {
-      setScaleLog(err instanceof Error ? err.message : "No se pudo conectar con el puerto.");
+      report(err instanceof Error ? err.message : "No se pudo conectar con el puerto.");
     } finally {
       setScaleBusy(false);
     }
@@ -70,13 +116,13 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
     setScaleLog("");
     try {
       const result = await sendScalePing();
-      setScaleLog(
+      report(
         result.ok
           ? `La balanza respondió: ${result.rawResponseHex || "(sin bytes)"} -- código "${result.responseCode}": ${describeResponseCode(result.responseCode)}`
           : "La balanza no respondió nada -- revisá el cable, o probá otra velocidad de puerto."
       );
     } catch (err) {
-      setScaleLog(err instanceof Error ? err.message : "Falló la prueba de conexión.");
+      report(err instanceof Error ? err.message : "Falló la prueba de conexión.");
     } finally {
       setScaleBusy(false);
     }
@@ -89,17 +135,17 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
       const result = await autoDetectScale((text) => setScaleLog(text));
       if (result.found && result.settings) {
         setScaleSettings(result.settings);
-        setScaleLog(
+        report(
           `¡Encontré tu balanza! Respondió con ${result.settings.baudRate} baudios, ${result.settings.stopBits} bit(s) de stop y equipo "${result.settings.deviceType}${result.settings.equipmentId}" (respuesta: ${result.rawResponseHex}). Ya quedó guardado: ahora usá "Verificar compatibilidad".`
         );
       } else {
         setScaleSettings(getScaleSerialSettings());
-        setScaleLog(
+        report(
           `Probé ${result.attempts} combinaciones y la balanza no respondió a ninguna. Revisá: 1) el cable (derecho, 1 a 1), 2) que la balanza esté en el menú COMUNI → MODO = "Datos" (la Aura) o el modo de comunicación con PC (otras Kretz), 3) que el adaptador USB tenga su driver instalado. Si todo está bien, mandá una captura de esta pantalla al equipo de Patagonia OS.`
         );
       }
     } catch (err) {
-      setScaleLog(err instanceof Error ? err.message : "Falló la detección automática.");
+      report(err instanceof Error ? err.message : "Falló la detección automática.");
     } finally {
       setScaleBusy(false);
     }
@@ -115,9 +161,9 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
         result.writeResponseCode ? `Escritura de prueba: código "${result.writeResponseCode}".` : "",
         result.readResponseCode ? `Relectura: código "${result.readResponseCode}".` : ""
       ].filter(Boolean).join(" ");
-      setScaleLog(`${result.compatible ? "✅" : "❌"} ${result.message} ${details}`);
+      report(`${result.compatible ? "✅" : "❌"} ${result.message} ${details}`);
     } catch (err) {
-      setScaleLog(err instanceof Error ? err.message : "Falló la prueba de compatibilidad.");
+      report(err instanceof Error ? err.message : "Falló la prueba de compatibilidad.");
     } finally {
       setScaleBusy(false);
     }
@@ -149,9 +195,9 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
       if (result.transportErrors.length) {
         parts.push(`${result.transportErrors.length} con error de conexión (${result.transportErrors[0].message}) -- probá enviar de nuevo, capaz fue un hipo del cable.`);
       }
-      setScaleLog(parts.join(" "));
+      report(parts.join(" "));
     } catch (err) {
-      setScaleLog(err instanceof Error ? err.message : "Falló el envío a la balanza.");
+      report(err instanceof Error ? err.message : "Falló el envío a la balanza.");
     } finally {
       setScaleBusy(false);
       setScaleSyncProgress(null);
@@ -161,18 +207,18 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
   async function handleSendOneProduct() {
     const product = products.find((p) => p.code === scaleTestCode.trim());
     if (!product) {
-      setScaleLog(`No encontré ningún producto con código "${scaleTestCode.trim()}".`);
+      report(`No encontré ningún producto con código "${scaleTestCode.trim()}".`);
       return;
     }
     setScaleBusy(true);
     setScaleLog("");
     try {
       const result = await syncOneProductToScale(product);
-      setScaleLog(
-        `Mandé "${product.name}" (código ${product.code}, $${product.priceRetail}). Respuesta: ${result.rawResponseHex} -- código "${result.responseCode}": ${describeResponseCode(result.responseCode)}`
+      report(
+        `Mandé "${product.name}" (código ${product.code}, ${product.priceRetail}). Respuesta: ${result.rawResponseHex} -- código "${result.responseCode}": ${describeResponseCode(result.responseCode)}`
       );
     } catch (err) {
-      setScaleLog(err instanceof Error ? err.message : "Falló el envío del producto.");
+      report(err instanceof Error ? err.message : "Falló el envío del producto.");
     } finally {
       setScaleBusy(false);
     }
@@ -180,18 +226,18 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
 
   async function handleReadPlu() {
     if (!scaleTestCode.trim()) {
-      setScaleLog("Ingresá un código de PLU para leer.");
+      report("Ingresá un código de PLU para leer.");
       return;
     }
     setScaleBusy(true);
     setScaleLog("");
     try {
       const result = await readScalePlu(scaleTestCode.trim());
-      setScaleLog(
+      report(
         `Leí PLU ${scaleTestCode.trim()}. Respuesta: ${result.rawResponseHex} -- código "${result.responseCode}": ${describeResponseCode(result.responseCode)}. Datos como texto: "${result.rawDataAscii}"`
       );
     } catch (err) {
-      setScaleLog(err instanceof Error ? err.message : "Falló la lectura del PLU.");
+      report(err instanceof Error ? err.message : "Falló la lectura del PLU.");
     } finally {
       setScaleBusy(false);
     }
@@ -200,7 +246,7 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
   async function handleDeletePlu() {
     const code = scaleTestCode.trim();
     if (!code) {
-      setScaleLog("Ingresá un código de PLU para borrar.");
+      report("Ingresá un código de PLU para borrar.");
       return;
     }
     if (!window.confirm(`¿Seguro que querés borrar el PLU ${code} de la balanza? Esto borra el registro de la balanza (no de Patagonia OS).`)) return;
@@ -208,9 +254,9 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
     setScaleLog("");
     try {
       const result = await deleteScalePlu(code);
-      setScaleLog(`Borré PLU ${code}. Respuesta: ${result.rawResponseHex} -- código "${result.responseCode}": ${describeResponseCode(result.responseCode)}`);
+      report(`Borré PLU ${code}. Respuesta: ${result.rawResponseHex} -- código "${result.responseCode}": ${describeResponseCode(result.responseCode)}`);
     } catch (err) {
-      setScaleLog(err instanceof Error ? err.message : "Falló el borrado del PLU.");
+      report(err instanceof Error ? err.message : "Falló el borrado del PLU.");
     } finally {
       setScaleBusy(false);
     }
@@ -364,6 +410,28 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
 
           {scaleLog && (
             <p style={{ margin: "14px 0 0", fontSize: 13, whiteSpace: "pre-wrap", background: "#f7f7f8", borderRadius: 6, padding: 10 }}>{scaleLog}</p>
+          )}
+
+          {/* Solo dueño y administrador pueden mandar el reporte (submit_scale_support_report, migración 100). */}
+          {(profile?.role === "owner" || profile?.role === "admin") && (
+          <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 14, marginTop: 14 }}>
+            <p style={{ margin: "0 0 6px", fontWeight: 700, fontSize: 13, textTransform: "uppercase", color: "#666" }}>¿Algo no anda? Enviar a soporte</p>
+            <p className="muted" style={{ margin: "0 0 8px", fontSize: 12 }}>
+              Le manda al equipo de Patagonia OS lo que pasó con la balanza en esta PC (pruebas, errores, configuración). No manda ventas, precios ni datos de clientes.
+            </p>
+            <textarea
+              rows={2}
+              placeholder="Contanos qué pasó (opcional). Ej.: no responde, se corta al pasar precios…"
+              value={supportNote}
+              maxLength={1000}
+              onChange={(e) => setSupportNote(e.target.value)}
+              style={{ width: "100%", boxSizing: "border-box", marginBottom: 8 }}
+            />
+            <button className="secondary" disabled={supportBusy} onClick={() => void handleSendToSupport()}>
+              {supportBusy ? "Enviando…" : "Enviar a soporte"}
+            </button>
+            {supportMessage && <p className="message" style={{ marginTop: 10 }}>{supportMessage}</p>}
+          </div>
           )}
         </div>
       )}

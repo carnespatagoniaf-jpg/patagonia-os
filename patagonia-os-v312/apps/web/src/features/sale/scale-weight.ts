@@ -89,7 +89,7 @@ async function closePort(): Promise<void> {
 async function getPort(): Promise<SerialPort> {
   if (cachedPort) return cachedPort;
   const known = await navigator.serial.getPorts();
-  if (known.length === 0) throw new Error("Todavía no conectaste la balanza. Configurala en Producto y stock → Balanzas.");
+  if (known.length === 0) throw new Error("Todavía no conectaste la balanza. Configurala en Mostrador → engranaje → “Peso directo de la balanza”.");
   if (known.length === 1) {
     cachedPort = known[0];
     return cachedPort;
@@ -118,7 +118,7 @@ async function findWeightScalePort(known: SerialPort[]): Promise<SerialPort> {
       portIsOpen = false;
     }
   }
-  throw new Error("Hay varios aparatos conectados a la PC y ninguno respondió como balanza de peso. Revisá el cable, o volvé a detectarla en Producto y stock → Balanzas.");
+  throw new Error("Hay varios aparatos conectados a la PC y ninguno respondió como balanza de peso. Revisá el cable, o volvé a conectarla en Mostrador → engranaje → “Peso directo de la balanza”.");
 }
 
 async function ensureOpen(port: SerialPort): Promise<void> {
