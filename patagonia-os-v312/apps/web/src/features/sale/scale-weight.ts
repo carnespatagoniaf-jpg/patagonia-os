@@ -54,6 +54,15 @@ export async function connectWeightScale(): Promise<void> {
   cachedPort = await navigator.serial.requestPort();
 }
 
+/** La pantalla "Balanzas" (Scale Manager) le pasa acá el puerto de la
+ * balanza de peso que ya detectó y que el cajero confirmó, así Mostrador
+ * lee de ESA balanza sin tener que configurarla de nuevo en el engranaje. */
+export async function setWeightScalePort(port: SerialPort): Promise<void> {
+  if (cachedPort === port) return;
+  await closePort();
+  cachedPort = port;
+}
+
 export async function forgetWeightScale(): Promise<void> {
   await closePort();
   cachedPort = null;
@@ -73,9 +82,36 @@ async function closePort(): Promise<void> {
 async function getPort(): Promise<SerialPort> {
   if (cachedPort) return cachedPort;
   const known = await navigator.serial.getPorts();
-  if (known.length === 0) throw new Error("Todavía no conectaste la balanza. Tocá \"Conectar balanza\" en el engranaje de Mostrador.");
-  cachedPort = known[0];
-  return cachedPort;
+  if (known.length === 0) throw new Error("Todavía no conectaste la balanza. Configurala en Producto y stock → Balanzas.");
+  if (known.length === 1) {
+    cachedPort = known[0];
+    return cachedPort;
+  }
+  return findWeightScalePort(known);
+}
+
+/** Con más de un aparato autorizado (ej. la Aura para peso y una Report
+ * para PLU en la misma PC) no alcanza con tomar el primero: se le pide el
+ * peso a cada uno y se queda con el que responde como balanza de peso.
+ * Los puertos que ya tiene abiertos otra parte de la app (ej. la
+ * sincronización de PLU) no se tocan, para no cortarle la conexión. */
+async function findWeightScalePort(known: SerialPort[]): Promise<SerialPort> {
+  for (const port of known) {
+    if (port.readable || port.writable) continue;
+    try {
+      await readOnce(port);
+      cachedPort = port;
+      return port;
+    } catch {
+      try {
+        await port.close();
+      } catch {
+        // no llegó a abrirse -- no importa
+      }
+      portIsOpen = false;
+    }
+  }
+  throw new Error("Hay varios aparatos conectados a la PC y ninguno respondió como balanza de peso. Revisá el cable, o volvé a detectarla en Producto y stock → Balanzas.");
 }
 
 async function ensureOpen(port: SerialPort): Promise<void> {

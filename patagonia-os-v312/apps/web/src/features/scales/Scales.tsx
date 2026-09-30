@@ -24,6 +24,16 @@ import { runScaleDiagnostics, type DiagnosticReport } from "./diagnostics";
 import { getSyncSession, runSafeSync, summarizeSyncSession, type SyncSession } from "./sync";
 import { clearActivityLog, exportActivityLogText, getActivityLog, logScaleActivity, type ScaleActivityEntry } from "./activity-log";
 import type { ScaleWeightReading } from "./types";
+import { forgetWeightScale, setWeightScaleEnabled, setWeightScalePort } from "../sale/scale-weight";
+
+/** Balanza de peso guardada acá (con lectura confirmada por el cajero) y
+ * enlazada a un puerto en esta sesión -> Mostrador lee de ese puerto. Así
+ * se configura en un solo lugar, sin repetirlo en el engranaje de Mostrador. */
+function linkWeightScaleToMostrador(): void {
+  const weight = listScaleConnections().find((c) => c.confirmedCapabilities.includes("readWeight") && getLiveScalePort(c.id));
+  if (!weight) return;
+  void setWeightScalePort(getLiveScalePort(weight.id)!);
+}
 
 /**
  * Pantalla "Configuración → Balanzas": punto único para conectar cualquier
@@ -66,6 +76,7 @@ export function Scales() {
   const [copyMessage, setCopyMessage] = useState("");
 
   function refresh() {
+    linkWeightScaleToMostrador();
     setConnections(listScaleConnections());
     setLiveIds(new Set(listScaleConnections().filter((c) => getLiveScalePort(c.id)).map((c) => c.id)));
   }
@@ -188,7 +199,7 @@ export function Scales() {
 
   function handleWeightConfirmed(port: SerialPort, detection: ScaleDetectionResult, matches: boolean) {
     if (matches) {
-      setWizard({ kind: "ready-to-save", port, detection, confirmedCapabilities: ["readWeight"], testMessage: "Confirmado por el cajero: el peso leído coincide con la pantalla de la balanza." });
+      setWizard({ kind: "ready-to-save", port, detection, confirmedCapabilities: ["readWeight"], testMessage: "Confirmado por el cajero: el peso leído coincide con la pantalla de la balanza. Al guardar, Mostrador empieza a tomar el peso de esta balanza (no hace falta configurarla también en el engranaje)." });
     } else {
       setWizard({ kind: "test-failed", port, detection, message: "El peso leído no coincide con la pantalla de la balanza -- no se activó. Mandá una captura de esta pantalla al equipo de Patagonia OS." });
     }
@@ -208,6 +219,12 @@ export function Scales() {
       lastVerifiedAt: now
     });
     setLiveScalePort(id, port);
+    if (confirmedCapabilities.includes("readWeight")) {
+      // Mismo efecto que "Sí, coincide" en el engranaje de Mostrador: el
+      // cajero ya comparó la lectura con la pantalla de la balanza.
+      setWeightScaleEnabled(true);
+      void setWeightScalePort(port);
+    }
     setWizard(null);
     refresh();
   }
@@ -319,8 +336,14 @@ export function Scales() {
 
   function handleRemove(id: string) {
     if (!window.confirm("¿Quitar esta balanza? Vas a tener que volver a conectarla y detectarla si la necesitás de nuevo.")) return;
+    const removed = listScaleConnections().find((c) => c.id === id);
     removeScaleConnection(id);
     clearLiveScalePort(id);
+    const otherWeightScale = listScaleConnections().some((c) => c.confirmedCapabilities.includes("readWeight"));
+    if (removed?.confirmedCapabilities.includes("readWeight") && !otherWeightScale) {
+      setWeightScaleEnabled(false);
+      void forgetWeightScale();
+    }
     refresh();
   }
 

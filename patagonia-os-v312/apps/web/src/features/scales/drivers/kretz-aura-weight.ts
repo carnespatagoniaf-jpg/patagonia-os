@@ -9,8 +9,9 @@ import type { ScaleDriver, ScaleIdentifyResult, ScaleWeightReading } from "../ty
  * solo una envoltura fina que expone esas mismas funciones bajo la
  * interfaz `ScaleDriver`. La pantalla actual (`ScaleWeightSettings.tsx`,
  * en el engranaje de Mostrador) sigue llamando a `scale-weight.ts`
- * directamente y no se toca en esta etapa -- este driver todavía no está
- * conectado a ninguna pantalla.
+ * directamente. La pantalla "Balanzas" usa este driver para detectar y
+ * probar, y al guardar le pasa el puerto a `scale-weight.ts`
+ * (`setWeightScalePort`), que es quien lee el peso al vender.
  *
  * Parámetros: manual Aura Eco Rev.01 sección 16.5 -- 9600 baudios, 8 bits
  * de datos, sin paridad, 2 bits de stop. La balanza tiene que estar en
