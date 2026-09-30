@@ -561,11 +561,15 @@ export function Reconciliation() {
   /* ------------------------------ pantalla ------------------------------ */
 
   return (
-    <div className="card">
-      <h2>Conciliación bancaria</h2>
-      <p className="muted" style={{ marginTop: 4 }}>
-        Subí el resumen de tu banco o billetera (Excel o CSV, de cualquier banco) y el sistema lo cruza con lo que se cobró y se pagó.
-      </p>
+    <>
+    <header className="page-header">
+      <div>
+        <p className="eyebrow">CONCILIACIÓN</p>
+        <h1>Conciliación bancaria</h1>
+        <p className="muted">Subí el resumen de tu banco o billetera (Excel o CSV, de cualquier banco) y el sistema lo cruza con lo que se cobró y se pagó.</p>
+      </div>
+    </header>
+    <div className="panel">
 
       {isSupabaseConfigured && !config && (
         <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 12 }}>
@@ -988,5 +992,6 @@ export function Reconciliation() {
         </>
       )}
     </div>
+    </>
   );
 }
