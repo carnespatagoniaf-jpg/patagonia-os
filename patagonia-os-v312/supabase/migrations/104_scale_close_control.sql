@@ -253,7 +253,10 @@ begin
 end;
 $$;
 
-revoke all on function public.scale_control_window(uuid) from public;
+-- Funciones internas: SIN acceso directo (no chequean la empresa; las usan
+-- get/save_scale_control). "from public" solo no alcanza en este proyecto:
+-- authenticated recibe EXECUTE por los privilegios por defecto.
+revoke all on function public.scale_control_window(uuid) from public, anon, authenticated;
 
 create or replace function public.scale_control_totals(p_shift_ids uuid[])
 returns jsonb
@@ -285,7 +288,7 @@ as $$
   );
 $$;
 
-revoke all on function public.scale_control_totals(uuid[]) from public;
+revoke all on function public.scale_control_totals(uuid[]) from public, anon, authenticated;
 
 create or replace function public.get_scale_control(p_pos_shift_id uuid)
 returns jsonb
