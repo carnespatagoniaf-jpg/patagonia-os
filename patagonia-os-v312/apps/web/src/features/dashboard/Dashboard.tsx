@@ -4,12 +4,13 @@ import { isOverdueDebt } from "@patagonia/domain";
 import { AlertTriangle, Boxes, CircleDollarSign, ReceiptText, TrendingUp } from "lucide-react";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
-import { can } from "../auth/permissions";
+import { can, canAccessPage } from "../auth/permissions";
 import { useAuth } from "../auth/AuthProvider";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { listCustomerChargesInRange, listCustomersWithBalance } from "../customers/customers-service";
 import { listProductsForBranch } from "../inventory/inventory-service";
 import { listProfitabilityPeriods } from "../profitability/profitability-service";
+import { getTransferAlerts } from "../reconciliation/reconciliation-service";
 import { listPosSalesInRange } from "../sale/pos-shift-service";
 import { addDaysIso, formatMoney, todayIso } from "../shifts/format";
 import { useShifts } from "../shifts/useShifts";
@@ -32,6 +33,7 @@ export function Dashboard() {
   const [grossProfit, setGrossProfit] = useState<number | null>(null);
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [overdueCustomers, setOverdueCustomers] = useState<{ name: string; balance: number }[]>([]);
+  const [transferAlerts, setTransferAlerts] = useState<{ count: number; total: number; oldest: string } | null>(null);
 
   useEffect(() => {
     if (!isSupabaseConfigured || !branchId) return;
@@ -91,6 +93,21 @@ export function Dashboard() {
     };
   }, [branchId, loadRange, profile]);
 
+  // Conciliación (plan Full): cobros por transferencia/QR que no llegaron al banco.
+  useEffect(() => {
+    if (!isSupabaseConfigured || !canAccessPage(profile, "reconciliation")) return;
+    let cancelled = false;
+    getTransferAlerts(null)
+      .then((list) => {
+        if (cancelled || list.length === 0) return;
+        setTransferAlerts({ count: list.length, total: list.reduce((s, a) => s + a.amount, 0), oldest: list[0].date });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [profile]);
+
   const cashOnHand = balances.reduce((sum, balance) => sum + balance.balance, 0);
   const stockValue = products.reduce((sum, p) => sum + p.stock * p.cost, 0);
   const alerts = products.filter((p) => p.stock <= p.minStock);
@@ -143,10 +160,21 @@ export function Dashboard() {
             <h2>Alertas</h2>
             <AlertTriangle size={20} />
           </div>
-          {alerts.length === 0 && overdueCustomers.length === 0 ? (
+          {alerts.length === 0 && overdueCustomers.length === 0 && !transferAlerts ? (
             <p className="muted">Sin alertas.</p>
           ) : (
             <>
+              {transferAlerts && (
+                <div className="alert-row">
+                  <AlertTriangle size={18} />
+                  <div>
+                    <strong>{transferAlerts.count} {transferAlerts.count === 1 ? "cobro por transferencia no llegó" : "cobros por transferencia no llegaron"} al banco</strong>
+                    <span>
+                      Suman {formatMoney(transferAlerts.total)} · desde el {transferAlerts.oldest.split("-").reverse().join("/")} · revisalos en Finanzas → Conciliación
+                    </span>
+                  </div>
+                </div>
+              )}
               {overdueCustomers.map((c) => (
                 <div className="alert-row" key={`overdue-${c.name}`}>
                   <AlertTriangle size={18} />

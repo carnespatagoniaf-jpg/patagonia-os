@@ -60,16 +60,16 @@ const SYNONYMS: Record<BankField, string[]> = {
   ],
   amount: [
     "importe", "monto", "valor", "importeneto", "montoneto", "neto", "importeenpesos", "montoenpesos",
-    "amount", "netamount", "transactionnetamount", "transactionamount"
+    "amount", "netamount", "transactionnetamount", "transactionamount", "settlementnetamount"
   ],
-  debit: ["debito", "debitos", "debe", "egreso", "egresos", "salida", "salidas", "retiro", "retiros", "cargo", "cargos", "debit"],
-  credit: ["credito", "creditos", "haber", "ingreso", "ingresos", "entrada", "entradas", "deposito", "depositos", "abono", "credit"],
+  debit: ["debito", "debitos", "debe", "egreso", "egresos", "salida", "salidas", "retiro", "retiros", "cargo", "cargos", "debit", "netdebitamount"],
+  credit: ["credito", "creditos", "haber", "ingreso", "ingresos", "entrada", "entradas", "deposito", "depositos", "abono", "credit", "netcreditamount"],
   reference: [
     "referencia", "nrooperacion", "numerodeoperacion", "nrodeoperacion", "iddeoperacion", "idoperacion", "operacionnro",
     "comprobante", "nrocomprobante", "numerodecomprobante", "nrodecomprobante", "codigo", "codigodeoperacion",
     "referenceid", "sourceid", "operationid", "nro", "numero", "nroref", "id"
   ],
-  balance: ["saldo", "saldoparcial", "saldodisponible", "saldocontable", "saldofinal", "balance", "partialbalance"]
+  balance: ["saldo", "saldoparcial", "saldodisponible", "saldocontable", "saldofinal", "balance", "partialbalance", "balanceamount"]
 };
 
 function matchField(header: Cell): BankField | null {

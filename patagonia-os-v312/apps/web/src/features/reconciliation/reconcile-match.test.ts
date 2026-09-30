@@ -1,6 +1,23 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { bankChannel, daysWaiting, groupSimilarLines, isCardDeposit, isTaxLine, suggestMatches, summarizeByChannel, summarizeCards, type SystemItem } from "./reconcile-match";
+import {
+  bankChannel,
+  buildClosingSheet,
+  cardCostByMonth,
+  closingBalanceFromLines,
+  daysWaiting,
+  depositsByBrand,
+  findRule,
+  groupSimilarLines,
+  isCardDeposit,
+  isTaxLine,
+  normalizeBankText,
+  suggestMatches,
+  suggestRuleText,
+  summarizeByChannel,
+  summarizeCards,
+  type SystemItem
+} from "./reconcile-match";
 
 const cobro = (id: string, date: string, amount: number, isCard = false): SystemItem => ({ id, source: "payment", date, amount, isCard, label: "Cobro" });
 
@@ -120,5 +137,59 @@ describe("cruce banco ↔ sistema (formatos del Banco Provincia real)", () => {
 
   it("días esperando", () => {
     assert.equal(daysWaiting("2026-09-01", "2026-09-30"), 29);
+  });
+});
+
+describe("reglas, tarjetas por mes y cierre (migración 106)", () => {
+  const rule = (id: string, matchText: string, direction: "in" | "out") => ({ id, matchText, direction, action: "ignore" as const, category: null, customerId: null });
+
+  it("propone el CUIT o el principio del texto, siempre un pedazo literal", () => {
+    assert.equal(suggestRuleText("CR.DEBIN 28/09-S.567700 C:27111111110"), "27111111110");
+    assert.equal(suggestRuleText("TRANSF DE JUAN PEREZ (20111111112) VAR"), "20111111112");
+    const tax = suggestRuleText("IMPUESTO CREDITO -LEY 25413");
+    assert.equal(tax, "IMPUESTO CREDITO -LEY");
+    assert.ok(normalizeBankText("IMPUESTO CREDITO -LEY 25413").includes(tax));
+  });
+
+  it("elige la regla más específica y respeta si entra o sale", () => {
+    const rules = [rule("a", "DEBIN", "in"), rule("b", "27111111110", "in"), rule("c", "DEBIN", "out")];
+    assert.equal(findRule({ amount: 500, description: "CR.DEBIN 28/09 C:27111111110" }, rules)?.id, "b");
+    assert.equal(findRule({ amount: 500, description: "CR.DEBIN 28/09 C:20999999990" }, rules)?.id, "a");
+    assert.equal(findRule({ amount: -500, description: "DB.DEBIN 30/09 C:27111111110" }, rules)?.id, "c");
+    assert.equal(findRule({ amount: -5, description: "OTRA COSA" }, rules), null);
+  });
+
+  it("costo de tarjetas por mes y por marca", () => {
+    const months = cardCostByMonth(
+      [{ date: "2026-08-30", amount: 1000 }, { date: "2026-09-02", amount: 2000 }],
+      [{ date: "2026-09-01", amount: 950 }, { date: "2026-09-04", amount: 1900 }]
+    );
+    assert.deepEqual(months.map((m) => [m.month, m.sold, m.deposited, m.difference]), [["2026-08", 1000, 0, 1000], ["2026-09", 2000, 2850, -850]]);
+    assert.deepEqual(
+      depositsByBrand([
+        { amount: 10, description: "PAGOS A COMERCIOS VISA" },
+        { amount: 5, description: "PAGOS A COMERCIOS MASTER" },
+        { amount: 1, description: "PAGOS A COMERCIOS VISA" }
+      ]).map((b) => [b.brand, b.total]),
+      [["Visa", 11], ["Mastercard", 5]]
+    );
+  });
+
+  it("saldo final del resumen aunque el banco liste el día al revés", () => {
+    // Banco Provincia: lo más nuevo arriba. 100 → +50 → 150 → −30 → 120.
+    const lines = [
+      { date: "2026-09-30", amount: -30, balance: 120 },
+      { date: "2026-09-30", amount: 50, balance: 150 },
+      { date: "2026-09-29", amount: 10, balance: 100 }
+    ];
+    assert.equal(closingBalanceFromLines(lines), 120);
+    assert.equal(closingBalanceFromLines([...lines].reverse()), 120);
+    assert.equal(closingBalanceFromLines([{ date: "2026-09-30", amount: 5, balance: null }]), null);
+  });
+
+  it("planilla de cierre", () => {
+    const s = buildClosingSheet({ bankBalance: 1000, pendingBank: 200, pendingSystem: 50, cardsGap: 30, systemBalance: 900 });
+    assert.equal(s.adjustedBank, 880);
+    assert.equal(s.unexplained, 20);
   });
 });

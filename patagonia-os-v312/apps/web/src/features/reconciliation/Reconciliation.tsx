@@ -10,9 +10,14 @@ import {
   CHANNEL_LABELS,
   MAX_DAYS_AFTER,
   summarizeByChannel,
+  type BankRule,
   type Channel,
   type MatchSuggestion,
+  cardCostByMonth,
+  closingBalanceFromLines,
   daysWaiting,
+  depositsByBrand,
+  findRule,
   groupSimilarLines,
   isCardDeposit,
   isTaxLine,
@@ -22,14 +27,18 @@ import {
 } from "./reconcile-match";
 import { readStatementFile } from "./read-statement-file";
 import {
+  applyReconRules,
   confirmBankMatch,
   confirmBankMatches,
   createMovementFromBankLine,
   createMovementsFromBankLines,
+  deleteReconRule,
   getReconciliationItems,
+  getTransferAlerts,
   importBankStatement,
   listBankLines,
   listReconAccounts,
+  listReconRules,
   markCardDeposits,
   saveReconAccount,
   setBankLineIgnored,
@@ -37,8 +46,13 @@ import {
   type ReconAccount,
   type ReconMovement,
   type ReconPayment,
-  type StoredBankLine
+  type StoredBankLine,
+  type TransferAlert
 } from "./reconciliation-service";
+import { listCustomers } from "../customers/customers-service";
+import { ACTION_LABELS, EXPENSE_CATEGORIES, RuleForm } from "./RuleForm";
+import { TransferAlerts } from "./TransferAlerts";
+import { ClosePeriod } from "./ClosePeriod";
 
 /**
  * Finanzas → Conciliación: subir el resumen del banco (de cualquier banco) y
@@ -62,14 +76,6 @@ const MOVEMENT_LABELS: Record<string, string> = {
   vale_mercaderia: "Vale mercadería",
   sueldo: "Sueldo"
 };
-
-const EXPENSE_CATEGORIES: { value: string; label: string }[] = [
-  { value: "otro", label: "Comisiones y otros" },
-  { value: "impuestos", label: "Impuestos" },
-  { value: "servicios", label: "Servicios" },
-  { value: "mantenimiento", label: "Mantenimiento" },
-  { value: "insumos", label: "Insumos" }
-];
 
 const FIELDS_ORDER: BankField[] = ["date", "description", "amount", "debit", "credit", "reference", "balance"];
 
@@ -118,6 +124,11 @@ export function Reconciliation() {
   const [linkingLineId, setLinkingLineId] = useState<string | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [categoryByLine, setCategoryByLine] = useState<Record<string, string>>({});
+  const [rules, setRules] = useState<BankRule[]>([]);
+  const [alerts, setAlerts] = useState<TransferAlert[]>([]);
+  const [customers, setCustomers] = useState<{ id: string; name: string }[]>([]);
+  /** Línea o grupo con el formulario "¿Qué es?" abierto. */
+  const [ruleTarget, setRuleTarget] = useState<{ key: string; lines: StoredBankLine[] } | null>(null);
 
   async function loadAccounts(selectId?: string) {
     const [treasury, recon] = await Promise.all([listAllTreasuryAccounts(), listReconAccounts()]);
@@ -138,6 +149,9 @@ export function Reconciliation() {
       return;
     }
     void loadAccounts().catch((err) => setMessage(err instanceof Error ? err.message : "No se pudieron cargar las cuentas."));
+    void listCustomers()
+      .then((list) => setCustomers(list.map((c) => ({ id: c.id, name: c.name })).sort((a, b) => a.name.localeCompare(b.name))))
+      .catch(() => setCustomers([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -148,13 +162,19 @@ export function Reconciliation() {
     if (!recon || !isSupabaseConfigured) return;
     setLoading(true);
     try {
-      const [l, items] = await Promise.all([
+      const [l, items, r, a] = await Promise.all([
         listBankLines(recon.id, from, to),
-        getReconciliationItems(recon.id, addDaysIso(from, -MAX_DAYS_AFTER), to)
+        getReconciliationItems(recon.id, addDaysIso(from, -MAX_DAYS_AFTER), to),
+        // Si las reglas o las alertas fallan, la conciliación igual tiene que andar.
+        listReconRules(recon.id).catch(() => [] as BankRule[]),
+        getTransferAlerts(recon.id).catch(() => [] as TransferAlert[])
       ]);
       setLines(l);
       setPayments(items.payments);
       setMovements(items.movements);
+      setRules(r);
+      setAlerts(a);
+      setRuleTarget(null);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo cargar la conciliación.");
     } finally {
@@ -214,11 +234,40 @@ export function Reconciliation() {
   );
   const cardSummary = summarizeCards(cardSales, cardDepositsAll);
 
+  const cardMonths = cardCostByMonth(cardSales, cardDepositsAll);
+  const cardBrands = depositsByBrand(cardDepositsAll);
+
   const bankOnly = pendingLines.filter((l) => !suggestedLineIds.has(l.id) && !(hasCards && isCardDeposit(l)));
-  const groups = groupSimilarLines(bankOnly);
+  // Lo que las reglas guardadas ya reconocen se ofrece aparte, para cargarlo de una vez.
+  const ruled = bankOnly.map((line) => ({ line, rule: findRule(line, rules) })).filter((x): x is { line: StoredBankLine; rule: BankRule } => x.rule !== null);
+  const ruledIds = new Set(ruled.map((x) => x.line.id));
+  const unruled = bankOnly.filter((l) => !ruledIds.has(l.id));
+  const groups = groupSimilarLines(unruled);
   const groupedIds = new Set(groups.flatMap((g) => g.lines.map((l) => l.id)));
-  const singles = bankOnly.filter((l) => !groupedIds.has(l.id));
+  const singles = unruled.filter((l) => !groupedIds.has(l.id));
   const systemOnly = items.filter((i) => !i.isCard && i.date >= from && !suggestedItemIds.has(i.id));
+  const customerName = (id: string | null) => customers.find((c) => c.id === id)?.name ?? "cliente";
+  const ruleLabel = (r: BankRule) => (r.action === "expense" ? `Gasto (${EXPENSE_CATEGORIES.find((c) => c.value === r.category)?.label ?? r.category})` : r.action === "customer" ? `Cobro de ${customerName(r.customerId)}` : ACTION_LABELS[r.action]);
+
+  // Para la planilla de cierre: partidas pendientes del período (las acreditaciones de tarjeta van por el renglón de tarjetas).
+  const closingPendingBank = pendingLines.filter((l) => !(hasCards && isCardDeposit(l)));
+  const closingPendingSystem = items.filter((i) => !i.isCard && i.date >= from && i.date <= to);
+
+  function renderRuleForm(key: string) {
+    if (!recon || !ruleTarget || ruleTarget.key !== key) return null;
+    return (
+      <RuleForm
+        reconId={recon.id}
+        branchId={branchId}
+        lines={ruleTarget.lines}
+        bankOnly={bankOnly}
+        customers={customers}
+        defaultCategory={ruleTarget.lines.every(isTaxLine) ? "impuestos" : "otro"}
+        onDone={async (msg) => { setRuleTarget(null); setMessage(msg); await reload(); }}
+        onCancel={() => setRuleTarget(null)}
+      />
+    );
+  }
 
   const parsed = useMemo(() => {
     if (!table || !mapping) return null;
@@ -358,6 +407,7 @@ export function Reconciliation() {
         <p style={{ margin: "0 0 6px", fontWeight: 700 }}>{config.id ? "Editar cuenta del banco" : "Configurar una cuenta del banco"}</p>
         <p className="muted" style={{ margin: "0 0 12px", fontSize: 13 }}>
           Una cuenta del banco puede recibir plata de varias cuentas de Tesorería (por ejemplo "Transferencia" y el posnet caen en la misma cuenta del banco). Se configura una sola vez.
+          {" "}Mercado Pago (u otra billetera) se concilia igual: creá otra cuenta llamada "Mercado Pago" y tildá la cuenta de Tesorería donde se cobra el QR.
         </p>
         <label style={{ display: "block", marginBottom: 10 }}>
           Nombre (ej.: Banco Provincia cuenta corriente)
@@ -502,6 +552,9 @@ export function Reconciliation() {
           {/* 1. Subir resumen */}
           <div style={box}>
             <p style={{ margin: "0 0 8px", fontWeight: 700 }}>1. Subir el resumen del banco</p>
+            <p className="muted" style={{ margin: "0 0 8px", fontSize: 13 }}>
+              Bajalo del homebanking en Excel o CSV. Para Mercado Pago: desde la computadora, en Mercado Pago → Tu dinero / Reportes, descargá el reporte de movimientos o de dinero liberado en Excel o CSV.
+            </p>
             <input
               type="file"
               accept=".xlsx,.xls,.csv,.txt"
@@ -587,7 +640,7 @@ export function Reconciliation() {
                             setTable(null);
                             setMapping(null);
                             setMappingNote("");
-                            setMessage(`Listo: ${result.new} movimientos nuevos${result.repeated > 0 ? `, ${result.repeated} ya estaban cargados de antes (no se repiten)` : ""}.`);
+                            setMessage(`Listo: ${result.new} movimientos nuevos${result.repeated > 0 ? `, ${result.repeated} ya estaban cargados de antes o son de un período cerrado (no se repiten)` : ""}.`);
                             await loadAccounts(recon.id);
                           })
                         }
@@ -643,6 +696,8 @@ export function Reconciliation() {
             </div>
           )}
 
+          {isSupabaseConfigured && <TransferAlerts alerts={alerts} />}
+
           {renderSuggestionGroup("2. Coincidencias exactas", "Mismo importe al centavo y fecha cercana. Nada queda conciliado hasta que confirmás.", exactSuggestions, false)}
           {renderSuggestionGroup(
             "2b. Casi iguales (revisalas)",
@@ -663,6 +718,29 @@ export function Reconciliation() {
               <p style={{ margin: "0 0 10px" }}>
                 Diferencia: <strong>{fmt(cardSummary.difference)}</strong>{cardSummary.differencePct !== null && ` (${cardSummary.differencePct}%)`} — comisiones y retenciones de las tarjetas, más lo vendido en los últimos días que todavía no se acreditó.
               </p>
+              {cardMonths.length > 1 && (
+                <div style={{ overflowX: "auto", marginBottom: 10 }}>
+                  <table className="data-table">
+                    <thead><tr><th>Mes</th><th className="num">Vendido</th><th className="num">Acreditado</th><th className="num">Costo / falta acreditar</th></tr></thead>
+                    <tbody>
+                      {cardMonths.map((m) => (
+                        <tr key={m.month}>
+                          <td>{m.month.split("-").reverse().join("/")}</td>
+                          <td className="num">{fmt(m.sold)}</td>
+                          <td className="num">{fmt(m.deposited)}</td>
+                          <td className="num">{fmt(m.difference)}{m.differencePct !== null && ` (${m.differencePct}%)`}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                  <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>Lo vendido los últimos días de un mes se acredita al mes siguiente: miralo en meses completos.</p>
+                </div>
+              )}
+              {cardBrands.length > 0 && (
+                <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
+                  Acreditado por marca: {cardBrands.map((b) => `${b.brand} ${fmt(b.total)} (${b.count})`).join(" · ")}
+                </p>
+              )}
               {cardDepositsPending.length > 0 && (
                 <button
                   disabled={busy}
@@ -681,10 +759,34 @@ export function Reconciliation() {
               Impuestos, comisiones, débitos automáticos, pagos o cobros que no se cargaron. Cargalos en Tesorería, vinculalos a mano o ignoralos si no corresponden.
             </p>
             {bankOnly.length === 0 && <p className="muted">Nada pendiente.</p>}
+            {ruled.length > 0 && (
+              <div style={{ ...row, marginBottom: 10, background: "#f3f0fb" }}>
+                <p style={{ margin: "0 0 6px" }}>
+                  <strong>Tus reglas reconocen {ruled.length} {ruled.length === 1 ? "línea" : "líneas"}</strong>
+                </p>
+                <div style={{ fontSize: 13, display: "grid", gap: 2, marginBottom: 8 }}>
+                  {Array.from(new Map(ruled.map((x) => [x.rule.id, x.rule])).values()).map((r) => {
+                    const mine = ruled.filter((x) => x.rule.id === r.id);
+                    return (
+                      <span key={r.id}>
+                        "{r.matchText}" → {ruleLabel(r)}: {mine.length} · {fmt(mine.reduce((s, x) => s + x.line.amount, 0))}
+                      </span>
+                    );
+                  })}
+                </div>
+                <button
+                  disabled={busy || !branchId}
+                  onClick={() => run(async () => { const n = await applyReconRules(ruled.map((x) => ({ lineId: x.line.id, ruleId: x.rule.id })), branchId!); setMessage(`Listo: ${n} líneas cargadas con tus reglas.`); await reload(); })}
+                >
+                  Cargar las {ruled.length} según las reglas
+                </button>
+              </div>
+            )}
             {groups.map((g) => {
               const category = g.lines.every(isTaxLine) ? "impuestos" : "otro";
+              const key = `g:${g.label}:${g.total < 0 ? "-" : "+"}`;
               return (
-                <div key={g.label} style={{ ...row, marginBottom: 8 }}>
+                <div key={key} style={{ ...row, marginBottom: 8 }}>
                   <div><strong>{g.lines.length} × {g.label}</strong> · total <strong className={g.total < 0 ? "num-negative" : "num-positive"}>{fmt(g.total)}</strong></div>
                   <div className="cash-banner-form" style={{ marginTop: 6, flexWrap: "wrap" }}>
                     {g.total < 0 && (
@@ -695,6 +797,7 @@ export function Reconciliation() {
                         Cargar los {g.lines.length} como gasto ({category === "impuestos" ? "Impuestos" : "Comisiones y otros"})
                       </button>
                     )}
+                    <button className="secondary" onClick={() => setRuleTarget({ key, lines: g.lines })}>¿Qué es? / Regla</button>
                     <details>
                       <summary style={{ cursor: "pointer" }}>Ver uno por uno</summary>
                       {g.lines.map((l) => (
@@ -702,6 +805,7 @@ export function Reconciliation() {
                       ))}
                     </details>
                   </div>
+                  {renderRuleForm(key)}
                 </div>
               );
             })}
@@ -723,13 +827,32 @@ export function Reconciliation() {
                       <button disabled={busy || !branchId} onClick={() => run(async () => { await createMovementFromBankLine(line.id, branchId!, category, line.description); await reload(); })}>
                         {line.amount < 0 ? "Cargar como gasto" : "Cargar como ingreso"}
                       </button>
+                      <button className="secondary" onClick={() => setRuleTarget({ key: `l:${line.id}`, lines: [line] })}>
+                        {line.amount > 0 ? "Es cobro de un cliente / Regla" : "¿Qué es? / Regla"}
+                      </button>
                       <button className="secondary" onClick={() => { setLinkingLineId(line.id); setSelectedIds(new Set()); }}>Vincular a mano</button>
                       <button className="secondary" disabled={busy} onClick={() => run(async () => { await setBankLineIgnored(line.id, true); await reload(); })}>Ignorar</button>
                     </div>
+                    {renderRuleForm(`l:${line.id}`)}
                   </div>
                 );
               })}
             </div>
+            {rules.length > 0 && (
+              <details style={{ marginTop: 12 }}>
+                <summary style={{ cursor: "pointer", fontWeight: 600 }}>Reglas guardadas ({rules.length})</summary>
+                <div style={{ display: "grid", gap: 4, marginTop: 8 }}>
+                  {rules.map((r) => (
+                    <div key={r.id} style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", fontSize: 14 }}>
+                      <span>
+                        Cuando {r.direction === "in" ? "entra" : "sale"} plata con "<strong>{r.matchText}</strong>" → {ruleLabel(r)}
+                      </span>
+                      <button className="secondary" disabled={busy} onClick={() => run(async () => { await deleteReconRule(r.id); await reload(); })}>Borrar</button>
+                    </div>
+                  ))}
+                </div>
+              </details>
+            )}
           </div>
 
           {renderLinking()}
@@ -762,6 +885,22 @@ export function Reconciliation() {
               </div>
             )}
           </div>
+
+          {isSupabaseConfigured && (
+            <ClosePeriod
+              reconId={recon.id}
+              reconName={recon.name}
+              from={from}
+              to={to}
+              today={todayIso()}
+              suggestedBankBalance={closingBalanceFromLines(lines)}
+              pendingBank={{ total: Math.round(closingPendingBank.reduce((s, l) => s + l.amount, 0) * 100) / 100, count: closingPendingBank.length }}
+              pendingSystem={{ total: Math.round(closingPendingSystem.reduce((s, i) => s + i.amount, 0) * 100) / 100, count: closingPendingSystem.length }}
+              cardsGap={hasCards ? cardSummary.difference : 0}
+              onMessage={setMessage}
+              onChanged={reload}
+            />
+          )}
 
           {/* Conciliadas e ignoradas */}
           {matchedLines.length > 0 && (

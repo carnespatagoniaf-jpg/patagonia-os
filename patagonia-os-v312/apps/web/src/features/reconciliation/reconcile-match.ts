@@ -252,3 +252,147 @@ export function groupSimilarLines<T extends MatchLine>(lines: T[], minSize = 3):
 export function daysWaiting(date: string, today: string): number {
   return Math.max(0, Math.round(toDay(today) - toDay(date)));
 }
+
+/* ------------------------------ reglas (migración 106) ------------------------------ */
+
+export type RuleAction = "expense" | "income" | "customer" | "ignore";
+
+export interface BankRule {
+  id: string;
+  /** En mayúsculas, espacios simples (así lo guarda la base). */
+  matchText: string;
+  direction: "in" | "out";
+  action: RuleAction;
+  category: string | null;
+  customerId: string | null;
+}
+
+/** Igual que la base: mayúsculas y espacios simples. */
+export function normalizeBankText(text: string): string {
+  return text.toUpperCase().replace(/\s+/g, " ").trim();
+}
+
+/** La regla que corresponde a una línea (la de texto más largo, la más específica). */
+export function findRule<R extends BankRule>(line: Pick<MatchLine, "amount" | "description">, rules: R[]): R | null {
+  const text = normalizeBankText(line.description);
+  const direction = line.amount > 0 ? "in" : "out";
+  let best: R | null = null;
+  for (const rule of rules) {
+    if (rule.direction !== direction || !text.includes(rule.matchText)) continue;
+    if (!best || rule.matchText.length > best.matchText.length) best = rule;
+  }
+  return best;
+}
+
+/**
+ * Texto propuesto para una regla nueva: el CUIT si el banco lo trae (quién
+ * pagó o a quién se le pagó), si no, el principio del texto hasta el primer
+ * número (ej. "IMPUESTO CREDITO -LEY"). Siempre es un pedazo literal del texto.
+ */
+export function suggestRuleText(description: string): string {
+  const text = normalizeBankText(description);
+  const cuit = text.match(/(?<!\d)(\d{11})(?!\d)/);
+  if (cuit) return cuit[1];
+  const lead = text.replace(/\d.*$/, "").replace(/[^\p{L}]+$/u, "").trim();
+  return lead.length >= 3 ? lead.slice(0, 80) : text.slice(0, 40);
+}
+
+/* ------------------------------ tarjetas por mes ------------------------------ */
+
+const CARD_BRANDS: [RegExp, string][] = [
+  [/visa/i, "Visa"],
+  [/master/i, "Mastercard"],
+  [/maestro/i, "Maestro"],
+  [/cabal/i, "Cabal"],
+  [/amex|american/i, "American Express"],
+  [/naranja/i, "Naranja"],
+  [/mercado ?pago/i, "Mercado Pago"],
+  [/d[eé]bito/i, "Débito"]
+];
+
+export function cardBrand(description: string): string {
+  for (const [re, label] of CARD_BRANDS) if (re.test(description)) return label;
+  return "Otras";
+}
+
+export interface CardMonth {
+  month: string;
+  sold: number;
+  deposited: number;
+  difference: number;
+  differencePct: number | null;
+}
+
+const round2 = (n: number) => Math.round(n * 100) / 100;
+
+/** Vendido con tarjeta vs acreditado, por mes (el costo de las tarjetas mes a mes). */
+export function cardCostByMonth(cardItems: Pick<SystemItem, "date" | "amount">[], depositLines: Pick<MatchLine, "date" | "amount">[]): CardMonth[] {
+  const months = new Map<string, { sold: number; deposited: number }>();
+  const get = (date: string) => {
+    const key = date.slice(0, 7);
+    let m = months.get(key);
+    if (!m) months.set(key, (m = { sold: 0, deposited: 0 }));
+    return m;
+  };
+  for (const i of cardItems) get(i.date).sold += i.amount;
+  for (const l of depositLines) get(l.date).deposited += l.amount;
+  return Array.from(months.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([month, m]) => {
+      const sold = round2(m.sold);
+      const deposited = round2(m.deposited);
+      const difference = round2(sold - deposited);
+      return { month, sold, deposited, difference, differencePct: sold > 0 ? Math.round((difference / sold) * 1000) / 10 : null };
+    });
+}
+
+/** Acreditado por marca (según el texto del banco). */
+export function depositsByBrand(depositLines: Pick<MatchLine, "amount" | "description">[]): { brand: string; total: number; count: number }[] {
+  const map = new Map<string, { total: number; count: number }>();
+  for (const l of depositLines) {
+    const brand = cardBrand(l.description);
+    const r = map.get(brand) ?? { total: 0, count: 0 };
+    r.total += l.amount;
+    r.count++;
+    map.set(brand, r);
+  }
+  return Array.from(map.entries()).map(([brand, r]) => ({ brand, total: round2(r.total), count: r.count })).sort((a, b) => b.total - a.total);
+}
+
+/* ------------------------------ cierre del período ------------------------------ */
+
+/**
+ * Saldo final del banco según el propio resumen: entre las líneas del último
+ * día, la que tiene un saldo que no es el "saldo anterior" de ninguna otra
+ * (el orden dentro del día no se sabe: cada banco lo exporta distinto).
+ * null si no se puede saber con certeza.
+ */
+export function closingBalanceFromLines(lines: { date: string; amount: number; balance: number | null }[]): number | null {
+  const withBalance = lines.filter((l) => l.balance !== null);
+  if (withBalance.length === 0) return null;
+  const lastDate = withBalance.reduce((m, l) => (l.date > m ? l.date : m), withBalance[0].date);
+  const day = withBalance.filter((l) => l.date === lastDate);
+  const previous = new Set(day.map((l) => cents((l.balance as number) - l.amount)));
+  const finals = day.filter((l) => !previous.has(cents(l.balance as number)));
+  return finals.length === 1 ? (finals[0].balance as number) : null;
+}
+
+export interface ClosingSheet {
+  bankBalance: number;
+  /** En el banco y no en el sistema (con signo). Se resta. */
+  pendingBank: number;
+  /** En el sistema y no en el banco, sin tarjetas (con signo). Se suma. */
+  pendingSystem: number;
+  /** Tarjetas vendidas − acreditadas en el período (comisiones y lo que falta acreditar). Se suma. */
+  cardsGap: number;
+  adjustedBank: number;
+  systemBalance: number;
+  /** Sistema − banco ajustado: lo que ninguna partida explica. */
+  unexplained: number;
+}
+
+/** La planilla clásica: saldo del banco ± partidas pendientes = saldo del sistema. */
+export function buildClosingSheet(input: { bankBalance: number; pendingBank: number; pendingSystem: number; cardsGap: number; systemBalance: number }): ClosingSheet {
+  const adjustedBank = round2(input.bankBalance - input.pendingBank + input.pendingSystem + input.cardsGap);
+  return { ...input, adjustedBank, unexplained: round2(input.systemBalance - adjustedBank) };
+}

@@ -115,6 +115,25 @@ describe("resumen con un solo importe con signo (tipo billetera)", () => {
   });
 });
 
+describe("reporte de liberaciones de Mercado Pago (columnas en inglés, crédito y débito netos)", () => {
+  const csv = [
+    "DATE,SOURCE_ID,EXTERNAL_REFERENCE,RECORD_TYPE,DESCRIPTION,NET_CREDIT_AMOUNT,NET_DEBIT_AMOUNT,GROSS_AMOUNT,MP_FEE_AMOUNT,BALANCE_AMOUNT",
+    "2026-09-02T10:15:00.000-03:00,74839201,,release,payment,9650.00,0.00,10000.00,-350.00,9650.00",
+    "2026-09-03T09:00:00.000-03:00,74839999,,release,withdrawal,0.00,9000.00,-9000.00,0.00,650.00"
+  ].join("\n");
+
+  it("usa el neto acreditado y debitado", () => {
+    const table = parseDelimited(csv);
+    const mapping = guessBankMapping(table);
+    assert.ok(mapping);
+    const { lines } = parseBankStatement(table, mapping);
+    assert.deepEqual(lines.map((l) => [l.date, l.amount, l.reference, l.balance]), [
+      ["2026-09-02", 9650, "74839201", 9650],
+      ["2026-09-03", -9000, "74839999", 650]
+    ]);
+  });
+});
+
 describe("importes y fechas en los formatos que usan los bancos", () => {
   it("importes", () => {
     assert.equal(parseBankAmount("1.234,56"), 1234.56);
