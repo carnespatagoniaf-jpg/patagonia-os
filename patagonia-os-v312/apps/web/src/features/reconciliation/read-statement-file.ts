@@ -3,35 +3,45 @@ import { decodeFileBytes, parseDelimited, type Cell, type Table } from "../impor
 /**
  * Lee el archivo del resumen tal como lo baja el homebanking:
  * - .xlsx (Excel nuevo)
- * - .csv / .txt (cualquier separador)
+ * - .xls de verdad (Excel viejo, binario). Ej. real: Banco Provincia, que lo
+ *   genera con JasperReports. Se lee con SheetJS (se carga solo cuando hace falta).
  * - .xls que en realidad es una página web con una tabla (muchos bancos
  *   exportan así su "Excel"): se lee la tabla.
- * - .xls de verdad (Excel viejo, binario): no se puede leer acá; se pide
- *   guardarlo como .xlsx o .csv.
+ * - .csv / .txt (cualquier separador)
  * Solo navegador (usa DOMParser).
  */
 export async function readStatementFile(file: File): Promise<Table> {
   const name = file.name.toLowerCase();
+  if (name.endsWith(".pdf")) {
+    throw new Error("Los resúmenes en PDF no se pueden leer con seguridad. Bajalo del homebanking como Excel o CSV (casi todos los bancos lo permiten).");
+  }
   if (name.endsWith(".xlsx")) {
     const { readSheet } = await import("read-excel-file/browser");
     return (await readSheet(file)) as Cell[][];
   }
-  if (name.endsWith(".pdf")) {
-    throw new Error("Los resúmenes en PDF no se pueden leer con seguridad. Bajalo del homebanking como Excel o CSV (casi todos los bancos lo permiten).");
-  }
 
   const buffer = await file.arrayBuffer();
+  const head = new Uint8Array(buffer.slice(0, 4));
+  // Firma de los archivos de Office viejos (Excel 97-2003).
+  const isBinaryExcel = head[0] === 0xd0 && head[1] === 0xcf && head[2] === 0x11 && head[3] === 0xe0;
+  if (isBinaryExcel) return readBinaryExcel(buffer);
+
   const text = decodeFileBytes(buffer);
   if (/<table[\s>]/i.test(text)) return readHtmlTable(text);
-
-  if (name.endsWith(".xls")) {
-    const head = new Uint8Array(buffer.slice(0, 4));
-    const isBinaryExcel = head[0] === 0xd0 && head[1] === 0xcf && head[2] === 0x11 && head[3] === 0xe0;
-    if (isBinaryExcel) {
-      throw new Error('Ese es un Excel viejo (.xls). Abrilo en Excel y guardalo como "Libro de Excel (.xlsx)" o como "CSV" y subilo de nuevo.');
-    }
-  }
   return parseDelimited(text);
+}
+
+async function readBinaryExcel(buffer: ArrayBuffer): Promise<Table> {
+  const XLSX = await import("xlsx");
+  const workbook = XLSX.read(new Uint8Array(buffer), { type: "array", cellDates: true });
+  // La hoja con más filas (el detalle de movimientos).
+  let best: Table = [];
+  for (const sheetName of workbook.SheetNames) {
+    const rows = XLSX.utils.sheet_to_json<Cell[]>(workbook.Sheets[sheetName], { header: 1, raw: true, defval: null });
+    if (rows.length > best.length) best = rows;
+  }
+  if (best.length === 0) throw new Error("El Excel no tiene filas.");
+  return best;
 }
 
 /** La tabla con más filas de la página (los bancos a veces ponen tablas chicas de encabezado). */

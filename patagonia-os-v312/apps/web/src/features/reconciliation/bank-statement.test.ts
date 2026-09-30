@@ -3,8 +3,49 @@ import { describe, it } from "node:test";
 import { parseDelimited } from "../import/import-parse";
 import { guessBankMapping, parseBankAmount, parseBankDate, parseBankStatement } from "./bank-statement";
 
-// Formatos INVENTADOS a imagen de los típicos. Falta validar contra resúmenes
-// reales (el dueño los pasa) antes de publicar la pantalla.
+// Formatos a imagen de los típicos. El primero reproduce la FORMA exacta del
+// resumen real del Banco Provincia (.xls binario de JasperReports, sept 2026)
+// con nombres y montos inventados; ese archivo real se leyó completo (1.227
+// líneas) sin cambios en el lector.
+
+describe("forma real del Banco Provincia (.xls leído como tabla)", () => {
+  const table = [
+    [],
+    [],
+    [null, "Fecha: 30/09/2026   Hora: 11:01"],
+    [null, "Detalle de Movimientos"],
+    [null, "Cuenta: 0000-000000/0"],
+    [null, "Fecha", "Descripción", "Importe", "Saldo"],
+    [],
+    [null, "30-sept-2026", "TRANSF DE JUAN PEREZ (20111111112) VAR", 82860, 497411.07],
+    [null, "30-sept-2026", "IMPUESTO CREDITO -LEY 25413", -963.39, 409171.07],
+    [null, "30-sept-2026", "PAGOS A COMERCIOS VISA - L. 0000300258 - C. 00005683628", 89420.91, 330925.35],
+    [null, "29-sept-2026", "DB.DEBIN 30/09-S.237200 C:20384013156", -400000, 9980.47],
+    [null, "01-sept-2026", "TRANSF DE ANA GOMEZ (27222222223) VAR", 5938, 407915.47],
+    [null, "Esta información es la que consta en los sistemas del Banco en el día y hora indicados,"],
+    [null, "y está supeditada a los ajustes que pudieran realizarse en los mismos."],
+    []
+  ];
+
+  it("encuentra los títulos debajo del encabezado del banco y lee todo", () => {
+    const mapping = guessBankMapping(table);
+    assert.ok(mapping);
+    assert.equal(mapping.headerRow, 5);
+    assert.deepEqual(mapping.columns, { date: 1, description: 2, amount: 3, balance: 4 });
+    const { lines, skipped } = parseBankStatement(table, mapping);
+    assert.deepEqual(
+      lines.map((l) => [l.date, l.amount]),
+      [
+        ["2026-09-30", 82860],
+        ["2026-09-30", -963.39],
+        ["2026-09-30", 89420.91],
+        ["2026-09-29", -400000],
+        ["2026-09-01", 5938]
+      ]
+    );
+    assert.equal(skipped.length, 2);
+  });
+});
 
 describe("resumen con débito y crédito en columnas separadas, encabezado con datos del titular", () => {
   const csv = [

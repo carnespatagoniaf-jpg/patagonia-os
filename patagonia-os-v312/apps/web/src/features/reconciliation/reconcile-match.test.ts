@@ -1,68 +1,75 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { daysWaiting, suggestMatches, type MatchMovement } from "./reconcile-match";
+import { daysWaiting, groupSimilarLines, isCardDeposit, isTaxLine, suggestMatches, summarizeCards, type SystemItem } from "./reconcile-match";
 
-const venta = (id: string, date: string, amount: number): MatchMovement => ({ id, date, direction: "in", amount, movementType: "venta" });
+const cobro = (id: string, date: string, amount: number, isCard = false): SystemItem => ({ id, source: "payment", date, amount, isCard, label: "Cobro" });
 
-describe("cruce banco ↔ Tesorería", () => {
-  it("uno a uno: mismo importe, fecha cercana, elige el más cercano", () => {
-    const suggestions = suggestMatches(
-      [{ id: "L1", date: "2026-09-02", amount: 25000, description: "TRANSFERENCIA" }],
-      [
-        { id: "M-lejos", date: "2026-08-20", direction: "in", amount: 25000, movementType: "cobro_cliente" },
-        { id: "M-cerca", date: "2026-09-02", direction: "in", amount: 25000, movementType: "cobro_cliente" }
-      ]
+describe("cruce banco ↔ sistema (formatos del Banco Provincia real)", () => {
+  it("transferencia: mismo importe, el banco la muestra 1 día después", () => {
+    const s = suggestMatches(
+      [{ id: "L1", date: "2026-09-30", amount: 17839, description: "TRANSF DE CLIENTE (20294029789) VAR" }],
+      [cobro("C1", "2026-09-29", 17839)]
     );
-    assert.deepEqual(suggestions.map((s) => [s.lineId, s.movementIds, s.kind]), [["L1", ["M-cerca"], "exact"]]);
+    assert.deepEqual(s, [{ lineId: "L1", itemIds: ["C1"], kind: "exact" }]);
   });
 
-  it("no cruza entradas con salidas del mismo importe", () => {
-    const suggestions = suggestMatches(
-      [{ id: "L1", date: "2026-09-02", amount: -5000, description: "PAGO" }],
-      [venta("M1", "2026-09-02", 5000)]
-    );
-    assert.equal(suggestions.length, 0);
-  });
-
-  it("un movimiento no se usa para dos líneas", () => {
-    const suggestions = suggestMatches(
+  it("dos transferencias del mismo importe van cada una a su cobro, sin repetir", () => {
+    const s = suggestMatches(
       [
-        { id: "L1", date: "2026-09-02", amount: -100, description: "COMISION" },
-        { id: "L2", date: "2026-09-02", amount: -100, description: "COMISION" }
+        { id: "L1", date: "2026-09-29", amount: 17839, description: "TRANSF DE A" },
+        { id: "L2", date: "2026-09-30", amount: 17839, description: "TRANSF DE B" }
       ],
-      [{ id: "M1", date: "2026-09-02", direction: "out", amount: 100, movementType: "gasto" }]
+      [cobro("C1", "2026-09-29", 17839), cobro("C2", "2026-09-29", 17839)]
     );
-    assert.equal(suggestions.length, 1);
+    assert.equal(s.length, 2);
+    assert.notEqual(s[0].itemIds[0], s[1].itemIds[0]);
   });
 
-  it("depósito del posnet = ventas de un día exactas", () => {
-    const suggestions = suggestMatches(
-      [{ id: "L1", date: "2026-09-04", amount: 30000, description: "ACRED. DEBITO" }],
-      [venta("A", "2026-09-03", 10000), venta("B", "2026-09-03", 20000), venta("C", "2026-09-02", 7000)]
-    );
-    assert.deepEqual(suggestions.map((s) => [s.kind, s.movementIds.sort(), s.fee]), [["day_total", ["A", "B"], 0]]);
+  it("no cruza fuera de la ventana de días", () => {
+    const s = suggestMatches([{ id: "L1", date: "2026-09-30", amount: 5000, description: "TRANSF DE X" }], [cobro("C1", "2026-09-10", 5000)]);
+    assert.equal(s.length, 0);
   });
 
-  it("depósito del posnet con comisión descontada: sugiere el día y la diferencia como comisión", () => {
-    const suggestions = suggestMatches(
-      [{ id: "L1", date: "2026-09-25", amount: 96450.3, description: "LIQUIDACION VISA" }],
-      [venta("A", "2026-09-05", 60000), venta("B", "2026-09-05", 40000), venta("C", "2026-09-06", 5000), venta("D", "2026-09-06", 5000)]
+  it("salida del banco contra pago a proveedor (movimiento con signo negativo)", () => {
+    const s = suggestMatches(
+      [{ id: "L1", date: "2026-09-11", amount: -80000, description: "TRANSF A PROVEEDOR" }],
+      [{ id: "M1", source: "movement", date: "2026-09-11", amount: -80000, isCard: false, label: "Pago a proveedor" }]
     );
-    assert.equal(suggestions.length, 1);
-    assert.equal(suggestions[0].kind, "day_total_fee");
-    assert.deepEqual(suggestions[0].movementIds.sort(), ["A", "B"]);
-    assert.equal(suggestions[0].fee, 3549.7);
+    assert.equal(s.length, 1);
   });
 
-  it("no sugiere si la diferencia es demasiado grande para ser una comisión", () => {
-    const suggestions = suggestMatches(
-      [{ id: "L1", date: "2026-09-10", amount: 50000, description: "DEPOSITO" }],
-      [venta("A", "2026-09-05", 60000), venta("B", "2026-09-05", 40000)]
+  it("las tarjetas no se cruzan una a una", () => {
+    const s = suggestMatches(
+      [{ id: "L1", date: "2026-09-30", amount: 30000, description: "PAGOS A COMERCIOS VISA - L. 0000300258 - C. 00005683628" }],
+      [cobro("C1", "2026-09-29", 30000, true)]
     );
-    assert.equal(suggestions.length, 0);
+    assert.equal(s.length, 0);
   });
 
-  it("días esperando acreditación", () => {
+  it("reconoce acreditaciones de tarjeta e impuestos", () => {
+    assert.equal(isCardDeposit({ amount: 89420.91, description: "PAGOS A COMERCIOS VISA - L. 0000300258 - C. 00005683628" }), true);
+    assert.equal(isCardDeposit({ amount: 5000, description: "TRANSF DE JUAN" }), false);
+    assert.equal(isTaxLine({ amount: -963.39, description: "IMPUESTO CREDITO -LEY 25413" }), true);
+    assert.equal(isTaxLine({ amount: -400000, description: "DB.DEBIN 30/09-S.237200" }), false);
+  });
+
+  it("resumen de tarjetas por período", () => {
+    const r = summarizeCards([cobro("C1", "2026-09-17", 60000, true), cobro("C2", "2026-09-18", 40000, true)], [{ id: "L1", date: "2026-09-19", amount: 96000, description: "PAGOS A COMERCIOS" }]);
+    assert.equal(r.sold, 100000);
+    assert.equal(r.deposited, 96000);
+    assert.equal(r.difference, 4000);
+    assert.equal(r.differencePct, 4);
+  });
+
+  it("agrupa líneas iguales (ej. el impuesto Ley 25413 de todo el mes)", () => {
+    const lines = [1, 2, 3].map((n) => ({ id: `L${n}`, date: `2026-09-0${n}`, amount: -100 * n, description: "IMPUESTO CREDITO -LEY 25413" }));
+    const groups = groupSimilarLines([...lines, { id: "X", date: "2026-09-01", amount: -5, description: "OTRA COSA" }]);
+    assert.equal(groups.length, 1);
+    assert.equal(groups[0].lines.length, 3);
+    assert.equal(groups[0].total, -600);
+  });
+
+  it("días esperando", () => {
     assert.equal(daysWaiting("2026-09-01", "2026-09-30"), 29);
   });
 });
