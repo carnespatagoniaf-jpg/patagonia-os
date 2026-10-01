@@ -131,6 +131,21 @@ describe("descubrimiento de balanza Kretz (solo lectura)", () => {
     assert.equal(scan.records.length, 1);
   });
 
+  it("adaptador trabado (caso real CH340): rechaza 9600 hasta abrirlo antes en otra velocidad, y la lectura igual anda", async () => {
+    const plus = ["000001FRUTILLA        P0000100010500000005"];
+    const port = new SequenceScale(plus);
+    let primed = false;
+    const realOpen = port.open.bind(port);
+    (port as unknown as { open: (o: SerialOptions) => Promise<void> }).open = async (o: SerialOptions) => {
+      if (o.baudRate === 9600 && !primed) throw Object.assign(new Error("Failed to execute open on SerialPort: Failed to open serial port."), { name: "NetworkError" });
+      if (o.baudRate === 4800) primed = true;
+      await realOpen();
+    };
+    const scan = await scanAllPlus(port as unknown as SerialPort, { link: { baudRate: 9600, stopBits: 2 }, deviceType: "H", equipmentId: "01" }, "aura", { timeoutMs: 50 });
+    assert.equal(scan.records.length, 1);
+    assert.ok(scan.openLog?.some((o) => o.settings.includes("destrabar") && o.ok));
+  });
+
   it("la trama que manda es la del documento de Kretz", () => {
     assert.deepEqual(Array.from(buildKretzFrame("P", "03", "0001")).slice(0, 8), [0x02, 0x50, 0x30, 0x33, 0x30, 0x30, 0x30, 0x31]);
   });

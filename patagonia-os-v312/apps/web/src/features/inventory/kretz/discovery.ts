@@ -70,7 +70,7 @@ export interface OpenAttempt {
   before: string;
 }
 
-export const DISCOVERY_VERSION = "2026-10-01e";
+export const DISCOVERY_VERSION = "2026-10-01f";
 
 /** Se llena en cada apertura; runKretzDiscovery y scanAllPlus lo guardan en su registro. */
 let openLog: OpenAttempt[] = [];
@@ -144,10 +144,34 @@ async function openWithRetry(port: SerialPort, options: SerialOptions, tries = 4
     } catch (err) {
       last = err;
       openLog.push({ at: new Date().toISOString(), settings, try: i + 1, ok: false, error: err instanceof Error ? `${err.name}: ${err.message}` : String(err), before });
+      // Caso real (Aura de un cliente, adaptador CH340, 2026-10-01): Windows rechazaba
+      // abrir en 9600 una y otra vez, pero abría en 115200 o 4800, y justo después de
+      // abrir en 4800 la 9600 sí abrió. Entonces: abrir un instante en otra velocidad,
+      // cerrar y volver a intentar. No se manda nada a la balanza en esa apertura.
+      await primePort(port, options);
       await new Promise((r) => setTimeout(r, waitMs));
     }
   }
   throw last instanceof Error ? last : new Error(String(last));
+}
+
+const PRIME_RATES = [4800, 115200];
+
+async function primePort(port: SerialPort, target: SerialOptions): Promise<void> {
+  for (const baudRate of PRIME_RATES) {
+    if (baudRate === target.baudRate) continue;
+    const settings = `${baudRate}/8/none/1 (destrabar)`;
+    try {
+      await port.open({ baudRate, dataBits: 8, stopBits: 1, parity: "none" });
+      openLog.push({ at: new Date().toISOString(), settings, try: 0, ok: true, before: "cerrado" });
+      await new Promise((r) => setTimeout(r, 150));
+      await closeQuietly(port);
+      await new Promise((r) => setTimeout(r, 300));
+      return;
+    } catch (err) {
+      openLog.push({ at: new Date().toISOString(), settings, try: 0, ok: false, error: err instanceof Error ? `${err.name}: ${err.message}` : String(err), before: "cerrado" });
+    }
+  }
 }
 
 async function openLink(port: SerialPort, link: SerialLink) {
