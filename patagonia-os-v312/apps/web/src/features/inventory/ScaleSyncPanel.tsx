@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "../auth/AuthProvider";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { exportActivityLogText, logScaleActivity } from "../scales/activity-log";
@@ -12,6 +12,7 @@ import {
   deleteScalePlu,
   describeResponseCode,
   diagnoseScaleLink,
+  scanScalePlus,
   getScalePortDescription,
   getScaleSerialSettings,
   isScalePortPaired,
@@ -25,7 +26,8 @@ import {
   type ScaleSerialSettings,
   type ScaleSyncableProduct
 } from "./scale-serial";
-import { getLastDiagnosticRecord, summarizeDiagnosticRecord } from "./kretz/discovery";
+import { getLastDiagnosticRecord, getLastPluScan, summarizeDiagnosticRecord, type PluScan } from "./kretz/discovery";
+import { auraPriceCandidates, parseAuraPlu } from "./kretz/aura-plu";
 import { EVIDENCE_LABELS, KRETZ_MODELS, canWritePlu, getKretzModel, getSavedModelId, saveModelId, type KretzModelId } from "./kretz/models";
 
 const BALANCE_NUMBER_KEY = "patagonia-scale-balance-number";
@@ -81,6 +83,9 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
   const [supportBusy, setSupportBusy] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
   const [portLabel, setPortLabel] = useState<string | null>(null);
+  const [pluScan, setPluScan] = useState<PluScan | null>(getLastPluScan());
+  const stopScanRef = useRef(false);
+  const [scanning, setScanning] = useState(false);
   const [modelId, setModelId] = useState<KretzModelId>(getSavedModelId());
   const [balanceNumber, setBalanceNumber] = useState(readLocal(BALANCE_NUMBER_KEY) ?? "1");
   const [verifiedKey, setVerifiedKey] = useState<string | null>(readLocal(VERIFIED_KEY));
@@ -126,6 +131,7 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
             status: scalePortReady ? "puerto elegido" : "sin puerto",
             settings: { ...scaleSettings, model: model.id, balanceNumber },
             diagnosticRecord: getLastDiagnosticRecord() ?? undefined,
+            pluScan: getLastPluScan() ?? undefined,
             confirmedCapabilities: [],
             pairedAt: "",
             connectedNow: scalePortReady
@@ -180,6 +186,42 @@ Detalle para soporte: ${technical}`);
     } finally {
       setScaleBusy(false);
     }
+  }
+
+  /** Lee todos los productos guardados en la balanza (solo lectura): para comprobar el formato y como copia de seguridad. */
+  async function handleScanPlus() {
+    stopScanRef.current = false;
+    setScaleBusy(true);
+    setScanning(true);
+    setScaleLog("Leyendo los productos de la balanza… no la desconectes (con muchos productos tarda unos minutos).");
+    try {
+      const scan = await scanScalePlus((text) => setScaleLog(text), () => stopScanRef.current);
+      setPluScan(scan);
+      const why = scan.stoppedBy === "fin" ? "llegó al final" : scan.stoppedBy === "cancelado" ? "la detuviste" : scan.stoppedBy === "limite" ? "llegó al límite" : `se cortó: ${scan.lastDetail}`;
+      report(`Lectura de productos de la balanza: ${scan.records.length} leídos (${why}). No se escribió nada. Quedó guardada como copia de seguridad en esta PC.`);
+    } catch (err) {
+      report(err instanceof Error ? err.message : "Falló la lectura de productos.");
+    } finally {
+      setScanning(false);
+      setScaleBusy(false);
+    }
+  }
+
+  function downloadPluScan() {
+    if (!pluScan) return;
+    const rows = [["plu", "nombre", "tipo", "codigo", "precio_6_digitos", "tara", "validez", "datos_crudos"]];
+    for (const r of pluScan.records) {
+      const a = model.id === "aura" ? parseAuraPlu(r.data) : null;
+      rows.push(a ? [String(a.plu), a.name, a.type, a.code, a.priceRaw, a.tareRaw, String(a.validityDays), r.data] : [String(r.plu), "", "", "", "", "", "", r.data]);
+    }
+    const csv = rows.map((row) => row.map((c) => `"${c.replace(/"/g, '""')}"`).join(";")).join("\r\n");
+    // BOM al principio para que Excel lo abra con acentos.
+    const url = URL.createObjectURL(new Blob(["﻿" + csv], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `productos-balanza-${pluScan.startedAt.slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
   }
 
   async function handlePingScale() {
@@ -502,6 +544,73 @@ Detalle para soporte: ${technical}`);
               </p>
             </details>
           </div>
+
+          {/* Productos guardados en la balanza (solo lectura) — para modelos todavía no habilitados */}
+          {model.id !== "report-lt" && (
+            <div style={step}>
+              <p style={stepTitle}>Productos guardados en la balanza (solo lectura)</p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <button disabled={scaleBusy || noSerial || !scalePortReady} onClick={() => void handleScanPlus()}>
+                  Leer productos de la balanza
+                </button>
+                {scanning && (
+                  <button className="secondary" onClick={() => { stopScanRef.current = true; }}>
+                    Detener
+                  </button>
+                )}
+                {pluScan && !scanning && (
+                  <button className="secondary" onClick={downloadPluScan}>
+                    Descargar copia (Excel / CSV)
+                  </button>
+                )}
+              </div>
+              <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
+                Lee lo que la balanza tiene cargado, sin cambiar nada. Usar después de "Probar todo". Queda como copia de seguridad en esta PC y viaja con "Enviar a soporte".
+              </p>
+              {pluScan && (
+                <>
+                  <p style={{ margin: "10px 0 6px", fontSize: 13 }}>
+                    <strong>{pluScan.records.length}</strong> productos leídos el {new Date(pluScan.startedAt).toLocaleString("es-AR")}.
+                  </p>
+                  {model.id === "aura" && (
+                    <p className="muted" style={{ margin: "0 0 6px", fontSize: 12 }}>
+                      Las columnas con (?) todavía no están confirmadas. Para comprobarlas, compará con la lista que imprime la balanza (menú → LISTAR → PRECI).
+                    </p>
+                  )}
+                  <div style={{ overflowX: "auto", maxHeight: 320, overflowY: "auto" }}>
+                    <table className="data-table">
+                      <thead>
+                        {model.id === "aura" ? (
+                          <tr><th>PLU</th><th>Nombre</th><th>Tipo (?)</th><th>Código (?)</th><th className="num">Precio (?)</th><th>Tara (?)</th><th>Validez (?)</th></tr>
+                        ) : (
+                          <tr><th>PLU</th><th>Datos tal cual</th></tr>
+                        )}
+                      </thead>
+                      <tbody>
+                        {pluScan.records.slice(0, 200).map((r) => {
+                          const a = model.id === "aura" ? parseAuraPlu(r.data) : null;
+                          if (!a) return <tr key={r.plu}><td>{r.plu}</td><td style={{ fontFamily: "monospace" }} colSpan={6}>{r.data}</td></tr>;
+                          const price = auraPriceCandidates(a.priceRaw);
+                          return (
+                            <tr key={r.plu}>
+                              <td>{a.plu}</td>
+                              <td>{a.name}</td>
+                              <td>{a.type}</td>
+                              <td>{a.code}</td>
+                              <td className="num">{price.sinDecimales} <span className="muted">ó {price.conDosDecimales.toFixed(2)}</span></td>
+                              <td>{a.tareRaw}</td>
+                              <td>{a.validityDays} días</td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  {pluScan.records.length > 200 && <p className="muted" style={{ fontSize: 12 }}>Mostrando 200 de {pluScan.records.length}. La copia descargable tiene todos.</p>}
+                </>
+              )}
+            </div>
+          )}
 
           {/* 3. Verificar con un PLU de prueba */}
           <div style={step}>

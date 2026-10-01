@@ -19,6 +19,8 @@ export interface ScaleSupportConnectionInfo {
   lastDiagnostic?: { summary: string; steps: { label: string; ok: boolean; detail: string }[] };
   /** Registro completo de "Probar todo" (Balanza por cable): cada byte que se mandó y que volvió. */
   diagnosticRecord?: unknown;
+  /** Última lectura de todos los PLU de la balanza (solo lectura, copia de seguridad). */
+  pluScan?: unknown;
 }
 
 export function buildSupportConnections(

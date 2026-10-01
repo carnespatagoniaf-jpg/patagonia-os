@@ -107,7 +107,11 @@ export const KRETZ_MODELS: KretzModel[] = [
       { text: "En modo Datos usa la misma trama Kretz que la Report (respuesta 0x07 … checksum … EOT, checksum correcto).", evidence: "real", source: "Primera Aura real de un cliente, 2026-10-01: TX 0001 → RX 07 48 30 31 30 30 30 31 37 31 04" },
       { text: "Tipo de equipo \"H\", ID \"01\", 9600 baudios, 2 bits de stop. Contesta el test de conexión 0001 con código \"01\" (OK).", evidence: "real", source: "Primera Aura real de un cliente, 2026-10-01" },
       { text: "Que el número de balanza (n_bal) sea el ID de equipo del protocolo.", evidence: "hipotesis", source: "Contestó con ID 01 (n_bal de fábrica es 1); falta probar con otro n_bal" },
-      { text: "Comandos de lectura/escritura de PLU y formato de los campos.", evidence: "desconocido", source: "Se obtiene del registro completo de \"Probar todo\" (lecturas 1500, 5002, 5005)" }
+      { text: "Datos técnicos (comando 1500): modelo AUI-030KMFBAPP4KAR, firmware V1.00 del 6 de febrero de 2024.", evidence: "real", source: "Aura del cliente Pollo y mar, 2026-10-01" },
+      { text: "Los comandos 0002 (test silencioso) y 5002 (modelo de datos) NO existen en la Aura: contesta código \"02\".", evidence: "real", source: "Aura del cliente Pollo y mar, 2026-10-01" },
+      { text: "Leer PLU: comando 5005 con un número de 6 dígitos; devuelve el siguiente PLU guardado (con 000000 devolvió el PLU 1). Respuesta grupo \"05\", código \"01\", registro de 42 caracteres: \"000001FRUTILLA        P0000100010500000005\".", evidence: "real", source: "Aura del cliente Pollo y mar, 2026-10-01" },
+      { text: "Reparto del registro: PLU 6 + nombre 16 + tipo 1 + código 6 + precio 6 + tara 4 + validez 3 = 42 (coincide con los límites del manual). Falta confirmar el orden código/precio, los decimales del precio y las letras de tipo.", evidence: "hipotesis", source: "Registro real + manual §8.2; se confirma comparando con la lista que imprime la balanza (LISTAR → PRECI)" },
+      { text: "Comandos para grabar y borrar PLU en la Aura.", evidence: "desconocido", source: "Hipótesis a probar: 2005 / 3005 como en la Report, con el mismo registro de 42 caracteres. Solo con un PLU de prueba en un código libre" }
     ]
   },
   {

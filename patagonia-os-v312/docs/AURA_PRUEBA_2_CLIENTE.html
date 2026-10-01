@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prueba 2 Aura</title>
+<style>
+  :root { --brand: #8b1e1e; --ink: #18202b; --muted: #5b6573; --line: #e3e7ee; --warn: #8a1f11; --warnbg: #fdecea; --okbg: #eef7ef; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #fff; color: var(--ink); font: 15px/1.5 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 28px 22px 40px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 18px; }
+  h2 { font-size: 18px; margin: 26px 0 8px; padding-top: 10px; border-top: 2px solid var(--brand); color: var(--brand); }
+  ol { padding-left: 22px; margin: 6px 0; }
+  li { margin: 6px 0; }
+  .key { display: inline-block; border: 1px solid #9aa3af; border-bottom-width: 3px; border-radius: 6px; padding: 0 6px; font-weight: 700; font-size: 13px; background: #f6f7f9; white-space: nowrap; }
+  .screen { font-family: Consolas, monospace; background: #e9f0e9; border: 1px solid #b9c8b9; border-radius: 4px; padding: 0 6px; font-weight: 700; }
+  .box { border-radius: 10px; padding: 12px 14px; margin: 12px 0; }
+  .warn { background: var(--warnbg); color: var(--warn); font-weight: 600; }
+  .ok { background: var(--okbg); }
+  .write { display: inline-block; min-width: 120px; border-bottom: 1px solid var(--ink); }
+  .photo::before { content: "📷 "; }
+  .check { list-style: none; padding-left: 0; }
+  .check li::before { content: "☐ "; font-size: 17px; }
+  footer { margin-top: 26px; color: var(--muted); font-size: 12px; }
+  @media print { main { padding: 0; } h2 { break-after: avoid; } li, .box { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Prueba 2 de la balanza Kretz Aura: leer sus productos</h1>
+  <p class="sub">Unos 10 minutos. <strong>No se borra ni se cambia ningún producto</strong>: Patagonia OS solo lee lo que tiene la balanza, y la balanza solo imprime una lista.</p>
+
+  <div class="box ok">
+    <strong>Antes de empezar</strong>
+    <ul class="check">
+      <li>Misma computadora de la prueba 1, con <strong>Google Chrome</strong> y el usuario del <strong>dueño o administrador</strong>.</li>
+      <li>Balanza encendida, conectada y en <strong>modo Datos</strong> (como quedó en la prueba 1).</li>
+      <li>Rollo de papel puesto en la balanza.</li>
+    </ul>
+  </div>
+
+  <h2>Parte 1 — En Patagonia OS</h2>
+  <ol>
+    <li>Apretar <strong>Ctrl + F5</strong>.</li>
+    <li>Ir a <strong>Productos</strong> → <strong>"Balanza por cable (sin iTegra)"</strong>. Tiene que estar elegida <strong>Kretz Aura / Aura Eco</strong>.</li>
+    <li>Si no dice "Puerto elegido", tocar <strong>"Elegir el puerto"</strong> y elegir el adaptador USB.</li>
+    <li>En <strong>"Productos guardados en la balanza (solo lectura)"</strong>, tocar <strong>"Leer productos de la balanza"</strong> y esperar sin tocar nada (si tiene muchos productos, unos minutos).</li>
+    <li class="photo">Sacar una <strong>foto de la tabla</strong> que aparece (las primeras filas).</li>
+    <li>Tocar <strong>"Descargar copia (Excel / CSV)"</strong> y guardar el archivo: es una copia de seguridad de los productos de la balanza.</li>
+  </ol>
+
+  <h2>Parte 2 — En la balanza: imprimir los primeros 5 productos</h2>
+  <div class="box warn">⚠ En el menú hay un ítem <span class="screen">bOrrAr</span>. <u>No entrar ahí</u>.</div>
+  <ol>
+    <li>Mantener apretada <span class="key">$/un ALT</span> y tocar <span class="key">FUNCIÓN / MENÚ</span>. Clave <strong>99999</strong> y <span class="key">PLU (ENTRA)</span>.</li>
+    <li>Moverse con <span class="key">FUNCIÓN / MENÚ</span> / <span class="key">SI / NO</span> hasta <span class="screen">LiStAr</span> y entrar con <span class="key">PLU (ENTRA)</span>.</li>
+    <li>En <span class="screen">PrECi=</span> elegir <strong>SI</strong> (con <span class="key">VENDEDOR 1</span> / <span class="key">VENDEDOR 2</span>) y <span class="key">PLU (ENTRA)</span>.</li>
+    <li><span class="screen">dESdE=</span> escribir <strong>1</strong> y <span class="key">PLU (ENTRA)</span>. <span class="screen">HAStA=</span> escribir <strong>5</strong> y <span class="key">PLU (ENTRA)</span>. La balanza imprime la lista.</li>
+    <li class="photo">Sacar una <strong>foto del ticket</strong> impreso.</li>
+    <li>Salir con <span class="key">BORRA</span>.</li>
+  </ol>
+
+  <h2>Parte 3 — Mandar</h2>
+  <ol>
+    <li>En Patagonia OS, abajo: <strong>"Enviar a soporte"</strong> con el texto <em>"Prueba 2, lectura de productos"</em>.</li>
+    <li>Por WhatsApp: la <strong>foto de la tabla</strong>, la <strong>foto del ticket</strong> y el <strong>archivo descargado</strong>.</li>
+    <li>Contestar: los productos que tiene la balanza (por ejemplo "FRUTILLA"), ¿los cargaron ustedes o venían de fábrica? ¿Con qué precio aparece FRUTILLA en la balanza?</li>
+  </ol>
+
+  <div class="box ok">Con esto comparamos lo que lee Patagonia OS con lo que dice la balanza y confirmamos el formato de sus productos. Recién después hacemos la prueba de grabar <strong>un solo producto de prueba</strong> en un lugar vacío.</div>
+
+  <footer>Patagonia OS · Prueba 2 de la Kretz Aura · 1 de octubre de 2026</footer>
+</main>
+</body>
+</html>

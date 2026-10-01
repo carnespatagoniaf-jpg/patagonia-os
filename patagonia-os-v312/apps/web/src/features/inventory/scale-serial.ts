@@ -1,5 +1,5 @@
 import type { Product } from "@patagonia/domain";
-import { runKretzDiscovery, saveDiagnosticRecord, type DiagnosticRecord, type DiscoveryVerdict } from "./kretz/discovery";
+import { runKretzDiscovery, saveDiagnosticRecord, savePluScan, scanAllPlus, type DiagnosticRecord, type DiscoveryVerdict, type PluScan } from "./kretz/discovery";
 import { getKretzModel, getSavedModelId } from "./kretz/models";
 import { buildKretzFrame, describeKretzCode } from "./kretz/kretz-frame";
 
@@ -510,6 +510,22 @@ export async function diagnoseScaleLink(
     message: diagnosisMessage(record, model.id, portLabel),
     record
   };
+}
+
+/** Lee todos los PLU guardados en la balanza (solo lectura) con la configuración que encontró "Probar todo". Queda como copia de seguridad. */
+export async function scanScalePlus(onProgress: (text: string) => void, shouldStop: () => boolean): Promise<PluScan> {
+  const settings = getScaleSerialSettings();
+  const port = await pickPort();
+  cachedPortOpenKey = null;
+  const scan = await scanAllPlus(
+    port,
+    { link: { baudRate: settings.baudRate, stopBits: settings.stopBits }, deviceType: settings.deviceType, equipmentId: settings.equipmentId },
+    getSavedModelId(),
+    { onProgress, shouldStop }
+  );
+  cachedPortOpenKey = null;
+  savePluScan(scan);
+  return scan;
 }
 
 function diagnosisMessage(r: DiagnosticRecord, modelId: string, portLabel: string): string {

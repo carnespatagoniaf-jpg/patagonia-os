@@ -113,7 +113,7 @@ async function openLink(port: SerialPort, link: SerialLink) {
 
 async function sendRead(
   port: SerialPort,
-  record: DiagnosticRecord,
+  log: DiagnosticExchange[],
   step: string,
   link: SerialLink,
   deviceType: string,
@@ -142,7 +142,7 @@ async function sendRead(
     kretz: parseKretzResponse(rx),
     echo: rx.length >= frame.length && toHex(rx.slice(0, frame.length)) === toHex(frame)
   };
-  record.exchanges.push(exchange);
+  log.push(exchange);
   return exchange;
 }
 
@@ -211,7 +211,7 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
           await openLink(port, a.link);
           openKey = key;
         }
-        const ex = await sendRead(port, record, "test de conexión", a.link, a.letter, a.id, "0001", "", timeout);
+        const ex = await sendRead(port, record.exchanges, "test de conexión", a.link, a.letter, a.id, "0001", "", timeout);
         if (ex.rx.length > 0 && !ex.echo) record.anyBytes = true;
         if (ex.kretz) {
           record.responder = { link: a.link, deviceType: ex.kretz.deviceType || a.letter, equipmentId: ex.kretz.equipmentId || a.id };
@@ -230,7 +230,7 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
         if (stop()) break;
         progress(`La balanza contestó. Leyendo: ${read.label}…`);
         try {
-          const ex = await sendRead(port, record, read.label, r.link, a2(r.deviceType), r.equipmentId, read.command, read.data, Math.max(timeout, 1500));
+          const ex = await sendRead(port, record.exchanges, read.label, r.link, a2(r.deviceType), r.equipmentId, read.command, read.data, Math.max(timeout, 1500));
           record.reads.push({
             command: read.command,
             data: read.data,
@@ -255,6 +255,116 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
 }
 
 const a2 = (letter: string) => letter.slice(0, 1) || "C";
+
+/* ------------------------------ leer todos los PLU (solo lectura) ------------------------------ */
+
+export interface KretzResponder {
+  link: SerialLink;
+  deviceType: string;
+  equipmentId: string;
+}
+
+export interface PluScan {
+  model: string;
+  startedAt: string;
+  finishedAt: string;
+  responder: KretzResponder;
+  /** Cada registro tal cual vino en los datos de la respuesta 5005. */
+  records: { plu: number; data: string }[];
+  stoppedBy: "fin" | "limite" | "cancelado" | "error";
+  /** Código de la última respuesta (el que cortó la lectura, si fue "fin"). */
+  lastCode: string | null;
+  lastDetail: string;
+  /** Los primeros intercambios, byte por byte, para soporte. */
+  sample: DiagnosticExchange[];
+}
+
+/**
+ * Lee todos los PLU con 5005 (devuelve el siguiente mayor al argumento: se
+ * pide 0, después el último leído, y así). Solo lectura: pasa por assertReadOnly.
+ * Sirve para comprobar el formato contra lo que imprime la balanza y como
+ * copia de seguridad antes de que alguna vez se escriba algo.
+ */
+export async function scanAllPlus(
+  port: SerialPort,
+  responder: KretzResponder,
+  modelId: string,
+  options: { max?: number; timeoutMs?: number; onProgress?: (text: string) => void; shouldStop?: () => boolean } = {}
+): Promise<PluScan> {
+  const max = options.max ?? 10000;
+  const timeout = options.timeoutMs ?? 1500;
+  const log: DiagnosticExchange[] = [];
+  const scan: PluScan = {
+    model: modelId,
+    startedAt: new Date().toISOString(),
+    finishedAt: "",
+    responder,
+    records: [],
+    stoppedBy: "fin",
+    lastCode: null,
+    lastDetail: "",
+    sample: []
+  };
+  try {
+    await openLink(port, responder.link);
+    let after = 0;
+    for (;;) {
+      if (options.shouldStop?.()) {
+        scan.stoppedBy = "cancelado";
+        break;
+      }
+      if (scan.records.length >= max) {
+        scan.stoppedBy = "limite";
+        break;
+      }
+      const arg = String(after).padStart(6, "0");
+      const ex = await sendRead(port, log, "leer PLU", responder.link, responder.deviceType, responder.equipmentId, "5005", arg, timeout);
+      if (log.length > 40) log.splice(20, 1); // guardar los primeros 20 y los últimos, no miles
+      scan.lastCode = ex.kretz?.code ?? null;
+      if (!ex.kretz || ex.kretz.code !== "01") {
+        scan.stoppedBy = ex.kretz ? "fin" : "error";
+        scan.lastDetail = ex.kretz ? describeKretzCode(ex.kretz.code) : ex.rx ? `respuesta no reconocida: ${ex.rx}` : "sin respuesta";
+        break;
+      }
+      const plu = Number(ex.kretz.data.slice(0, 6));
+      if (!Number.isFinite(plu) || plu <= after) {
+        scan.stoppedBy = "error";
+        scan.lastDetail = `la balanza devolvió el PLU ${ex.kretz.data.slice(0, 6)} después del ${after}: se corta para no dar vueltas`;
+        break;
+      }
+      scan.records.push({ plu, data: ex.kretz.data });
+      after = plu;
+      options.onProgress?.(`Leyendo productos de la balanza… ${scan.records.length} (va por el PLU ${plu})`);
+    }
+  } catch (err) {
+    scan.stoppedBy = "error";
+    scan.lastDetail = err instanceof Error ? err.message : String(err);
+  } finally {
+    await closeQuietly(port);
+    scan.sample = log;
+    scan.finishedAt = new Date().toISOString();
+  }
+  return scan;
+}
+
+const BACKUP_KEY = "patagonia-scale-plu-backup";
+
+export function savePluScan(scan: PluScan): void {
+  try {
+    localStorage.setItem(BACKUP_KEY, JSON.stringify(scan));
+  } catch {
+    // muy grande o bloqueado: igual se puede descargar
+  }
+}
+
+export function getLastPluScan(): PluScan | null {
+  try {
+    const raw = localStorage.getItem(BACKUP_KEY);
+    return raw ? (JSON.parse(raw) as PluScan) : null;
+  } catch {
+    return null;
+  }
+}
 
 /* ------------------------------ guardar el registro ------------------------------ */
 

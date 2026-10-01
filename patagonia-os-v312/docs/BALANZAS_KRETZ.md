@@ -64,7 +64,12 @@ Código:
 | El modo Datos usa la misma trama Kretz (STX…EOT) que la Report: la respuesta tiene la forma Kretz y el checksum da exacto. | **Real** | Primera Aura de un cliente, 2026-10-01: TX `0001` → RX `07 48 30 31 30 30 30 31 37 31 04` |
 | Tipo de equipo **"H"**, ID "01", 9600 baudios, 2 bits de stop. El 0001 contesta código "01" (OK), grupo "00". | **Real** | Ídem |
 | n_bal = ID de equipo del protocolo. | **Hipótesis** (consistente: contestó con ID 01 y el de fábrica es 1) | Falta probar con otro n_bal. |
-| Comandos de PLU, formato de campos, ACK/errores de la Aura (más allá del 0001). | **Desconocido** (pendiente: registro completo del cliente) | Se averigua con "Probar todo" (solo lectura), o con los planes B/C de más abajo. |
+| 1500 (datos técnicos): `AUI-030KMFBAPP4KAR  V1.00  6Feb24 00`. | **Real** | Reporte de soporte del cliente "Pollo y mar", 2026-10-01 |
+| 0002 (test silencioso) y 5002 (modelo de datos) **no existen** en la Aura: contesta código "02". | **Real** | Ídem |
+| 5005 lee un PLU: con el argumento `000000` devolvió el PLU 1, o sea "el siguiente mayor", igual que la Report. La respuesta viene con grupo "05", código "01" y un registro de **42 caracteres**: `000001FRUTILLA        P0000100010500000005`. | **Real** | Ídem |
+| Checksum: cada nibble + 0x30, así que los valores 10–15 salen como `:`…`?` (por ejemplo `3c` = `<`). Las 5 respuestas reales cierran y la Aura aceptó nuestras tramas. | **Real** | Ídem |
+| Reparto del registro (solo es una hipótesis): PLU 6 + nombre 16 + tipo 1 + código 6 + precio 6 + tara 4 + validez 3 = 42. Encaja con los límites del manual (§8.2). Ejemplo: FRUTILLA, tipo "P", código 000010, precio 001050 (¿1050 o 10,50?), tara 0000, validez 5 días. | **Hipótesis** | Falta comparar con la lista impresa (LISTAR → PRECI): orden código/precio, decimales y letras de tipo |
+| Grabar y borrar PLU en la Aura: ¿2005 / 3005 con el mismo registro de 42 caracteres? | **Desconocido / hipótesis** | Se prueba solo con un PLU de prueba en un código libre, después de confirmar el reparto |
 | Variante del cliente: DB-9, 30 kg, fabricada en Pueblo Esther (según la foto). Si tiene Bluetooth, no lo sabemos. | Real (foto) | Cliente, 2026-10-01 |
 
 ### Primera prueba real (2026-10-01): qué pasó y qué se corrigió
