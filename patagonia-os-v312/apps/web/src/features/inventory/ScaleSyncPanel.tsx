@@ -572,6 +572,13 @@ Detalle para soporte: ${technical}`);
                   <p style={{ margin: "10px 0 6px", fontSize: 13 }}>
                     <strong>{pluScan.records.length}</strong> productos leídos el {new Date(pluScan.startedAt).toLocaleString("es-AR")}.
                   </p>
+                  {pluScan.records.length === 0 && (
+                    <p className="message warning" style={{ margin: "0 0 8px" }}>
+                      {pluScan.stoppedBy === "fin" && pluScan.lastCode && pluScan.lastCode !== "01"
+                        ? `La balanza contestó que no tiene productos cargados (${pluScan.lastDetail}).`
+                        : `La balanza no contestó la lectura (${pluScan.lastDetail || "sin respuesta"}). Revisá que esté en modo Datos (menú → COMUNI → MODO = dAtOS), tocá "Probar todo" y después de nuevo "Leer productos de la balanza".`}
+                    </p>
+                  )}
                   {model.id === "aura" && (
                     <p className="muted" style={{ margin: "0 0 6px", fontSize: 12 }}>
                       Las columnas con (?) todavía no están confirmadas. Para comprobarlas, compará con la lista que imprime la balanza (menú → LISTAR → PRECI).
