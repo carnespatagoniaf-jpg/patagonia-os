@@ -51,7 +51,10 @@ export async function exchangeWeightFrame(port: SerialPort): Promise<{ raw: stri
   try {
     // 1) Descartar lo que haya quedado viejo en el buffer (en modo continuo la
     //    balanza transmite sola): sin esto se podría leer el peso del producto anterior.
-    for (;;) {
+    //    Con tope: si por el cable entra algo sin parar (ruido, otra velocidad),
+    //    esto no puede quedarse descartando para siempre.
+    const drainUntil = Date.now() + 400;
+    while (Date.now() < drainUntil) {
       const stale = await readWithTimeout(DRAIN_MS);
       if (stale.timedOut || stale.done || !stale.value?.length) break;
     }

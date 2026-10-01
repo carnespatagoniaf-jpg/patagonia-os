@@ -11,6 +11,8 @@ import {
   connectScalePort,
   deleteScalePlu,
   describeResponseCode,
+  diagnoseScaleLink,
+  getScalePortDescription,
   getScaleSerialSettings,
   isScalePortPaired,
   isScaleSerialSupported,
@@ -45,9 +47,11 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
   const [supportNote, setSupportNote] = useState("");
   const [supportBusy, setSupportBusy] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
+  const [portLabel, setPortLabel] = useState<string | null>(null);
 
   useEffect(() => {
     void isScalePortPaired().then(setScalePortReady);
+    void getScalePortDescription().then(setPortLabel);
   }, []);
 
   const scaleSyncPlan = planScaleSync(products);
@@ -103,9 +107,35 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
     try {
       await connectScalePort();
       setScalePortReady(true);
-      report("Puerto conectado. Ahora probá la conexión antes de sincronizar productos.");
+      const label = await getScalePortDescription();
+      setPortLabel(label);
+      report(`Puerto elegido: ${label ?? "?"}. Ahora tocá "Probar todo".`);
     } catch (err) {
       report(err instanceof Error ? err.message : "No se pudo conectar con el puerto.");
+    } finally {
+      setScaleBusy(false);
+    }
+  }
+
+  /** "Probar todo": dice en un click si es el cable/puerto o el modo de la balanza (scale-serial.ts → diagnoseScaleLink). */
+  async function handleDiagnose() {
+    setScaleBusy(true);
+    setScaleLog("Probando… no desenchufes la balanza ni cierres esta pantalla (tarda hasta un minuto).");
+    try {
+      const d = await diagnoseScaleLink((text) => setScaleLog(text));
+      setScaleSettings(getScaleSerialSettings());
+      setScalePortReady(true);
+      setPortLabel(d.portLabel);
+      const technical = [
+        `Puerto: ${d.portLabel}.`,
+        `Prueba de peso (9600, 2 bits de stop): ${d.weightRaw ? JSON.stringify(d.weightRaw.slice(0, 80)) : "no llegó nada"}.`,
+        d.dataResponseHex ? `Respuesta en modo datos: ${d.dataResponseHex}.` : `Modo datos: ${d.attempts - 1} combinaciones probadas, ninguna contestó como balanza Kretz.`
+      ].join(" ");
+      report(`${d.message}
+
+Detalle para soporte: ${technical}`);
+    } catch (err) {
+      report(err instanceof Error ? err.message : "Falló la prueba.");
     } finally {
       setScaleBusy(false);
     }
@@ -286,10 +316,13 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
           <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 14, marginBottom: 14 }}>
             <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 13, textTransform: "uppercase", color: "#666" }}>1. Conexión</p>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button disabled={scaleBusy || !isScaleSerialSupported()} onClick={handleConnectScale}>
-                {scalePortReady ? "Volver a elegir puerto" : "Conectar balanza"}
+              <button className={scalePortReady ? "secondary" : undefined} disabled={scaleBusy || !isScaleSerialSupported()} onClick={handleConnectScale}>
+                {scalePortReady ? "Elegir otro puerto" : "Elegir el puerto"}
               </button>
-              <button disabled={scaleBusy || !isScaleSerialSupported() || !scalePortReady} onClick={handleAutoDetect}>
+              <button disabled={scaleBusy || !isScaleSerialSupported() || !scalePortReady} onClick={handleDiagnose}>
+                Probar todo
+              </button>
+              <button disabled={scaleBusy || !isScaleSerialSupported() || !scalePortReady} className="secondary" onClick={handleAutoDetect}>
                 Detectar mi balanza automáticamente
               </button>
               <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handlePingScale}>
@@ -299,9 +332,23 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
                 Verificar compatibilidad
               </button>
             </div>
+            {portLabel && (
+              <p style={{ margin: "8px 0 0", fontSize: 13 }}>
+                Puerto elegido: <strong>{portLabel}</strong>
+              </p>
+            )}
             <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
-              Si es una balanza que no probamos todavía (Report NX, Novel Eco, Aura Eco, o cualquier otra que no sea esta Report LT), usá "Verificar compatibilidad" antes de mandar productos: carga y borra un producto de prueba para confirmar que entiende el mismo formato, sin arriesgar datos reales. No hace falta saber el modelo -- la prueba es la misma para cualquiera.
+              Primero "Elegir el puerto" y después "Probar todo": en un solo paso te dice si el problema es el cable, el puerto o el modo de la balanza. Si es una balanza que no probamos todavía (Report NX, Novel Eco, Aura Eco o cualquier otra que no sea la Report LT), usá "Verificar compatibilidad" antes de mandar productos: carga y borra un producto de prueba, sin arriesgar datos reales.
             </p>
+            <details style={{ marginTop: 10, fontSize: 13 }}>
+              <summary style={{ fontWeight: 600 }}>Kretz Aura: cómo se conecta</summary>
+              <ul style={{ margin: "8px 0 0", paddingLeft: 18, display: "grid", gap: 4 }}>
+                <li>Cable serie <strong>directo</strong> (pin 2 con 2, 3 con 3, 5 con 5): <strong>macho</strong> del lado de la balanza y hembra del lado de la PC. Los cables "null modem" o "cruzados" no sirven. Si la PC no tiene puerto serie, un adaptador USB a serie.</li>
+                <li>En la balanza: menú de usuario (clave de fábrica 99999) → <strong>COMUNI</strong>. Para mandar precios: MODO = <strong>"Datos"</strong>. Para que Mostrador lea el peso: MODO = <strong>"A pedido de peso"</strong>. En los dos casos PUERT = <strong>RS-232</strong>.</li>
+                <li>La Aura usa 9600 baudios y 2 bits de stop: "Probar todo" ya lo prueba solo.</li>
+                <li>Mandar precios a la Aura por cable todavía no está confirmado con una Aura real (Kretz lo documenta solo para su programa iTegra). El peso en Mostrador sí sigue el manual de Kretz.</li>
+              </ul>
+            </details>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
               <details style={{ display: "inline-block" }}>
                 <summary className="secondary" style={{ display: "inline-block", cursor: "pointer", padding: "10px 14px", border: "1px solid #ccc", borderRadius: 6 }}>

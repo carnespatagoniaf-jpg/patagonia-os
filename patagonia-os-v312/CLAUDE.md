@@ -110,7 +110,24 @@ Why the other paths fail (real incident, Unnion UN-TP95W): Windows auto-installs
 
 ## Kretz Aura scale (direct weight over RS-232, 2026-09-25)
 
-`features/sale/scale-weight.ts` (+ `scale-weight-parser.ts`, `ScaleWeightSettings.tsx` in the Mostrador gear panel) reads the weight straight from a Kretz Aura Eco over Web Serial, following the manufacturer's manual (Aura Eco Rev.01 §16, https://www.kretz.com.ar/shop/balanza-aura-eco-332/document/11): 9600 baud, 8 data bits, no parity, **2 stop bits**, straight (1:1) DB9 male–female cable (scale pin 2 Tx, 3 Rx, 5 GND), scale menu COMUNI → "A pedido de peso"; the app sends "W" and gets `2,XX.XXX,CR` (with price/amount variants). The parser is deliberately tolerant because the manual doesn't say whether the commas / leading "2" are literal; activation therefore requires a cashier-confirmed test read ("¿coincide con la pantalla de la balanza?"). Verified only against a simulated serial port and unit tests — NOT yet against a real Aura. If reading fails Mostrador adds nothing (never defaults to 1 kg). Separate from `features/inventory/scale-serial.ts` (PLU upload, Report LT protocol, 115200 baud); the Aura's "Datos" mode (iTegra/JDataGate) has an undocumented protocol, so PLU upload to the Aura is UNCONFIRMED: `scale-serial.ts` now has `stopBits` in its settings and `autoDetectScale()` (button "Detectar mi balanza automáticamente" in ScaleSyncPanel) which sweeps baud/stop bits/equipment letter/ID with the 0001 ping (Aura preset first: 9600, 2 stop bits, letter C, ID 01) hoping the Aura's Datos mode speaks the same Kretz frame protocol as the Report LT. Tested only against simulated ports; the first real Aura test decides. The scale is in ONE communication mode at a time (Datos for PLU upload vs "A pedido de peso" for weight reading).
+`features/sale/scale-weight.ts` (+ `scale-weight-parser.ts`, `ScaleWeightSettings.tsx` in the Mostrador gear panel) reads the weight straight from a Kretz Aura Eco over Web Serial, following the manufacturer's manual (Aura Eco Rev.01 §16, https://www.kretz.com.ar/shop/balanza-aura-eco-332/document/11): 9600 baud, 8 data bits, no parity, **2 stop bits**, straight (1:1) DB9 male–female cable (scale pin 2 Tx, 3 Rx, 5 GND), scale menu COMUNI → "A pedido de peso"; the app sends "W" and gets `2,XX.XXX,CR` (with price/amount variants). The parser is deliberately tolerant because the manual doesn't say whether the commas / leading "2" are literal; activation therefore requires a cashier-confirmed test read ("¿coincide con la pantalla de la balanza?"). Verified only against a simulated serial port and unit tests — NOT yet against a real Aura. If reading fails Mostrador adds nothing (never defaults to 1 kg). Separate from `features/inventory/scale-serial.ts` (PLU upload, Report LT protocol, 115200 baud); the Aura's "Datos" mode (iTegra/JDataGate) has an undocumented protocol, so PLU upload to the Aura is UNCONFIRMED: `scale-serial.ts` now has `stopBits` in its settings and `autoDetectScale()` (button "Detectar mi balanza automáticamente" in ScaleSyncPanel) which sweeps baud/stop bits/equipment letter/ID with the 0001 ping (Aura preset first: 9600, 2 stop bits, letter C, ID 01) hoping the Aura's Datos mode speaks the same Kretz frame protocol as the Report LT. Tested only against simulated ports; the first real Aura test decides.
+
+**First real Aura (client, 2026-10-01).** The client used Stock → "Balanza por cable" with the Report LT defaults (115200 baud, 1 stop bit), so the scale never answered. Three bugs of ours were found and fixed:
+1. `connectScalePort` ("Volver a elegir puerto") never opened the port picker when any port was already authorized; it silently took `getPorts()[0]`. It now always calls `requestPort()` and remembers the chosen port by USB vendor:product (`patagonia-scale-serial-port`).
+2. `autoDetectScale` accepted ANY bytes as "found" (noise, or the scale in continuous weight mode). It now requires a Kretz-shaped response (`isKretzResponse`: starts with 0x07, contains EOT).
+3. The drain loop in `exchangeWeightFrame` had no time limit, so endless noise would hang Mostrador. It is now capped at 400 ms.
+
+New **"Probar todo"** (`diagnoseScaleLink`):
+- At 9600 baud / 8N2 it listens passively and sends "W" (weight modes), then sweeps the Kretz 0001 ping (Datos mode).
+- The verdict is one of:
+  - `peso`: the cable works; switch the scale to Datos to send prices.
+  - `datos`: the scale answered and the settings were saved.
+  - `bytes`: data arrives but in a format we don't understand.
+  - `nada`: physical problem (wrong port, cable not straight 2-2/3-3/5-5 with the male end at the scale, or adapter driver).
+- The port is described by its USB chip (CH340, PL2303, FTDI or CP210x).
+- Tests: `scale-diagnosis.test.ts`.
+
+Manual pages 42–45 were re-read: the Datos mode is documented only for iTegra/JDataGate, so PLU upload to an Aura is still unconfirmed. The scale is in ONE communication mode at a time (Datos for PLU upload vs "A pedido de peso" for weight reading).
 
 ## AI help chat (LIVE since 2026-09-28)
 

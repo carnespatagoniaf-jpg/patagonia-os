@@ -140,26 +140,96 @@ export async function isScalePortPaired(): Promise<boolean> {
   return known.length > 0;
 }
 
+const PORT_INFO_KEY = "patagonia-scale-serial-port";
+
+function portInfoKey(port: SerialPort): string {
+  try {
+    const info = port.getInfo?.() ?? {};
+    return `${info.usbVendorId ?? "-"}:${info.usbProductId ?? "-"}`;
+  } catch {
+    return "-:-";
+  }
+}
+
 async function pickPort(): Promise<SerialPort> {
   if (cachedPort) return cachedPort;
   const known = await navigator.serial.getPorts();
   if (known.length > 0) {
-    cachedPort = known[0];
+    // Si la PC tiene permiso para más de un puerto, usar el que la persona
+    // eligió la última vez (no el primero de la lista, que puede ser otro aparato).
+    let remembered: string | null = null;
+    try {
+      remembered = localStorage.getItem(PORT_INFO_KEY);
+    } catch {
+      // sin localStorage: se usa el primero
+    }
+    cachedPort = (remembered && known.find((p) => portInfoKey(p) === remembered)) || known[0];
     return cachedPort;
   }
   cachedPort = await navigator.serial.requestPort();
   return cachedPort;
 }
 
-/** Pide el puerto por primera vez -- tiene que llamarse desde un gesto del
- * usuario (click), el navegador exige eso para mostrar el selector. */
+/** Abre SIEMPRE el selector de puertos del navegador (tiene que llamarse desde
+ * un click). Antes, si la PC ya tenía permiso para algún puerto, agarraba el
+ * primero sin preguntar: con dos aparatos serie no había forma de elegir el de
+ * la balanza (caso real, primera Aura de un cliente, 2026-10-01). */
 export async function connectScalePort(): Promise<void> {
   if (!isScaleSerialSupported()) {
     throw new Error("Este navegador no soporta comunicación serie directa (usá Chrome o Edge).");
   }
-  cachedPort = null;
+  const previous = cachedPort;
+  const port = await navigator.serial.requestPort();
+  if (previous && previous !== port && (previous.readable || previous.writable)) {
+    try {
+      await previous.close();
+    } catch {
+      // ya estaba cerrado
+    }
+  }
+  cachedPort = port;
   cachedPortOpenKey = null;
-  await pickPort();
+  try {
+    localStorage.setItem(PORT_INFO_KEY, portInfoKey(port));
+  } catch {
+    // no crítico
+  }
+}
+
+const USB_SERIAL_CHIPS: Record<number, string> = {
+  0x1a86: "CH340",
+  0x067b: "Prolific PL2303",
+  0x0403: "FTDI",
+  0x10c4: "Silicon Labs CP210x"
+};
+
+/** Qué puerto está elegido, en palabras (para la pantalla y para soporte). */
+export function describeScalePort(port: SerialPort | null): string {
+  if (!port) return "ninguno";
+  let info: SerialPortInfo = {};
+  try {
+    info = port.getInfo?.() ?? {};
+  } catch {
+    // sin info
+  }
+  if (info.usbVendorId === undefined) return "un puerto serie que no es USB (puerto COM de la PC o uno virtual, por ejemplo Bluetooth)";
+  const chip = USB_SERIAL_CHIPS[info.usbVendorId];
+  const ids = `${info.usbVendorId.toString(16).padStart(4, "0")}:${(info.usbProductId ?? 0).toString(16).padStart(4, "0")}`;
+  return chip ? `adaptador USB a serie ${chip} (${ids})` : `aparato USB ${ids}`;
+}
+
+export async function getScalePortDescription(): Promise<string | null> {
+  if (!isScaleSerialSupported()) return null;
+  if (cachedPort) return describeScalePort(cachedPort);
+  const known = await navigator.serial.getPorts();
+  if (known.length === 0) return null;
+  let remembered: string | null = null;
+  try {
+    remembered = localStorage.getItem(PORT_INFO_KEY);
+  } catch {
+    // nada
+  }
+  return describeScalePort((remembered && known.find((p) => portInfoKey(p) === remembered)) || known[0]);
 }
 
 export function forgetScalePort(): void {
@@ -329,8 +399,23 @@ export interface ScaleAutoDetectResult {
  * sección 16.5) y tiene que estar en el menú COMUNI → MODO = "Datos".
  */
 export async function autoDetectScale(onProgress: (text: string) => void, shouldStop: () => boolean = () => false): Promise<ScaleAutoDetectResult> {
-  const original = getScaleSerialSettings();
   const port = await pickPort();
+  const previousTimeout = frameTimeoutMs;
+  frameTimeoutMs = 800;
+  try {
+    return await autoDetectScaleWith(port, onProgress, () => {}, shouldStop);
+  } finally {
+    frameTimeoutMs = previousTimeout;
+  }
+}
+
+async function autoDetectScaleWith(
+  port: SerialPort,
+  onProgress: (text: string) => void,
+  onResponse: (response: Uint8Array) => void,
+  shouldStop: () => boolean = () => false
+): Promise<ScaleAutoDetectResult> {
+  const original = getScaleSerialSettings();
 
   const links: { baudRate: number; stopBits: 1 | 2 }[] = [
     { baudRate: 9600, stopBits: 2 },
@@ -350,20 +435,22 @@ export async function autoDetectScale(onProgress: (text: string) => void, should
     for (const equipmentId of ["00", "02"]) attempts.push({ ...original, ...link, deviceType: "C", equipmentId });
   }
 
-  const previousTimeout = frameTimeoutMs;
-  frameTimeoutMs = 800;
+  // El tiempo de espera de cada intento lo fija quien llama (frameTimeoutMs).
   let count = 0;
-  try {
+  {
     for (const candidate of attempts) {
       if (shouldStop()) break;
       count++;
-      onProgress(`Probando ${count}/${attempts.length}: ${candidate.baudRate} baudios, ${candidate.stopBits} bit(s) de stop, equipo "${candidate.deviceType}${candidate.equipmentId}"…`);
+      onProgress(`Probando modo datos ${count}/${attempts.length}: ${candidate.baudRate} baudios, ${candidate.stopBits} bit(s) de stop, equipo "${candidate.deviceType}${candidate.equipmentId}"…`);
       saveScaleSerialSettings(candidate);
       cachedPortOpenKey = null;
       try {
         const frame = buildFrame(candidate.deviceType, candidate.equipmentId, "0001", "");
         const response = await writeFrame(port, frame, candidate.baudRate);
-        if (response.length > 0) {
+        onResponse(response);
+        // Solo vale una respuesta con forma de respuesta Kretz: una balanza en
+        // modo continuo de peso (o ruido a otra velocidad) también "manda algo".
+        if (isKretzResponse(response)) {
           return { found: true, settings: candidate, rawResponseHex: toHex(response), attempts: count };
         }
       } catch {
@@ -373,9 +460,175 @@ export async function autoDetectScale(onProgress: (text: string) => void, should
     }
     saveScaleSerialSettings(original);
     return { found: false, attempts: count };
+  }
+}
+
+/** Respuesta con forma de respuesta Kretz: arranca con 0x07 y termina en EOT. */
+export function isKretzResponse(response: Uint8Array): boolean {
+  return response.length >= 8 && response[0] === 0x07 && response.includes(EOT);
+}
+
+export type ScaleLinkVerdict = "datos" | "peso" | "bytes" | "nada";
+
+export interface ScaleLinkDiagnosis {
+  verdict: ScaleLinkVerdict;
+  portLabel: string;
+  /** Peso leído en modo "A pedido de peso" / continuo (9600, 2 bits de stop). */
+  weightKg: number | null;
+  /** Lo que llegó en la prueba de peso, tal cual (para soporte). */
+  weightRaw: string;
+  /** Datos: configuración que contestó como balanza Kretz (para mandar precios). */
+  dataSettings: ScaleSerialSettings | null;
+  dataResponseHex: string;
+  /** Llegó algún byte en alguna de las pruebas (entonces el cable transmite). */
+  anyBytes: boolean;
+  attempts: number;
+  message: string;
+}
+
+async function closeQuietly(port: SerialPort) {
+  try {
+    if (port.readable || port.writable) await port.close();
+  } catch {
+    // ya cerrado
+  }
+}
+
+/** Escucha sin mandar nada (en modo continuo la balanza transmite sola). */
+async function listenPassively(port: SerialPort, ms: number): Promise<number[]> {
+  const reader = port.readable!.getReader();
+  const got: number[] = [];
+  const deadline = Date.now() + ms;
+  let pending: Promise<ReadableStreamReadResult<Uint8Array>> | null = null;
+  try {
+    while (Date.now() < deadline) {
+      pending ??= reader.read();
+      const r = await Promise.race([pending, new Promise<null>((res) => setTimeout(() => res(null), Math.max(1, deadline - Date.now())))]);
+      if (r === null) break;
+      pending = null;
+      if (r.done) break;
+      if (r.value) got.push(...r.value);
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // lectura pendiente: el navegador la cancela al cerrar
+    }
+  }
+  return got;
+}
+
+/**
+ * "Probar todo": en un solo click dice si el problema es el cable/puerto o el
+ * modo de la balanza. Hecho para la primera Kretz Aura real de un cliente
+ * (2026-10-01), que no contestaba desde el panel de precios:
+ * 1) A 9600 baudios y 2 bits de stop (manual Aura 16.5) escucha 1,2 s sin
+ *    mandar nada (modo continuo) y pide el peso con "W" (modo a pedido).
+ *    Si contesta el peso, el cable, el adaptador y el puerto andan.
+ * 2) Si no hubo peso, prueba el test de conexión Kretz (0001) en todas las
+ *    combinaciones de la detección automática (modo "Datos", para precios).
+ * Nunca escribe nada en la balanza: solo pide el peso y el test de conexión.
+ */
+export async function diagnoseScaleLink(onProgress: (text: string) => void, options: { frameTimeoutMs?: number; listenMs?: number } = {}): Promise<ScaleLinkDiagnosis> {
+  const { exchangeWeightFrame, WEIGHT_PORT_OPTIONS } = await import("../sale/scale-weight-protocol");
+  const port = await pickPort();
+  const portLabel = describeScalePort(port);
+  let anyBytes = false;
+
+  // 1) Modo peso.
+  onProgress("Probando si la balanza manda el peso (modo peso)…");
+  await closeQuietly(port);
+  cachedPortOpenKey = null;
+  let weightKg: number | null = null;
+  let weightRaw = "";
+  try {
+    await port.open(WEIGHT_PORT_OPTIONS);
+    const passive = await listenPassively(port, options.listenMs ?? 1200);
+    if (passive.length > 0) anyBytes = true;
+    const exchange = await exchangeWeightFrame(port);
+    weightRaw = (passive.length ? String.fromCharCode(...passive) : "") + exchange.raw;
+    if (exchange.raw.length > 0) anyBytes = true;
+    if (exchange.frame) weightKg = exchange.frame.weightKg;
+  } catch (err) {
+    weightRaw = `error al abrir o leer: ${err instanceof Error ? err.message : String(err)}`;
+  } finally {
+    await closeQuietly(port);
+    cachedPortOpenKey = null;
+  }
+
+  const base = { portLabel, weightKg, weightRaw, anyBytes };
+  if (weightKg !== null) {
+    return {
+      ...base,
+      verdict: "peso",
+      dataSettings: null,
+      dataResponseHex: "",
+      attempts: 1,
+      message:
+        `✅ El cable, el adaptador y el puerto ANDAN: la balanza mandó el peso (${weightKg.toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg).\n` +
+        `Pero está en modo PESO. Eso sirve para que Mostrador lea el peso (se activa en Mostrador → engranaje → "Peso directo de la balanza").\n` +
+        `Para mandarle precios tiene que estar en modo DATOS: en la balanza, menú COMUNI → MODO = "Datos" (puerto RS-232). Después tocá de nuevo "Probar todo".`
+    };
+  }
+
+  // 2) Modo datos (precios).
+  const previousTimeout = frameTimeoutMs;
+  if (options.frameTimeoutMs) frameTimeoutMs = options.frameTimeoutMs;
+  let detect: ScaleAutoDetectResult;
+  let sawDataBytes = false;
+  try {
+    detect = await autoDetectScaleWith(port, onProgress, (response) => {
+      if (response.length > 0) sawDataBytes = true;
+    });
   } finally {
     frameTimeoutMs = previousTimeout;
   }
+  if (sawDataBytes) anyBytes = true;
+
+  if (detect.found && detect.settings) {
+    return {
+      ...base,
+      anyBytes: true,
+      verdict: "datos",
+      dataSettings: detect.settings,
+      dataResponseHex: detect.rawResponseHex ?? "",
+      attempts: detect.attempts + 1,
+      message:
+        `✅ La balanza contestó en modo DATOS (${detect.settings.baudRate} baudios, ${detect.settings.stopBits} bit(s) de stop, equipo "${detect.settings.deviceType}${detect.settings.equipmentId}"). Ya quedó guardado.\n` +
+        `Ahora tocá "Verificar compatibilidad" (carga y borra un producto de prueba) y, si sale bien, "Enviar todos los productos".`
+    };
+  }
+
+  if (anyBytes) {
+    return {
+      ...base,
+      anyBytes: true,
+      verdict: "bytes",
+      dataSettings: null,
+      dataResponseHex: "",
+      attempts: detect.attempts + 1,
+      message:
+        `⚠️ Desde la balanza llega algo, así que el cable transmite, pero no en un formato que entendamos.\n` +
+        `Revisá en la balanza el menú COMUNI: para precios MODO = "Datos"; para que Mostrador lea el peso MODO = "A pedido de peso". Y que PUERT = RS-232.\n` +
+        `Si ya está así, tocá "Enviar a soporte" (abajo) para que veamos lo que llegó.`
+    };
+  }
+
+  return {
+    ...base,
+    verdict: "nada",
+    dataSettings: null,
+    dataResponseHex: "",
+    attempts: detect.attempts + 1,
+    message:
+      `❌ La balanza no mandó ni un dato, en ninguna configuración (puerto elegido: ${portLabel}). Casi siempre es algo físico:\n` +
+      `1) El puerto: tocá "Elegir el puerto" y elegí el del adaptador USB de la balanza (si no sabés cuál es, desenchufá el adaptador, mirá cuál desaparece de la lista y volvé a enchufarlo).\n` +
+      `2) El cable: tiene que ser DIRECTO (pin 2 con 2, 3 con 3, 5 con 5), macho del lado de la balanza. Los cables "null modem" o "cruzados" NO sirven.\n` +
+      `3) El adaptador USB: en Windows, Administrador de dispositivos → Puertos (COM y LPT): si aparece con un signo amarillo, le falta el driver.\n` +
+      `4) La balanza: encendida y en el menú COMUNI con PUERT = RS-232.\n` +
+      `Una prueba que aísla todo: poné la balanza en COMUNI → MODO = "A pedido de peso" y tocá "Probar todo". Si así contesta el peso, el cable anda y el problema es solo el modo.`
+  };
 }
 
 /** Comando 0001 (test de conexión) -- confirma que el cable y la velocidad
