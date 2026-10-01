@@ -117,12 +117,13 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
     });
   }
 
-  async function handleSendToSupport() {
+  /** Devuelve true si llegó. `autoNote`: envío automático al terminar "Probar todo". */
+  async function handleSendToSupport(autoNote?: string): Promise<boolean> {
     setSupportBusy(true);
     setSupportMessage("");
     try {
       await submitScaleSupportReport({
-        note: supportNote,
+        note: autoNote ?? supportNote,
         logText: supportLogText(),
         connections: [
           {
@@ -139,10 +140,12 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
         ],
         branchId: branchId ?? null
       });
-      setSupportNote("");
+      if (!autoNote) setSupportNote("");
       setSupportMessage("Listo, le llegó al equipo de Patagonia OS. Te vamos a contactar.");
+      return true;
     } catch (err) {
-      setSupportMessage(`No se pudo enviar: ${(err instanceof Error ? err.message : "error desconocido").replace(/.$/, "")}. Sacale una captura a esta pantalla y mandala por WhatsApp.`);
+      setSupportMessage(`No se pudo enviar: ${(err instanceof Error ? err.message : "error desconocido").replace(/\.$/, "")}. Sacale una captura a esta pantalla y mandala por WhatsApp.`);
+      return false;
     } finally {
       setSupportBusy(false);
     }
@@ -178,9 +181,36 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
         `Prueba de peso (9600, 2 bits de stop): ${d.weightRaw ? JSON.stringify(d.weightRaw.slice(0, 80)) : "no llegó nada"}.`,
         d.dataResponseHex ? `Respuesta en modo datos: ${d.dataResponseHex}.` : `Modo datos: ${d.attempts - 1} combinaciones probadas, ninguna contestó como balanza Kretz.`
       ].join(" ");
-      report(`${d.message}
+      report(`${d.message}\n\nDetalle para soporte: ${technical}`);
 
-Detalle para soporte: ${technical}`);
+      // Modelos todavía no habilitados (Aura, otra Kretz): todo de una, para no
+      // tener que pedirle al cliente varias pruebas. Si la balanza contestó, se
+      // leen sus productos (solo lectura) y se manda todo a soporte solo.
+      if (model.id !== "report-lt") {
+        let scanLine = "";
+        if (d.record.responder) {
+          stopScanRef.current = false;
+          setScanning(true);
+          try {
+            const scan = await scanScalePlus((text) => setScaleLog(text), () => stopScanRef.current);
+            setPluScan(scan);
+            scanLine = `Productos leídos de la balanza: ${scan.records.length}${scan.stoppedBy === "fin" || scan.stoppedBy === "cancelado" ? "" : ` (se cortó: ${scan.lastDetail})`}.`;
+          } finally {
+            setScanning(false);
+          }
+        }
+        const canSend = profile?.role === "owner" || profile?.role === "admin";
+        const sent = canSend ? await handleSendToSupport("Probar todo (envío automático)") : false;
+        setScaleLog(
+          `${d.message}\n\n${scanLine ? `${scanLine}\n\n` : ""}` +
+            (sent
+              ? "✅ Listo: el resultado completo ya le llegó al equipo de Patagonia OS. No hace falta hacer nada más."
+              : canSend
+                ? "No se pudo mandar el resultado a soporte: sacale una foto a esta pantalla y mandala por WhatsApp."
+                : "Para que nos llegue el resultado, el dueño o un administrador tiene que tocar \"Enviar a soporte\" (abajo).") +
+            `\n\nDetalle para soporte: ${technical}`
+        );
+      }
     } catch (err) {
       report(err instanceof Error ? err.message : "Falló la prueba.");
     } finally {
@@ -491,6 +521,7 @@ Detalle para soporte: ${technical}`);
             )}
             <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
               "Probar todo" prueba todas las formas de comunicarse y te dice si el problema es el cable, el puerto o el modo de la balanza. No escribe nada en la balanza (como mucho hace un "bip"). Tarda hasta dos minutos.
+              {model.id !== "report-lt" && " Con esta balanza además lee sus productos y nos manda el resultado a soporte solo: no hace falta tocar nada más."}
             </p>
             {model.id === "aura" && (
               <details style={{ marginTop: 10, fontSize: 13 }} open={!scalePortReady}>
