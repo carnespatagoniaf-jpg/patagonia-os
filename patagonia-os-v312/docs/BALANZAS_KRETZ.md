@@ -61,9 +61,10 @@ Código:
 | Entonces, **existe** un protocolo de PLU para la Aura (al menos por Bluetooth). | Documentado | Ídem |
 | "Drivers de iTegra compatibles con la Aura Eco" para cargar precios desde la PC. | Terceros | Centro de ayuda de Autogestiones |
 | El manual de iTegra R005 (viejo) lista solo Report, Advanced y Plura. La versión 4.148 existe, pero no la revisamos: solo había un instalador en un sitio no oficial y no se bajó. | Documentado (versión vieja) | Manual iTegra R005 |
-| El modo Datos usa la misma trama Kretz (STX…EOT) que la Report. | **Hipótesis** | Familia Kretz. Se confirma si la Aura contesta un 0001 con una respuesta 0x07…EOT válida. |
-| n_bal = ID de equipo del protocolo. | **Hipótesis** | Así es en la Report ("número de equipo"). |
-| Letra de tipo de equipo, comandos de PLU, formato de campos, ACK/errores de la Aura. | **Desconocido** | Se averigua con "Probar todo" (solo lectura), o con los planes B/C de más abajo. |
+| El modo Datos usa la misma trama Kretz (STX…EOT) que la Report: la respuesta tiene la forma Kretz y el checksum da exacto. | **Real** | Primera Aura de un cliente, 2026-10-01: TX `0001` → RX `07 48 30 31 30 30 30 31 37 31 04` |
+| Tipo de equipo **"H"**, ID "01", 9600 baudios, 2 bits de stop. El 0001 contesta código "01" (OK), grupo "00". | **Real** | Ídem |
+| n_bal = ID de equipo del protocolo. | **Hipótesis** (consistente: contestó con ID 01 y el de fábrica es 1) | Falta probar con otro n_bal. |
+| Comandos de PLU, formato de campos, ACK/errores de la Aura (más allá del 0001). | **Desconocido** (pendiente: registro completo del cliente) | Se averigua con "Probar todo" (solo lectura), o con los planes B/C de más abajo. |
 | Variante del cliente: DB-9, 30 kg, fabricada en Pueblo Esther (según la foto). Si tiene Bluetooth, no lo sabemos. | Real (foto) | Cliente, 2026-10-01 |
 
 ### Primera prueba real (2026-10-01): qué pasó y qué se corrigió

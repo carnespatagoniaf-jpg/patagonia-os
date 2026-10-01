@@ -23,6 +23,16 @@ describe("trama Kretz (documento público Report Nx)", () => {
     assert.equal(describeKretzCode(r.code), "comando ejecutado correctamente");
   });
 
+  it("lee la respuesta REAL de la primera Kretz Aura (2026-10-01): tipo H, ID 01, código 01, checksum correcto", () => {
+    const r = parseKretzResponse([0x07, 0x48, 0x30, 0x31, 0x30, 0x30, 0x30, 0x31, 0x37, 0x31, 0x04]);
+    assert.ok(r);
+    assert.equal(r.deviceType, "H");
+    assert.equal(r.equipmentId, "01");
+    assert.equal(r.group, "00");
+    assert.equal(r.code, "01");
+    assert.equal(r.checksumOk, true);
+  });
+
   it("no confunde ruido con una respuesta Kretz", () => {
     assert.equal(parseKretzResponse([0xff, 0x13, 0x88, 0x04]), null);
     assert.equal(parseKretzResponse(new TextEncoder().encode("2,01.234,\r")), null);

@@ -89,7 +89,8 @@ export const KRETZ_MODELS: KretzModel[] = [
     id: "aura",
     label: "Kretz Aura / Aura Eco",
     links: order([{ baudRate: 9600, stopBits: 2 }, { baudRate: 9600, stopBits: 1 }], ALL_LINKS, sameLink),
-    deviceTypes: order(["C", "A", "P", "K"], ALL_LETTERS),
+    // "H" comprobado con la primera Aura real (2026-10-01); el resto queda por si otra variante usa otra letra.
+    deviceTypes: order(["H", "C", "A", "P", "K"], ALL_LETTERS),
     weight: "documentado",
     plu: { evidence: "desconocido", range: [1, 9999] },
     facts: [
@@ -103,9 +104,10 @@ export const KRETZ_MODELS: KretzModel[] = [
       { text: "Número de balanza 1 a 99 (menú DATOS → n_bal).", evidence: "documentado", source: `${MANUAL_AURA}, §7.1.1` },
       { text: "Alta, baja y modificación de PLU, consulta de PLU y totales desde la app iTegra Mobile por Bluetooth (familia \"PPI\": Aura, Novel Eco 2, Delta Eco 2).", evidence: "documentado", source: GUIA_BT },
       { text: "Los drivers de iTegra son compatibles con la Aura Eco para cargar precios desde la PC.", evidence: "terceros", source: "Centro de ayuda de Autogestiones (blog.autogestiones.net)" },
-      { text: "Que el modo Datos use la misma trama que la Report (STX … checksum … EOT).", evidence: "hipotesis", source: "Familia Kretz; se confirma si una Aura real contesta el test 0001" },
-      { text: "Que el número de balanza (n_bal) sea el ID de equipo del protocolo.", evidence: "hipotesis", source: "Así funciona en la Report (\"número de equipo\" en iTegra)" },
-      { text: "Letra de tipo de equipo, comandos de lectura/escritura de PLU y formato de los campos.", evidence: "desconocido", source: "Se averigua con \"Probar todo\" (solo lectura) en una Aura real" }
+      { text: "En modo Datos usa la misma trama Kretz que la Report (respuesta 0x07 … checksum … EOT, checksum correcto).", evidence: "real", source: "Primera Aura real de un cliente, 2026-10-01: TX 0001 → RX 07 48 30 31 30 30 30 31 37 31 04" },
+      { text: "Tipo de equipo \"H\", ID \"01\", 9600 baudios, 2 bits de stop. Contesta el test de conexión 0001 con código \"01\" (OK).", evidence: "real", source: "Primera Aura real de un cliente, 2026-10-01" },
+      { text: "Que el número de balanza (n_bal) sea el ID de equipo del protocolo.", evidence: "hipotesis", source: "Contestó con ID 01 (n_bal de fábrica es 1); falta probar con otro n_bal" },
+      { text: "Comandos de lectura/escritura de PLU y formato de los campos.", evidence: "desconocido", source: "Se obtiene del registro completo de \"Probar todo\" (lecturas 1500, 5002, 5005)" }
     ]
   },
   {
