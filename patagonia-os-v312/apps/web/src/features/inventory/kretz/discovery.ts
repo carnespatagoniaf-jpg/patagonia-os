@@ -306,7 +306,25 @@ export async function scanAllPlus(
     sample: []
   };
   try {
-    await openLink(port, responder.link);
+    try {
+      await openLink(port, responder.link);
+    } catch (err) {
+      scan.stoppedBy = "error";
+      scan.lastDetail = `no se pudo abrir el puerto: está ocupado por otra pestaña de Patagonia OS u otro programa (iTegra, etc.). Cerralos, desenchufá y volvé a enchufar el USB, y probá de nuevo. (${err instanceof Error ? err.message : String(err)})`;
+      return scan;
+    }
+    // Primero el test de conexión, como en "Probar todo" (con la Aura real, la
+    // lectura que vino después del 0001 contestó; una lectura sola, más tarde, no:
+    // 2026-10-01). Si ni el 0001 contesta, el problema es el estado de la balanza.
+    let hello = await sendRead(port, log, "test de conexión", responder.link, responder.deviceType, responder.equipmentId, "0001", "", timeout);
+    if (!hello.kretz) hello = await sendRead(port, log, "test de conexión (reintento)", responder.link, responder.deviceType, responder.equipmentId, "0001", "", timeout);
+    if (!hello.kretz) {
+      scan.stoppedBy = "error";
+      scan.lastCode = null;
+      scan.lastDetail =
+        "la balanza no contestó ni el test de conexión. Fijate que esté prendida, en la pantalla de venta (no dentro del menú), y en modo Datos (menú → COMUNI → MODO = dAtOS). Tocá una tecla para despertarla y probá de nuevo";
+      return scan;
+    }
     let after = 0;
     for (;;) {
       if (options.shouldStop?.()) {
@@ -318,7 +336,8 @@ export async function scanAllPlus(
         break;
       }
       const arg = String(after).padStart(6, "0");
-      const ex = await sendRead(port, log, "leer PLU", responder.link, responder.deviceType, responder.equipmentId, "5005", arg, timeout);
+      let ex = await sendRead(port, log, "leer PLU", responder.link, responder.deviceType, responder.equipmentId, "5005", arg, timeout);
+      if (!ex.kretz) ex = await sendRead(port, log, "leer PLU (reintento)", responder.link, responder.deviceType, responder.equipmentId, "5005", arg, timeout);
       if (log.length > 40) log.splice(20, 1); // guardar los primeros 20 y los últimos, no miles
       scan.lastCode = ex.kretz?.code ?? null;
       if (!ex.kretz || ex.kretz.code !== "01") {

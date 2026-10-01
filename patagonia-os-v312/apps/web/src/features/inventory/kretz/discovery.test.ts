@@ -49,6 +49,7 @@ class SequenceScale {
   readable: ReadableStream<Uint8Array> | null = null;
   writable: WritableStream<Uint8Array> | null = null;
   args: string[] = [];
+  mute = false;
   constructor(private records: string[]) {}
   async open() {
     let controller!: ReadableStreamDefaultController<Uint8Array>;
@@ -56,7 +57,12 @@ class SequenceScale {
     const self = this;
     this.writable = new WritableStream<Uint8Array>({
       write(chunk) {
+        if (self.mute) return;
         const text = String.fromCharCode(...chunk);
+        if (text.slice(4, 8) === "0001") {
+          setTimeout(() => controller.enqueue(new Uint8Array(kretzReply("H", "01", "00", "01"))), 2);
+          return;
+        }
         assert.equal(text.slice(4, 8), "5005");
         const arg = text.slice(8, 14);
         self.args.push(arg);
@@ -107,6 +113,15 @@ describe("descubrimiento de balanza Kretz (solo lectura)", () => {
     assert.equal(scan.lastCode, "20");
     assert.deepEqual(scan.records.map((r) => r.plu), [1, 5, 12]);
     assert.deepEqual(port.args, ["000000", "000001", "000005", "000012"]);
+  });
+
+  it("si la balanza no contesta ni el test de conexión, lo dice (y no intenta leer)", async () => {
+    const silent = new SequenceScale([]);
+    silent.mute = true;
+    const scan = await scanAllPlus(silent as unknown as SerialPort, { link: { baudRate: 9600, stopBits: 2 }, deviceType: "H", equipmentId: "01" }, "aura", { timeoutMs: 30 });
+    assert.equal(scan.stoppedBy, "error");
+    assert.match(scan.lastDetail, /test de conexión/);
+    assert.equal(silent.args.length, 0);
   });
 
   it("si la balanza devuelve siempre el mismo PLU, corta (no se queda dando vueltas)", async () => {
