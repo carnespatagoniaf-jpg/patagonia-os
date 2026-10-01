@@ -127,7 +127,23 @@ New **"Probar todo"** (`diagnoseScaleLink`):
 - The port is described by its USB chip (CH340, PL2303, FTDI or CP210x).
 - Tests: `scale-diagnosis.test.ts`.
 
-Manual pages 42–45 were re-read: the Datos mode is documented only for iTegra/JDataGate, so PLU upload to an Aura is still unconfirmed. The scale is in ONE communication mode at a time (Datos for PLU upload vs "A pedido de peso" for weight reading).
+Manual pages 42–45 were re-read: the Datos mode is documented only for iTegra/JDataGate, so PLU upload to an Aura is still unconfirmed.
+
+**Per-model drivers (2026-10-01, owner goal: send PLU/prices to the Aura without iTegra).** The source of truth is `docs/BALANZAS_KRETZ.md`: every fact tagged real / documentado / terceros / hipótesis / desconocido, with its source, plus the discovery plan, the Kretz e-mail draft and plan C (Bluetooth HCI snoop with iTegra Mobile, or a serial monitor with iTegra; never decompiling).
+
+`features/inventory/kretz/`:
+- `kretz-frame.ts`: frame, checksum and the response-code table from the public Report Nx doc. Tested with the doc's checksum example and a real Report LT reply; `scale-serial.ts` now reuses it. The old response-code table was shifted and had no source; only "01" drives logic.
+- `models.ts`: Report LT / Aura / Otra Kretz, each with links, letters and facts. `canWritePlu` is true ONLY when `plu.evidence === "real"`, which today means Report LT only.
+- `discovery.ts`: `runKretzDiscovery` is READ-ONLY. `assertReadOnly` allows only 0001/0002/1500-1999/5000-5999. It does a weight probe, then sweeps 0001 across links × letters × the n_bal ID, then reads 0002/1500/5002 "05"/5005. Every byte is stored in a `DiagnosticRecord` (localStorage `patagonia-scale-diagnostic-last`) that is sent with "Enviar a soporte".
+
+`ScaleSyncPanel` steps are: 1 modelo (+ n_bal for Aura) → 2 Elegir el puerto / Probar todo → 3 Verificar con un producto de prueba → 4 Mandar productos. "Enviar todos" needs a successful step 3 with the same model+baud+stop+letter+ID (`patagonia-scale-verified`). For a model without real evidence every write button and handler is blocked.
+
+To enable the Aura you need:
+1. A real `DiagnosticRecord` from the client (client guide: `docs/AURA_PRUEBA_CLIENTE.html/.pdf`).
+2. The Aura PLU field model, written in code.
+3. One verified test PLU (write, read back, compare, delete) on a free slot.
+
+Only then set `plu.evidence = "real"`. The scale is in ONE communication mode at a time (Datos for PLU upload vs "A pedido de peso" for weight reading).
 
 ## AI help chat (LIVE since 2026-09-28)
 

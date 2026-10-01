@@ -25,6 +25,39 @@ import {
   type ScaleSerialSettings,
   type ScaleSyncableProduct
 } from "./scale-serial";
+import { getLastDiagnosticRecord, summarizeDiagnosticRecord } from "./kretz/discovery";
+import { EVIDENCE_LABELS, KRETZ_MODELS, canWritePlu, getKretzModel, getSavedModelId, saveModelId, type KretzModelId } from "./kretz/models";
+
+const BALANCE_NUMBER_KEY = "patagonia-scale-balance-number";
+const VERIFIED_KEY = "patagonia-scale-verified";
+
+function readLocal(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+function writeLocal(key: string, value: string | null): void {
+  try {
+    if (value === null) localStorage.removeItem(key);
+    else localStorage.setItem(key, value);
+  } catch {
+    // no crítico
+  }
+}
+
+/** Actividad de esta PC + el último "Probar todo" completo, para "Enviar a soporte". */
+function supportLogText(): string {
+  const record = getLastDiagnosticRecord();
+  return record ? `${exportActivityLogText()}\n\n${summarizeDiagnosticRecord(record)}` : exportActivityLogText();
+}
+
+/** Con qué balanza/configuración se verificó el PLU de prueba (el envío masivo exige que coincida). */
+function verificationKey(modelId: string, s: ScaleSerialSettings): string {
+  return [modelId, s.baudRate, s.stopBits, s.deviceType, s.equipmentId].join("|");
+}
 
 /** Panel "Balanza por cable" completo (conectar, verificar compatibilidad,
  * envío masivo, un solo producto) como componente aparte -- lo usan tanto
@@ -48,6 +81,13 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
   const [supportBusy, setSupportBusy] = useState(false);
   const [supportMessage, setSupportMessage] = useState("");
   const [portLabel, setPortLabel] = useState<string | null>(null);
+  const [modelId, setModelId] = useState<KretzModelId>(getSavedModelId());
+  const [balanceNumber, setBalanceNumber] = useState(readLocal(BALANCE_NUMBER_KEY) ?? "1");
+  const [verifiedKey, setVerifiedKey] = useState<string | null>(readLocal(VERIFIED_KEY));
+  const model = getKretzModel(modelId);
+  const writeAllowed = canWritePlu(model);
+  const verified = verifiedKey === verificationKey(model.id, scaleSettings);
+  const writeLockedReason = writeAllowed ? undefined : `Bloqueado: el envío de productos a ${model.label} todavía no está comprobado con una balanza real.`;
 
   useEffect(() => {
     void isScalePortPaired().then(setScalePortReady);
@@ -78,13 +118,14 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
     try {
       await submitScaleSupportReport({
         note: supportNote,
-        logText: exportActivityLogText(),
+        logText: supportLogText(),
         connections: [
           {
             displayName: "Balanza por cable (Productos / Stock)",
             driverId: "kretz-report-plu (panel Balanza por cable)",
             status: scalePortReady ? "puerto elegido" : "sin puerto",
-            settings: { ...scaleSettings },
+            settings: { ...scaleSettings, model: model.id, balanceNumber },
+            diagnosticRecord: getLastDiagnosticRecord() ?? undefined,
             confirmedCapabilities: [],
             pairedAt: "",
             connectedNow: scalePortReady
@@ -122,7 +163,7 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
     setScaleBusy(true);
     setScaleLog("Probando… no desenchufes la balanza ni cierres esta pantalla (tarda hasta un minuto).");
     try {
-      const d = await diagnoseScaleLink((text) => setScaleLog(text));
+      const d = await diagnoseScaleLink((text) => setScaleLog(text), { modelId: model.id, balanceNumber });
       setScaleSettings(getScaleSerialSettings());
       setScalePortReady(true);
       setPortLabel(d.portLabel);
@@ -185,7 +226,13 @@ Detalle para soporte: ${technical}`);
     setScaleBusy(true);
     setScaleLog("Probando compatibilidad… esto carga y borra un producto de prueba en la balanza, no toca productos reales.");
     try {
+      if (!writeAllowed) throw new Error(writeLockedReason);
       const result = await checkScaleCompatibility();
+      if (result.compatible) {
+        const key = verificationKey(model.id, getScaleSerialSettings());
+        writeLocal(VERIFIED_KEY, key);
+        setVerifiedKey(key);
+      }
       const details = [
         `Conexión: ${result.pingOk ? "OK" : "sin respuesta"}.`,
         result.writeResponseCode ? `Escritura de prueba: código "${result.writeResponseCode}".` : "",
@@ -200,6 +247,8 @@ Detalle para soporte: ${technical}`);
   }
 
   async function handleSyncScale() {
+    if (!writeAllowed) return report(writeLockedReason ?? "Bloqueado.");
+    if (!verified) return report("Primero hacé \"Verificar con un PLU de prueba\": el envío masivo se habilita recién cuando el producto de prueba se grabó y se releyó bien con esta balanza.");
     setScaleBusy(true);
     setScaleLog("");
     setScaleSyncProgress({ done: 0, total: 0 });
@@ -235,6 +284,7 @@ Detalle para soporte: ${technical}`);
   }
 
   async function handleSendOneProduct() {
+    if (!writeAllowed) return report(writeLockedReason ?? "Bloqueado.");
     const product = products.find((p) => p.code === scaleTestCode.trim());
     if (!product) {
       report(`No encontré ningún producto con código "${scaleTestCode.trim()}".`);
@@ -274,6 +324,7 @@ Detalle para soporte: ${technical}`);
   }
 
   async function handleDeletePlu() {
+    if (!writeAllowed) return report(writeLockedReason ?? "Bloqueado.");
     const code = scaleTestCode.trim();
     if (!code) {
       report("Ingresá un código de PLU para borrar.");
@@ -295,6 +346,11 @@ Detalle para soporte: ${technical}`);
   // La balanza por cable es del plan Estándar en adelante.
   if (!planAllows(profile, "estandar")) return null;
 
+  const stepTitle = { margin: "0 0 8px", fontWeight: 700, fontSize: 13, textTransform: "uppercase", color: "#666" } as const;
+  const step = { borderTop: "1px solid #eef0f3", paddingTop: 14, marginBottom: 14 } as const;
+  const noSerial = !isScaleSerialSupported();
+  const EVIDENCE_COLORS: Record<string, string> = { real: "#176329", documentado: "#1d4ed8", terceros: "#6b7280", hipotesis: "#8a4b00", desconocido: "#8a1f11" };
+
   return (
     <>
       <button className="secondary" onClick={() => setShowScalePanel((v) => !v)}>
@@ -307,29 +363,83 @@ Detalle para soporte: ${technical}`);
           <p className="muted" style={{ margin: "0 0 16px", fontSize: 13 }}>
             Manda los productos directo a la balanza Kretz por cable, sin usar el software de iTegra. Solo funciona en Chrome o Edge.
           </p>
-          {!isScaleSerialSupported() && (
+          {noSerial && (
             <p style={{ margin: "0 0 14px", color: "#8a4b00", fontWeight: 700 }}>
               Este navegador no soporta esto -- abrí Patagonia OS en Chrome o Edge.
             </p>
           )}
 
-          <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 14, marginBottom: 14 }}>
-            <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 13, textTransform: "uppercase", color: "#666" }}>1. Conexión</p>
+          {/* 1. Modelo */}
+          <div style={step}>
+            <p style={stepTitle}>1. ¿Qué balanza es?</p>
+            <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
+              <select
+                value={model.id}
+                disabled={scaleBusy}
+                onChange={(e) => {
+                  const id = e.target.value as KretzModelId;
+                  saveModelId(id);
+                  setModelId(id);
+                }}
+              >
+                {KRETZ_MODELS.map((m) => <option key={m.id} value={m.id}>{m.label}</option>)}
+              </select>
+              {model.id !== "report-lt" && (
+                <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 14 }}>
+                  Número de balanza
+                  <input
+                    type="number"
+                    min={1}
+                    max={99}
+                    step={1}
+                    style={{ width: 70 }}
+                    value={balanceNumber}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/\D/g, "").slice(0, 2);
+                      setBalanceNumber(v);
+                      writeLocal(BALANCE_NUMBER_KEY, v || null);
+                    }}
+                  />
+                  <span className="muted" style={{ fontSize: 12 }}>(en la balanza: menú DATOS → n_bal; de fábrica es 1)</span>
+                </label>
+              )}
+            </div>
+            <p style={{ margin: "8px 0 0", fontSize: 13 }}>
+              Envío de productos a esta balanza:{" "}
+              {writeAllowed ? (
+                <strong style={{ color: "#176329" }}>habilitado (comprobado con una balanza real)</strong>
+              ) : (
+                <strong style={{ color: "#8a1f11" }}>bloqueado hasta comprobarlo con una balanza real</strong>
+              )}
+            </p>
+            {!writeAllowed && (
+              <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
+                Mientras tanto, "Probar todo" averigua cómo se comunica esta balanza SIN escribir nada en ella, y "Enviar a soporte" nos manda el resultado para terminar de habilitarla.
+              </p>
+            )}
+            <details style={{ marginTop: 10, fontSize: 13 }}>
+              <summary style={{ fontWeight: 600 }}>Qué sabemos de esta balanza y cómo lo sabemos</summary>
+              <ul style={{ margin: "8px 0 0", paddingLeft: 18, display: "grid", gap: 6 }}>
+                {model.facts.map((f) => (
+                  <li key={f.text}>
+                    {f.text}{" "}
+                    <span style={{ color: EVIDENCE_COLORS[f.evidence], fontWeight: 700, whiteSpace: "nowrap" }}>[{EVIDENCE_LABELS[f.evidence]}]</span>
+                    <span className="muted" style={{ fontSize: 12 }}> — {f.source}</span>
+                  </li>
+                ))}
+              </ul>
+            </details>
+          </div>
+
+          {/* 2. Conexión */}
+          <div style={step}>
+            <p style={stepTitle}>2. Conectar y probar</p>
             <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button className={scalePortReady ? "secondary" : undefined} disabled={scaleBusy || !isScaleSerialSupported()} onClick={handleConnectScale}>
+              <button className={scalePortReady ? "secondary" : undefined} disabled={scaleBusy || noSerial} onClick={handleConnectScale}>
                 {scalePortReady ? "Elegir otro puerto" : "Elegir el puerto"}
               </button>
-              <button disabled={scaleBusy || !isScaleSerialSupported() || !scalePortReady} onClick={handleDiagnose}>
+              <button disabled={scaleBusy || noSerial || !scalePortReady} onClick={handleDiagnose}>
                 Probar todo
-              </button>
-              <button disabled={scaleBusy || !isScaleSerialSupported() || !scalePortReady} className="secondary" onClick={handleAutoDetect}>
-                Detectar mi balanza automáticamente
-              </button>
-              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handlePingScale}>
-                Probar conexión
-              </button>
-              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handleCheckCompatibility}>
-                Verificar compatibilidad
               </button>
             </div>
             {portLabel && (
@@ -338,64 +448,114 @@ Detalle para soporte: ${technical}`);
               </p>
             )}
             <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
-              Primero "Elegir el puerto" y después "Probar todo": en un solo paso te dice si el problema es el cable, el puerto o el modo de la balanza. Si es una balanza que no probamos todavía (Report NX, Novel Eco, Aura Eco o cualquier otra que no sea la Report LT), usá "Verificar compatibilidad" antes de mandar productos: carga y borra un producto de prueba, sin arriesgar datos reales.
+              "Probar todo" prueba todas las formas de comunicarse y te dice si el problema es el cable, el puerto o el modo de la balanza. No escribe nada en la balanza (como mucho hace un "bip"). Tarda hasta dos minutos.
             </p>
-            <details style={{ marginTop: 10, fontSize: 13 }}>
-              <summary style={{ fontWeight: 600 }}>Kretz Aura: cómo se conecta</summary>
-              <ul style={{ margin: "8px 0 0", paddingLeft: 18, display: "grid", gap: 4 }}>
-                <li>Cable serie <strong>directo</strong> (pin 2 con 2, 3 con 3, 5 con 5): <strong>macho</strong> del lado de la balanza y hembra del lado de la PC. Los cables "null modem" o "cruzados" no sirven. Si la PC no tiene puerto serie, un adaptador USB a serie.</li>
-                <li>En la balanza: menú de usuario (clave de fábrica 99999) → <strong>COMUNI</strong>. Para mandar precios: MODO = <strong>"Datos"</strong>. Para que Mostrador lea el peso: MODO = <strong>"A pedido de peso"</strong>. En los dos casos PUERT = <strong>RS-232</strong>.</li>
-                <li>La Aura usa 9600 baudios y 2 bits de stop: "Probar todo" ya lo prueba solo.</li>
-                <li>Mandar precios a la Aura por cable todavía no está confirmado con una Aura real (Kretz lo documenta solo para su programa iTegra). El peso en Mostrador sí sigue el manual de Kretz.</li>
-              </ul>
-            </details>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
-              <details style={{ display: "inline-block" }}>
-                <summary className="secondary" style={{ display: "inline-block", cursor: "pointer", padding: "10px 14px", border: "1px solid #ccc", borderRadius: 6 }}>
-                  Configuración avanzada
-                </summary>
-                <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", marginTop: 10, fontSize: 14 }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    Velocidad
-                    <select value={scaleSettings.baudRate} onChange={(e) => updateScaleSettings({ baudRate: Number(e.target.value) })}>
-                      {[2400, 4800, 9600, 19200, 38400, 57600, 115200].map((rate) => (
-                        <option key={rate} value={rate}>{rate}</option>
-                      ))}
-                    </select>
-                  </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    Bits de stop
-                    <select value={scaleSettings.stopBits} onChange={(e) => updateScaleSettings({ stopBits: Number(e.target.value) === 2 ? 2 : 1 })}>
-                      <option value={1}>1</option>
-                      <option value={2}>2</option>
-                    </select>
-                  </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    ID de equipo
-                    <input style={{ width: 50 }} value={scaleSettings.equipmentId} onChange={(e) => updateScaleSettings({ equipmentId: e.target.value.slice(0, 2) })} />
-                  </label>
-                  <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    Tipo de equipo
-                    <input style={{ width: 40 }} value={scaleSettings.deviceType} onChange={(e) => updateScaleSettings({ deviceType: e.target.value.slice(0, 1).toUpperCase() })} />
-                  </label>
-                </div>
-                <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
-                  Ya configurado para una Report LT (115200 baudios, tipo "C"). Solo tocar esto si conectás un modelo distinto.
-                </p>
+            {model.id === "aura" && (
+              <details style={{ marginTop: 10, fontSize: 13 }} open={!scalePortReady}>
+                <summary style={{ fontWeight: 600 }}>Kretz Aura: cómo se conecta</summary>
+                <ul style={{ margin: "8px 0 0", paddingLeft: 18, display: "grid", gap: 4 }}>
+                  <li>Cable serie <strong>directo</strong> (pin 2 con 2, 3 con 3, 5 con 5): <strong>macho</strong> del lado de la balanza y hembra del lado de la PC. Los cables "null modem", "cruzados" o el cable de PC de otras Kretz no sirven. Si la PC no tiene puerto serie, un adaptador USB a serie.</li>
+                  <li>En la balanza: menú de usuario (clave de fábrica 99999) → <strong>COMUNI</strong> → MODO = <strong>"Datos"</strong> y PUERT = <strong>RS-232</strong>. (Para que Mostrador lea el peso, en cambio, MODO = "A pedido de peso".)</li>
+                  <li>La Aura usa 9600 baudios y 2 bits de stop: "Probar todo" ya lo prueba solo.</li>
+                </ul>
               </details>
-            </div>
+            )}
+            <details style={{ marginTop: 10 }}>
+              <summary className="secondary" style={{ display: "inline-block", cursor: "pointer", padding: "8px 14px", border: "1px solid #d6dce5", borderRadius: 10, fontSize: 14, fontWeight: 700, color: "#47505c" }}>
+                Configuración avanzada
+              </summary>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+                <button disabled={scaleBusy || noSerial || !scalePortReady} className="secondary" onClick={handleAutoDetect}>
+                  Detectar mi balanza automáticamente
+                </button>
+                <button disabled={scaleBusy || noSerial} className="secondary" onClick={handlePingScale}>
+                  Probar conexión
+                </button>
+              </div>
+              <div style={{ display: "flex", gap: 16, alignItems: "center", flexWrap: "wrap", marginTop: 10, fontSize: 14 }}>
+                <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  Velocidad
+                  <select value={scaleSettings.baudRate} onChange={(e) => updateScaleSettings({ baudRate: Number(e.target.value) })}>
+                    {[2400, 4800, 9600, 19200, 38400, 57600, 115200].map((rate) => (
+                      <option key={rate} value={rate}>{rate}</option>
+                    ))}
+                  </select>
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  Bits de stop
+                  <select value={scaleSettings.stopBits} onChange={(e) => updateScaleSettings({ stopBits: Number(e.target.value) === 2 ? 2 : 1 })}>
+                    <option value={1}>1</option>
+                    <option value={2}>2</option>
+                  </select>
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  ID de equipo
+                  <input style={{ width: 50 }} value={scaleSettings.equipmentId} onChange={(e) => updateScaleSettings({ equipmentId: e.target.value.slice(0, 2) })} />
+                </label>
+                <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  Tipo de equipo
+                  <input style={{ width: 40 }} value={scaleSettings.deviceType} onChange={(e) => updateScaleSettings({ deviceType: e.target.value.slice(0, 1).toUpperCase() })} />
+                </label>
+              </div>
+              <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
+                "Probar todo" completa esto solo. Solo tocar si soporte te lo pide.
+              </p>
+            </details>
           </div>
 
-          <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 14, marginBottom: 14 }}>
-            <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 13, textTransform: "uppercase", color: "#666" }}>2. Envío masivo</p>
-            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={() => setShowScalePreview((v) => !v)}>
+          {/* 3. Verificar con un PLU de prueba */}
+          <div style={step}>
+            <p style={stepTitle}>3. Verificar con un producto de prueba</p>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+              <button disabled={scaleBusy || noSerial || !writeAllowed} title={writeLockedReason} onClick={handleCheckCompatibility}>
+                Verificar con un producto de prueba
+              </button>
+              {verified ? (
+                <strong style={{ color: "#176329", fontSize: 13 }}>✓ Verificado con esta balanza</strong>
+              ) : (
+                <span className="muted" style={{ fontSize: 13 }}>Todavía no verificado con esta configuración.</span>
+              )}
+            </div>
+            <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
+              Graba un producto de prueba en un código libre, lo vuelve a leer para comprobar que quedó exactamente igual y lo borra. Si ese código ya tiene un producto real, no hace nada. El envío de todos los productos se habilita recién cuando esto sale bien.
+            </p>
+          </div>
+
+          {/* 4. Envío */}
+          <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 14 }}>
+            <p style={stepTitle}>4. Mandar productos</p>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <input
+                placeholder="Código del producto (ej. 12)"
+                style={{ width: 200 }}
+                value={scaleTestCode}
+                onChange={(e) => setScaleTestCode(e.target.value)}
+              />
+              <button disabled={scaleBusy || noSerial || !writeAllowed} title={writeLockedReason} className="secondary" onClick={handleSendOneProduct}>
+                Enviar uno
+              </button>
+              <button disabled={scaleBusy || noSerial || !writeAllowed} title={writeLockedReason} className="secondary" onClick={handleReadPlu}>
+                Leer de la balanza
+              </button>
+              <button disabled={scaleBusy || noSerial || !writeAllowed} title={writeLockedReason} className="danger" onClick={handleDeletePlu}>
+                Borrar de la balanza
+              </button>
+            </div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 10 }}>
+              <button disabled={scaleBusy || noSerial} className="secondary" onClick={() => setShowScalePreview((v) => !v)}>
                 {showScalePreview ? "Ocultar vista previa" : `Vista previa (${scaleSyncPlan.toSend.length} productos)`}
               </button>
-              <button disabled={scaleBusy || !isScaleSerialSupported()} onClick={handleSyncScale}>
+              <button
+                disabled={scaleBusy || noSerial || !writeAllowed || !verified}
+                title={!writeAllowed ? writeLockedReason : !verified ? "Primero verificá con un producto de prueba (paso 3)" : undefined}
+                onClick={handleSyncScale}
+              >
                 {scaleBusy && scaleSyncProgress ? `Enviando… ${scaleSyncProgress.done}/${scaleSyncProgress.total}` : "Enviar todos los productos"}
               </button>
             </div>
+            {writeAllowed && !verified && (
+              <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>"Enviar todos los productos" se habilita después de verificar con un producto de prueba (paso 3).</p>
+            )}
             {showScalePreview && (
               <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid #eef0f3", borderRadius: 6, padding: 10, marginTop: 10, fontSize: 13 }}>
                 <p style={{ margin: "0 0 8px", fontWeight: 700 }}>
@@ -432,27 +592,6 @@ Detalle para soporte: ${technical}`);
                 )}
               </div>
             )}
-          </div>
-
-          <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 14 }}>
-            <p style={{ margin: "0 0 8px", fontWeight: 700, fontSize: 13, textTransform: "uppercase", color: "#666" }}>3. Un solo producto</p>
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <input
-                placeholder="Código del producto (ej. 12)"
-                style={{ width: 200 }}
-                value={scaleTestCode}
-                onChange={(e) => setScaleTestCode(e.target.value)}
-              />
-              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handleSendOneProduct}>
-                Enviar
-              </button>
-              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" onClick={handleReadPlu}>
-                Leer de la balanza
-              </button>
-              <button disabled={scaleBusy || !isScaleSerialSupported()} className="secondary" style={{ color: "#8a1f11" }} onClick={handleDeletePlu}>
-                Borrar de la balanza
-              </button>
-            </div>
           </div>
 
           {scaleLog && (

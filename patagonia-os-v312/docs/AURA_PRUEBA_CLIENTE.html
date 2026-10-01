@@ -1,0 +1,97 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prueba Kretz Aura</title>
+<style>
+  :root { --brand: #8b1e1e; --ink: #18202b; --muted: #5b6573; --line: #e3e7ee; --warn: #8a1f11; --warnbg: #fdecea; --okbg: #eef7ef; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: #fff; color: var(--ink); font: 15px/1.5 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 28px 22px 40px; }
+  h1 { font-size: 26px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 18px; }
+  h2 { font-size: 18px; margin: 26px 0 8px; padding-top: 10px; border-top: 2px solid var(--brand); color: var(--brand); }
+  ol { padding-left: 22px; margin: 6px 0; }
+  li { margin: 6px 0; }
+  .key { display: inline-block; border: 1px solid #9aa3af; border-bottom-width: 3px; border-radius: 6px; padding: 0 6px; font-weight: 700; font-size: 13px; background: #f6f7f9; white-space: nowrap; }
+  .screen { font-family: Consolas, monospace; background: #e9f0e9; border: 1px solid #b9c8b9; border-radius: 4px; padding: 0 6px; font-weight: 700; }
+  .box { border-radius: 10px; padding: 12px 14px; margin: 12px 0; }
+  .warn { background: var(--warnbg); color: var(--warn); font-weight: 600; }
+  .ok { background: var(--okbg); }
+  .write { display: inline-block; min-width: 120px; border-bottom: 1px solid var(--ink); }
+  .photo::before { content: "📷 "; }
+  .check { list-style: none; padding-left: 0; }
+  .check li::before { content: "☐ "; font-size: 17px; }
+  footer { margin-top: 26px; color: var(--muted); font-size: 12px; }
+  @media print { main { padding: 0; } h2 { break-after: avoid; } li, .box { break-inside: avoid; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Prueba de la balanza Kretz Aura con Patagonia OS</h1>
+  <p class="sub">Tarda unos 15 minutos. <strong>No se borra ni se cambia ningún producto de la balanza</strong>: Patagonia OS solo pregunta y escucha. Como mucho, la balanza hace un "bip".</p>
+
+  <div class="box ok">
+    <strong>Antes de empezar</strong>
+    <ul class="check">
+      <li>Computadora con <strong>Google Chrome</strong>, entrar a Patagonia OS con el usuario del <strong>dueño o administrador</strong>.</li>
+      <li>Cable conectado: conector azul de atrás de la balanza → cable → adaptador USB → computadora.</li>
+      <li>Balanza encendida.</li>
+      <li class="photo">Sacar una foto de la <strong>etiqueta de atrás de la balanza</strong> y otra de <strong>las dos puntas del cable</strong>.</li>
+    </ul>
+  </div>
+
+  <h2>Parte 1 — En la balanza (2 minutos)</h2>
+  <div class="box warn">⚠ En el menú de la balanza hay un ítem que se llama <span class="screen">bOrrAr</span>. <u>No entrar ahí</u>: borra todos los productos de la balanza.</div>
+  <ol>
+    <li>Mantener apretada la tecla <span class="key">$/un ALT</span> y, sin soltarla, tocar <span class="key">FUNCIÓN / MENÚ</span>.</li>
+    <li>Pide una clave: escribir <strong>99999</strong> y confirmar con <span class="key">PLU (ENTRA)</span>.</li>
+    <li>Moverse entre los ítems con <span class="key">FUNCIÓN / MENÚ</span> y <span class="key">SI / NO</span>. Entrar y confirmar con <span class="key">PLU (ENTRA)</span>. Para salir, <span class="key">BORRA</span> (esa tecla <u>no</u> borra productos, solo sale).</li>
+    <li>Entrar a <span class="screen">dAtOS</span>. El primer dato es <span class="screen">n_bAL=</span>: <strong>anotar ese número</strong> (normalmente 1): <span class="write">&nbsp;</span>. No cambiarlo. Salir.</li>
+    <li>Entrar a <span class="screen">COMUNI</span>:
+      <ol type="a">
+        <li>En <span class="screen">MODO=</span>, con <span class="key">VENDEDOR 1</span> / <span class="key">VENDEDOR 2</span> elegir <strong>Datos</strong> (<span class="screen">dAtOS</span>) y confirmar con <span class="key">PLU (ENTRA)</span>.</li>
+        <li>En <span class="screen">PUErt=</span> elegir <strong>RS-232</strong> (<span class="screen">rS-232</span>) y confirmar con <span class="key">PLU (ENTRA)</span>.</li>
+      </ol>
+    </li>
+    <li class="photo">Si en algún paso la pantalla muestra otra cosa, sacarle una foto.</li>
+    <li>Salir con <span class="key">BORRA</span>.</li>
+  </ol>
+
+  <h2>Parte 2 — En Patagonia OS: prueba en modo Datos</h2>
+  <ol>
+    <li>Apretar <strong>Ctrl + F5</strong> para cargar la última versión.</li>
+    <li>Ir a <strong>Productos</strong> → botón <strong>"Balanza por cable (sin iTegra)"</strong>.</li>
+    <li>En <strong>1. ¿Qué balanza es?</strong> elegir <strong>Kretz Aura / Aura Eco</strong>. En <strong>Número de balanza</strong>, escribir el número anotado.</li>
+    <li>En <strong>2. Conectar y probar</strong>, tocar <strong>"Elegir el puerto"</strong> y elegir el del adaptador USB.
+      <br><small>¿Hay varios y no sabés cuál? Cerrá la ventanita, desenchufá el USB del cable, tocá de nuevo "Elegir el puerto" y fijate cuál desapareció. Volvé a enchufarlo y elegí ese.</small></li>
+    <li>Tocar <strong>"Probar todo"</strong> y esperar <strong>sin tocar nada</strong> (hasta 2 minutos). Prestar atención: <strong>¿la balanza hizo "bip"?</strong> Sí / No</li>
+    <li class="photo">Cuando termine, sacar una <strong>foto del mensaje</strong> que aparece.</li>
+    <li>Más abajo, en <strong>"¿Algo no anda? Enviar a soporte"</strong>, escribir: <em>"Prueba 1, modo Datos, hizo bip: sí/no"</em> y tocar <strong>"Enviar a soporte"</strong>.</li>
+  </ol>
+
+  <h2>Parte 3 — Prueba en modo peso (para comprobar el cable)</h2>
+  <ol>
+    <li>En la balanza: menú (igual que en la Parte 1) → <span class="screen">COMUNI</span> → <span class="screen">MODO=</span> elegir <strong>A pedido de peso</strong>, y <span class="screen">PUErt=</span> <strong>RS-232</strong>. Salir.</li>
+    <li>Poner algo en el plato (por ejemplo, 1 kg de cualquier cosa) y dejarlo quieto.</li>
+    <li>En Patagonia OS, tocar otra vez <strong>"Probar todo"</strong> y esperar.</li>
+    <li class="photo">Sacar una <strong>foto del mensaje</strong>.</li>
+    <li>"Enviar a soporte" con el texto: <em>"Prueba 2, modo peso"</em>.</li>
+    <li>Volver la balanza a <strong>MODO = Datos</strong> (para vender en el mostrador da igual cuál quede).</li>
+  </ol>
+
+  <h2>Parte 4 — Preguntas (respondelas por WhatsApp)</h2>
+  <ol>
+    <li>¿La balanza tiene <strong>Bluetooth</strong>? (lo dice la caja, la factura o la etiqueta)</li>
+    <li>¿Dónde compraron el cable y qué dice la factura? (por ejemplo "cable serie", "null modem", "extensión DB9")</li>
+    <li>¿Alguna vez usaron el programa <strong>iTegra</strong> de Kretz en esa computadora?</li>
+    <li>¿Tienen un celular <strong>Android</strong>? (puede servir para un paso siguiente)</li>
+  </ol>
+
+  <div class="box ok"><strong>Mandar por WhatsApp:</strong> las fotos (etiqueta, puntas del cable, mensaje de la prueba 1 y de la prueba 2) y las respuestas de la Parte 4. Con eso sabemos exactamente qué falta.</div>
+
+  <footer>Patagonia OS · Guía para la prueba de la Kretz Aura · 1 de octubre de 2026</footer>
+</main>
+</body>
+</html>

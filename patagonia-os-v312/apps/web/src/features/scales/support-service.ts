@@ -17,6 +17,8 @@ export interface ScaleSupportConnectionInfo {
   pairedAt: string;
   connectedNow: boolean;
   lastDiagnostic?: { summary: string; steps: { label: string; ok: boolean; detail: string }[] };
+  /** Registro completo de "Probar todo" (Balanza por cable): cada byte que se mandó y que volvió. */
+  diagnosticRecord?: unknown;
 }
 
 export function buildSupportConnections(

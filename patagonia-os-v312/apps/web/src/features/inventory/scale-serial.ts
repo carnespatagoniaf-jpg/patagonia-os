@@ -1,4 +1,7 @@
 import type { Product } from "@patagonia/domain";
+import { runKretzDiscovery, saveDiagnosticRecord, type DiagnosticRecord, type DiscoveryVerdict } from "./kretz/discovery";
+import { getKretzModel, getSavedModelId } from "./kretz/models";
+import { buildKretzFrame, describeKretzCode } from "./kretz/kretz-frame";
 
 /** Lo mínimo que hace falta de un producto para mandarlo a la balanza --
  * no el `Product` completo de @patagonia/domain. Así esta función sirve
@@ -62,10 +65,8 @@ export interface ScaleSyncableProduct {
  * - Código de respuesta (2 ASCII en el offset 6-7 de la respuesta): "01" es
  *   éxito real, confirmado a fondo (se grabó y se pudo releer). Otros
  *   códigos documentados: "02" comando inexistente, "10" error de
- *   checksum, "20" cantidad de bytes incorrecta / modelo de datos
- *   inválido, "30" registro inexistente, "40" último registro borrado,
- *   "41" no hay registros, "50" no hay registros para borrar, "60"
- *   capacidad máxima superada o falló la ejecución.
+ *   checksum, y el resto según el documento público de Kretz (ver
+ *   kretz/kretz-frame.ts): solo "01" se usa para decidir algo.
  * - IMPORTANTE -- 2005 sobre un PLU que ya existía (cargado antes por
  *   iTegra) puede IGNORAR la modificación en silencio (respondiendo "01"
  *   igual) si los campos "secundarios" del comando (flag de posición
@@ -246,22 +247,9 @@ if (isScaleSerialSupported()) {
   });
 }
 
-function checksum(bytes: number[]): [number, number] {
-  const sum = bytes.reduce((acc, b) => (acc + b) & 0xff, 0);
-  const high = (sum >> 4) & 0x0f;
-  const low = sum & 0x0f;
-  return [high + 0x30, low + 0x30];
-}
-
+/** La trama Kretz vive en kretz/kretz-frame.ts (documentada y testeada); acá se reusa. */
 function buildFrame(deviceType: string, equipmentId: string, commandNumber: string, data: string): Uint8Array {
-  const body = [
-    (deviceType || "C").charCodeAt(0),
-    ...equipmentId.padStart(2, "0").split("").map((c) => c.charCodeAt(0)),
-    ...commandNumber.padStart(4, "0").split("").map((c) => c.charCodeAt(0)),
-    ...Array.from(data).map((c) => c.charCodeAt(0))
-  ];
-  const [checkHigh, checkLow] = checksum([STX, ...body]);
-  return new Uint8Array([STX, ...body, checkHigh, checkLow, EOT]);
+  return buildKretzFrame(deviceType, equipmentId, commandNumber, data);
 }
 
 /** Texto a ASCII simple (sin acentos/ñ), ancho fijo -- estos protocolos de
@@ -366,22 +354,9 @@ function extractResponseCode(response: Uint8Array): string | null {
   return String.fromCharCode(response[6], response[7]);
 }
 
-const RESPONSE_CODE_LABELS: Record<string, string> = {
-  "01": "OK -- comando ejecutado correctamente",
-  "02": "comando inexistente en el equipo (funcionalidad no disponible)",
-  "10": "error de checksum recibido por el equipo",
-  "20": "cantidad de bytes incorrecta / modelo de datos inválido",
-  "30": "registro inexistente",
-  "31": "último registro leído",
-  "40": "último registro borrado",
-  "41": "no hay registros en el equipo",
-  "50": "no hay registros para borrar",
-  "60": "capacidad máxima superada, o falló la ejecución del comando"
-};
-
+// Tabla del documento público de Kretz (antes había otra, corrida, sin fuente; solo "01" decide algo).
 export function describeResponseCode(code: string | null): string {
-  if (code === null) return "sin respuesta";
-  return RESPONSE_CODE_LABELS[code] ?? "código desconocido (no está en la tabla que tenemos)";
+  return describeKretzCode(code);
 }
 
 export interface ScaleAutoDetectResult {
@@ -468,7 +443,7 @@ export function isKretzResponse(response: Uint8Array): boolean {
   return response.length >= 8 && response[0] === 0x07 && response.includes(EOT);
 }
 
-export type ScaleLinkVerdict = "datos" | "peso" | "bytes" | "nada";
+export type ScaleLinkVerdict = DiscoveryVerdict;
 
 export interface ScaleLinkDiagnosis {
   verdict: ScaleLinkVerdict;
@@ -477,159 +452,108 @@ export interface ScaleLinkDiagnosis {
   weightKg: number | null;
   /** Lo que llegó en la prueba de peso, tal cual (para soporte). */
   weightRaw: string;
-  /** Datos: configuración que contestó como balanza Kretz (para mandar precios). */
+  /** Datos: configuración que contestó como balanza Kretz. */
   dataSettings: ScaleSerialSettings | null;
   dataResponseHex: string;
   /** Llegó algún byte en alguna de las pruebas (entonces el cable transmite). */
   anyBytes: boolean;
   attempts: number;
   message: string;
-}
-
-async function closeQuietly(port: SerialPort) {
-  try {
-    if (port.readable || port.writable) await port.close();
-  } catch {
-    // ya cerrado
-  }
-}
-
-/** Escucha sin mandar nada (en modo continuo la balanza transmite sola). */
-async function listenPassively(port: SerialPort, ms: number): Promise<number[]> {
-  const reader = port.readable!.getReader();
-  const got: number[] = [];
-  const deadline = Date.now() + ms;
-  let pending: Promise<ReadableStreamReadResult<Uint8Array>> | null = null;
-  try {
-    while (Date.now() < deadline) {
-      pending ??= reader.read();
-      const r = await Promise.race([pending, new Promise<null>((res) => setTimeout(() => res(null), Math.max(1, deadline - Date.now())))]);
-      if (r === null) break;
-      pending = null;
-      if (r.done) break;
-      if (r.value) got.push(...r.value);
-    }
-  } finally {
-    try {
-      reader.releaseLock();
-    } catch {
-      // lectura pendiente: el navegador la cancela al cerrar
-    }
-  }
-  return got;
+  /** Registro completo (cada byte que se mandó y que volvió). */
+  record: DiagnosticRecord;
 }
 
 /**
- * "Probar todo": en un solo click dice si el problema es el cable/puerto o el
- * modo de la balanza. Hecho para la primera Kretz Aura real de un cliente
- * (2026-10-01), que no contestaba desde el panel de precios:
- * 1) A 9600 baudios y 2 bits de stop (manual Aura 16.5) escucha 1,2 s sin
- *    mandar nada (modo continuo) y pide el peso con "W" (modo a pedido).
- *    Si contesta el peso, el cable, el adaptador y el puerto andan.
- * 2) Si no hubo peso, prueba el test de conexión Kretz (0001) en todas las
- *    combinaciones de la detección automática (modo "Datos", para precios).
- * Nunca escribe nada en la balanza: solo pide el peso y el test de conexión.
+ * "Probar todo": en un click dice si el problema es el cable/puerto o el modo
+ * de la balanza, y deja guardado un registro completo para soporte. Delega en
+ * kretz/discovery.ts, que es SOLO DE LECTURA (nunca escribe en la balanza).
+ * Primera Kretz Aura real de un cliente: 2026-10-01.
  */
-export async function diagnoseScaleLink(onProgress: (text: string) => void, options: { frameTimeoutMs?: number; listenMs?: number } = {}): Promise<ScaleLinkDiagnosis> {
-  const { exchangeWeightFrame, WEIGHT_PORT_OPTIONS } = await import("../sale/scale-weight-protocol");
+export async function diagnoseScaleLink(
+  onProgress: (text: string) => void,
+  options: { frameTimeoutMs?: number; listenMs?: number; modelId?: string; balanceNumber?: string } = {}
+): Promise<ScaleLinkDiagnosis> {
+  const model = getKretzModel(options.modelId ?? getSavedModelId());
   const port = await pickPort();
   const portLabel = describeScalePort(port);
-  let anyBytes = false;
-
-  // 1) Modo peso.
-  onProgress("Probando si la balanza manda el peso (modo peso)…");
-  await closeQuietly(port);
   cachedPortOpenKey = null;
-  let weightKg: number | null = null;
-  let weightRaw = "";
-  try {
-    await port.open(WEIGHT_PORT_OPTIONS);
-    const passive = await listenPassively(port, options.listenMs ?? 1200);
-    if (passive.length > 0) anyBytes = true;
-    const exchange = await exchangeWeightFrame(port);
-    weightRaw = (passive.length ? String.fromCharCode(...passive) : "") + exchange.raw;
-    if (exchange.raw.length > 0) anyBytes = true;
-    if (exchange.frame) weightKg = exchange.frame.weightKg;
-  } catch (err) {
-    weightRaw = `error al abrir o leer: ${err instanceof Error ? err.message : String(err)}`;
-  } finally {
-    await closeQuietly(port);
-    cachedPortOpenKey = null;
-  }
+  const record = await runKretzDiscovery(port, portLabel, model, {
+    balanceNumber: options.balanceNumber,
+    frameTimeoutMs: options.frameTimeoutMs,
+    listenMs: options.listenMs,
+    onProgress
+  });
+  cachedPortOpenKey = null;
+  saveDiagnosticRecord(record);
 
-  const base = { portLabel, weightKg, weightRaw, anyBytes };
-  if (weightKg !== null) {
-    return {
-      ...base,
-      verdict: "peso",
-      dataSettings: null,
-      dataResponseHex: "",
-      attempts: 1,
-      message:
-        `✅ El cable, el adaptador y el puerto ANDAN: la balanza mandó el peso (${weightKg.toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg).\n` +
-        `Pero está en modo PESO. Eso sirve para que Mostrador lea el peso (se activa en Mostrador → engranaje → "Peso directo de la balanza").\n` +
-        `Para mandarle precios tiene que estar en modo DATOS: en la balanza, menú COMUNI → MODO = "Datos" (puerto RS-232). Después tocá de nuevo "Probar todo".`
+  let dataSettings: ScaleSerialSettings | null = null;
+  if (record.responder) {
+    dataSettings = {
+      ...getScaleSerialSettings(),
+      baudRate: record.responder.link.baudRate,
+      stopBits: record.responder.link.stopBits,
+      deviceType: record.responder.deviceType,
+      equipmentId: record.responder.equipmentId
     };
+    saveScaleSerialSettings(dataSettings);
   }
-
-  // 2) Modo datos (precios).
-  const previousTimeout = frameTimeoutMs;
-  if (options.frameTimeoutMs) frameTimeoutMs = options.frameTimeoutMs;
-  let detect: ScaleAutoDetectResult;
-  let sawDataBytes = false;
-  try {
-    detect = await autoDetectScaleWith(port, onProgress, (response) => {
-      if (response.length > 0) sawDataBytes = true;
-    });
-  } finally {
-    frameTimeoutMs = previousTimeout;
-  }
-  if (sawDataBytes) anyBytes = true;
-
-  if (detect.found && detect.settings) {
-    return {
-      ...base,
-      anyBytes: true,
-      verdict: "datos",
-      dataSettings: detect.settings,
-      dataResponseHex: detect.rawResponseHex ?? "",
-      attempts: detect.attempts + 1,
-      message:
-        `✅ La balanza contestó en modo DATOS (${detect.settings.baudRate} baudios, ${detect.settings.stopBits} bit(s) de stop, equipo "${detect.settings.deviceType}${detect.settings.equipmentId}"). Ya quedó guardado.\n` +
-        `Ahora tocá "Verificar compatibilidad" (carga y borra un producto de prueba) y, si sale bien, "Enviar todos los productos".`
-    };
-  }
-
-  if (anyBytes) {
-    return {
-      ...base,
-      anyBytes: true,
-      verdict: "bytes",
-      dataSettings: null,
-      dataResponseHex: "",
-      attempts: detect.attempts + 1,
-      message:
-        `⚠️ Desde la balanza llega algo, así que el cable transmite, pero no en un formato que entendamos.\n` +
-        `Revisá en la balanza el menú COMUNI: para precios MODO = "Datos"; para que Mostrador lea el peso MODO = "A pedido de peso". Y que PUERT = RS-232.\n` +
-        `Si ya está así, tocá "Enviar a soporte" (abajo) para que veamos lo que llegó.`
-    };
-  }
-
+  const answered = record.exchanges.find((e) => e.kretz);
   return {
-    ...base,
-    verdict: "nada",
-    dataSettings: null,
-    dataResponseHex: "",
-    attempts: detect.attempts + 1,
-    message:
-      `❌ La balanza no mandó ni un dato, en ninguna configuración (puerto elegido: ${portLabel}). Casi siempre es algo físico:\n` +
-      `1) El puerto: tocá "Elegir el puerto" y elegí el del adaptador USB de la balanza (si no sabés cuál es, desenchufá el adaptador, mirá cuál desaparece de la lista y volvé a enchufarlo).\n` +
-      `2) El cable: tiene que ser DIRECTO (pin 2 con 2, 3 con 3, 5 con 5), macho del lado de la balanza. Los cables "null modem" o "cruzados" NO sirven.\n` +
-      `3) El adaptador USB: en Windows, Administrador de dispositivos → Puertos (COM y LPT): si aparece con un signo amarillo, le falta el driver.\n` +
-      `4) La balanza: encendida y en el menú COMUNI con PUERT = RS-232.\n` +
-      `Una prueba que aísla todo: poné la balanza en COMUNI → MODO = "A pedido de peso" y tocá "Probar todo". Si así contesta el peso, el cable anda y el problema es solo el modo.`
+    verdict: record.verdict,
+    portLabel,
+    weightKg: record.weight.kg,
+    weightRaw: record.weight.raw,
+    dataSettings,
+    dataResponseHex: answered?.rx ?? "",
+    anyBytes: record.anyBytes,
+    attempts: record.exchanges.length + 1,
+    message: diagnosisMessage(record, model.id, portLabel),
+    record
   };
 }
+
+function diagnosisMessage(r: DiagnosticRecord, modelId: string, portLabel: string): string {
+  const isAura = modelId === "aura";
+  if (r.verdict === "peso") {
+    return (
+      `✅ El cable, el adaptador y el puerto ANDAN: la balanza mandó el peso (${(r.weight.kg ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg).\n` +
+      `Está en modo PESO. Para probar la carga de productos, en la balanza: menú COMUNI → MODO = "Datos" (PUERT = RS-232), y tocá de nuevo "Probar todo".`
+    );
+  }
+  if (r.verdict === "datos" && r.responder) {
+    const how = `${r.responder.link.baudRate} baudios, ${r.responder.link.stopBits} bit(s) de stop, equipo "${r.responder.deviceType}${r.responder.equipmentId}"`;
+    const pluRead = r.reads.find((x) => x.command === "5002");
+    if (isAura) {
+      return (
+        `✅ La Aura CONTESTÓ en modo Datos (${how}). Es la primera vez que se comprueba con una Aura real.\n` +
+        `Se leyeron sus datos técnicos y el formato de sus productos${pluRead?.code === "01" ? "" : " (alguna lectura no contestó; está en el detalle)"}, sin escribir nada.\n` +
+        `Tocá "Enviar a soporte" (abajo) para que el equipo de Patagonia OS lo analice. El envío de productos a la Aura sigue bloqueado hasta confirmar el formato.`
+      );
+    }
+    return (
+      `✅ La balanza contestó en modo Datos (${how}). Ya quedó guardado.\n` +
+      `Ahora tocá "Verificar compatibilidad" (carga y borra un producto de prueba) y, si sale bien, se habilita "Enviar todos los productos".`
+    );
+  }
+  if (r.verdict === "bytes") {
+    const echo = r.exchanges.some((e) => e.echo);
+    return (
+      (echo
+        ? `⚠️ Lo que mandamos vuelve igual: el adaptador o el cable están devolviendo nuestra propia señal (puede ser un cable armado mal o con los pines puenteados).\n`
+        : `⚠️ Desde la balanza llega algo, así que el cable transmite, pero no en un formato que entendamos.\n`) +
+      `Revisá en la balanza el menú COMUNI: MODO = "Datos" y PUERT = RS-232. Después tocá "Enviar a soporte" (abajo) para que veamos lo que llegó.`
+    );
+  }
+  return (
+    `❌ La balanza no mandó ni un dato, en ninguna configuración (puerto elegido: ${portLabel}). Casi siempre es algo físico:\n` +
+    `1) El puerto: tocá "Elegir otro puerto" y elegí el del adaptador USB de la balanza (si no sabés cuál es, desenchufá el adaptador, mirá cuál desaparece de la lista y volvé a enchufarlo).\n` +
+    `2) El cable: tiene que ser DIRECTO (pin 2 con 2, 3 con 3, 5 con 5), macho del lado de la balanza. Los cables "null modem", "cruzados" o el cable de PC de otras Kretz NO sirven para la Aura.\n` +
+    `3) El adaptador USB: en Windows, Administrador de dispositivos → Puertos (COM y LPT): si aparece con un signo amarillo, le falta el driver.\n` +
+    `4) La balanza: encendida y en el menú COMUNI con PUERT = RS-232.\n` +
+    `Prueba que aísla el cable: poné la balanza en COMUNI → MODO = "A pedido de peso" y tocá "Probar todo". Si así contesta el peso, el cable anda.`
+  );
+}
+
 
 /** Comando 0001 (test de conexión) -- confirma que el cable y la velocidad
  * andan, antes de mandar un PLU real. */
