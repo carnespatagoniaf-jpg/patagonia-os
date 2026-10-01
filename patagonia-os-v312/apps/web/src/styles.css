@@ -16,24 +16,25 @@ button { cursor: pointer; }
    para que cualquier regla más específica de más abajo la pise. Solo toca
    botones sin clase o con .secondary/.danger: los que tienen su propia clase
    (menú, tickets, etc.) quedan como estaban. */
-button:not([class]), button.secondary, button.danger {
+button:not([class]), button[class=""], button.secondary, button.danger {
   display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   min-height: 38px; padding: 8px 14px; border-radius: 10px;
   font-size: 14px; font-weight: 700; line-height: 1.2;
   transition: background-color .15s, border-color .15s, color .15s;
 }
-button:not([class]) { background: #8b1e1e; color: white; border: 1px solid #8b1e1e; }
-button:not([class]):hover:not(:disabled) { background: #731818; border-color: #731818; }
+button:not([class]), button[class=""] { background: #8b1e1e; color: white; border: 1px solid #8b1e1e; }
+button:not([class]):hover:not(:disabled), button[class=""]:hover:not(:disabled) { background: #731818; border-color: #731818; }
 button.secondary:hover:not(:disabled) { background: #f6f7f9; border-color: #c3cad5; color: #18202b; }
 button.danger:hover:not(:disabled) { background: #fdf3f2; }
 
-input:not([class]):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="color"]),
-select:not([class]), textarea:not([class]) {
+/* input.num: los campos de número de las filas que se editan en Stock. */
+:is(input:not([class]), input[class=""], input.num):not([type="checkbox"]):not([type="radio"]):not([type="file"]):not([type="range"]):not([type="color"]),
+select:not([class]), select[class=""], textarea:not([class]), textarea[class=""] {
   min-height: 38px; padding: 8px 11px; border: 1px solid #d6dce5; border-radius: 10px;
   background: white; color: #18202b; font-size: 14px;
 }
 textarea:not([class]) { line-height: 1.4; }
-input:not([class]):focus, select:not([class]):focus, textarea:not([class]):focus {
+:is(input:not([class]), input[class=""], input.num, select:not([class]), select[class=""], textarea:not([class]), textarea[class=""]):focus {
   outline: none; border-color: #8b1e1e; box-shadow: 0 0 0 3px rgba(139, 30, 30, .15);
 }
 input:not([class]):disabled, select:not([class]):disabled, textarea:not([class]):disabled { background: #f4f5f7; color: #8b95a5; }
