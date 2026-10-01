@@ -106,9 +106,26 @@ async function collect(port: SerialPort, ms: number, untilEot: boolean): Promise
   return got;
 }
 
+/** Abre el puerto; si Windows lo tiene ocupado un momento (otra pestaña, Mostrador leyendo el peso,
+ * otro programa), espera y reintenta: con la Aura real pasó que los primeros segundos fallaba
+ * ("Failed to open serial port") y se perdían justo las pruebas importantes (2026-10-01). */
+async function openWithRetry(port: SerialPort, options: SerialOptions, tries = 4, waitMs = 1000): Promise<void> {
+  let last: unknown;
+  for (let i = 0; i < tries; i++) {
+    await closeQuietly(port);
+    try {
+      await port.open(options);
+      return;
+    } catch (err) {
+      last = err;
+      await new Promise((r) => setTimeout(r, waitMs));
+    }
+  }
+  throw last instanceof Error ? last : new Error(String(last));
+}
+
 async function openLink(port: SerialPort, link: SerialLink) {
-  await closeQuietly(port);
-  await port.open({ baudRate: link.baudRate, dataBits: 8, stopBits: link.stopBits, parity: "none" });
+  await openWithRetry(port, { baudRate: link.baudRate, dataBits: 8, stopBits: link.stopBits, parity: "none" });
 }
 
 async function sendRead(
@@ -179,7 +196,7 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
     // 1) Modo peso (9600, 2 bits de stop, según el manual de la Aura): escucha y pide "W".
     progress("Probando si la balanza manda el peso…");
     try {
-      await port.open(WEIGHT_PORT_OPTIONS);
+      await openWithRetry(port, WEIGHT_PORT_OPTIONS);
       const passive = await collect(port, options.listenMs ?? 1200, false);
       const exchange = await exchangeWeightFrame(port);
       record.weight = { kg: exchange.frame?.weightKg ?? null, raw: toPrintable(passive) + exchange.raw, passiveBytes: passive.length };
