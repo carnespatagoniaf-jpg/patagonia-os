@@ -54,7 +54,26 @@ export interface DiagnosticRecord {
   exchanges: DiagnosticExchange[];
   verdict: DiscoveryVerdict;
   anyBytes: boolean;
+  /** Versión de esta prueba (para saber qué código corrió en la PC del cliente). */
+  codeVersion?: string;
+  /** Cada intento de abrir el puerto, con el error exacto de Windows/Chrome si falló. */
+  openLog?: OpenAttempt[];
 }
+
+export interface OpenAttempt {
+  at: string;
+  settings: string;
+  try: number;
+  ok: boolean;
+  error?: string;
+  /** Estado del puerto ANTES de intentar (si quedaba algo abierto). */
+  before: string;
+}
+
+export const DISCOVERY_VERSION = "2026-10-01e";
+
+/** Se llena en cada apertura; runKretzDiscovery y scanAllPlus lo guardan en su registro. */
+let openLog: OpenAttempt[] = [];
 
 export interface DiscoveryOptions {
   /** Número de balanza (Aura: menú DATOS → n_bal). Se usa como ID de equipo. */
@@ -113,14 +132,18 @@ async function openWithRetry(port: SerialPort, options: SerialOptions, tries = 4
   let last: unknown;
   for (let i = 0; i < tries; i++) {
     const wasOpen = Boolean(port.readable || port.writable);
+    const before = `readable=${port.readable ? (port.readable.locked ? "bloqueado" : "sí") : "no"} writable=${port.writable ? (port.writable.locked ? "bloqueado" : "sí") : "no"}`;
+    const settings = `${options.baudRate}/${options.dataBits ?? 8}/${options.parity ?? "none"}/${options.stopBits ?? 1}`;
     await closeQuietly(port);
     // Algunos adaptadores (CH340) fallan si se reabre enseguida de cerrar.
     if (wasOpen || i > 0) await new Promise((r) => setTimeout(r, 400));
     try {
       await port.open(options);
+      openLog.push({ at: new Date().toISOString(), settings, try: i + 1, ok: true, before });
       return;
     } catch (err) {
       last = err;
+      openLog.push({ at: new Date().toISOString(), settings, try: i + 1, ok: false, error: err instanceof Error ? `${err.name}: ${err.message}` : String(err), before });
       await new Promise((r) => setTimeout(r, waitMs));
     }
   }
@@ -192,8 +215,11 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
     reads: [],
     exchanges: [],
     verdict: "nada",
-    anyBytes: false
+    anyBytes: false,
+    codeVersion: DISCOVERY_VERSION,
+    openLog: []
   };
+  openLog = record.openLog!;
 
   try {
     // 1) Modo peso (9600, 2 bits de stop, según el manual de la Aura): escucha y pide "W".
@@ -297,6 +323,8 @@ export interface PluScan {
   lastDetail: string;
   /** Los primeros intercambios, byte por byte, para soporte. */
   sample: DiagnosticExchange[];
+  codeVersion?: string;
+  openLog?: OpenAttempt[];
 }
 
 /**
@@ -323,8 +351,11 @@ export async function scanAllPlus(
     stoppedBy: "fin",
     lastCode: null,
     lastDetail: "",
-    sample: []
+    sample: [],
+    codeVersion: DISCOVERY_VERSION,
+    openLog: []
   };
+  openLog = scan.openLog!;
   try {
     try {
       await openLink(port, responder.link);
