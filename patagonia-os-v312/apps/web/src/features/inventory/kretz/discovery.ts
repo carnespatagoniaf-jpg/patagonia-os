@@ -112,7 +112,10 @@ async function collect(port: SerialPort, ms: number, untilEot: boolean): Promise
 async function openWithRetry(port: SerialPort, options: SerialOptions, tries = 4, waitMs = 1000): Promise<void> {
   let last: unknown;
   for (let i = 0; i < tries; i++) {
+    const wasOpen = Boolean(port.readable || port.writable);
     await closeQuietly(port);
+    // Algunos adaptadores (CH340) fallan si se reabre enseguida de cerrar.
+    if (wasOpen || i > 0) await new Promise((r) => setTimeout(r, 400));
     try {
       await port.open(options);
       return;
