@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { AURA_FIRST_TEST_READBACK, AURA_TEST_RECORDS, assertTestWrite, runAuraWriteTest } from "./aura-write-test";
+import { AURA_FIRST_TEST_READBACK, AURA_TEST_RECORDS, assertTestDelete, assertTestWrite, runAuraWriteTest } from "./aura-write-test";
 import { kretzChecksum } from "./kretz-frame";
 
 const REAL_SIX = [
@@ -25,6 +25,10 @@ class MemoryAura {
   rejectWrites = false;
   /** Imita lo que hizo la Aura real con el PLU 99: pone el código en 0. */
   zeroCode = false;
+  /** 3005: "exacto" borra ese PLU; "siguiente" borra el siguiente mayor (como 5005). */
+  deleteMode: "exacto" | "siguiente" = "exacto";
+  /** Para simular un desastre: al cargar este PLU, también cambia un producto de la clienta. */
+  corruptOnWrite: number | null = null;
   constructor(public plus: string[]) {}
   async open() {
     let controller!: ReadableStreamDefaultController<Uint8Array>;
@@ -48,6 +52,14 @@ class MemoryAura {
             self.plus = self.plus.filter((r) => r.slice(0, 6) !== data.slice(0, 6)).concat(stored);
             out = reply("02", "01");
           }
+          if (self.corruptOnWrite !== null && Number(data.slice(0, 6)) === self.corruptOnWrite) {
+            self.plus = self.plus.map((r) => (r.startsWith("000001") ? r.replace("FRUTILLA", "FRUTILLX") : r));
+          }
+        } else if (command === "3005") {
+          const sorted = [...self.plus].sort();
+          const target = self.deleteMode === "exacto" ? sorted.find((r) => Number(r.slice(0, 6)) === Number(data)) : sorted.find((r) => Number(r.slice(0, 6)) > Number(data));
+          self.plus = self.plus.filter((r) => r !== target);
+          out = reply("03", target ? "01" : "20");
         } else out = reply("00", "02");
         setTimeout(() => controller.enqueue(out), 2);
       }
@@ -66,11 +78,14 @@ describe("prueba de escritura de la Aura (solo PLU 96 a 99)", () => {
     const aura = new MemoryAura([...REAL_SIX, AURA_FIRST_TEST_READBACK]);
     const r = await runAuraWriteTest(aura as unknown as SerialPort, responder, { timeoutMs: 50 });
     assert.equal(r.verdict, "ok", r.detail);
-    assert.deepEqual(r.items.map((it) => it.plu), [98, 97, 96, 99]);
+    assert.deepEqual(r.items.map((it) => it.plu), [97, 98, 96, 99]);
     assert.ok(r.items.every((it) => it.readBack === it.sent));
     assert.deepEqual(r.after.filter((x) => x.plu < 90).map((x) => x.data), REAL_SIX);
     assert.equal(aura.commands.filter((c) => c === "2005").length, 4);
-    assert.ok(aura.commands.every((c) => ["0001", "5005", "2005"].includes(c)), aura.commands.join(","));
+    assert.equal(aura.commands.filter((c) => c === "3005").length, 1);
+    assert.ok(aura.commands.every((c) => ["0001", "5005", "2005", "3005"].includes(c)), aura.commands.join(","));
+    assert.deepEqual(r.deleteTest, { sent: "000096", code: "01", removedPlus: [96], clientIntact: true });
+    assert.match(r.detail, /sacó el PLU 96/);
     assert.equal(aura.readable, null, "el puerto queda cerrado");
   });
 
@@ -127,10 +142,36 @@ describe("prueba de escritura de la Aura (solo PLU 96 a 99)", () => {
     assert.deepEqual(r.after.map((x) => x.data), REAL_SIX);
   });
 
+  it("si 3005 funciona como 'el siguiente mayor', borra el 97 (también de prueba) y lo informa; los de la clienta quedan igual", async () => {
+    const aura = new MemoryAura([...REAL_SIX]);
+    aura.deleteMode = "siguiente";
+    const r = await runAuraWriteTest(aura as unknown as SerialPort, responder, { timeoutMs: 50 });
+    assert.equal(r.verdict, "ok");
+    assert.deepEqual(r.deleteTest?.removedPlus, [97]);
+    assert.ok(r.after.some((x) => x.plu === 98) && r.after.some((x) => x.plu === 99), "los de los tickets siguen");
+    assert.deepEqual(r.after.filter((x) => x.plu < 90).map((x) => x.data), REAL_SIX);
+  });
+
+  it("si al cargar un producto de prueba cambia uno de la clienta, frena ahí: no carga los siguientes ni prueba el borrado", async () => {
+    const aura = new MemoryAura([...REAL_SIX]);
+    aura.corruptOnWrite = 97; // el primero que se carga
+    const r = await runAuraWriteTest(aura as unknown as SerialPort, responder, { timeoutMs: 50 });
+    assert.equal(r.verdict, "otros_cambiaron");
+    assert.equal(aura.commands.filter((c) => c === "2005").length, 1);
+    assert.ok(!aura.commands.includes("3005"));
+  });
+
+  it("el borrado solo se permite con el argumento de prueba y si la clienta no tiene PLU de 96 o más", () => {
+    assert.doesNotThrow(() => assertTestDelete("3005", "000096", [1, 2, 3, 6, 8, 11]));
+    assert.throws(() => assertTestDelete("3005", "000001", [1, 2, 3]), /Bloqueado/);
+    assert.throws(() => assertTestDelete("3005", "000096", [1, 120]), /Bloqueado/);
+    assert.throws(() => assertTestDelete("2005", "000096", [1]), /Bloqueado/);
+  });
+
   it("el candado no deja escribir otra cosa", () => {
     for (const real of REAL_SIX) assert.throws(() => assertTestWrite("2005", real), /Bloqueado/);
     assert.throws(() => assertTestWrite("3005", AURA_TEST_RECORDS[0]), /Bloqueado/);
     for (const rec of AURA_TEST_RECORDS) assert.doesNotThrow(() => assertTestWrite("2005", rec));
-    assert.deepEqual(AURA_TEST_RECORDS.map((r) => Number(r.slice(0, 6))), [98, 97, 96, 99]);
+    assert.deepEqual(AURA_TEST_RECORDS.map((r) => Number(r.slice(0, 6))), [97, 98, 96, 99]);
   });
 });
