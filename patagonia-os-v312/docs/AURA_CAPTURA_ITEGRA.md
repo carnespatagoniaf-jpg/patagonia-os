@@ -59,3 +59,40 @@ Con eso se programa en Patagonia el mismo formato y se prueba primero en el simu
 - **PC del dueño:** iTegra es un programa Java con su propio Java incluido, y puede traer una base de datos local. El paso 2 lista lo que instala antes de decidir. No hay que aceptar instalar drivers USB si los ofrece (no hacen falta para TCP).
 - **Red:** la Aura de mentira escucha solo en 127.0.0.1. Nada sale de la PC.
 - **Datos:** iTegra crea su propia base de datos de productos de prueba. No toca Patagonia.
+
+## Análisis estático de iTegra 4-148 (2026-10-03, sin ejecutar ni instalar)
+
+**Descarga.** `iTegra_setup_4-148.exe` desde la carpeta "iTegra para Windows" enlazada en kretz.com.ar/software.
+
+- Tamaño: 500.450.686 bytes.
+- SHA-256: `26DFC99B400F4290AF11D31972691F9366910EA1FF74D4F5A2E930CF627DC881`.
+- **Sin firma digital**, igual que JDataGate 2.30.
+
+**Qué trae** (es un instalador InstallAnywhere/Flexera; se abre como zip):
+
+- `iTegra.jar` (92 MB, Java 5) y bibliotecas (`Packages/`), y un **Java propio, viejo, de 32 bits**.
+- **Base de datos local HSQLDB.** `info.cx` → `jdbc:hsqldb:hsql://127.0.0.1:9001/dbTest`, `arrancarBase:si`: al abrirse, levanta un servidor de base de datos que escucha solo en esta PC, en el puerto 9001.
+- **Instaladores de drivers USB incluidos:**
+  - FTDI `CDM20814_Setup.exe`;
+  - NXP `LPCXpresso_Link2_USB_driver_package.exe`;
+  - `nxpUSBlibVirtualSerial.inf` / `lpc-vcom.inf`;
+  - `devcon` (herramienta de Microsoft para instalar dispositivos).
+  No se puede saber sin ejecutarlo si el instalador los corre solo.
+- `ServicioWin_zg_ia_sf.jar`: componente de **servicio de Windows**.
+- Bandeja del sistema (`tray.dll`, `jdic.dll`).
+- Su propio JDataGate (`DataGate.jar`, 2026-07-22) y un `INFO/6020_Protocolo.pdf`.
+
+**Dónde está la estructura del producto de la Aura:**
+
+- `CONF.JDG` y `Datos/info.xml` (modelos de datos) **solo traen el modelo "4000LCD" (Report NX LCD)**, no la Aura.
+- La base inicial (`Datos.script`, tabla MODELOS) también trae solo `4000LCD`.
+- La lógica de la Aura está **compilada** (paquete `AuraBackup`: `PLU`, `Configuracion`, `TDR`). No se abrió: abrirla sería descompilar.
+- **Conclusión:** la estructura solo se ve **capturando** lo que iTegra manda.
+
+**Opción recomendada: iTegra PORTÁTIL** (`scripts/preparar-itegra-portable.sh`). Copia los archivos y el Java incluido a una carpeta y deja afuera los instaladores de drivers.
+
+- No pasa por el instalador: no hay drivers, servicio ni registro de Windows.
+- Se abre con `iTegra.bat` (`..\..\jreK\bin\java -jar iTegra.jar`) solo con autorización.
+- Al abrirse levanta su base de datos en 127.0.0.1:9001. Para borrarlo, se borra la carpeta.
+
+**Espacio en disco:** el 2026-10-03 el disco C: de la PC del dueño se llenó (0 bytes libres) durante el análisis. Se borraron todas las descargas, y quedaron 2 GB libres. La preparación portátil necesita unos 1,6 GB durante el proceso y deja unos 650 MB. **Conviene liberar espacio antes.**
