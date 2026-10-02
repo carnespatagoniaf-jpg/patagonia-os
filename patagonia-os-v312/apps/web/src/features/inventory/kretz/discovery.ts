@@ -1,6 +1,7 @@
 import { exchangeWeightFrame, WEIGHT_PORT_OPTIONS } from "../../sale/scale-weight-protocol";
 import { buildKretzFrame, describeKretzCode, parseKretzResponse, toHex, toPrintable, type KretzResponse } from "./kretz-frame";
 import type { KretzModel, SerialLink } from "./models";
+import { claimPort, closeQuietly, errorClassification, freshPortFor, newSession, openForSession, releasePort, type OpenAttempt, type PortSession } from "./port-session";
 import { askOtherTabs, type TabAnswer } from "./serial-tabs";
 
 /**
@@ -82,20 +83,16 @@ export interface DiagnosticRecord {
   otherTabs?: TabAnswer[];
 }
 
-export interface OpenAttempt {
-  at: string;
-  settings: string;
-  try: number;
-  ok: boolean;
-  error?: string;
-  /** Estado del puerto ANTES de intentar (si quedaba algo abierto). */
-  before: string;
-}
+export type { OpenAttempt };
 
-export const DISCOVERY_VERSION = "2026-10-02a";
+export const DISCOVERY_VERSION = "2026-10-02b";
 
-/** Se llena en cada apertura; runKretzDiscovery y scanAllPlus lo guardan en su registro. */
-let openLog: OpenAttempt[] = [];
+/** Aperturas de la prueba en curso (presupuesto + registro); runKretzDiscovery y scanAllPlus arman una nueva. */
+let session: PortSession = newSession();
+
+/** Máximo de aperturas del puerto por prueba. Antes no había tope (hasta 700 en 5 minutos). */
+export const DISCOVERY_OPEN_BUDGET = 12;
+export const SCAN_OPEN_BUDGET = 4;
 
 export interface DiscoveryOptions {
   /** Número de balanza (Aura: menú DATOS → n_bal). Se usa como ID de equipo. */
@@ -113,14 +110,6 @@ export interface DiscoveryOptions {
 }
 
 const linkLabel = (l: SerialLink) => `${l.baudRate} baudios, ${l.stopBits} bit(s) de stop`;
-
-async function closeQuietly(port: SerialPort) {
-  try {
-    if (port.readable || port.writable) await port.close();
-  } catch {
-    // ya cerrado
-  }
-}
 
 /** Lee lo que llegue hasta `ms` (o hasta EOT si `untilEot`). Una sola lectura pendiente a la vez. */
 async function collect(port: SerialPort, ms: number, untilEot: boolean): Promise<number[]> {
@@ -153,57 +142,20 @@ async function collect(port: SerialPort, ms: number, untilEot: boolean): Promise
   return got;
 }
 
-/** Abre el puerto; si Windows lo tiene ocupado un momento (otra pestaña, Mostrador leyendo el peso,
- * otro programa), espera y reintenta: con la Aura real pasó que los primeros segundos fallaba
- * ("Failed to open serial port") y se perdían justo las pruebas importantes (2026-10-01). */
-async function openWithRetry(port: SerialPort, options: SerialOptions, tries = 4, waitMs = 1000): Promise<void> {
-  let last: unknown;
-  for (let i = 0; i < tries; i++) {
-    const wasOpen = Boolean(port.readable || port.writable);
-    const before = `readable=${port.readable ? (port.readable.locked ? "bloqueado" : "sí") : "no"} writable=${port.writable ? (port.writable.locked ? "bloqueado" : "sí") : "no"}`;
-    const settings = `${options.baudRate}/${options.dataBits ?? 8}/${options.parity ?? "none"}/${options.stopBits ?? 1}`;
-    await closeQuietly(port);
-    // Algunos adaptadores (CH340) fallan si se reabre enseguida de cerrar.
-    if (wasOpen || i > 0) await new Promise((r) => setTimeout(r, 400));
-    try {
-      await port.open(options);
-      openLog.push({ at: new Date().toISOString(), settings, try: i + 1, ok: true, before });
-      return;
-    } catch (err) {
-      last = err;
-      openLog.push({ at: new Date().toISOString(), settings, try: i + 1, ok: false, error: err instanceof Error ? `${err.name}: ${err.message}` : String(err), before });
-      // Caso real (Aura de un cliente, adaptador CH340, 2026-10-01): Windows rechazaba
-      // abrir en 9600 una y otra vez, pero abría en 115200 o 4800, y justo después de
-      // abrir en 4800 la 9600 sí abrió. Entonces: abrir un instante en otra velocidad,
-      // cerrar y volver a intentar. No se manda nada a la balanza en esa apertura.
-      await primePort(port, options);
-      await new Promise((r) => setTimeout(r, waitMs));
-    }
-  }
-  throw last instanceof Error ? last : new Error(String(last));
-}
-
-const PRIME_RATES = [4800, 115200];
-
-async function primePort(port: SerialPort, target: SerialOptions): Promise<void> {
-  for (const baudRate of PRIME_RATES) {
-    if (baudRate === target.baudRate) continue;
-    const settings = `${baudRate}/8/none/1 (destrabar)`;
-    try {
-      await port.open({ baudRate, dataBits: 8, stopBits: 1, parity: "none" });
-      openLog.push({ at: new Date().toISOString(), settings, try: 0, ok: true, before: "cerrado" });
-      await new Promise((r) => setTimeout(r, 150));
-      await closeQuietly(port);
-      await new Promise((r) => setTimeout(r, 300));
-      return;
-    } catch (err) {
-      openLog.push({ at: new Date().toISOString(), settings, try: 0, ok: false, error: err instanceof Error ? `${err.name}: ${err.message}` : String(err), before: "cerrado" });
-    }
-  }
+/** Abre con el presupuesto de la prueba en curso (ver port-session.ts). */
+function openWithRetry(port: SerialPort, options: SerialOptions, tries = 2, waitMs = 1000): Promise<void> {
+  return openForSession(port, options, session, tries, waitMs);
 }
 
 async function openLink(port: SerialPort, link: SerialLink) {
   await openWithRetry(port, { baudRate: link.baudRate, dataBits: 8, stopBits: link.stopBits, parity: "none" });
+}
+
+/** Texto para la persona según el tipo de error de apertura. */
+function openFailureText(err: unknown): string {
+  const c = errorClassification(err) ?? session.lastError;
+  const raw = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  return c ? `${c.explanation} (${raw})` : raw;
 }
 
 async function sendRead(
@@ -253,7 +205,7 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
   const progress = options.onProgress ?? (() => {});
   const stop = options.shouldStop ?? (() => false);
   const timeout = options.frameTimeoutMs ?? 500;
-  const tries = options.openTries ?? 4;
+  const tries = options.openTries ?? 2;
   const balanceNumber = (options.balanceNumber ?? "").replace(/\D/g, "").slice(-2) || "1";
   const id = balanceNumber.padStart(2, "0");
   const stages: Record<StageId, Stage> = {
@@ -281,10 +233,22 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
     portsSeen: options.portsSeen ?? [],
     otherTabs: []
   };
-  openLog = record.openLog!;
   const finishStages = () => {
     record.stages = (Object.keys(STAGE_LABELS) as StageId[]).map((k) => stages[k]);
   };
+
+  // Una sola prueba por puerto a la vez: otra en curso NO vuelve a abrir el puerto
+  // (ni lo cierra al terminar, porque lo está usando la primera).
+  if (!claimPort(port)) {
+    stages.dispositivo = { id: "dispositivo", status: "ok", detail: `puerto elegido: ${portLabel}` };
+    stages.abrir = { id: "abrir", status: "falla", detail: "ya hay una prueba en curso con esta balanza en esta pestaña: no se abre el puerto dos veces" };
+    record.verdict = "puerto";
+    finishStages();
+    record.finishedAt = new Date().toISOString();
+    return record;
+  }
+  const claimed = port;
+  session = newSession(DISCOVERY_OPEN_BUDGET, record.openLog);
 
   // Lleva la cuenta de qué etapas se alcanzaron en cada intercambio.
   const noteExchange = (ex: DiagnosticExchange) => {
@@ -304,10 +268,14 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
 
   try {
     // Etapa 1: el aparato. Quien llama ya eligió el puerto; acá queda anotado qué ve Chrome.
+    // Si el adaptador se desenchufó y volvió, el objeto viejo ya no sirve: se toma el nuevo.
+    const fresh = await freshPortFor(port);
+    const replaced = fresh !== port;
+    port = fresh;
     stages.dispositivo = {
       id: "dispositivo",
       status: "ok",
-      detail: `puerto elegido: ${portLabel}. Autorizados en este Chrome: ${record.portsSeen!.length ? record.portsSeen!.join(" | ") : "?"}`
+      detail: `puerto elegido: ${portLabel}${replaced ? " (se había reconectado: se usó el puerto nuevo)" : ""}. Autorizados en este Chrome: ${record.portsSeen!.length ? record.portsSeen!.join(" | ") : "?"}`
     };
 
     // Otras pestañas de Patagonia que tengan el puerto tomado: pedirles que lo suelten.
@@ -323,10 +291,12 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
       await openWithRetry(port, { baudRate: primary.baudRate, dataBits: 8, stopBits: primary.stopBits, parity: "none" }, tries);
       stages.abrir = { id: "abrir", status: "ok", detail: `abrió en ${linkLabel(primary)}` };
     } catch (err) {
-      const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      const msg = openFailureText(err);
+      const kind = errorClassification(err)?.kind;
       // ¿Abre en alguna otra velocidad? Distingue "puerto tomado del todo" de "adaptador trabado en una velocidad".
+      // Solo tiene sentido si Windows lo rechazó (desconectado o sin permiso: no abre en ninguna).
       let opensElsewhere = "";
-      for (const link of model.links.slice(1)) {
+      for (const link of kind === "windows_rechazo" ? model.links.slice(1, 3) : []) {
         try {
           await openWithRetry(port, { baudRate: link.baudRate, dataBits: 8, stopBits: link.stopBits, parity: "none" }, 1, 200);
           opensElsewhere = linkLabel(link);
@@ -339,9 +309,12 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
       stages.abrir = {
         id: "abrir",
         status: "falla",
-        detail: opensElsewhere
-          ? `Windows no deja abrir en ${linkLabel(primary)} (${msg}), pero sí en ${opensElsewhere}: el adaptador USB quedó trabado.`
-          : `Windows no deja abrir el puerto en ninguna velocidad (${msg}): lo tiene tomado otra pestaña, otra ventana de Chrome u otro programa, o el adaptador quedó trabado.`
+        detail:
+          kind !== "windows_rechazo"
+            ? `no se pudo abrir el puerto: ${msg}`
+            : opensElsewhere
+              ? `Windows no deja abrir en ${linkLabel(primary)}, pero sí en ${opensElsewhere}: el adaptador USB quedó trabado. ${msg}`
+              : `Windows no deja abrir el puerto en ninguna velocidad: ${msg}.`
       };
       record.verdict = "puerto";
       return record;
@@ -452,6 +425,7 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
   } finally {
     finishStages();
     await closeQuietly(port);
+    releasePort(claimed);
     record.finishedAt = new Date().toISOString();
   }
 }
@@ -511,13 +485,21 @@ export async function scanAllPlus(
     codeVersion: DISCOVERY_VERSION,
     openLog: []
   };
-  openLog = scan.openLog!;
+  if (!claimPort(port)) {
+    scan.stoppedBy = "error";
+    scan.lastDetail = "ya hay una prueba en curso con esta balanza en esta pestaña";
+    scan.finishedAt = new Date().toISOString();
+    return scan;
+  }
+  const claimed = port;
+  session = newSession(SCAN_OPEN_BUDGET, scan.openLog);
   try {
+    port = await freshPortFor(port);
     try {
       await openLink(port, responder.link);
     } catch (err) {
       scan.stoppedBy = "error";
-      scan.lastDetail = `no se pudo abrir el puerto: está ocupado por otra pestaña de Patagonia OS u otro programa (iTegra, etc.). Cerralos, desenchufá y volvé a enchufar el USB, y probá de nuevo. (${err instanceof Error ? err.message : String(err)})`;
+      scan.lastDetail = `no se pudo abrir el puerto: ${openFailureText(err)}`;
       return scan;
     }
     // Primero el test de conexión, como en "Probar todo" (con la Aura real, la
@@ -567,6 +549,7 @@ export async function scanAllPlus(
     scan.lastDetail = err instanceof Error ? err.message : String(err);
   } finally {
     await closeQuietly(port);
+    releasePort(claimed);
     scan.sample = log;
     scan.finishedAt = new Date().toISOString();
   }

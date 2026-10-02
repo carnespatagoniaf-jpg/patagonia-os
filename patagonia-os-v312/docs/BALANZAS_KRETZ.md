@@ -162,3 +162,32 @@ Registro real (`scale_support_reports`, con el error exacto de cada apertura des
 - La Report LT queda igual. El paso de verificación previa al envío masivo es solo para modelos que no son la Report LT.
 
 **No verificable desde el código:** qué proceso tiene tomado el puerto, si es otro perfil de Chrome o un programa. BroadcastChannel no llega a otros perfiles ni a otros programas.
+
+### Segunda revisión (2026-10-02, versión de prueba `2026-10-02b`)
+
+**Los 700 intentos los generó nuestra propia prueba.** No hubo un bucle de reconexión de fondo. Cada corrida de "Probar todo" reintentaba así:
+
+- 4 intentos por velocidad.
+- Una ronda de "destrabar" (abrir en 4800/115200) después de CADA falla.
+- Un barrido de unas 58 combinaciones.
+
+Los horarios de los 700 caen todos entre el inicio y el fin de cada corrida. No hay ningún código que reabra la balanza solo: la reconexión automática de la pantalla Balanzas solo corre si esa pantalla oculta está abierta. Las aperturas que fallan no dejan el puerto tomado.
+
+**Qué se corrigió:**
+
+- `kretz/port-session.ts` es el único camino de apertura de "Probar todo" y de la lectura de productos.
+  - **Presupuesto:** como mucho 12 aperturas por prueba y 4 por lectura.
+  - **Reintentos:** 2 intentos por velocidad.
+  - **"Destrabar":** UNA sola vez por prueba.
+  - **Una prueba por puerto a la vez:** la segunda se rechaza sin tocar el puerto.
+  - **Puerto reconectado:** si el adaptador se desenchufó y volvió, se toma el puerto nuevo (por USB vendor:product).
+  - **Error clasificado:** `InvalidStateError` = abierto en esta pestaña (se cierra y se abre). `NetworkError` = Windows lo rechazó. `NotFoundError` o `connected=false` = desconectado, y no se reintenta. `SecurityError` = sin permiso.
+- `sale/scale-weight.ts` (peso en Mostrador, Aura) cierra el puerto a los 10 s sin uso. Antes lo dejaba abierto todo el día, y eso bloqueaba a cualquier otra pestaña o programa.
+- La Report LT (`scale-serial.ts`: `ensureOpen` y el envío) NO se tocó.
+
+**Evidencia sobre Windows y el adaptador (de los registros reales):**
+
+- **10-01 a las 16:13:** el mismo puerto abrió en 115200 y en 4800 pero NO en 9600, y abrió en 9600 justo después de 4800. Un bloqueo de otro proceso no depende de la velocidad, así que en ese momento el problema era el adaptador o su driver (chip CH340) rechazando la configuración.
+- **10-02:** no abrió en NINGUNA velocidad, ni recargando la página, y el estado previo era siempre "cerrado" en nuestra pestaña. Eso encaja con otro proceso que lo tiene tomado (otra ventana o perfil de Chrome, o un programa) o con un adaptador o driver trabado.
+- Web Serial no da el código de Windows. El detalle queda en `chrome://device-log` de esa PC.
+- Desenchufar y volver a enchufar el USB reinicia el driver y suelta cualquier proceso que lo tenga, así que resuelve los dos casos.

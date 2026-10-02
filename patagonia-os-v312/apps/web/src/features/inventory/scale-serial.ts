@@ -556,6 +556,17 @@ function diagnosisVerdictMessage(r: DiagnosticRecord, modelId: string, portLabel
     const tabsLine = holding.length
       ? `Había ${holding.length} pestaña(s) de Patagonia con la balanza tomada (${holding.map((t) => t.page).join(", ")}); se les pidió soltarla${holding.some((t) => t.busy > 0) ? ", pero alguna la estaba usando" : ""}.`
       : "Ninguna otra pestaña de Patagonia de este Chrome la tenía tomada.";
+    // El tipo de error que dio Chrome (ver kretz/port-session.ts): cada uno tiene otra solución.
+    const kind = [...(r.openLog ?? [])].reverse().find((o) => !o.ok && o.kind && o.kind !== "presupuesto")?.kind;
+    if (r.stages?.[1]?.detail.startsWith("ya hay una prueba en curso")) {
+      return "⏳ Ya hay una prueba corriendo con esta balanza. Esperá a que termine (dice \"Listo\").";
+    }
+    if (kind === "desconectado") {
+      return `❌ El adaptador USB de la balanza no está conectado a la computadora (puerto elegido: ${portLabel}). Enchufalo, esperá 5 segundos y tocá "Probar todo".`;
+    }
+    if (kind === "sin_permiso") {
+      return `❌ Chrome no dio permiso para usar el puerto. Tocá "Elegir otro puerto", elegí el de la balanza y tocá "Conectar".`;
+    }
     return (
       `❌ Windows no deja abrir el puerto de la balanza (puerto elegido: ${portLabel}). La balanza no llegó a recibir nada: el problema está en la computadora, antes de la balanza.
 ` +

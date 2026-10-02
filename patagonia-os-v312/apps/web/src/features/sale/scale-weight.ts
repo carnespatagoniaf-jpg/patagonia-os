@@ -135,9 +135,41 @@ async function readOnce(port: SerialPort): Promise<ScaleReading> {
   throw weightReadError(raw);
 }
 
+/** Después de leer, el puerto se cierra solo a los pocos segundos sin uso.
+ * Antes quedaba abierto todo el día: mientras Mostrador estaba abierto en
+ * una pestaña, ninguna otra pestaña ni programa podía abrir esa balanza
+ * (Windows contesta "Failed to open serial port"). Caso real: Aura de una
+ * clienta, 2026-10-01/02. Reabrir para la próxima pesada tarda milisegundos. */
+let idleCloseMs = 10_000;
+let idleTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Solo para tests. */
+export function setWeightIdleCloseMs(ms: number): void {
+  idleCloseMs = ms;
+}
+
+function scheduleIdleClose(): void {
+  if (idleTimer) clearTimeout(idleTimer);
+  idleTimer = setTimeout(() => {
+    idleTimer = null;
+    void closePort();
+  }, idleCloseMs);
+  (idleTimer as { unref?: () => void }).unref?.();
+}
+
 /** Lee el peso actual de la balanza. Reintenta una vez reabriendo el puerto (un error de cable/adaptador rompe el stream hasta reabrir). */
 export async function readScaleWeight(): Promise<ScaleReading> {
   if (!isWeightScaleSupported()) throw new Error("Este navegador no soporta la conexión por cable. Usá Chrome o Edge.");
+  if (idleTimer) clearTimeout(idleTimer); // que no se cierre en medio de esta lectura
+  idleTimer = null;
+  try {
+    return await readScaleWeightNow();
+  } finally {
+    scheduleIdleClose();
+  }
+}
+
+async function readScaleWeightNow(): Promise<ScaleReading> {
   const port = await getPort();
   try {
     return await readOnce(port);

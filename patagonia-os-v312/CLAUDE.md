@@ -135,6 +135,14 @@ Manual pages 42–45 were re-read: the Datos mode is documented only for iTegra/
 - `kretz-frame.ts`: frame, checksum and the response-code table from the public Report Nx doc. Tested with the doc's checksum example and a real Report LT reply; `scale-serial.ts` now reuses it. The old response-code table was shifted and had no source; only "01" drives logic.
 - `models.ts`: Report LT / Aura / Otra Kretz, each with links, letters and facts. `canWritePlu` is true ONLY when `plu.evidence === "real"`, which today means Report LT only.
 - `discovery.ts`: `runKretzDiscovery` is READ-ONLY. `assertReadOnly` allows only 0001/0002/1500-1999/5000-5999. It does a weight probe, then sweeps 0001 across links × letters × the n_bal ID, then reads 0002/1500/5002 "05"/5005. Every byte is stored in a `DiagnosticRecord` (localStorage `patagonia-scale-diagnostic-last`) that is sent with "Enviar a soporte".
+- `port-session.ts` (2026-10-02) is the ONLY way discovery and the PLU scan open the port.
+  - Open budget: at most 12 opens per discovery and 4 per scan. Before this, our own retries hit 700 opens in 5 minutes at the client.
+  - "Destrabar" runs once per run.
+  - One run per port at a time (`claimPort`).
+  - Stale-port refresh after a replug (`freshPortFor`).
+  - Web Serial errors are classified by name (`classifyOpenError`), and the message the person sees depends on the kind.
+  - `scale-weight.ts` (Mostrador weight) closes its port after 10 s idle, so it no longer holds the Aura's COM port all day.
+  - The Report LT path in `scale-serial.ts` is untouched.
 
 `ScaleSyncPanel` steps are: 1 modelo (+ n_bal for Aura) → 2 Elegir el puerto / Probar todo → 3 Verificar con un producto de prueba → 4 Mandar productos. "Enviar todos" needs a successful step 3 with the same model+baud+stop+letter+ID (`patagonia-scale-verified`). For a model without real evidence every write button and handler is blocked.
 
