@@ -23,6 +23,8 @@ export interface ScaleSupportConnectionInfo {
   pluScan?: unknown;
   /** Prueba de escritura de un producto en la Aura (kretz/aura-write-test.ts). */
   auraWriteTest?: unknown;
+  /** Diagnóstico del modelo de datos de la Aura (solo lectura, kretz/aura-model-probe.ts). */
+  auraModelProbe?: unknown;
 }
 
 export function buildSupportConnections(

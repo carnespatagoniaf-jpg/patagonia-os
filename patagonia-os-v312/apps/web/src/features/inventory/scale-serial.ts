@@ -1,6 +1,7 @@
 import type { Product } from "@patagonia/domain";
 import { STAGE_LABELS, runKretzDiscovery, saveDiagnosticRecord, savePluScan, scanAllPlus, type DiagnosticRecord, type DiscoveryVerdict, type PluScan } from "./kretz/discovery";
 import { runAuraWriteTest, saveAuraWriteTest, type AuraWriteTestResult } from "./kretz/aura-write-test";
+import { runAuraModelProbe, saveModelProbe, type ModelProbeResult } from "./kretz/aura-model-probe";
 import { getKretzModel, getSavedModelId } from "./kretz/models";
 import { buildKretzFrame, describeKretzCode } from "./kretz/kretz-frame";
 
@@ -545,6 +546,21 @@ export async function runAuraWriteTestOnScale(onProgress: (text: string) => void
   );
   cachedPortOpenKey = null;
   saveAuraWriteTest(result);
+  return result;
+}
+
+/** Diagnóstico del modelo de datos de la Aura (SOLO LECTURA), con la configuración que encontró "Probar todo". Ver kretz/aura-model-probe.ts. */
+export async function runAuraModelProbeOnScale(onProgress: (text: string) => void): Promise<ModelProbeResult> {
+  const settings = getScaleSerialSettings();
+  const port = await pickPort();
+  cachedPortOpenKey = null;
+  const result = await runAuraModelProbe(
+    port,
+    { link: { baudRate: settings.baudRate, stopBits: settings.stopBits }, deviceType: settings.deviceType, equipmentId: settings.equipmentId },
+    { onProgress }
+  );
+  cachedPortOpenKey = null;
+  saveModelProbe(result);
   return result;
 }
 

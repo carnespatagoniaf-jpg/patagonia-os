@@ -132,3 +132,44 @@ Todas son de **solo lectura** según Nx y caen en el rango que el código ya per
 **Para enviar productos por unidad conservando su código:** hoy no hay ninguna alternativa respaldada por evidencia. Las únicas vías para conseguirla sin Kretz son C (si el modelo de datos muestra el campo) y D.
 
 **Pruebas automáticas (simulador):** demuestran que el código se comporta como se espera ante las respuestas reales grabadas. **No demuestran** que la balanza vaya a aceptar algo nuevo.
+
+## 8. Opción C preparada: diagnóstico del modelo de datos (2026-10-03, sin publicar)
+
+**El comando.** 5002, "Lectura del largo de campo" (Nx §4.82).
+
+- **Pedido.** Datos = entidad "05" + número de campo "01".."22".
+  - El documento no muestra un ejemplo del pedido: solo dice "campo especificado de una Entidad".
+  - Este formato es el que funcionó en la **Report LT real** (sesión de sept. 2026): las 22 respuestas fueron "05NN" + ancho, y daban 135 en total.
+- **Respuesta (DOCUMENTADO).** Entidad (2) + campo (2) + cantidad de caracteres (3). Un campo deshabilitado responde "000" (REAL, Report LT).
+- **Códigos posibles (Nx §2.7).** 01 OK · 02 comando inexistente · 10 checksum · 11 cantidad de bytes incorrecta · 20 registro inexistente · 60 error al ejecutar.
+
+**¿Está documentado para la Aura?** **No.** Solo para la Report Nx, y comprobado en la Report LT.
+
+**Lo que ya está registrado de la Aura** (COMPROBADO, 2026-10-02):
+
+- 5002 con datos "05" (pedido incompleto) → `07 48 30 31 30 30 30 32 37 32 04`, o sea grupo "00", código "02".
+- 0002, que la Aura no tiene → **exactamente la misma respuesta**.
+- Cuando la Aura reconoce un comando de productos, contesta con grupo "05" (por ejemplo, a 2005 y 5005). Si 5002 existiera y lo único mal fueran los datos, lo esperable según Nx sería grupo 05 y código 11.
+- **HIPÓTESIS fuerte:** la Aura **no tiene** el 5002. No es concluyente porque el pedido estaba incompleto.
+
+**La herramienta** (`kretz/aura-model-probe.ts` + `aura-model-probe.test.ts`; botón "Leer modelo de datos" en el panel de la Aura; sin publicar):
+
+- Solo manda 0001, 1500, 5001 "05", 5026 y 5002 "05NN". Un candado bloquea todo lo demás: 5008, 3xxx, 4xxx, 2xxx y la configuración 1000–1499.
+- Si el campo 01 contesta "02", no insiste: un solo pedido.
+- Guarda cada respuesta en hexadecimal y en texto, y la manda sola a soporte.
+- **Informe automático (`analyzeModelProbe`)** con uno de estos resultados:
+  - "modelo no disponible": falta la captura de iTegra;
+  - "el código no existe en el registro": 2005 no puede escribirlo, y se indica dónde está el tipo;
+  - "código y tipo existen": se indica en qué orden (H2) o si es un problema de validación;
+  - "modelo no coincide".
+- **Probado con el simulador:**
+  - la respuesta real de la Aura;
+  - dos modelos posibles (sin código; código antes del tipo);
+  - el modelo real de la Report LT (135, detectado como no coincidente);
+  - el candado.
+
+**Qué falta para cerrar la integración:**
+
+1. Que la Aura conteste 5002 con el pedido correcto. Hace falta **un** "Leer modelo de datos" en el comercio: es solo lectura. Si contesta "02" otra vez, el comando no existe en la Aura y por lectura no hay más que sacar.
+2. En ese caso, o si el modelo muestra que el tipo existe pero se valida: **qué bytes manda iTegra** al cargar un producto por unidad con código. Es la única referencia real que queda sin Kretz.
+3. Para los tickets: **un** ticket real con PESO = NO, para calibrar los decimales del importe.

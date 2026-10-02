@@ -14,6 +14,7 @@ import {
   diagnoseScaleLink,
   scanScalePlus,
   runAuraWriteTestOnScale,
+  runAuraModelProbeOnScale,
   getScalePortDescription,
   getScaleSerialSettings,
   isScalePortPaired,
@@ -30,6 +31,7 @@ import {
 import { getLastDiagnosticRecord, getLastPluScan, summarizeDiagnosticRecord, type PluScan } from "./kretz/discovery";
 import { auraPriceCandidates, parseAuraPlu } from "./kretz/aura-plu";
 import { AURA_TEST_PLUS, AURA_TEST_PRODUCTS, getLastAuraWriteTest, type AuraWriteTestResult } from "./kretz/aura-write-test";
+import { analyzeModelProbe, getLastModelProbe, type ModelProbeResult } from "./kretz/aura-model-probe";
 import { EVIDENCE_LABELS, KRETZ_MODELS, canWritePlu, getKretzModel, getSavedModelId, saveModelId, type KretzModelId } from "./kretz/models";
 
 const BALANCE_NUMBER_KEY = "patagonia-scale-balance-number";
@@ -87,6 +89,7 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
   const [portLabel, setPortLabel] = useState<string | null>(null);
   const [pluScan, setPluScan] = useState<PluScan | null>(getLastPluScan());
   const [auraTest, setAuraTest] = useState<AuraWriteTestResult | null>(getLastAuraWriteTest());
+  const [modelProbe, setModelProbe] = useState<ModelProbeResult | null>(getLastModelProbe());
   const stopScanRef = useRef(false);
   const [scanning, setScanning] = useState(false);
   const [modelId, setModelId] = useState<KretzModelId>(getSavedModelId());
@@ -140,6 +143,7 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
             diagnosticRecord: getLastDiagnosticRecord() ?? undefined,
             pluScan: getLastPluScan() ?? undefined,
             auraWriteTest: getLastAuraWriteTest() ?? undefined,
+            auraModelProbe: getLastModelProbe() ?? undefined,
             confirmedCapabilities: [],
             pairedAt: "",
             connectedNow: scalePortReady
@@ -245,6 +249,26 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
 ${sent ? "El resultado ya le llegó al equipo de Patagonia OS." : "Sacale una foto a esta pantalla y mandala por WhatsApp."}`);
     } catch (err) {
       report(err instanceof Error ? err.message : "Falló la prueba.");
+    } finally {
+      setScaleBusy(false);
+    }
+  }
+
+  /** Aura: lee el modelo de datos de la balanza (SOLO LECTURA) para saber si el registro admite tipo y código. */
+  async function handleModelProbe() {
+    setScaleBusy(true);
+    setScaleLog("Leyendo cómo guarda los productos la balanza (no cambia nada)…");
+    try {
+      const r = await runAuraModelProbeOnScale((text) => setScaleLog(text));
+      setModelProbe(r);
+      const a = analyzeModelProbe(r);
+      const canSend = profile?.role === "owner" || profile?.role === "admin";
+      const sent = canSend ? await handleSendToSupport("Modelo de datos Aura (envío automático)") : false;
+      report(`${a.lines.join(" ")}
+
+${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sacale una foto a esta pantalla y mandala por WhatsApp."}`);
+    } catch (err) {
+      report(err instanceof Error ? err.message : "Falló la lectura.");
     } finally {
       setScaleBusy(false);
     }
@@ -679,6 +703,24 @@ ${sent ? "El resultado ya le llegó al equipo de Patagonia OS." : "Sacale una fo
                   {pluScan.records.length > 200 && <p className="muted" style={{ fontSize: 12 }}>Mostrando 200 de {pluScan.records.length}. La copia descargable tiene todos.</p>}
                 </>
               )}
+            </div>
+          )}
+
+          {/* Aura: diagnóstico del modelo de datos (solo lectura) */}
+          {model.id === "aura" && (
+            <div style={step}>
+              <p style={stepTitle}>Kretz Aura: cómo guarda los productos (solo lectura)</p>
+              <button disabled={scaleBusy || noSerial || !scalePortReady || !getLastDiagnosticRecord()?.responder} onClick={() => void handleModelProbe()}>
+                Leer modelo de datos
+              </button>
+              {modelProbe && (
+                <p className="muted" style={{ margin: "8px 0 0", fontSize: 12, whiteSpace: "pre-wrap" }}>
+                  {analyzeModelProbe(modelProbe).lines.join(" ")}
+                </p>
+              )}
+              <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
+                Le pregunta a la balanza el largo de cada dato de un producto. Solo lee: no cambia ni borra nada. Usar después de "Probar todo". El resultado se manda solo a soporte.
+              </p>
             </div>
           )}
 
