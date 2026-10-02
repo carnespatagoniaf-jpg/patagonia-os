@@ -85,7 +85,7 @@ export interface DiagnosticRecord {
 
 export type { OpenAttempt };
 
-export const DISCOVERY_VERSION = "2026-10-02b";
+export const DISCOVERY_VERSION = "2026-10-02c";
 
 /** Aperturas de la prueba en curso (presupuesto + registro); runKretzDiscovery y scanAllPlus arman una nueva. */
 let session: PortSession = newSession();
@@ -421,6 +421,14 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
       }
     }
     record.verdict = "datos";
+    return record;
+  } catch (err) {
+    // Error inesperado (ej. el cable/adaptador falla al escribir): el registro
+    // igual se devuelve, para que llegue a soporte con la etapa y el error exacto.
+    const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+    const at: StageId = stages.enviar.status !== "ok" ? "enviar" : stages.recibir.status !== "ok" ? "recibir" : "interpretar";
+    stages[at] = { id: at, status: "falla", detail: `error inesperado: ${msg}` };
+    record.verdict = record.anyBytes ? "bytes" : "nada";
     return record;
   } finally {
     finishStages();

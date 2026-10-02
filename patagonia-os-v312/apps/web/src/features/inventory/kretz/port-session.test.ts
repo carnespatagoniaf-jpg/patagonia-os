@@ -129,6 +129,19 @@ describe("apertura del puerto de la Aura (port-session)", () => {
     assert.equal(ok.stoppedBy, "fin");
   });
 
+  it("si el cable falla al mandar la primera instrucción, igual devuelve el registro (llega a soporte) y suelta el puerto", async () => {
+    const port = new FakeAura();
+    port.breakWrites = true;
+    const record = await runKretzDiscovery(port as unknown as SerialPort, "prueba", aura, fast);
+    assert.equal(record.verdict, "nada");
+    assert.equal(record.stages![1].status, "ok");
+    assert.equal(record.stages![2].status, "falla");
+    assert.match(record.stages![2].detail, /Framing error/);
+    assert.equal(port.readable, null);
+    port.breakWrites = false;
+    assert.equal((await runKretzDiscovery(port as unknown as SerialPort, "prueba", aura, fast)).verdict, "datos");
+  });
+
   it("si quedó abierto en esta pestaña, lo cierra antes de abrir (no da InvalidStateError)", async () => {
     const port = new FakeAura();
     await port.open({ baudRate: 9600, stopBits: 2 });
