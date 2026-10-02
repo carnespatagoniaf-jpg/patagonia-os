@@ -78,31 +78,29 @@ describe("prueba de escritura de la Aura (solo PLU 96 a 99)", () => {
     const aura = new MemoryAura([...REAL_SIX, ...AURA_PREVIOUS_TEST_READBACKS]);
     const r = await runAuraWriteTest(aura as unknown as SerialPort, responder, { timeoutMs: 50 });
     assert.equal(r.verdict, "ok", r.detail);
-    assert.deepEqual(r.items.map((it) => it.plu), [97, 98, 96, 99]);
+    assert.deepEqual(r.items.map((it) => it.plu), [97, 98, 96, 99, 97]);
+    assert.equal(r.verdict, "ok", r.detail);
     assert.ok(r.items.every((it) => it.readBack === auraWriteToReadOrder(it.sent)), JSON.stringify(r.items));
-    assert.match(r.detail, /con su tipo y su código/);
-    assert.deepEqual(r.items.map((it) => it.readBack![22]), ["P", "N", "N", "P"]);
-    assert.deepEqual(r.items.map((it) => it.readBack!.slice(23, 29)), ["000097", "000098", "000960", "000500"]);
+    assert.deepEqual(r.items.map((it) => it.readBack![22]), ["P", "N", "N", "P", "P"]);
+    assert.deepEqual(r.items.map((it) => it.readBack!.slice(23, 29)), ["000097", "000098", "000960", "000500", "000097"]);
+    // Cambio de precio: el PLU 97 pasa de 2000 a 2100 y conserva tipo, código, tara (0) y validez (2 días).
+    assert.equal(r.items[4].readBack, "000097PRUEBA KILO     P0000970021000000002");
     assert.deepEqual(r.after.filter((x) => x.plu < 90).map((x) => x.data), REAL_SIX);
-    assert.equal(aura.commands.filter((c) => c === "2005").length, 4);
+    assert.equal(aura.commands.filter((c) => c === "2005").length, 5);
     // Nunca un borrado: solo test de conexión, lecturas y las 4 cargas.
     assert.ok(aura.commands.every((c) => ["0001", "5005", "2005"].includes(c)), aura.commands.join(","));
     assert.deepEqual(r.after.filter((x) => x.plu >= 96).map((x) => x.plu), [96, 97, 98, 99]);
     assert.equal(aura.readable, null, "el puerto queda cerrado");
   });
 
-  it("si la balanza igual ignorara tipo y código (pone D y 0), sigue con los demás y lo informa campo por campo", async () => {
+  it("si la balanza igual ignorara tipo y código (pone D y 0), frena en el primero y lo informa campo por campo", async () => {
     const aura = new MemoryAura([...REAL_SIX]);
     aura.zeroCode = true;
     const r = await runAuraWriteTest(aura as unknown as SerialPort, responder, { timeoutMs: 50 });
-    assert.equal(r.verdict, "ok");
-    assert.equal(aura.commands.filter((c) => c === "2005").length, 4);
-    assert.match(r.detail, /cambió la letra o el código/);
-    for (const it of r.items) {
-      assert.equal(it.same?.codigo, false);
-      assert.equal(it.same?.precio, true);
-      assert.equal(it.same?.letra, false);
-    }
+    assert.equal(r.verdict, "diferencia");
+    assert.match(r.detail, /letra, codigo/);
+    assert.equal(aura.commands.filter((c) => c === "2005").length, 1);
+    assert.equal(r.items[0].same?.precio, true);
   });
 
   it("si algún PLU de prueba tiene otro producto, no escribe nada", async () => {

@@ -32,6 +32,9 @@ import { getLastDiagnosticRecord, getLastPluScan, summarizeDiagnosticRecord, typ
 import { auraPriceCandidates, parseAuraPlu } from "./kretz/aura-plu";
 import { AURA_TEST_PLUS, AURA_TEST_PRODUCTS, getLastAuraWriteTest, type AuraWriteTestResult } from "./kretz/aura-write-test";
 import { analyzeModelProbe, getLastModelProbe, type ModelProbeResult } from "./kretz/aura-model-probe";
+
+/** El botón de diagnóstico de la Aura no se muestra todavía (decisión del dueño). */
+const SHOW_AURA_DIAGNOSTIC = false;
 import { EVIDENCE_LABELS, KRETZ_MODELS, canWritePlu, getKretzModel, getSavedModelId, saveModelId, type KretzModelId } from "./kretz/models";
 
 const BALANCE_NUMBER_KEY = "patagonia-scale-balance-number";
@@ -706,8 +709,8 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
             </div>
           )}
 
-          {/* Aura: diagnóstico del modelo de datos (solo lectura) */}
-          {model.id === "aura" && (
+          {/* Aura: diagnóstico (solo lectura). Oculto hasta que el dueño lo autorice (2026-10-03): el código queda listo. */}
+          {SHOW_AURA_DIAGNOSTIC && model.id === "aura" && (
             <div style={step}>
               <p style={stepTitle}>Kretz Aura: diagnóstico (solo lectura)</p>
               <button disabled={scaleBusy || noSerial} onClick={() => void handleModelProbe()}>
@@ -745,8 +748,8 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
                       <tr><th>PLU</th><th>Mandado</th><th>Quedó en la balanza</th><th>Distinto</th></tr>
                     </thead>
                     <tbody>
-                      {auraTest.items.map((it) => (
-                        <tr key={it.plu}>
+                      {auraTest.items.map((it, idx) => (
+                        <tr key={idx}>
                           <td>{it.plu}</td>
                           <td style={{ fontFamily: "monospace", fontSize: 12 }}>{it.sent}</td>
                           <td style={{ fontFamily: "monospace", fontSize: 12 }}>{it.readBack ?? `(no se pudo releer; código ${it.writeCode ?? "-"})`}</td>
@@ -758,7 +761,7 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
                 </div>
               )}
               <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
-                Carga {AURA_TEST_PRODUCTS.map((p) => `"${p.name}" (PLU ${p.plu})`).join(", ")}, los vuelve a leer y comprueba después de cada uno que tus productos quedaron igual (si algo cambia, frena). Solo usa esos números: si alguno tiene otro producto, no carga nada. No cambia ni borra ningún producto tuyo, y no borra nada de la balanza. Usar después de "Probar todo".
+                Carga {AURA_TEST_PRODUCTS.map((p) => `"${p.name}" (PLU ${p.plu})`).join(", ")}, los vuelve a leer, después le cambia el precio a uno y comprueba que no se pierda nada. Después de cada paso revisa que tus productos sigan igual (si algo no coincide, frena). Solo usa esos números: si alguno tiene otro producto, no carga nada. No cambia ni borra ningún producto tuyo, y no borra nada de la balanza. Usar después de "Probar todo".
               </p>
             </div>
           )}

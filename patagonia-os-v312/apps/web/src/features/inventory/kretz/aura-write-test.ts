@@ -1,5 +1,5 @@
 import { buildKretzFrame, parseKretzResponse, toHex, toPrintable } from "./kretz-frame";
-import { auraWriteToReadOrder, buildAuraWriteRecord, type AuraWriteInput } from "./aura-plu";
+import { auraWriteToReadOrder, buildAuraWriteRecord, rewriteWithNewPrice, type AuraWriteInput } from "./aura-plu";
 import { collect, readPluList, sendRead, type DiagnosticExchange, type KretzResponder } from "./discovery";
 import { claimPort, closeQuietly, errorClassification, freshPortFor, newSession, openForSession, releasePort, type OpenAttempt } from "./port-session";
 
@@ -25,21 +25,21 @@ import { claimPort, closeQuietly, errorClassification, freshPortFor, newSession,
  * Pasos:
  * 1. Lista completa antes. Frena si en 96 a 99 hay algo que no sea un producto
  *    de prueba nuestro (de las pruebas anteriores o de esta).
- * 2. 2005 de cada uno. `assertTestWrite` deja pasar SOLO estos 4 registros exactos.
+ * 2. 2005 de cada uno. `assertTestWrite` deja pasar SOLO estos 4 registros exactos y el del cambio de precio.
  * 3. Releer cada uno. Se frena todo (no se carga el siguiente) si:
  *    - no se puede releer;
- *    - cambió el nombre, el precio, la tara o la validez;
+ *    - volvió distinto en CUALQUIER campo (nombre, tipo, código, precio, tara, validez);
  *    - después de esa carga cambió cualquier producto de la clienta (se relee la lista entera).
- *    Las diferencias de LETRA y CÓDIGO no frenan: son justo lo que la prueba mide;
- *    se anotan campo por campo.
- * 4. Lista completa final: los productos de la clienta tienen que estar idénticos.
+ * 4. Cambio de precio del PLU 97 (2000 → 2100) reenviando el registro con el mismo
+ *    código y tipo, como iTegra. Se relee y tiene que conservar todo lo demás.
+ * 5. Lista completa final: los productos de la clienta tienen que estar idénticos.
  *
  * NO BORRA NADA, nunca (decisión del dueño, 2026-10-02): este módulo solo manda
- * 0001 y 5005 (de solo lectura, assertReadOnly) y 2005 con uno de los 4 registros
+ * 0001 y 5005 (de solo lectura, assertReadOnly) y 2005 con uno de los registros
  * de prueba (assertTestWrite). Los productos de prueba quedan en la balanza.
  */
 
-export const AURA_WRITE_TEST_VERSION = "2026-10-02h";
+export const AURA_WRITE_TEST_VERSION = "2026-10-03a";
 
 export interface AuraTestProduct extends AuraWriteInput {
   purpose: string;
@@ -57,6 +57,11 @@ export const AURA_TEST_RECORDS = AURA_TEST_PRODUCTS.map((p) => buildAuraWriteRec
 export const AURA_TEST_EXPECTED_READBACK = AURA_TEST_RECORDS.map(auraWriteToReadOrder);
 export const AURA_TEST_PLUS = AURA_TEST_PRODUCTS.map((p) => p.plu);
 
+/** Cambio de precio (como iTegra: reenvía el registro completo con el mismo código y tipo): PLU 97 de 2000 a 2100. */
+export const AURA_TEST_PRICE_CHANGE = { plu: 97, from: 2000, to: 2100 };
+export const AURA_TEST_PRICE_CHANGE_RECORD = rewriteWithNewPrice(AURA_TEST_EXPECTED_READBACK[0], AURA_TEST_PRICE_CHANGE.to)!;
+export const AURA_TEST_PRICE_CHANGE_READBACK = auraWriteToReadOrder(AURA_TEST_PRICE_CHANGE_RECORD);
+
 /** Lo que quedó en la balanza real de las pruebas anteriores (lo único que se permite pisar en 96 a 99). */
 export const AURA_FIRST_TEST_READBACK = "000099PRUEBA PATAGONIAD0000000012340000000";
 export const AURA_PREVIOUS_TEST_READBACKS = [
@@ -67,7 +72,7 @@ export const AURA_PREVIOUS_TEST_READBACKS = [
 ];
 
 export function assertTestWrite(command: string, data: string): void {
-  if (command !== "2005" || !AURA_TEST_RECORDS.includes(data)) {
+  if (command !== "2005" || !(AURA_TEST_RECORDS.includes(data) || data === AURA_TEST_PRICE_CHANGE_RECORD)) {
     throw new Error(`Bloqueado: en la Aura solo se permite escribir los productos de prueba (PLU ${AURA_TEST_PLUS.join(", ")}).`);
   }
 }
@@ -80,7 +85,7 @@ export type WriteTestVerdict =
   | "plu_ocupado" // algún PLU de prueba tiene otra cosa: no se escribió
   | "rechazada" // la balanza contestó otro código a algún 2005
   | "otros_cambiaron" // ¡algún producto de la clienta cambió! (no debería pasar)
-  | "diferencia" // un producto de prueba no se pudo releer o volvió con otro nombre/precio/tara/validez: se frenó
+  | "diferencia" // un producto de prueba no se pudo releer o volvió distinto (nombre, tipo, código, precio, tara o validez): se frenó
   | "error";
 
 export interface AuraTestItemResult {
@@ -171,12 +176,11 @@ export async function runAuraWriteTest(port: SerialPort, responder: KretzRespond
       return list.stoppedBy === "fin" && now.length === clientBefore.length && clientBefore.every((b) => now.some((a) => a.plu === b.plu && a.data === b.data));
     };
     if (clientBefore.some((r) => r.plu >= 96)) return finish("plu_ocupado", "hay productos de la clienta con número 96 o más: no se escribió nada");
-    const busy = before.records.filter((r) => AURA_TEST_PLUS.includes(r.plu) && !AURA_PREVIOUS_TEST_READBACKS.includes(r.data) && !AURA_TEST_EXPECTED_READBACK.includes(r.data));
+    const busy = before.records.filter((r) => AURA_TEST_PLUS.includes(r.plu) && !AURA_PREVIOUS_TEST_READBACKS.includes(r.data) && !AURA_TEST_EXPECTED_READBACK.includes(r.data) && r.data !== AURA_TEST_PRICE_CHANGE_READBACK);
     if (busy.length) return finish("plu_ocupado", `el PLU ${busy.map((b) => b.plu).join(", ")} tiene otro producto: no se escribió nada`);
 
-    for (const [i, product] of AURA_TEST_PRODUCTS.entries()) {
-      const record = AURA_TEST_RECORDS[i];
-      progress(`Cargando producto de prueba ${i + 1} de ${AURA_TEST_PRODUCTS.length} (PLU ${product.plu})…`);
+    /** Manda un 2005, lo relee, compara TODO y revisa que los de la clienta sigan iguales. Devuelve un motivo para frenar, o null. */
+    const writeAndCheck = async (plu: number, purpose: string, record: string, expected: string): Promise<{ verdict: WriteTestVerdict; detail: string } | null> => {
       assertTestWrite("2005", record);
       const frame = buildKretzFrame(deviceType, equipmentId, "2005", record);
       const writer = port.writable!.getWriter();
@@ -188,32 +192,48 @@ export async function runAuraWriteTest(port: SerialPort, responder: KretzRespond
       }
       const rx = await collect(port, Math.max(timeout, 2000), true);
       const kretz = parseKretzResponse(rx);
-      result.exchanges.push({ step: `escribir PLU ${product.plu}`, link: `${link.baudRate}/${link.stopBits}`, tx: toHex(frame), rx: toHex(rx), rxText: toPrintable(rx), ms: Date.now() - t0, kretz, echo: false });
-      const item: AuraTestItemResult = { plu: product.plu, purpose: product.purpose, sent: record, writeCode: kretz?.code ?? null, readBack: null, same: null };
+      result.exchanges.push({ step: `escribir PLU ${plu}`, link: `${link.baudRate}/${link.stopBits}`, tx: toHex(frame), rx: toHex(rx), rxText: toPrintable(rx), ms: Date.now() - t0, kretz, echo: false });
+      const item: AuraTestItemResult = { plu, purpose, sent: record, writeCode: kretz?.code ?? null, readBack: null, same: null };
       result.items.push(item);
-      if (!kretz || kretz.code !== "01") break; // no se sigue escribiendo si la balanza rechaza uno
+      if (!kretz || kretz.code !== "01") {
+        result.after = (await readPluList(port, responder, result.exchanges, { timeoutMs: timeout })).records; // constancia de cómo quedó todo
+        return { verdict: "rechazada", detail: `la balanza contestó ${kretz ? `el código ${kretz.code}` : "nada"} al cargar el PLU ${plu}: se frenó todo` };
+      }
       await new Promise((r) => setTimeout(r, 400));
-      const back = await sendRead(port, result.exchanges, `releer PLU ${product.plu}`, link, deviceType, equipmentId, "5005", String(product.plu - 1).padStart(6, "0"), timeout);
+      const back = await sendRead(port, result.exchanges, `releer PLU ${plu}`, link, deviceType, equipmentId, "5005", String(plu - 1).padStart(6, "0"), timeout);
       const data = back.kretz?.code === "01" ? back.kretz.data : null;
-      item.readBack = data && data.startsWith(String(product.plu).padStart(6, "0")) ? data : null;
+      item.readBack = data && data.startsWith(String(plu).padStart(6, "0")) ? data : null;
       // Se compara contra cómo DEBERÍA releerse (la Aura devuelve el tipo antes que el código).
-      item.same = item.readBack ? compareAuraRecords(AURA_TEST_EXPECTED_READBACK[i], item.readBack) : null;
+      item.same = item.readBack ? compareAuraRecords(expected, item.readBack) : null;
       const check = await readPluList(port, responder, result.exchanges, { timeoutMs: timeout });
       result.after = check.records;
-      if (!clientIntact(check)) return finish("otros_cambiaron", `después de cargar el PLU ${product.plu}, la lista de productos de la clienta no coincide: se frenó todo`);
-      if (!item.same) return finish("diferencia", `no se pudo releer el PLU ${product.plu} después de cargarlo: se frenó todo`);
-      const critical = (["nombre", "precio", "tara", "validez"] as const).filter((k) => !item.same![k]);
-      if (critical.length) return finish("diferencia", `el PLU ${product.plu} volvió con otro ${critical.join(", ")}: se frenó todo`);
+      if (!clientIntact(check)) return { verdict: "otros_cambiaron", detail: `después de cargar el PLU ${plu}, la lista de productos de la clienta no coincide: se frenó todo` };
+      if (!item.same) return { verdict: "diferencia", detail: `no se pudo releer el PLU ${plu} después de cargarlo: se frenó todo` };
+      const wrong = Object.entries(item.same).filter(([, ok]) => !ok).map(([k]) => k);
+      if (wrong.length) return { verdict: "diferencia", detail: `el PLU ${plu} volvió con otro ${wrong.join(", ")} (esperado ${expected}, leído ${item.readBack}): se frenó todo` };
+      return null;
+    };
+
+    for (const [i, product] of AURA_TEST_PRODUCTS.entries()) {
+      progress(`Cargando producto de prueba ${i + 1} de ${AURA_TEST_PRODUCTS.length} (PLU ${product.plu})…`);
+      const stop = await writeAndCheck(product.plu, product.purpose, AURA_TEST_RECORDS[i], AURA_TEST_EXPECTED_READBACK[i]);
+      if (stop) return finish(stop.verdict, stop.detail);
     }
+
+    progress(`Cambiando el precio del PLU ${AURA_TEST_PRICE_CHANGE.plu} (comprobar que no se pierde nada)…`);
+    const stop = await writeAndCheck(
+      AURA_TEST_PRICE_CHANGE.plu,
+      `cambio de precio de ${AURA_TEST_PRICE_CHANGE.from} a ${AURA_TEST_PRICE_CHANGE.to}: ¿se conservan tipo, código, tara y validez?`,
+      AURA_TEST_PRICE_CHANGE_RECORD,
+      AURA_TEST_PRICE_CHANGE_READBACK
+    );
+    if (stop) return finish(stop.verdict, stop.detail);
 
     progress("Leyendo todos los productos otra vez (comprobar que los de la clienta no cambiaron)…");
     const after = await readPluList(port, responder, result.exchanges, { timeoutMs: timeout });
     result.after = after.records;
     if (!clientIntact(after)) return finish("otros_cambiaron", "la lista de productos de la clienta no coincide antes y después (ver before/after)");
-    const rejected = result.items.find((it) => it.writeCode !== "01");
-    if (rejected) return finish("rechazada", `la balanza contestó el código ${rejected.writeCode ?? "(nada)"} al cargar el PLU ${rejected.plu}`);
-    const diffs = result.items.filter((it) => !it.same || Object.values(it.same).some((v) => !v)).map((it) => it.plu);
-    return finish("ok", diffs.length ? `se cargaron los ${result.items.length}; la balanza cambió la letra o el código en el PLU ${diffs.join(", ")} (ver detalle)` : `se cargaron los ${result.items.length} y se releyeron con su tipo y su código`);
+    return finish("ok", `se cargaron los 4 productos de prueba con su tipo, código y precio, y el cambio de precio conservó todo lo demás`);
   } catch (err) {
     return finish("error", err instanceof Error ? `${err.name}: ${err.message}` : String(err));
   } finally {
