@@ -81,13 +81,38 @@ export function auraPriceCandidates(priceRaw: string): { sinDecimales: number; c
  * prueba: se escribe un precio conocido y se mira qué muestra la balanza.
  */
 
+/*
+ * Letra (2026-10-02, hipótesis H1 que explica los 7 registros reales, incluido
+ * el cambio P→D que hizo la balanza con el PLU 99): la letra NO es solo
+ * "pesable sí/no" (el manual §8.2.2 tiene PESA = Sí/No). Depende también de
+ * si tiene días de validez:
+ *   pesable + validez > 0 → P (FRUTILLA 5 días, PAN NEGRO 1 día)
+ *   unitario + validez > 0 → N (PASTELITOS 3 días)
+ *   pesable + validez 0   → D (MILA BERENJENA, HAMB POLLO, y el PLU 99 de prueba,
+ *                               que la pantalla mostró en $/kg)
+ *   unitario + validez 0  → C (PROMO)
+ * El documento de la Report NX solo lista P, N y R; D y C no figuran.
+ *
+ * Código: el manual (§8.2.2) dice "código del producto, hasta 6 dígitos", y el
+ * documento Report NX lo da de 5 caracteres. En los 6 reales vale igual al PLU
+ * (00001, 00002, 00003, 00006, 00008, 00011) si se toman 5 dígitos, seguidos
+ * de un "0". El precio se mostró tal cual, en pesos enteros (1234 → "1234 $/kg").
+ */
+export type AuraTypeLetter = "P" | "N" | "D" | "C";
+
+export function auraTypeLetter(weighable: boolean, validityDays: number): AuraTypeLetter {
+  if (weighable) return validityDays > 0 ? "P" : "D";
+  return validityDays > 0 ? "N" : "C";
+}
+
 export interface AuraPluInput {
   plu: number;
   name: string;
-  /** "P" pesable (como FRUTILLA y PAN NEGRO), "N" por unidad (como PASTELITOS). */
-  type: "P" | "N";
-  /** Los 6 dígitos tal cual se guardan (sin aplicar ningún factor). */
+  type: AuraTypeLetter;
+  /** Precio en pesos enteros (comprobado con la pantalla de la balanza). */
   priceRaw: number;
+  /** Código del producto (5 dígitos). Por defecto, el mismo número de PLU, como en los 6 reales. */
+  code?: number;
   tareGrams?: number;
   validityDays?: number;
 }
@@ -95,22 +120,24 @@ export interface AuraPluInput {
 /** Arma el registro de 42 caracteres, con el mismo formato que devuelve 5005. Tira error ante cualquier dato fuera de rango. */
 export function buildAuraPluRecord(input: AuraPluInput): string {
   const { plu, name, type, priceRaw } = input;
+  const code = input.code ?? plu;
   const tare = input.tareGrams ?? 0;
   const days = input.validityDays ?? 0;
   if (!Number.isInteger(plu) || plu < 1 || plu > 9999) throw new Error(`PLU fuera de rango (1 a 9999): ${plu}`);
+  if (!Number.isInteger(code) || code < 0 || code > 99999) throw new Error(`Código fuera de rango (5 dígitos): ${code}`);
   if (!Number.isInteger(priceRaw) || priceRaw < 0 || priceRaw > 999999) throw new Error(`Precio fuera de rango (6 dígitos): ${priceRaw}`);
   if (!Number.isInteger(tare) || tare < 0 || tare > 9999) throw new Error(`Tara fuera de rango: ${tare}`);
   if (!Number.isInteger(days) || days < 0 || days > 250) throw new Error(`Validez fuera de rango (0 a 250 días): ${days}`);
-  if (type !== "P" && type !== "N") throw new Error(`Tipo desconocido: ${type}`);
+  if (!["P", "N", "D", "C"].includes(type)) throw new Error(`Tipo desconocido: ${type}`);
   const cleanName = name
     .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
+    .replace(/[\u0300-\u036f]/g, "")
     .toUpperCase()
     .replace(/[^A-Z0-9 .,%/-]/g, " ")
     .slice(0, 16)
     .padEnd(16, " ");
   const pad = (n: number, w: number) => String(n).padStart(w, "0");
-  const record = `${pad(plu, 6)}${cleanName}${type}${pad(plu * 10, 6)}${pad(priceRaw, 6)}${pad(tare, 4)}${pad(days, 3)}`;
+  const record = `${pad(plu, 6)}${cleanName}${type}${pad(code, 5)}0${pad(priceRaw, 6)}${pad(tare, 4)}${pad(days, 3)}`;
   if (record.length !== AURA_PLU_RECORD_LENGTH) throw new Error(`Registro de ${record.length} caracteres (se esperaban ${AURA_PLU_RECORD_LENGTH})`);
   return record;
 }

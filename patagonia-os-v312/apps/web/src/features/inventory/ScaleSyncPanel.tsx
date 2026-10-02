@@ -29,7 +29,7 @@ import {
 } from "./scale-serial";
 import { getLastDiagnosticRecord, getLastPluScan, summarizeDiagnosticRecord, type PluScan } from "./kretz/discovery";
 import { auraPriceCandidates, parseAuraPlu } from "./kretz/aura-plu";
-import { AURA_TEST_PRODUCT, getLastAuraWriteTest, type AuraWriteTestResult } from "./kretz/aura-write-test";
+import { AURA_TEST_PLUS, AURA_TEST_PRODUCTS, getLastAuraWriteTest, type AuraWriteTestResult } from "./kretz/aura-write-test";
 import { EVIDENCE_LABELS, KRETZ_MODELS, canWritePlu, getKretzModel, getSavedModelId, saveModelId, type KretzModelId } from "./kretz/models";
 
 const BALANCE_NUMBER_KEY = "patagonia-scale-balance-number";
@@ -225,17 +225,16 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
     }
   }
 
-  /** Aura: carga UN producto de prueba en un PLU libre, lo relee y comprueba que los demás no cambiaron (kretz/aura-write-test.ts). */
+  /** Aura: carga los productos de prueba (PLU 96 a 99), los relee y comprueba que los de la clienta no cambiaron (kretz/aura-write-test.ts). */
   async function handleAuraWriteTest() {
     setScaleBusy(true);
-    setScaleLog("Cargando el producto de prueba… no desenchufes la balanza ni cierres esta pantalla.");
+    setScaleLog("Cargando los productos de prueba… no desenchufes la balanza ni cierres esta pantalla.");
     try {
       const r = await runAuraWriteTestOnScale((text) => setScaleLog(text));
       setAuraTest(r);
       const text =
         r.verdict === "ok"
-          ? `✅ Se cargó "${AURA_TEST_PRODUCT.name}" en el PLU ${AURA_TEST_PRODUCT.plu}, se volvió a leer igual y los demás productos no cambiaron.
-Ahora, en la balanza, llamá al producto ${AURA_TEST_PRODUCT.plu} y fijate qué precio muestra.`
+          ? `✅ Se cargaron los productos de prueba (PLU ${AURA_TEST_PLUS.join(", ")}) y tus productos no cambiaron.`
           : r.verdict === "plu_ocupado" || r.verdict === "lectura_incompleta" || r.verdict === "sin_respuesta" || r.verdict === "puerto"
             ? `No se cargó nada: ${r.detail}.`
             : `❌ La prueba no salió bien: ${r.detail}.`;
@@ -686,19 +685,38 @@ ${sent ? "El resultado ya le llegó al equipo de Patagonia OS." : "Sacale una fo
           {/* 3 (Aura). Prueba de escritura de UN producto en un PLU libre */}
           {model.id === "aura" && (
             <div style={step}>
-              <p style={stepTitle}>Kretz Aura: cargar un producto de prueba</p>
+              <p style={stepTitle}>Kretz Aura: cargar productos de prueba</p>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
                 <button disabled={scaleBusy || noSerial || !scalePortReady || !getLastDiagnosticRecord()?.responder} onClick={() => void handleAuraWriteTest()}>
-                  Cargar producto de prueba (PLU {AURA_TEST_PRODUCT.plu})
+                  Cargar productos de prueba (PLU {Math.min(...AURA_TEST_PLUS)} a {Math.max(...AURA_TEST_PLUS)})
                 </button>
                 {auraTest && (
                   <span className={auraTest.verdict === "ok" ? undefined : "muted"} style={{ fontSize: 13 }}>
-                    {auraTest.verdict === "ok" ? "✓ Cargado y comprobado" : `Última prueba: ${auraTest.detail}`}
+                    {auraTest.verdict === "ok" ? "✓ Cargados" : `Última prueba: ${auraTest.detail}`}
                   </span>
                 )}
               </div>
+              {auraTest?.items && auraTest.items.length > 0 && (
+                <div style={{ overflowX: "auto", marginTop: 8 }}>
+                  <table className="data-table">
+                    <thead>
+                      <tr><th>PLU</th><th>Mandado</th><th>Quedó en la balanza</th><th>Distinto</th></tr>
+                    </thead>
+                    <tbody>
+                      {auraTest.items.map((it) => (
+                        <tr key={it.plu}>
+                          <td>{it.plu}</td>
+                          <td style={{ fontFamily: "monospace", fontSize: 12 }}>{it.sent}</td>
+                          <td style={{ fontFamily: "monospace", fontSize: 12 }}>{it.readBack ?? `(no se pudo releer; código ${it.writeCode ?? "-"})`}</td>
+                          <td>{it.same ? Object.entries(it.same).filter(([, ok]) => !ok).map(([k]) => k).join(", ") || "nada" : "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
               <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
-                Carga "{AURA_TEST_PRODUCT.name}" en el PLU {AURA_TEST_PRODUCT.plu} (si está libre), lo vuelve a leer y comprueba que los demás productos de la balanza quedaron igual. No cambia ni borra ningún otro producto. Usar después de "Probar todo".
+                Carga {AURA_TEST_PRODUCTS.map((p) => `"${p.name}" (PLU ${p.plu})`).join(", ")}, los vuelve a leer y comprueba que tus productos quedaron igual. Solo usa esos números: si alguno tiene otro producto, no carga nada. No cambia ni borra ningún producto tuyo. Usar después de "Probar todo".
               </p>
             </div>
           )}

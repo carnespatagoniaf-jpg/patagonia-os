@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { AURA_PLU_LAYOUT, AURA_PLU_RECORD_LENGTH, auraPriceCandidates, buildAuraPluRecord, parseAuraPlu } from "./aura-plu";
+import { AURA_PLU_LAYOUT, AURA_PLU_RECORD_LENGTH, auraPriceCandidates, auraTypeLetter, buildAuraPluRecord, parseAuraPlu, type AuraTypeLetter } from "./aura-plu";
 
 describe("PLU de la Kretz Aura (registro real de 5005)", () => {
   const REAL = "000001FRUTILLA        P0000100010500000005"; // Aura AUI-030KMFBAPP4KAR, 2026-10-01
@@ -39,16 +39,24 @@ describe("armado del registro de la Aura", () => {
     "000011HAMB POLLO      D0001100108000000000"
   ];
 
-  it("arma byte por byte igual que los registros reales de la balanza (P y N)", () => {
+  it("arma byte por byte igual que los 6 registros reales de la balanza", () => {
     for (const real of REAL_SIX) {
       const r = parseAuraPlu(real)!;
-      if (r.type !== "P" && r.type !== "N") continue;
-      const built = buildAuraPluRecord({ plu: r.plu, name: r.name, type: r.type, priceRaw: Number(r.priceRaw), tareGrams: Number(r.tareRaw), validityDays: r.validityDays });
+      const built = buildAuraPluRecord({ plu: r.plu, name: r.name, type: r.type as AuraTypeLetter, priceRaw: Number(r.priceRaw), tareGrams: Number(r.tareRaw), validityDays: r.validityDays });
       assert.equal(built, real);
     }
   });
 
-  it("el producto de prueba", () => {
+  it("la letra (hipótesis H1) explica los 6 reales y el cambio P→D del PLU 99", () => {
+    const sold = { FRUTILLA: true, PASTELITOS: false, "PAN NEGRO": true, "MILA BERENJENA": true, PROMO: false, "HAMB POLLO": true } as Record<string, boolean>;
+    for (const real of REAL_SIX) {
+      const r = parseAuraPlu(real)!;
+      assert.equal(auraTypeLetter(sold[r.name], r.validityDays), r.type, r.name);
+    }
+    assert.equal(auraTypeLetter(true, 0), "D"); // PLU 99: mandamos P sin validez y la balanza lo guardó como D
+  });
+
+  it("el primer producto de prueba (el que se mandó el 2026-10-02)", () => {
     assert.equal(buildAuraPluRecord({ plu: 99, name: "Prueba Patagonia", type: "P", priceRaw: 1234 }), "000099PRUEBA PATAGONIAP0009900012340000000");
   });
 
