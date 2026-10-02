@@ -271,3 +271,39 @@ Además, el código probablemente va en el código de barras del ticket que lee 
 - A favor: explica las 5 escrituras.
 - En contra: no es simétrico con la lectura.
 - No se prueba sin autorización ni protocolo.
+
+### Segunda ronda sin Kretz (2026-10-02, noche)
+
+**Fuentes nuevas.** Se usó el texto completo del "Multiprotocolo Report Nx" R30 (jun-2023). Lo que importa:
+
+- §2.7: la respuesta **11** quiere decir "cantidad incorrecta de bytes". La Aura contestó 01, así que el registro de 42 caracteres tiene el largo que ella espera.
+- §4.85: **5005 devuelve los mismos campos que 2005**, es decir que lectura y escritura comparten el formato.
+- §4.31: en la Report el orden es código (5) y después tipo (P/N/R). El largo de cada campo depende del "modelo de datos" de cada equipo.
+- §4.17 (1070, configuración del código de barras): inicio pesable, peso o importe, inicio no pesable, unidades o importe, y formato (1=2-5-5, 2=2-4-6, 3=1-5-6, 4=2-6-4, 5=2-3-7, 6=1-4-7).
+- §4.18 (1080): código de barras individual por PLU en el ticket de suma.
+- §4.82 (5002): pide entidad (2) + número de campo (2). Nosotros habíamos mandado solo "05".
+
+En GitHub no hay implementaciones públicas.
+
+**Evidencia de terceros** (yoreparo, otra Aura): el código de barras del ticket trae siempre el mismo código "9998…" (el código suma), pero ahí el importe sí aparece.
+
+**Simulador de hipótesis** (`kretz/aura-hypotheses.ts` y su test), contra las 5 escrituras reales:
+
+- **Descartadas:**
+  - guardar la letra y el código tal cual;
+  - letra según la validez;
+  - letra según el código.
+- **Posibles:**
+  - **H2:** al escribir, la balanza lee esas posiciones en orden código → tipo, y lo inválido queda por defecto. El §4.85 va en contra.
+  - **H3:** la Aura no toma la letra ni el código por 2005.
+
+Para elegir entre H2 y H3 hace falta una escritura más, o el tráfico real de iTegra.
+
+**Plan de precios con lo comprobado** (`kretz/aura-sync-plan.ts`, no se usa en la app):
+
+- **Actualizar:** productos que ya son D (por kilo). Lo único que cambia es el precio, y el código queda en 0.
+- **Crear:** solo productos por kilo.
+- **Riesgo:** letra P, porque no se sabe en qué difiere de D.
+- **Omitir:** N y C, porque pasarían a venderse por kilo.
+
+**Código de barras** (`kretz/aura-barcode.ts`): lee los formatos del manual y reconoce el ticket de suma. El ticket real da suma sin importe. Si se configura la balanza con importe (PESO = NO), el ticket traería el total; falta un ticket real para calibrar los decimales.
