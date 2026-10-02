@@ -12,9 +12,10 @@ import { kretzChecksum } from "./kretz-frame";
  * - 5005 → el siguiente PLU mayor, de su propia memoria (arranca con los 6 reales). Al final, código 40.
  * - 2005 → guarda el registro TAL CUAL llega y contesta grupo 05, código 01.
  *   Así se ve exactamente qué manda iTegra, sin que esta "balanza" lo cambie.
- * - Cualquier otro comando → grupo 00, código 02 ("comando inexistente"), como
- *   contestó la real a 0002 y a 5002. Igual queda registrado: si iTegra manda
- *   un comando previo (por ejemplo, de configuración), se ve.
+ * - Configuración (1000-1499), otras altas (2xxx) y bajas (3xxx/4xxx) → "01" sin
+ *   aplicar nada: así iTegra no se corta y se ve todo lo que manda.
+ * - Cualquier otra lectura → grupo 00, código 02 ("comando inexistente"), como
+ *   contestó la real a 0002 y a 5002. Todo queda registrado.
  */
 
 export const REAL_1500_DATA = "AUI-030KMFBAPP4KAR  V1.00  6Feb24 00       ";
@@ -103,6 +104,11 @@ export class FakeAuraDevice {
       this.records = this.records.filter((r) => r.slice(0, 6) !== data.slice(0, 6)).concat(data);
       tx = this.reply("05", "01");
       note = `ALTA/MODIFICACIÓN DE PLU: ${data.length} caracteres`;
+    } else if (/^(1[0-4][0-9][0-9]|[234][0-9][0-9][0-9])$/.test(command)) {
+      // Configuración (1000-1499), altas (2xxx) y bajas (3xxx/4xxx) distintas de 2005: se contesta OK
+      // para que iTegra siga y se vea TODO lo que manda. No se aplica nada (solo se registra).
+      tx = this.reply(command.startsWith("1") ? "00" : command.slice(2, 4), "01");
+      note = `comando ${command} (contestado OK sin aplicar, solo registrado)`;
     } else {
       tx = this.reply("00", "02");
       note = `comando ${command} (contestado "inexistente")`;

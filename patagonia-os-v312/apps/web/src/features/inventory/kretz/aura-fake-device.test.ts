@@ -34,13 +34,15 @@ describe("Aura de mentira para capturar iTegra", () => {
     assert.match(e.note, /42 caracteres/);
   });
 
-  it("cualquier otro comando queda registrado y se contesta 'inexistente' (00 02), como la real", () => {
+  it("configuración y otras altas/bajas: contesta OK sin aplicar nada y lo registra; lecturas desconocidas: 'inexistente'", () => {
     const d = new FakeAuraDevice();
-    const r = parseKretzResponse(d.receive(buildKretzFrame("H", "01", "1070", "2012011")));
+    assert.equal(parseKretzResponse(d.receive(buildKretzFrame("H", "01", "1070", "2012011")))?.code, "01");
+    assert.equal(d.log.at(-1)?.frame?.command, "1070");
+    assert.equal(parseKretzResponse(d.receive(buildKretzFrame("H", "01", "3005", "000001")))?.code, "01");
+    assert.deepEqual(d.records, REAL_CLIENT_RECORDS, "no cambia nada");
+    const r = parseKretzResponse(d.receive(buildKretzFrame("H", "01", "5002", "0501")));
     assert.equal(r?.group, "00");
     assert.equal(r?.code, "02");
-    assert.equal(d.log.at(-1)?.frame?.command, "1070");
-    assert.deepEqual(d.records, REAL_CLIENT_RECORDS, "no cambia nada");
   });
 
   it("arma la trama aunque llegue en pedazos, y registra bytes sueltos", () => {
