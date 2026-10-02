@@ -191,3 +191,31 @@ Los horarios de los 700 caen todos entre el inicio y el fin de cada corrida. No 
 - **10-02:** no abrió en NINGUNA velocidad, ni recargando la página, y el estado previo era siempre "cerrado" en nuestra pestaña. Eso encaja con otro proceso que lo tiene tomado (otra ventana o perfil de Chrome, o un programa) o con un adaptador o driver trabado.
 - Web Serial no da el código de Windows. El detalle queda en `chrome://device-log` de esa PC.
 - Desenchufar y volver a enchufar el USB reinicia el driver y suelta cualquier proceso que lo tenga, así que resuelve los dos casos.
+
+### Resultado real con la versión `2026-10-02c` (2026-10-02 11:23 AR)
+
+**Anduvo todo.** Etapas dispositivo → abrir → enviar → recibir → interpretar, todas en verde. La balanza contestó como equipo H01 a 9600 baudios con 2 bits de stop, y se leyeron los 6 PLU de la balanza hasta el final ("no hay registros"). Hubo 3 aperturas en la prueba y 3 en la lectura.
+
+**Patrón del adaptador CH340 (real, se repitió 2 de 2 veces):**
+
+1. La primera apertura en 9600 con 2 bits de stop falla: `NetworkError`.
+2. Ninguna pestaña tenía el puerto ("readable=no", y la otra pestaña tenía 0 puertos abiertos).
+3. La apertura en 4800 con 1 bit de stop ("destrabar") anda al instante.
+4. La siguiente apertura en 9600 con 2 bits de stop anda.
+
+Conclusión: no es otro proceso que lo retiene, es el adaptador o su driver. **Cualquier función futura que abra la Aura (por ejemplo, la escritura de PLU) tiene que usar `openForSession`**, que ya hace ese "destrabar".
+
+**Los 6 registros reales (42 caracteres cada uno):**
+
+```
+000001FRUTILLA        P0000100010500000005
+000002PASTELITOS      N0000200000900000003
+000003PAN NEGRO       P0000300004800100001
+000006MILA BERENJENA  D0000600052000000000
+000008PROMO           C0000800189000000000
+000011HAMB POLLO      D0001100108000000000
+```
+
+- **Real:** PLU (6), nombre (16) y una letra (P/N/D/C).
+- **Real:** los 5 dígitos siguientes repiten el número de PLU (probable código de artículo).
+- **Hipótesis:** el precio está en los dígitos siguientes (001050, 000090, 000048, 000520, 001890, 001080, o con un dígito más). Falta compararlo con el precio que muestra la balanza para un producto.
