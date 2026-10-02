@@ -44,4 +44,16 @@ Además hay dos fotos de tickets (PLU 99 y PLU 98).
 
 ## Resultado
 
-(Se completa cuando llegue el informe.)
+Prueba del 2026-10-02 a las 12:59 AR (versión 2026-10-02g), con fotos de los tickets T.0029 y T.0030.
+
+- **Seguridad: OK.** `verdict` = ok. Las 4 cargas contestaron 01. Los 6 productos de la clienta quedaron idénticos antes y después.
+- **Nombre, precio, tara y validez:** se guardaron exactamente como se mandaron en los 4.
+- **Letra: la hipótesis H1 queda DESCARTADA.**
+  - Se mandó P, C, N y D, y la balanza guardó **D en los 4**.
+  - En los tickets, D se vende por kilo: el 99 salió "1.130kg @ 1234.00$/kg" y el 98 ("PRUEBA UNIDAD") salió "1.130kg @ 500.00$/kg".
+  - Con este registro, todo lo que se carga queda **por kilo**. No se pudo crear un producto por unidad.
+- **Código:** se mandó 97, 98, 96 y 500, y la balanza guardó **0 en los 4**.
+- **Conclusión:** la letra y el código no se toman de esas posiciones del registro 2005. Lo más probable es que el formato de escritura no sea igual al de lectura en esa parte. Eso solo lo puede aclarar Kretz.
+- **Código de barras:** los dos tickets, con totales distintos (1394 y 1130), traen el mismo código: `2099998000008` (EAN-13 válido). No lleva ni el producto, ni el peso, ni el importe. Con la configuración actual de la balanza, Mostrador no puede usar estos tickets. El encabezado del ticket es el de fábrica ("KRETZ S.A.").
+- **Riesgo para el envío masivo:** si se reescribe un producto de la clienta con este método, probablemente quede en D con código 0. Por ejemplo, PASTELITOS pasaría a venderse por kilo. **El envío masivo NO se habilita.**
+- **Quedan en la balanza:** los PLU 96 a 99 (de prueba, por kilo) y dos ventas de prueba en los totales del día ($1394 y $1130).
