@@ -803,12 +803,25 @@ export interface ScalePluWriteResult {
   responseCode: string | null;
 }
 
+/** Los envíos de la Report LT (registro de 135 caracteres, 2005/3005) nunca
+ * van a una Kretz Aura: en la Aura la única escritura permitida es la prueba
+ * del PLU 99 (kretz/aura-write-test.ts). Antes esto solo lo frenaba la
+ * pantalla; si alguien cambiaba el modelo a "Report LT" con la Aura
+ * conectada, "Borrar de la balanza" podía borrar un producto real. La Report
+ * LT usa el tipo de equipo "C", así que esto no la afecta. */
+export function assertNotAuraForReportWrites(settings: ScaleSerialSettings): void {
+  if (settings.deviceType === "H" || getSavedModelId() === "aura") {
+    throw new Error("Bloqueado: con la Kretz Aura todavía no se pueden mandar ni borrar productos. Solo está habilitada la prueba del producto 99.");
+  }
+}
+
 /** Manda un solo producto a la balanza (comando 2005). */
 export async function syncOneProductToScale(product: ScaleSyncableProduct): Promise<ScalePluWriteResult> {
   if (!isScaleSerialSupported()) {
     throw new Error("Este navegador no soporta comunicación serie directa (usá Chrome o Edge).");
   }
   const settings = getScaleSerialSettings();
+  assertNotAuraForReportWrites(settings);
   const port = await pickPort();
   const frame = await buildPluFrame(port, product, settings.deviceType, settings.equipmentId, settings.altaCommand, settings.baudRate);
   const response = await writeFrameResilient(port, frame, settings.baudRate);
@@ -833,6 +846,7 @@ export async function deleteScalePlu(pluCode: string): Promise<ScalePluDeleteRes
     throw new Error("Este navegador no soporta comunicación serie directa (usá Chrome o Edge).");
   }
   const settings = getScaleSerialSettings();
+  assertNotAuraForReportWrites(settings);
   const port = await pickPort();
   const pluNumber = fixedDigits(Number(pluCode) || 0, 6);
   const frame = buildFrame(settings.deviceType, settings.equipmentId, "3005", pluNumber);
@@ -919,6 +933,7 @@ export async function checkScaleCompatibility(): Promise<ScaleCompatibilityResul
     throw new Error("Este navegador no soporta comunicación serie directa (usá Chrome o Edge).");
   }
   const settings = getScaleSerialSettings();
+  assertNotAuraForReportWrites(settings);
   const port = await pickPort();
 
   const pingFrame = buildFrame(settings.deviceType, settings.equipmentId, "0001", "");
@@ -1096,6 +1111,7 @@ export async function syncProductsToScale(
     throw new Error("Este navegador no soporta comunicación serie directa (usá Chrome o Edge).");
   }
   const settings = getScaleSerialSettings();
+  assertNotAuraForReportWrites(settings);
   const port = await pickPort();
 
   const { toSend, skipped } = planScaleSync(products);
