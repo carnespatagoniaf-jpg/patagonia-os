@@ -24,28 +24,50 @@ import { claimPort, closeQuietly, errorClassification, freshPortFor, newSession,
  *   - 5002 con datos "05" (incompleto) → grupo "00", código "02", igual que 0002, que la Aura no tiene.
  *   - 1500 → la misma estructura que la Report Nx.
  *
- * Seguridad: solo se mandan los comandos de PROBE_COMMANDS (ninguno modifica, borra ni reinicia).
- * Se dejaron solo las lecturas que aportan a la decisión, para mandar la menor
- * cantidad de comandos que la Aura nunca recibió.
- * Queda excluido 5008 (totales por PLU): para seguir leyendo exige borrar con 3008.
+ * SEGURIDAD (decisión del dueño, 2026-10-03): solo se mandan comandos que esta
+ * Aura YA recibió antes sin ningún efecto, según las tramas registradas en
+ * scale_support_reports (cliente "Pollo y mar", 2026-10-01/02):
+ *   0001 (26 veces, contesta 01), 1500 (9 veces, datos técnicos),
+ *   5005 (132 veces, lectura de PLU; los productos quedaron idénticos).
+ * Ninguno modifica, borra, reinicia ni configura (Nx §2.2: 0001 test, 15xx
+ * lectura de configuración, 50xx lectura de datos).
+ * DESHABILITADOS porque la Aura nunca los recibió con estos datos y no hay
+ * documento de la Aura que los cubra: 5001 "05", 5026 y 5002 "05NN".
+ * (5002 solo se le mandó con "05" y contestó "comando inexistente"; con otros
+ * datos no se puede garantizar el comportamiento.) Para habilitarlos hace
+ * falta cambiar UNVERIFIED_ENABLED en el código: no hay ningún botón ni
+ * opción en tiempo de ejecución que lo haga.
+ * Siempre excluidos: 5008 (exige borrar con 3008), 0000-1499 (configuración),
+ * 2xxx (escritura), 3xxx/4xxx (borrado).
  */
 
-export const MODEL_PROBE_VERSION = "2026-10-03a";
+export const MODEL_PROBE_VERSION = "2026-10-03b";
 
-/** Comandos permitidos y para qué sirven. Todos de lectura según la Report Nx. */
-export const PROBE_COMMANDS: Record<string, string> = {
+/** Comandos ya recibidos por esta Aura sin efecto (ver arriba). */
+export const VERIFIED_COMMANDS: Record<string, string> = {
   "0001": "test de conexión",
   "1500": "datos técnicos (modelo y firmware)",
+  "5005": "lectura de un producto (el siguiente mayor al número pedido)"
+};
+
+/** Lecturas documentadas solo para la Report Nx; nunca enviadas a esta Aura. DESHABILITADAS. */
+export const UNVERIFIED_COMMANDS: Record<string, string> = {
   "5001": "cantidad de registros de la entidad PLU",
   "5002": "largo de cada campo del PLU (modelo de datos)",
   "5026": "moneda y decimales"
 };
 
+export const UNVERIFIED_ENABLED = false;
+
+export const PROBE_COMMANDS: Record<string, string> = { ...VERIFIED_COMMANDS, ...UNVERIFIED_COMMANDS };
+
 export function assertProbeCommand(command: string, data: string): void {
-  const ok =
-    command in PROBE_COMMANDS &&
+  const verified = command in VERIFIED_COMMANDS && (command === "5005" ? /^\d{6}$/.test(data) : data === "");
+  const unverified =
+    UNVERIFIED_ENABLED &&
+    command in UNVERIFIED_COMMANDS &&
     (command === "5002" ? /^05(0[1-9]|1\d|2[0-4])$/.test(data) : command === "5001" ? data === "05" : data === "");
-  if (!ok) throw new Error(`Bloqueado: el diagnóstico del modelo solo hace lecturas (${command} ${data} no está permitido).`);
+  if (!verified && !unverified) throw new Error(`Bloqueado: el diagnóstico solo manda lecturas ya comprobadas en esta Aura (${command} ${data} no está permitido).`);
 }
 
 export interface ProbeExchange {
@@ -157,17 +179,34 @@ export async function runAuraModelProbe(port: SerialPort, responder: KretzRespon
       result.detail = "la balanza no contestó el test de conexión";
       return result;
     }
-    for (const [command, data] of [["1500", ""], ["5001", "05"], ["5026", ""]] as const) {
-      progress(`Leyendo: ${PROBE_COMMANDS[command]}…`);
-      await probe(port, responder, result, command, data, timeout);
-      await sleep(50);
+    progress("Leyendo los datos técnicos…");
+    await probe(port, responder, result, "1500", "", timeout);
+
+    // Todos los productos, uno por uno (5005 devuelve el siguiente mayor). Corta al final de la lista,
+    // si la balanza no contesta, o si el número no avanza (para no quedar dando vueltas).
+    let after = 0;
+    for (let i = 0; i < 10000; i++) {
+      const arg = String(after).padStart(6, "0");
+      let ex = await probe(port, responder, result, "5005", arg, timeout);
+      if (!ex.code) ex = await probe(port, responder, result, "5005", arg, timeout);
+      if (ex.code !== "01" || !ex.responseData) break;
+      const plu = Number(ex.responseData.slice(0, 6));
+      if (!Number.isFinite(plu) || plu <= after) break;
+      after = plu;
+      progress(`Leyendo los productos de la balanza… va por el ${plu}`);
     }
-    // 5002 campo por campo. Si el primero contesta "comando inexistente" (02), no se insiste.
-    for (let field = 1; field <= 24; field++) {
-      progress(`Leyendo el largo del campo ${field} del PLU…`);
-      const ex = await probe(port, responder, result, "5002", `05${String(field).padStart(2, "0")}`, timeout);
-      if (field === 1 && (ex.code === "02" || !ex.code)) break;
-      await sleep(30);
+
+    if (UNVERIFIED_ENABLED) {
+      for (const [command, data] of [["5001", "05"], ["5026", ""]] as const) {
+        await probe(port, responder, result, command, data, timeout);
+        await sleep(50);
+      }
+      // 5002 campo por campo. Si el primero contesta "comando inexistente" (02), no se insiste.
+      for (let field = 1; field <= 24; field++) {
+        const ex = await probe(port, responder, result, "5002", `05${String(field).padStart(2, "0")}`, timeout);
+        if (field === 1 && (ex.code === "02" || !ex.code)) break;
+        await sleep(30);
+      }
     }
     result.detail = "lectura terminada";
     return result;
@@ -214,6 +253,7 @@ export const AURA_OBSERVED = {
 
 export type ModelVerdict =
   | "sin_conexion"
+  | "modelo_no_consultado" // 5002 deshabilitado: no se preguntó
   | "modelo_no_disponible" // la Aura no informa el modelo (5002 inexistente o sin respuesta)
   | "modelo_incompleto"
   | "modelo_no_coincide" // la suma de anchos no da 42 o las posiciones no encajan con lo leído
@@ -234,6 +274,8 @@ export interface ModelAnalysis {
   layout: FieldLayout[];
   total: number | null;
   technical: { model: string | null; firmware: string | null; currency: string | null; pluRecords: string | null };
+  /** Productos leídos con 5005 en este diagnóstico (registro de 42 tal cual). */
+  products: string[];
 }
 
 export function analyzeModelProbe(r: ModelProbeResult): ModelAnalysis {
@@ -246,10 +288,19 @@ export function analyzeModelProbe(r: ModelProbeResult): ModelAnalysis {
     pluRecords: find("5001")?.responseData ?? null
   };
   const lines: string[] = [];
+  const products = r.exchanges.filter((e) => e.command === "5005" && e.code === "01" && e.responseData).map((e) => e.responseData!);
   if (!r.exchanges.some((e) => e.command === "0001" && e.code)) {
-    return { verdict: "sin_conexion", lines: [`No hubo comunicación: ${r.detail}.`], layout: [], total: null, technical };
+    return { verdict: "sin_conexion", lines: [`No hubo comunicación: ${r.detail}.`], layout: [], total: null, technical, products };
   }
   const fieldEx = r.exchanges.filter((e) => e.command === "5002");
+  if (fieldEx.length === 0) {
+    lines.push(`Conexión correcta. Equipo ${technical.model ?? "?"}, firmware ${technical.firmware ?? "?"}. Productos leídos: ${products.length}.`);
+    lines.push(
+      'El modelo de datos (5002) NO se consultó: está deshabilitado porque nunca se comprobó en esta Aura con el pedido completo. Registro previo: 5002 con "05" contestó "comando inexistente" (grupo 00, código 02), igual que 0002.'
+    );
+    lines.push("Con lecturas ya comprobadas no se puede saber si el registro admite tipo y código. Lo que falta: la captura de lo que manda iTegra.");
+    return { verdict: "modelo_no_consultado", lines, layout: [], total: null, technical, products };
+  }
   const ok = fieldEx.filter((e) => e.code === "01" && /^05\d{2}\d{3}$/.test(e.responseData ?? ""));
   if (ok.length === 0) {
     const first = fieldEx[0];
@@ -259,7 +310,7 @@ export function analyzeModelProbe(r: ModelProbeResult): ModelAnalysis {
         : "No se llegó a preguntar el modelo de datos."
     );
     lines.push("Por lectura no se puede saber si el registro tiene código y tipo. Lo que falta: la captura de lo que manda iTegra.");
-    return { verdict: "modelo_no_disponible", lines, layout: [], total: null, technical };
+    return { verdict: "modelo_no_disponible", lines, layout: [], total: null, technical, products };
   }
   const widths = new Map(ok.map((e) => [Number(e.responseData!.slice(2, 4)), Number(e.responseData!.slice(4, 7))]));
   const layout: FieldLayout[] = [];
@@ -273,7 +324,7 @@ export function analyzeModelProbe(r: ModelProbeResult): ModelAnalysis {
   const total = pos;
   if (!widths.has(6) || !widths.has(7) || !widths.has(9)) {
     lines.push(`El modelo vino incompleto (campos con respuesta: ${[...widths.keys()].join(", ")}).`);
-    return { verdict: "modelo_incompleto", lines, layout, total, technical };
+    return { verdict: "modelo_incompleto", lines, layout, total, technical, products };
   }
   const at = (f: number) => layout.find((l) => l.field === f)!;
   const code = at(6);
@@ -284,7 +335,7 @@ export function analyzeModelProbe(r: ModelProbeResult): ModelAnalysis {
   const fits = total === AURA_OBSERVED.recordLength && price.start === AURA_OBSERVED.priceAt[0];
   if (!fits) {
     lines.push("El modelo que informa la balanza no encaja con el registro que devuelve (largo o posición del precio distintos). Hay que revisar la numeración de campos antes de sacar conclusiones.");
-    return { verdict: "modelo_no_coincide", lines, layout, total, technical };
+    return { verdict: "modelo_no_coincide", lines, layout, total, technical, products };
   }
   if (code.width === 0) {
     const six = layout.find((l) => l.start === AURA_OBSERVED.sixDigitsAt[0] && l.width > 0);
@@ -296,12 +347,12 @@ export function analyzeModelProbe(r: ModelProbeResult): ModelAnalysis {
         ? 'El tipo SÍ está en el registro, en la posición 22. Si mandamos P o N y queda "D", la Aura valida o recalcula ese valor. Lo que falta es saber qué valor acepta (captura de iTegra).'
         : "El tipo no está donde lo leemos: revisar el informe."
     );
-    return { verdict: "codigo_no_existe", lines, layout, total, technical };
+    return { verdict: "codigo_no_existe", lines, layout, total, technical, products };
   }
   lines.push(
     code.start < type.start
       ? `El código va ANTES que el tipo (posiciones ${code.start} y ${type.start}). Si eso es así también al escribir, explica la pérdida (hipótesis H2): habría que mandar código y tipo en ese orden.`
       : `El código (posición ${code.start}) y el tipo (posición ${type.start}) existen en el orden en que los leemos. Que la Aura los ponga en "D" y 0 indica que valida esos valores: falta saber qué acepta (captura de iTegra).`
   );
-  return { verdict: "codigo_y_tipo_existen", lines, layout, total, technical };
+  return { verdict: "codigo_y_tipo_existen", lines, layout, total, technical, products };
 }

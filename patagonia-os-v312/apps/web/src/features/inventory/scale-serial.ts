@@ -554,9 +554,11 @@ export async function runAuraModelProbeOnScale(onProgress: (text: string) => voi
   const settings = getScaleSerialSettings();
   const port = await pickPort();
   cachedPortOpenKey = null;
+  // Si todavía no se hizo "Probar todo" en esta PC, se usa la configuración ya comprobada de la Aura (H01, 9600, 2 bits de stop).
+  const aura = settings.deviceType === "H" ? settings : { ...settings, baudRate: 9600, stopBits: 2 as const, deviceType: "H", equipmentId: "01" };
   const result = await runAuraModelProbe(
     port,
-    { link: { baudRate: settings.baudRate, stopBits: settings.stopBits }, deviceType: settings.deviceType, equipmentId: settings.equipmentId },
+    { link: { baudRate: aura.baudRate, stopBits: aura.stopBits }, deviceType: aura.deviceType, equipmentId: aura.equipmentId },
     { onProgress }
   );
   cachedPortOpenKey = null;

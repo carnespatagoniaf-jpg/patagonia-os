@@ -257,13 +257,13 @@ ${sent ? "El resultado ya le llegó al equipo de Patagonia OS." : "Sacale una fo
   /** Aura: lee el modelo de datos de la balanza (SOLO LECTURA) para saber si el registro admite tipo y código. */
   async function handleModelProbe() {
     setScaleBusy(true);
-    setScaleLog("Leyendo cómo guarda los productos la balanza (no cambia nada)…");
+    setScaleLog("Leyendo la balanza (no cambia nada)…");
     try {
       const r = await runAuraModelProbeOnScale((text) => setScaleLog(text));
       setModelProbe(r);
       const a = analyzeModelProbe(r);
       const canSend = profile?.role === "owner" || profile?.role === "admin";
-      const sent = canSend ? await handleSendToSupport("Modelo de datos Aura (envío automático)") : false;
+      const sent = canSend ? await handleSendToSupport("Diagnóstico Aura (envío automático)") : false;
       report(`${a.lines.join(" ")}
 
 ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sacale una foto a esta pantalla y mandala por WhatsApp."}`);
@@ -709,9 +709,9 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
           {/* Aura: diagnóstico del modelo de datos (solo lectura) */}
           {model.id === "aura" && (
             <div style={step}>
-              <p style={stepTitle}>Kretz Aura: cómo guarda los productos (solo lectura)</p>
-              <button disabled={scaleBusy || noSerial || !scalePortReady || !getLastDiagnosticRecord()?.responder} onClick={() => void handleModelProbe()}>
-                Leer modelo de datos
+              <p style={stepTitle}>Kretz Aura: diagnóstico (solo lectura)</p>
+              <button disabled={scaleBusy || noSerial} onClick={() => void handleModelProbe()}>
+                Diagnóstico de la balanza
               </button>
               {modelProbe && (
                 <p className="muted" style={{ margin: "8px 0 0", fontSize: 12, whiteSpace: "pre-wrap" }}>
@@ -719,7 +719,7 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
                 </p>
               )}
               <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
-                Le pregunta a la balanza el largo de cada dato de un producto. Solo lee: no cambia ni borra nada. Usar después de "Probar todo". El resultado se manda solo a soporte.
+                Lee los datos técnicos de la balanza y la lista de productos. Solo lee: no cambia ni borra nada. El resultado se manda solo a soporte.
               </p>
             </div>
           )}
