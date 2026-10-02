@@ -219,3 +219,25 @@ Conclusión: no es otro proceso que lo retiene, es el adaptador o su driver. **C
 - **Real:** PLU (6), nombre (16) y una letra (P/N/D/C).
 - **Real:** los 5 dígitos siguientes repiten el número de PLU (probable código de artículo).
 - **Hipótesis:** el precio está en los dígitos siguientes (001050, 000090, 000048, 000520, 001890, 001080, o con un dígito más). Falta compararlo con el precio que muestra la balanza para un producto.
+
+### Primera escritura real en la Aura (2026-10-02 12:02 AR, PLU 99, versión `2026-10-02d`)
+
+**Lo que se mandó y lo que quedó guardado:**
+
+- Mandado: `000099PRUEBA PATAGONIAP0009900012340000000`, con el comando 2005. La balanza contestó código 01.
+- Releído: `000099PRUEBA PATAGONIAD0000000012340000000`.
+
+**Lo que quedó comprobado (real):**
+
+- **2005 con el registro de 42 caracteres escribe.** Los 6 productos de la clienta quedaron idénticos: se leyó la lista antes y después.
+- **Precio en pesos enteros, sin decimales.** Se mandó 001234 y la pantalla mostró "1234 $/kg" (foto de la clienta). Entonces FRUTILLA, guardada como 001050, figura en la balanza a $1.050/kg.
+- Nombre, precio, tara y validez se guardaron tal cual se mandaron.
+
+**Lo que NO se guardó como se mandó:**
+
+- La letra: se mandó "P" y quedó "D".
+- El código: se mandó 000990 y quedó 000000.
+
+La balanza los reemplazó y igual contestó 01. Qué significan la letra (P/N/D/C) y el código, y por qué los cambió, sigue **desconocido**.
+
+Además, el código probablemente va en el código de barras del ticket que lee Mostrador. Hay que resolver esto antes del envío masivo.
