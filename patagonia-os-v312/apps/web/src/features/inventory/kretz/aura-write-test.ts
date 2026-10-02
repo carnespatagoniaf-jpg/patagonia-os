@@ -1,5 +1,5 @@
 import { buildKretzFrame, parseKretzResponse, toHex, toPrintable } from "./kretz-frame";
-import { buildAuraPluRecord, type AuraPluInput } from "./aura-plu";
+import { auraWriteToReadOrder, buildAuraWriteRecord, type AuraWriteInput } from "./aura-plu";
 import { collect, readPluList, sendRead, type DiagnosticExchange, type KretzResponder } from "./discovery";
 import { claimPort, closeQuietly, errorClassification, freshPortFor, newSession, openForSession, releasePort, type OpenAttempt } from "./port-session";
 
@@ -11,26 +11,27 @@ import { claimPort, closeQuietly, errorClassification, freshPortFor, newSession,
  * lo guardó con D y código 000000. Precio, nombre, tara y validez quedaron
  * bien; la pantalla mostró "1234 $/kg".
  *
- * Segunda prueba: cada producto contesta una pregunta concreta.
- * - PLU 97, por kilo, 2 días → P. ¿Se respeta P cuando hay días de validez? (hipótesis H1, aura-plu.ts)
- * - PLU 98, por unidad, 0 días → C. ¿Es C el unitario sin validez? ¿La pantalla lo vende por unidad? (ticket)
- * - PLU 96, por unidad, 3 días → N. ¿Es N el unitario con validez?
- * - PLU 99, por kilo, 0 días → D, código 500. Se reescribe solo nuestro producto
- *   de prueba. ¿Se queda un código distinto del PLU? ¿El código de barras del
- *   ticket lleva el código o el número de PLU?
- * En los PLU 96, 97 y 98 el código es igual al PLU, como en los 6 productos de la
- * clienta: si ahí tampoco queda, la balanza no toma el código por este comando.
+ * Segunda prueba (12:59): con P/C/N/D y códigos 97/98/96/500, todo quedó D y 0.
+ *
+ * CAUSA (capturada de iTegra, 2026-10-02): al escribir, el código va ANTES del
+ * tipo (aura-plu.ts, buildAuraWriteRecord). Esta tercera prueba usa ese formato:
+ * - PLU 97, por kilo (P), código 97, 2 días.
+ * - PLU 98, por unidad (N), código 98: ticket para ver la venta por unidad.
+ * - PLU 96, por unidad (N), código 960 (distinto del PLU), 3 días.
+ * - PLU 99, por kilo (P), código 500 (distinto del PLU): ticket para ver el código de barras.
+ * Se espera que al releer (5005) cada uno vuelva con SU tipo y SU código
+ * (auraWriteToReadOrder). Si vuelven con D y 0 otra vez, el formato no es ese.
  *
  * Pasos:
- * 1. Lista completa antes. Frena si 96/97/98 existen, o si 99 existe con otra cosa
- *    que no sea nuestro producto de la primera prueba.
+ * 1. Lista completa antes. Frena si en 96 a 99 hay algo que no sea un producto
+ *    de prueba nuestro (de las pruebas anteriores o de esta).
  * 2. 2005 de cada uno. `assertTestWrite` deja pasar SOLO estos 4 registros exactos.
  * 3. Releer cada uno. Se frena todo (no se carga el siguiente) si:
  *    - no se puede releer;
  *    - cambió el nombre, el precio, la tara o la validez;
  *    - después de esa carga cambió cualquier producto de la clienta (se relee la lista entera).
- *    Las diferencias de LETRA y CÓDIGO no frenan: son justo lo que la prueba mide
- *    (la primera prueba ya mostró que la balanza los cambia); se anotan campo por campo.
+ *    Las diferencias de LETRA y CÓDIGO no frenan: son justo lo que la prueba mide;
+ *    se anotan campo por campo.
  * 4. Lista completa final: los productos de la clienta tienen que estar idénticos.
  *
  * NO BORRA NADA, nunca (decisión del dueño, 2026-10-02): este módulo solo manda
@@ -38,24 +39,32 @@ import { claimPort, closeQuietly, errorClassification, freshPortFor, newSession,
  * de prueba (assertTestWrite). Los productos de prueba quedan en la balanza.
  */
 
-export const AURA_WRITE_TEST_VERSION = "2026-10-02g";
+export const AURA_WRITE_TEST_VERSION = "2026-10-02h";
 
-export interface AuraTestProduct extends AuraPluInput {
+export interface AuraTestProduct extends AuraWriteInput {
   purpose: string;
 }
 
 export const AURA_TEST_PRODUCTS: AuraTestProduct[] = [
-  { plu: 97, name: "PRUEBA KILO", type: "P", code: 97, priceRaw: 2000, validityDays: 2, purpose: "por kilo con 2 días de validez: ¿queda la letra P?" },
-  { plu: 98, name: "PRUEBA UNIDAD", type: "C", code: 98, priceRaw: 500, validityDays: 0, purpose: "por unidad sin validez: ¿queda la letra C y se vende por unidad? (ticket)" },
-  { plu: 96, name: "PRUEBA UNIDAD V", type: "N", code: 96, priceRaw: 300, validityDays: 3, purpose: "por unidad con 3 días de validez: ¿queda la letra N?" },
-  { plu: 99, name: "PRUEBA PATAGONIA", type: "D", code: 500, priceRaw: 1234, validityDays: 0, purpose: "por kilo, código 500 (distinto del PLU): ¿queda el código? ¿qué lleva el código de barras?" }
+  { plu: 97, name: "PRUEBA KILO", type: "P", code: 97, priceRaw: 2000, validityDays: 2, purpose: "por kilo, código 97, 2 días: ¿queda P y el código?" },
+  { plu: 98, name: "PRUEBA UNIDAD", type: "N", code: 98, priceRaw: 500, validityDays: 0, purpose: "por unidad, código 98: ¿queda N y se vende por unidad? (ticket)" },
+  { plu: 96, name: "PRUEBA UNIDAD V", type: "N", code: 960, priceRaw: 300, validityDays: 3, purpose: "por unidad, código 960 (distinto del PLU), 3 días: ¿queda N y el código?" },
+  { plu: 99, name: "PRUEBA PATAGONIA", type: "P", code: 500, priceRaw: 1234, validityDays: 0, purpose: "por kilo, código 500 (distinto del PLU): ¿queda el código? ¿qué lleva el código de barras? (ticket)" }
 ];
 
-export const AURA_TEST_RECORDS = AURA_TEST_PRODUCTS.map((p) => buildAuraPluRecord(p));
+/** Registros a mandar (orden de ESCRITURA) y cómo se espera releerlos (orden de LECTURA). */
+export const AURA_TEST_RECORDS = AURA_TEST_PRODUCTS.map((p) => buildAuraWriteRecord(p));
+export const AURA_TEST_EXPECTED_READBACK = AURA_TEST_RECORDS.map(auraWriteToReadOrder);
 export const AURA_TEST_PLUS = AURA_TEST_PRODUCTS.map((p) => p.plu);
 
-/** Lo que quedó en el PLU 99 después de la primera prueba (lo único que se permite pisar). */
+/** Lo que quedó en la balanza real de las pruebas anteriores (lo único que se permite pisar en 96 a 99). */
 export const AURA_FIRST_TEST_READBACK = "000099PRUEBA PATAGONIAD0000000012340000000";
+export const AURA_PREVIOUS_TEST_READBACKS = [
+  AURA_FIRST_TEST_READBACK,
+  "000097PRUEBA KILO     D0000000020000000002",
+  "000098PRUEBA UNIDAD   D0000000005000000000",
+  "000096PRUEBA UNIDAD V D0000000003000000003"
+];
 
 export function assertTestWrite(command: string, data: string): void {
   if (command !== "2005" || !AURA_TEST_RECORDS.includes(data)) {
@@ -162,7 +171,7 @@ export async function runAuraWriteTest(port: SerialPort, responder: KretzRespond
       return list.stoppedBy === "fin" && now.length === clientBefore.length && clientBefore.every((b) => now.some((a) => a.plu === b.plu && a.data === b.data));
     };
     if (clientBefore.some((r) => r.plu >= 96)) return finish("plu_ocupado", "hay productos de la clienta con número 96 o más: no se escribió nada");
-    const busy = before.records.filter((r) => AURA_TEST_PLUS.includes(r.plu) && !(r.plu === 99 && (r.data === AURA_FIRST_TEST_READBACK || AURA_TEST_RECORDS.includes(r.data))));
+    const busy = before.records.filter((r) => AURA_TEST_PLUS.includes(r.plu) && !AURA_PREVIOUS_TEST_READBACKS.includes(r.data) && !AURA_TEST_EXPECTED_READBACK.includes(r.data));
     if (busy.length) return finish("plu_ocupado", `el PLU ${busy.map((b) => b.plu).join(", ")} tiene otro producto: no se escribió nada`);
 
     for (const [i, product] of AURA_TEST_PRODUCTS.entries()) {
@@ -187,7 +196,8 @@ export async function runAuraWriteTest(port: SerialPort, responder: KretzRespond
       const back = await sendRead(port, result.exchanges, `releer PLU ${product.plu}`, link, deviceType, equipmentId, "5005", String(product.plu - 1).padStart(6, "0"), timeout);
       const data = back.kretz?.code === "01" ? back.kretz.data : null;
       item.readBack = data && data.startsWith(String(product.plu).padStart(6, "0")) ? data : null;
-      item.same = item.readBack ? compareAuraRecords(record, item.readBack) : null;
+      // Se compara contra cómo DEBERÍA releerse (la Aura devuelve el tipo antes que el código).
+      item.same = item.readBack ? compareAuraRecords(AURA_TEST_EXPECTED_READBACK[i], item.readBack) : null;
       const check = await readPluList(port, responder, result.exchanges, { timeoutMs: timeout });
       result.after = check.records;
       if (!clientIntact(check)) return finish("otros_cambiaron", `después de cargar el PLU ${product.plu}, la lista de productos de la clienta no coincide: se frenó todo`);
@@ -203,7 +213,7 @@ export async function runAuraWriteTest(port: SerialPort, responder: KretzRespond
     const rejected = result.items.find((it) => it.writeCode !== "01");
     if (rejected) return finish("rechazada", `la balanza contestó el código ${rejected.writeCode ?? "(nada)"} al cargar el PLU ${rejected.plu}`);
     const diffs = result.items.filter((it) => !it.same || Object.values(it.same).some((v) => !v)).map((it) => it.plu);
-    return finish("ok", diffs.length ? `se cargaron los ${result.items.length}; la balanza cambió la letra o el código en el PLU ${diffs.join(", ")} (ver detalle)` : `se cargaron los ${result.items.length} y se releyeron idénticos`);
+    return finish("ok", diffs.length ? `se cargaron los ${result.items.length}; la balanza cambió la letra o el código en el PLU ${diffs.join(", ")} (ver detalle)` : `se cargaron los ${result.items.length} y se releyeron con su tipo y su código`);
   } catch (err) {
     return finish("error", err instanceof Error ? `${err.name}: ${err.message}` : String(err));
   } finally {

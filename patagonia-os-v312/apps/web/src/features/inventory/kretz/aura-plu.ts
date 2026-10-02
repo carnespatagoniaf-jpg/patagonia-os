@@ -133,3 +133,83 @@ export function buildAuraPluRecord(input: AuraPluInput): string {
   if (record.length !== AURA_PLU_RECORD_LENGTH) throw new Error(`Registro de ${record.length} caracteres (se esperaban ${AURA_PLU_RECORD_LENGTH})`);
   return record;
 }
+
+/* ===================== FORMATO DE ESCRITURA (2005), CAPTURADO DE iTegra ===================== */
+/*
+ * Capturado del programa oficial iTegra 4-148 (modelo "3300ECO" = Aura Eco, equipo
+ * tipo H) contra la Aura simulada, 2026-10-02 (docs/capturas/aura-itegra-2026-10-02.json):
+ *
+ *   000050PRUEBA KILO     000050P1234000000005
+ *   PLU(6) nombre(16)     código(6) tipo(1) precio(6) tara(4) validez(3)
+ *
+ * Al ESCRIBIR, el código va ANTES del tipo (posiciones 22-27 código, 28 tipo P/N).
+ * Al LEER (5005) la Aura devuelve el tipo primero (22) y el código después (23-28).
+ * Nosotros escribíamos en el orden de lectura: la Aura recibía una letra donde
+ * esperaba el código y un dígito donde esperaba el tipo, y ponía sus valores por
+ * defecto ("D" y 0). Eso explica las 5 escrituras reales del 2026-10-02.
+ *
+ * Precio: iTegra lo manda con 2 decimales (1234 → "123400"). En la Aura de la
+ * clienta, en cambio, "001234" se imprimió "1234.00$/kg" (ticket real T.0029): esa
+ * balanza trabaja en pesos enteros. Patagonia manda el número tal como la balanza
+ * lo muestra, que es lo comprobado en la balanza real.
+ * Cambio de precio (capturado): iTegra reenvía el registro completo con el mismo
+ * código y tipo, sin borrar nada.
+ */
+
+export type AuraWriteType = "P" | "N";
+
+export interface AuraWriteInput {
+  plu: number;
+  name: string;
+  /** P = por kilo (pesable), N = por unidad (no pesable). Los únicos que manda iTegra. */
+  type: AuraWriteType;
+  /** Código de producto (el del código de barras), hasta 6 dígitos. */
+  code: number;
+  /** Pesos enteros, como los muestra la balanza de la clienta. */
+  priceRaw: number;
+  tareGrams?: number;
+  validityDays?: number;
+}
+
+export function buildAuraWriteRecord(input: AuraWriteInput): string {
+  const { plu, name, type, code, priceRaw } = input;
+  const tare = input.tareGrams ?? 0;
+  const days = input.validityDays ?? 0;
+  if (!Number.isInteger(plu) || plu < 1 || plu > 9999) throw new Error(`PLU fuera de rango (1 a 9999): ${plu}`);
+  if (!Number.isInteger(code) || code < 0 || code > 999999) throw new Error(`Código fuera de rango (6 dígitos): ${code}`);
+  if (type !== "P" && type !== "N") throw new Error(`Tipo inválido: ${type} (P = por kilo, N = por unidad)`);
+  if (!Number.isInteger(priceRaw) || priceRaw < 0 || priceRaw > 999999) throw new Error(`Precio fuera de rango (6 dígitos): ${priceRaw}`);
+  if (!Number.isInteger(tare) || tare < 0 || tare > 9999) throw new Error(`Tara fuera de rango: ${tare}`);
+  if (!Number.isInteger(days) || days < 0 || days > 250) throw new Error(`Validez fuera de rango (0 a 250 días): ${days}`);
+  const cleanName = name
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9 .,%/-]/g, " ")
+    .slice(0, 16)
+    .padEnd(16, " ");
+  const pad = (n: number, w: number) => String(n).padStart(w, "0");
+  const record = `${pad(plu, 6)}${cleanName}${pad(code, 6)}${type}${pad(priceRaw, 6)}${pad(tare, 4)}${pad(days, 3)}`;
+  if (record.length !== AURA_PLU_RECORD_LENGTH) throw new Error(`Registro de ${record.length} caracteres`);
+  return record;
+}
+
+/** Cómo devolvería la Aura con 5005 un registro escrito con buildAuraWriteRecord (tipo y código intercambiados). */
+export function auraWriteToReadOrder(writeRecord: string): string {
+  return writeRecord.slice(0, 22) + writeRecord[28] + writeRecord.slice(22, 28) + writeRecord.slice(29);
+}
+
+/**
+ * Cambia el precio de un producto que ya está en la balanza SIN perder su código
+ * ni su tipo: toma el registro leído (orden de lectura) y lo pasa al orden de
+ * escritura con el precio nuevo. Solo P y N (los que usa iTegra). D y C devuelven
+ * null porque todavía no se sabe cómo se escriben.
+ */
+export function rewriteWithNewPrice(readRecord: string, priceRaw: number): string | null {
+  if (readRecord.length !== AURA_PLU_RECORD_LENGTH) return null;
+  const type = readRecord[22];
+  if (type !== "P" && type !== "N") return null;
+  if (!/^\d{6}$/.test(readRecord.slice(23, 29))) return null;
+  if (!Number.isInteger(priceRaw) || priceRaw < 0 || priceRaw > 999999) return null;
+  return readRecord.slice(0, 22) + readRecord.slice(23, 29) + type + String(priceRaw).padStart(6, "0") + readRecord.slice(35);
+}

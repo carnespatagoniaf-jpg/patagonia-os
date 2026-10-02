@@ -57,15 +57,14 @@ export const HYPOTHESES: Hypothesis[] = [
   {
     id: "H2-orden-nx",
     description:
-      "Al escribir, la balanza lee esas posiciones en el orden del documento Report Nx (código de 5 y después tipo); lo que no es válido queda en su valor por defecto (D y 0).",
+      "Al escribir, el código (6) va ANTES del tipo (P/N); lo que no es válido queda en su valor por defecto (D y 0). CONFIRMADA: es el formato que manda iTegra (captura 2026-10-02).",
     store: (s) => {
-      const code = s.slice(22, 27);
-      const type = s[27];
-      const validCode = /^\d{5}$/.test(code);
-      const validType = type === "P" || type === "N";
-      return `${head(s)}${validType ? type : "D"}${validCode ? code : "00000"}0${tail(s)}`;
+      const code = s.slice(22, 28);
+      const type = s[28];
+      const valid = /^\d{6}$/.test(code) && (type === "P" || type === "N");
+      return valid ? `${head(s)}${type}${code}${tail(s)}` : `${head(s)}D000000${tail(s)}`;
     },
-    unitProductWith97: (b) => `${head(b)}${pad(97, 5)}N0${tail(b)}`
+    unitProductWith97: (b) => `${head(b)}${pad(97, 6)}N${tail(b)}`
   },
   {
     id: "H3-ignora",

@@ -1,68 +1,64 @@
-import { parseAuraPlu } from "./aura-plu";
+import { auraWriteToReadOrder, buildAuraWriteRecord, parseAuraPlu, rewriteWithNewPrice } from "./aura-plu";
 
 /**
- * Plan de actualización de PRECIOS para la Kretz Aura, solo sobre lo que la
- * evidencia real permite (no se usa en la app todavía; no envía nada).
+ * Plan de envío de PRECIOS y PRODUCTOS a la Kretz Aura (no envía nada: arma qué mandar).
  *
- * Lo comprobado con la balanza real (2026-10-02, 5 escrituras):
- * - 2005 guarda nombre, precio (pesos enteros), tara y validez tal cual.
- * - La letra queda SIEMPRE "D" y el código SIEMPRE 0.
- * - "D" se vende por kilo (tickets T.0029 y T.0030).
- * Entonces:
- * - Producto con letra "D" en la balanza: actualizar el precio no cambia cómo se
- *   vende. Lo único que se pierde es su código (queda en 0). → "actualizar"
- * - Letra "P": pasaría a "D". Los dos parecen por kilo, pero no se sabe qué
- *   diferencia hay entre P y D. → "riesgo" (no se manda sin decisión del dueño)
- * - Letra "N" o "C": pasaría a "D" = por kilo, y se vendería mal. → "omitir"
- * - PLU que no existe en la balanza: se crearía como "D" = por kilo. Solo sirve
- *   para productos por kilo. → "crear_por_kilo", o "omitir" si es por unidad.
+ * Formato de escritura capturado del programa oficial iTegra (aura-plu.ts,
+ * buildAuraWriteRecord): código (6) antes del tipo P/N. Cambio de precio = reenviar
+ * el registro completo con el mismo código y tipo (como iTegra), sin borrar nada.
+ *
+ * - Producto que ya está en la balanza con tipo P o N → "actualizar": cambia SOLO
+ *   el precio; nombre, código, tipo, tara y validez quedan como estaban.
+ * - Tipo D o C (existen en la balanza de la clienta; iTegra no los usa) → "revisar":
+ *   no se sabe todavía cómo se escriben, no se tocan.
+ * - PLU que no está en la balanza → "crear" con tipo P (por kilo) o N (por unidad)
+ *   y el código que se indique (por defecto, el número de PLU).
+ * Pendiente de confirmar en la balanza real (una sola prueba): que releer después de
+ * escribir devuelva el mismo tipo y código (aura-write-test.ts).
  */
 
-export type AuraPlanAction = "actualizar" | "riesgo" | "omitir" | "crear_por_kilo" | "sin_cambios";
+export type AuraPlanAction = "actualizar" | "crear" | "revisar" | "omitir" | "sin_cambios";
 
 export interface AuraPlanItem {
   plu: number;
   action: AuraPlanAction;
   reason: string;
-  /** Registro a mandar con 2005 (null si no se manda). */
+  /** Registro a mandar con 2005 (orden de escritura), o null si no se manda. */
   record: string | null;
-  /** Lo que se espera que quede guardado según lo observado (letra D, código 0). */
-  expectedStored: string | null;
+  /** Cómo debería releerse con 5005 si la balanza lo guardó bien. */
+  expectedReadBack: string | null;
 }
 
-/** Lo que la Aura real hizo con cada 2005: posición 22 → "D", 23-28 → "000000", el resto igual. */
-export function observedAuraStore(sent: string): string {
-  return sent.slice(0, 22) + "D" + "000000" + sent.slice(29);
+export interface AuraPlanUpdate {
+  plu: number;
+  priceRaw: number;
+  byWeight: boolean;
+  name?: string;
+  code?: number;
 }
 
-export function planAuraPriceUpdate(
-  scaleRecords: string[],
-  updates: { plu: number; priceRaw: number; byWeight: boolean; name?: string }[]
-): AuraPlanItem[] {
+export function planAuraPriceUpdate(scaleRecords: string[], updates: AuraPlanUpdate[]): AuraPlanItem[] {
   const byPlu = new Map(scaleRecords.map((r) => [Number(r.slice(0, 6)), r]));
   return updates.map((u) => {
     if (!Number.isInteger(u.priceRaw) || u.priceRaw < 0 || u.priceRaw > 999999) {
-      return { plu: u.plu, action: "omitir", reason: "precio fuera de rango (6 dígitos, pesos enteros)", record: null, expectedStored: null };
+      return { plu: u.plu, action: "omitir", reason: "precio fuera de rango (6 dígitos, pesos enteros)", record: null, expectedReadBack: null };
     }
     const current = byPlu.get(u.plu);
-    const price = String(u.priceRaw).padStart(6, "0");
     if (!current) {
-      if (!u.byWeight) return { plu: u.plu, action: "omitir", reason: "producto por unidad: la Aura lo guardaría por kilo", record: null, expectedStored: null };
-      const name = (u.name ?? "").toUpperCase().slice(0, 16).padEnd(16, " ");
-      const record = `${String(u.plu).padStart(6, "0")}${name}D000000${price}0000000`;
-      return { plu: u.plu, action: "crear_por_kilo", reason: "no existe en la balanza: se crea por kilo, sin código", record, expectedStored: observedAuraStore(record) };
+      try {
+        const record = buildAuraWriteRecord({ plu: u.plu, name: u.name ?? `PLU ${u.plu}`, type: u.byWeight ? "P" : "N", code: u.code ?? u.plu, priceRaw: u.priceRaw });
+        return { plu: u.plu, action: "crear", reason: u.byWeight ? "nuevo, por kilo" : "nuevo, por unidad", record, expectedReadBack: auraWriteToReadOrder(record) };
+      } catch (err) {
+        return { plu: u.plu, action: "omitir", reason: err instanceof Error ? err.message : String(err), record: null, expectedReadBack: null };
+      }
     }
     const p = parseAuraPlu(current);
-    if (!p) return { plu: u.plu, action: "omitir", reason: "registro de la balanza ilegible", record: null, expectedStored: null };
-    if (p.priceRaw === price) return { plu: u.plu, action: "sin_cambios", reason: "ya tiene ese precio", record: null, expectedStored: null };
-    // Se cambia SOLO el precio: nombre, letra, código, tara y validez van tal cual estaban.
-    const record = current.slice(0, 29) + price + current.slice(35);
-    if (p.type === "D") {
-      return { plu: u.plu, action: "actualizar", reason: p.code === "000000" ? "por kilo (D): cambia solo el precio" : `por kilo (D): cambia el precio; su código ${p.code} quedaría en 0`, record, expectedStored: observedAuraStore(record) };
+    if (!p) return { plu: u.plu, action: "omitir", reason: "registro de la balanza ilegible", record: null, expectedReadBack: null };
+    if (Number(p.priceRaw) === u.priceRaw) return { plu: u.plu, action: "sin_cambios", reason: "ya tiene ese precio", record: null, expectedReadBack: null };
+    const record = rewriteWithNewPrice(current, u.priceRaw);
+    if (!record) {
+      return { plu: u.plu, action: "revisar", reason: `tipo "${p.type}" en la balanza: todavía no se sabe cómo se escribe; no se toca`, record: null, expectedReadBack: null };
     }
-    if (p.type === "P") {
-      return { plu: u.plu, action: "riesgo", reason: "letra P: quedaría en D; no se sabe qué diferencia hay entre P y D", record, expectedStored: observedAuraStore(record) };
-    }
-    return { plu: u.plu, action: "omitir", reason: `letra ${p.type}: quedaría en D = por kilo (hoy se vende distinto)`, record: null, expectedStored: null };
+    return { plu: u.plu, action: "actualizar", reason: `cambia solo el precio (${p.type === "P" ? "por kilo" : "por unidad"}, código ${p.code} se conserva)`, record, expectedReadBack: auraWriteToReadOrder(record) };
   });
 }

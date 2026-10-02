@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { AURA_FIRST_TEST_READBACK, AURA_TEST_RECORDS, assertTestWrite, runAuraWriteTest } from "./aura-write-test";
+import { auraWriteToReadOrder } from "./aura-plu";
+import { AURA_PREVIOUS_TEST_READBACKS, AURA_TEST_RECORDS, assertTestWrite, runAuraWriteTest } from "./aura-write-test";
 import { kretzChecksum } from "./kretz-frame";
 
 const REAL_SIX = [
@@ -23,7 +24,7 @@ class MemoryAura {
   writable: WritableStream<Uint8Array> | null = null;
   commands: string[] = [];
   rejectWrites = false;
-  /** Imita lo que hizo la Aura real con el PLU 99: pone el código en 0. */
+  /** Mundo "H3": la balanza ignora tipo y código aunque vengan bien (pone D y 0). */
   zeroCode = false;
   /** Para simular que la balanza guarda otro precio. */
   manglePrice = false;
@@ -48,7 +49,10 @@ class MemoryAura {
         } else if (command === "2005") {
           if (self.rejectWrites || data.length !== 42) out = reply("02", "05");
           else {
-            let stored = self.zeroCode ? data.slice(0, 23) + "000000" + data.slice(29) : data;
+            // Como la Aura real: con el formato de escritura (código 22-27 y tipo P/N en 28) guarda tipo y código
+            // y los devuelve en orden de lectura; con cualquier otra cosa en esas posiciones pone "D" y 0 (lo visto el 2026-10-02).
+            const writeFormat = /^[0-9]{6}$/.test(data.slice(22, 28)) && (data[28] === "P" || data[28] === "N");
+            let stored = writeFormat && !self.zeroCode ? auraWriteToReadOrder(data) : data.slice(0, 22) + "D000000" + data.slice(29);
             if (self.manglePrice) stored = stored.slice(0, 29) + "009999" + stored.slice(35);
             self.plus = self.plus.filter((r) => r.slice(0, 6) !== data.slice(0, 6)).concat(stored);
             out = reply("02", "01");
@@ -71,11 +75,14 @@ const responder = { link: { baudRate: 9600, stopBits: 2 as const }, deviceType: 
 
 describe("prueba de escritura de la Aura (solo PLU 96 a 99)", () => {
   it("carga los 4 productos de prueba, los relee y no toca los de la clienta (con el 99 de la primera prueba ya cargado)", async () => {
-    const aura = new MemoryAura([...REAL_SIX, AURA_FIRST_TEST_READBACK]);
+    const aura = new MemoryAura([...REAL_SIX, ...AURA_PREVIOUS_TEST_READBACKS]);
     const r = await runAuraWriteTest(aura as unknown as SerialPort, responder, { timeoutMs: 50 });
     assert.equal(r.verdict, "ok", r.detail);
     assert.deepEqual(r.items.map((it) => it.plu), [97, 98, 96, 99]);
-    assert.ok(r.items.every((it) => it.readBack === it.sent));
+    assert.ok(r.items.every((it) => it.readBack === auraWriteToReadOrder(it.sent)), JSON.stringify(r.items));
+    assert.match(r.detail, /con su tipo y su código/);
+    assert.deepEqual(r.items.map((it) => it.readBack![22]), ["P", "N", "N", "P"]);
+    assert.deepEqual(r.items.map((it) => it.readBack!.slice(23, 29)), ["000097", "000098", "000960", "000500"]);
     assert.deepEqual(r.after.filter((x) => x.plu < 90).map((x) => x.data), REAL_SIX);
     assert.equal(aura.commands.filter((c) => c === "2005").length, 4);
     // Nunca un borrado: solo test de conexión, lecturas y las 4 cargas.
@@ -84,7 +91,7 @@ describe("prueba de escritura de la Aura (solo PLU 96 a 99)", () => {
     assert.equal(aura.readable, null, "el puerto queda cerrado");
   });
 
-  it("si la balanza cambia el código (como la real), sigue con los demás y lo informa campo por campo", async () => {
+  it("si la balanza igual ignorara tipo y código (pone D y 0), sigue con los demás y lo informa campo por campo", async () => {
     const aura = new MemoryAura([...REAL_SIX]);
     aura.zeroCode = true;
     const r = await runAuraWriteTest(aura as unknown as SerialPort, responder, { timeoutMs: 50 });
@@ -94,7 +101,7 @@ describe("prueba de escritura de la Aura (solo PLU 96 a 99)", () => {
     for (const it of r.items) {
       assert.equal(it.same?.codigo, false);
       assert.equal(it.same?.precio, true);
-      assert.equal(it.same?.letra, true);
+      assert.equal(it.same?.letra, false);
     }
   });
 
