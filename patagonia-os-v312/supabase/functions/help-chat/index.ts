@@ -162,7 +162,7 @@ CUENTA Y CONTRASEÑA
 - Si no la recuerda: en la pantalla de ingreso, "¿Olvidaste tu contraseña?" y le llega un mail para elegir una nueva.
 
 SUCURSALES
-- El dueño o administrador puede cambiar de sucursal arriba a la izquierda y crear otras con "+ Nueva sucursal". El resto de los usuarios solo ve su sucursal.
+- El dueño o administrador puede cambiar de sucursal arriba a la izquierda y crear otras con "+ Nueva sucursal". Para corregir el nombre de la sucursal elegida (por ejemplo, si quedó "Suc 1"), tocar "Cambiar nombre" ahí mismo, escribir el nombre nuevo y "Guardar": no cambia nada más (ventas, stock y cuentas siguen igual) y no puede repetirse con otra sucursal. El resto de los usuarios solo ve su sucursal.
 
 IMPRESIÓN DE TICKETS
 - Funciona con cualquier impresora térmica de tickets, de cualquier marca. Se configura en el engranaje de Mostrador → "Impresora de tickets".

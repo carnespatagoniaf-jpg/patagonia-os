@@ -24,6 +24,14 @@ export async function createBranch(name: string): Promise<{ id: string }> {
   return { id: data.id };
 }
 
+/** Cambia el nombre de una sucursal (solo dueño/administrador; migración 108_rename_branch.sql). */
+export async function renameBranch(branchId: string, name: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("rename_branch", { p_branch_id: branchId, p_name: name });
+  if (error) throw error;
+}
+
 export async function setBranchSalesMode(branchId: string, salesMode: SalesMode): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 

@@ -75,9 +75,12 @@ const navGroups: Array<{ heading: string | null; items: NavItem[] }> = [
 ];
 
 function BranchSwitcher() {
-  const { branchId, branches, activeBranch, canSwitch, setBranchId, addBranch, setSalesMode } = useActiveBranch();
+  const { branchId, branches, activeBranch, canSwitch, setBranchId, addBranch, renameBranch, setSalesMode } = useActiveBranch();
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState("");
+  const [showRename, setShowRename] = useState(false);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
   const [error, setError] = useState("");
   const [modeBusy, setModeBusy] = useState(false);
 
@@ -96,6 +99,22 @@ function BranchSwitcher() {
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo crear la sucursal.");
+    }
+  }
+
+  async function handleRename() {
+    if (!branchId) return;
+    const name = renameValue.trim();
+    if (!name) { setError("Ingresá un nombre."); return; }
+    setRenameBusy(true);
+    try {
+      await renameBranch(branchId, name);
+      setShowRename(false);
+      setError("");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo cambiar el nombre.");
+    } finally {
+      setRenameBusy(false);
     }
   }
 
@@ -124,7 +143,21 @@ function BranchSwitcher() {
         <option value="mostrador">Mostrador (venta ítem a ítem)</option>
       </select>
 
-      {showNewForm ? (
+      {showRename ? (
+        <div className="branch-switcher-new">
+          <input placeholder="Nuevo nombre" value={renameValue} maxLength={60} onChange={(e) => setRenameValue(e.target.value)} />
+          <button className="secondary" disabled={renameBusy} onClick={handleRename}>Guardar</button>
+          <button className="secondary" onClick={() => { setShowRename(false); setError(""); }}>Cancelar</button>
+        </div>
+      ) : (
+        !showNewForm && (
+          <button className="branch-switcher-add" onClick={() => { setRenameValue(currentName ?? ""); setShowRename(true); setError(""); }}>
+            Cambiar nombre
+          </button>
+        )
+      )}
+
+      {showRename ? null : showNewForm ? (
         <div className="branch-switcher-new">
           <input placeholder="Nombre de la sucursal" value={newName} onChange={(e) => setNewName(e.target.value)} />
           <button className="secondary" onClick={handleAdd}>Guardar</button>

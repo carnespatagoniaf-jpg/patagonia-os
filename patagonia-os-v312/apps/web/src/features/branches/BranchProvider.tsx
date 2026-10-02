@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useState, t
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 import { can } from "../auth/permissions";
-import { createBranch, listBranches, setBranchSalesMode, type Branch, type SalesMode } from "./branches-service";
+import { createBranch, listBranches, renameBranch as renameBranchRpc, setBranchSalesMode, type Branch, type SalesMode } from "./branches-service";
 
 const DEMO_BRANCH_ID = "demo-branch";
 const DEMO_BRANCH: Branch = { id: DEMO_BRANCH_ID, name: "Sucursal demo", sales_mode: null };
@@ -15,6 +15,7 @@ interface BranchContextValue {
   loading: boolean;
   setBranchId(id: string): void;
   addBranch(name: string): Promise<Branch>;
+  renameBranch(branchId: string, name: string): Promise<void>;
   setSalesMode(branchId: string, mode: SalesMode): Promise<void>;
 }
 
@@ -75,6 +76,15 @@ export function BranchProvider({ children }: { children: ReactNode }) {
     return { id: result.id, name, sales_mode: null };
   }
 
+  async function renameBranch(id: string, name: string) {
+    if (!isSupabaseConfigured) {
+      setBranches((list) => list.map((b) => (b.id === id ? { ...b, name } : b)));
+      return;
+    }
+    await renameBranchRpc(id, name);
+    await reload();
+  }
+
   async function setSalesMode(id: string, mode: SalesMode) {
     await setBranchSalesMode(id, mode);
     await reload();
@@ -82,7 +92,7 @@ export function BranchProvider({ children }: { children: ReactNode }) {
 
   const activeBranch = branches.find((b) => b.id === branchId) ?? null;
 
-  const value: BranchContextValue = { branchId, branches, activeBranch, canSwitch, loading, setBranchId, addBranch, setSalesMode };
+  const value: BranchContextValue = { branchId, branches, activeBranch, canSwitch, loading, setBranchId, addBranch, renameBranch, setSalesMode };
 
   return <BranchContext.Provider value={value}>{children}</BranchContext.Provider>;
 }
