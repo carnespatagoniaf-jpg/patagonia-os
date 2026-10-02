@@ -112,7 +112,7 @@ export interface DiscoveryOptions {
 const linkLabel = (l: SerialLink) => `${l.baudRate} baudios, ${l.stopBits} bit(s) de stop`;
 
 /** Lee lo que llegue hasta `ms` (o hasta EOT si `untilEot`). Una sola lectura pendiente a la vez. */
-async function collect(port: SerialPort, ms: number, untilEot: boolean): Promise<number[]> {
+export async function collect(port: SerialPort, ms: number, untilEot: boolean): Promise<number[]> {
   const reader = port.readable!.getReader();
   const got: number[] = [];
   const deadline = Date.now() + ms;
@@ -158,7 +158,7 @@ function openFailureText(err: unknown): string {
   return c ? `${c.explanation} (${raw})` : raw;
 }
 
-async function sendRead(
+export async function sendRead(
   port: SerialPort,
   log: DiagnosticExchange[],
   step: string,
@@ -522,36 +522,7 @@ export async function scanAllPlus(
         "la balanza no contestó ni el test de conexión. Fijate que esté prendida, en la pantalla de venta (no dentro del menú), y en modo Datos (menú → COMUNI → MODO = dAtOS). Tocá una tecla para despertarla y probá de nuevo";
       return scan;
     }
-    let after = 0;
-    for (;;) {
-      if (options.shouldStop?.()) {
-        scan.stoppedBy = "cancelado";
-        break;
-      }
-      if (scan.records.length >= max) {
-        scan.stoppedBy = "limite";
-        break;
-      }
-      const arg = String(after).padStart(6, "0");
-      let ex = await sendRead(port, log, "leer PLU", responder.link, responder.deviceType, responder.equipmentId, "5005", arg, timeout);
-      if (!ex.kretz) ex = await sendRead(port, log, "leer PLU (reintento)", responder.link, responder.deviceType, responder.equipmentId, "5005", arg, timeout);
-      if (log.length > 40) log.splice(20, 1); // guardar los primeros 20 y los últimos, no miles
-      scan.lastCode = ex.kretz?.code ?? null;
-      if (!ex.kretz || ex.kretz.code !== "01") {
-        scan.stoppedBy = ex.kretz ? "fin" : "error";
-        scan.lastDetail = ex.kretz ? describeKretzCode(ex.kretz.code) : ex.rx ? `respuesta no reconocida: ${ex.rx}` : "sin respuesta";
-        break;
-      }
-      const plu = Number(ex.kretz.data.slice(0, 6));
-      if (!Number.isFinite(plu) || plu <= after) {
-        scan.stoppedBy = "error";
-        scan.lastDetail = `la balanza devolvió el PLU ${ex.kretz.data.slice(0, 6)} después del ${after}: se corta para no dar vueltas`;
-        break;
-      }
-      scan.records.push({ plu, data: ex.kretz.data });
-      after = plu;
-      options.onProgress?.(`Leyendo productos de la balanza… ${scan.records.length} (va por el PLU ${plu})`);
-    }
+    Object.assign(scan, await readPluList(port, responder, log, { max, timeoutMs: timeout, onProgress: options.onProgress, shouldStop: options.shouldStop }));
   } catch (err) {
     scan.stoppedBy = "error";
     scan.lastDetail = err instanceof Error ? err.message : String(err);
@@ -562,6 +533,56 @@ export async function scanAllPlus(
     scan.finishedAt = new Date().toISOString();
   }
   return scan;
+}
+
+export interface PluListResult {
+  records: { plu: number; data: string }[];
+  stoppedBy: PluScan["stoppedBy"];
+  lastCode: string | null;
+  lastDetail: string;
+}
+
+/** Lee todos los PLU con 5005 sobre un puerto YA abierto (y con el 0001 ya contestado). Solo lectura. */
+export async function readPluList(
+  port: SerialPort,
+  responder: KretzResponder,
+  log: DiagnosticExchange[],
+  options: { max?: number; timeoutMs?: number; onProgress?: (text: string) => void; shouldStop?: () => boolean } = {}
+): Promise<PluListResult> {
+  const max = options.max ?? 10000;
+  const timeout = options.timeoutMs ?? 1500;
+  const result: PluListResult = { records: [], stoppedBy: "fin", lastCode: null, lastDetail: "" };
+  let after = 0;
+  for (;;) {
+    if (options.shouldStop?.()) {
+      result.stoppedBy = "cancelado";
+      break;
+    }
+    if (result.records.length >= max) {
+      result.stoppedBy = "limite";
+      break;
+    }
+    const arg = String(after).padStart(6, "0");
+    let ex = await sendRead(port, log, "leer PLU", responder.link, responder.deviceType, responder.equipmentId, "5005", arg, timeout);
+    if (!ex.kretz) ex = await sendRead(port, log, "leer PLU (reintento)", responder.link, responder.deviceType, responder.equipmentId, "5005", arg, timeout);
+    if (log.length > 40) log.splice(20, 1); // guardar los primeros 20 y los últimos, no miles
+    result.lastCode = ex.kretz?.code ?? null;
+    if (!ex.kretz || ex.kretz.code !== "01") {
+      result.stoppedBy = ex.kretz ? "fin" : "error";
+      result.lastDetail = ex.kretz ? describeKretzCode(ex.kretz.code) : ex.rx ? `respuesta no reconocida: ${ex.rx}` : "sin respuesta";
+      break;
+    }
+    const plu = Number(ex.kretz.data.slice(0, 6));
+    if (!Number.isFinite(plu) || plu <= after) {
+      result.stoppedBy = "error";
+      result.lastDetail = `la balanza devolvió el PLU ${ex.kretz.data.slice(0, 6)} después del ${after}: se corta para no dar vueltas`;
+      break;
+    }
+    result.records.push({ plu, data: ex.kretz.data });
+    after = plu;
+    options.onProgress?.(`Leyendo productos de la balanza… ${result.records.length} (va por el PLU ${plu})`);
+  }
+  return result;
 }
 
 const BACKUP_KEY = "patagonia-scale-plu-backup";

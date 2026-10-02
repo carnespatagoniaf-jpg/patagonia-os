@@ -21,6 +21,8 @@ export interface ScaleSupportConnectionInfo {
   diagnosticRecord?: unknown;
   /** Última lectura de todos los PLU de la balanza (solo lectura, copia de seguridad). */
   pluScan?: unknown;
+  /** Prueba de escritura de un producto en la Aura (kretz/aura-write-test.ts). */
+  auraWriteTest?: unknown;
 }
 
 export function buildSupportConnections(

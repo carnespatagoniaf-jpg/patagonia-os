@@ -13,6 +13,7 @@ import {
   describeResponseCode,
   diagnoseScaleLink,
   scanScalePlus,
+  runAuraWriteTestOnScale,
   getScalePortDescription,
   getScaleSerialSettings,
   isScalePortPaired,
@@ -28,6 +29,7 @@ import {
 } from "./scale-serial";
 import { getLastDiagnosticRecord, getLastPluScan, summarizeDiagnosticRecord, type PluScan } from "./kretz/discovery";
 import { auraPriceCandidates, parseAuraPlu } from "./kretz/aura-plu";
+import { AURA_TEST_PRODUCT, getLastAuraWriteTest, type AuraWriteTestResult } from "./kretz/aura-write-test";
 import { EVIDENCE_LABELS, KRETZ_MODELS, canWritePlu, getKretzModel, getSavedModelId, saveModelId, type KretzModelId } from "./kretz/models";
 
 const BALANCE_NUMBER_KEY = "patagonia-scale-balance-number";
@@ -84,6 +86,7 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
   const [supportMessage, setSupportMessage] = useState("");
   const [portLabel, setPortLabel] = useState<string | null>(null);
   const [pluScan, setPluScan] = useState<PluScan | null>(getLastPluScan());
+  const [auraTest, setAuraTest] = useState<AuraWriteTestResult | null>(getLastAuraWriteTest());
   const stopScanRef = useRef(false);
   const [scanning, setScanning] = useState(false);
   const [modelId, setModelId] = useState<KretzModelId>(getSavedModelId());
@@ -136,6 +139,7 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
             settings: { ...scaleSettings, model: model.id, balanceNumber },
             diagnosticRecord: getLastDiagnosticRecord() ?? undefined,
             pluScan: getLastPluScan() ?? undefined,
+            auraWriteTest: getLastAuraWriteTest() ?? undefined,
             confirmedCapabilities: [],
             pairedAt: "",
             connectedNow: scalePortReady
@@ -214,6 +218,32 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
             `\n\nDetalle para soporte: ${technical}`
         );
       }
+    } catch (err) {
+      report(err instanceof Error ? err.message : "Falló la prueba.");
+    } finally {
+      setScaleBusy(false);
+    }
+  }
+
+  /** Aura: carga UN producto de prueba en un PLU libre, lo relee y comprueba que los demás no cambiaron (kretz/aura-write-test.ts). */
+  async function handleAuraWriteTest() {
+    setScaleBusy(true);
+    setScaleLog("Cargando el producto de prueba… no desenchufes la balanza ni cierres esta pantalla.");
+    try {
+      const r = await runAuraWriteTestOnScale((text) => setScaleLog(text));
+      setAuraTest(r);
+      const text =
+        r.verdict === "ok"
+          ? `✅ Se cargó "${AURA_TEST_PRODUCT.name}" en el PLU ${AURA_TEST_PRODUCT.plu}, se volvió a leer igual y los demás productos no cambiaron.
+Ahora, en la balanza, llamá al producto ${AURA_TEST_PRODUCT.plu} y fijate qué precio muestra.`
+          : r.verdict === "plu_ocupado" || r.verdict === "lectura_incompleta" || r.verdict === "sin_respuesta" || r.verdict === "puerto"
+            ? `No se cargó nada: ${r.detail}.`
+            : `❌ La prueba no salió bien: ${r.detail}.`;
+      const canSend = profile?.role === "owner" || profile?.role === "admin";
+      const sent = canSend ? await handleSendToSupport("Prueba de escritura Aura (envío automático)") : false;
+      report(`${text}
+
+${sent ? "El resultado ya le llegó al equipo de Patagonia OS." : "Sacale una foto a esta pantalla y mandala por WhatsApp."}`);
     } catch (err) {
       report(err instanceof Error ? err.message : "Falló la prueba.");
     } finally {
@@ -650,6 +680,26 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
                   {pluScan.records.length > 200 && <p className="muted" style={{ fontSize: 12 }}>Mostrando 200 de {pluScan.records.length}. La copia descargable tiene todos.</p>}
                 </>
               )}
+            </div>
+          )}
+
+          {/* 3 (Aura). Prueba de escritura de UN producto en un PLU libre */}
+          {model.id === "aura" && (
+            <div style={step}>
+              <p style={stepTitle}>Kretz Aura: cargar un producto de prueba</p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <button disabled={scaleBusy || noSerial || !scalePortReady || !getLastDiagnosticRecord()?.responder} onClick={() => void handleAuraWriteTest()}>
+                  Cargar producto de prueba (PLU {AURA_TEST_PRODUCT.plu})
+                </button>
+                {auraTest && (
+                  <span className={auraTest.verdict === "ok" ? undefined : "muted"} style={{ fontSize: 13 }}>
+                    {auraTest.verdict === "ok" ? "✓ Cargado y comprobado" : `Última prueba: ${auraTest.detail}`}
+                  </span>
+                )}
+              </div>
+              <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
+                Carga "{AURA_TEST_PRODUCT.name}" en el PLU {AURA_TEST_PRODUCT.plu} (si está libre), lo vuelve a leer y comprueba que los demás productos de la balanza quedaron igual. No cambia ni borra ningún otro producto. Usar después de "Probar todo".
+              </p>
             </div>
           )}
 

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { AURA_PLU_LAYOUT, AURA_PLU_RECORD_LENGTH, auraPriceCandidates, parseAuraPlu } from "./aura-plu";
+import { AURA_PLU_LAYOUT, AURA_PLU_RECORD_LENGTH, auraPriceCandidates, buildAuraPluRecord, parseAuraPlu } from "./aura-plu";
 
 describe("PLU de la Kretz Aura (registro real de 5005)", () => {
   const REAL = "000001FRUTILLA        P0000100010500000005"; // Aura AUI-030KMFBAPP4KAR, 2026-10-01
@@ -26,5 +26,36 @@ describe("PLU de la Kretz Aura (registro real de 5005)", () => {
   it("no acepta registros de otro largo", () => {
     assert.equal(parseAuraPlu(REAL.slice(1)), null);
     assert.equal(parseAuraPlu("AUI-030KMFBAPP4KAR  V1.00  6Feb24 00       "), null);
+  });
+});
+
+describe("armado del registro de la Aura", () => {
+  const REAL_SIX = [
+    "000001FRUTILLA        P0000100010500000005",
+    "000002PASTELITOS      N0000200000900000003",
+    "000003PAN NEGRO       P0000300004800100001",
+    "000006MILA BERENJENA  D0000600052000000000",
+    "000008PROMO           C0000800189000000000",
+    "000011HAMB POLLO      D0001100108000000000"
+  ];
+
+  it("arma byte por byte igual que los registros reales de la balanza (P y N)", () => {
+    for (const real of REAL_SIX) {
+      const r = parseAuraPlu(real)!;
+      if (r.type !== "P" && r.type !== "N") continue;
+      const built = buildAuraPluRecord({ plu: r.plu, name: r.name, type: r.type, priceRaw: Number(r.priceRaw), tareGrams: Number(r.tareRaw), validityDays: r.validityDays });
+      assert.equal(built, real);
+    }
+  });
+
+  it("el producto de prueba", () => {
+    assert.equal(buildAuraPluRecord({ plu: 99, name: "Prueba Patagonia", type: "P", priceRaw: 1234 }), "000099PRUEBA PATAGONIAP0009900012340000000");
+  });
+
+  it("frena datos fuera de rango", () => {
+    assert.throws(() => buildAuraPluRecord({ plu: 0, name: "X", type: "P", priceRaw: 1 }));
+    assert.throws(() => buildAuraPluRecord({ plu: 10000, name: "X", type: "P", priceRaw: 1 }));
+    assert.throws(() => buildAuraPluRecord({ plu: 5, name: "X", type: "P", priceRaw: 1000000 }));
+    assert.throws(() => buildAuraPluRecord({ plu: 5, name: "X", type: "P", priceRaw: 10.5 }));
   });
 });

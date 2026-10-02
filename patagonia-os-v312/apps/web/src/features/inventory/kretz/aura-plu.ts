@@ -69,3 +69,48 @@ export function auraPriceCandidates(priceRaw: string): { sinDecimales: number; c
   const n = Number(priceRaw);
   return { sinDecimales: n, conDosDecimales: n / 100 };
 }
+
+/*
+ * Evidencia del reparto con los 6 PLU reales de la clienta (2026-10-02):
+ * - El reparto 6+16+1+6+6+4+3 coincide con los anchos del manual (§8.2).
+ * - Da valores razonables en los 6: "PAN NEGRO" tara 0100 (100 g) y validez
+ *   001 día, "FRUTILLA" validez 5 días, "PASTELITOS" (N = por unidad) 3 días.
+ * - El "código" sigue siempre el patrón PLU × 10 (000010, 000020, 000110).
+ * PENDIENTE: el precio. FRUTILLA guarda 001050 y la clienta dice $10.500/kg,
+ * así que hay un factor (×10 o decimales) que se confirma con el PLU de
+ * prueba: se escribe un precio conocido y se mira qué muestra la balanza.
+ */
+
+export interface AuraPluInput {
+  plu: number;
+  name: string;
+  /** "P" pesable (como FRUTILLA y PAN NEGRO), "N" por unidad (como PASTELITOS). */
+  type: "P" | "N";
+  /** Los 6 dígitos tal cual se guardan (sin aplicar ningún factor). */
+  priceRaw: number;
+  tareGrams?: number;
+  validityDays?: number;
+}
+
+/** Arma el registro de 42 caracteres, con el mismo formato que devuelve 5005. Tira error ante cualquier dato fuera de rango. */
+export function buildAuraPluRecord(input: AuraPluInput): string {
+  const { plu, name, type, priceRaw } = input;
+  const tare = input.tareGrams ?? 0;
+  const days = input.validityDays ?? 0;
+  if (!Number.isInteger(plu) || plu < 1 || plu > 9999) throw new Error(`PLU fuera de rango (1 a 9999): ${plu}`);
+  if (!Number.isInteger(priceRaw) || priceRaw < 0 || priceRaw > 999999) throw new Error(`Precio fuera de rango (6 dígitos): ${priceRaw}`);
+  if (!Number.isInteger(tare) || tare < 0 || tare > 9999) throw new Error(`Tara fuera de rango: ${tare}`);
+  if (!Number.isInteger(days) || days < 0 || days > 250) throw new Error(`Validez fuera de rango (0 a 250 días): ${days}`);
+  if (type !== "P" && type !== "N") throw new Error(`Tipo desconocido: ${type}`);
+  const cleanName = name
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9 .,%/-]/g, " ")
+    .slice(0, 16)
+    .padEnd(16, " ");
+  const pad = (n: number, w: number) => String(n).padStart(w, "0");
+  const record = `${pad(plu, 6)}${cleanName}${type}${pad(plu * 10, 6)}${pad(priceRaw, 6)}${pad(tare, 4)}${pad(days, 3)}`;
+  if (record.length !== AURA_PLU_RECORD_LENGTH) throw new Error(`Registro de ${record.length} caracteres (se esperaban ${AURA_PLU_RECORD_LENGTH})`);
+  return record;
+}

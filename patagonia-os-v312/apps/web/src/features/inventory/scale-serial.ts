@@ -1,5 +1,6 @@
 import type { Product } from "@patagonia/domain";
 import { STAGE_LABELS, runKretzDiscovery, saveDiagnosticRecord, savePluScan, scanAllPlus, type DiagnosticRecord, type DiscoveryVerdict, type PluScan } from "./kretz/discovery";
+import { runAuraWriteTest, saveAuraWriteTest, type AuraWriteTestResult } from "./kretz/aura-write-test";
 import { getKretzModel, getSavedModelId } from "./kretz/models";
 import { buildKretzFrame, describeKretzCode } from "./kretz/kretz-frame";
 
@@ -530,6 +531,21 @@ export async function scanScalePlus(onProgress: (text: string) => void, shouldSt
   cachedPortOpenKey = null;
   savePluScan(scan);
   return scan;
+}
+
+/** Prueba de escritura de UN producto en la Aura (PLU libre), con la configuración que encontró "Probar todo". Ver kretz/aura-write-test.ts. */
+export async function runAuraWriteTestOnScale(onProgress: (text: string) => void): Promise<AuraWriteTestResult> {
+  const settings = getScaleSerialSettings();
+  const port = await pickPort();
+  cachedPortOpenKey = null;
+  const result = await runAuraWriteTest(
+    port,
+    { link: { baudRate: settings.baudRate, stopBits: settings.stopBits }, deviceType: settings.deviceType, equipmentId: settings.equipmentId },
+    { onProgress }
+  );
+  cachedPortOpenKey = null;
+  saveAuraWriteTest(result);
+  return result;
 }
 
 /** Resumen por etapa: dónde se cortó la comunicación. */
