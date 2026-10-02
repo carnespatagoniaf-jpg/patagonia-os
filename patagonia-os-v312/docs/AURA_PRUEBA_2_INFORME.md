@@ -1,10 +1,9 @@
 # Kretz Aura — segunda prueba de escritura: cómo se lee el resultado
 
-Prueba versión `2026-10-02f`, cliente "Pollo y mar". El resultado llega solo a `scale_support_reports`, en `connections[0].auraWriteTest`. Trae:
+Prueba versión `2026-10-02g` (sin borrado: decisión del dueño, 2026-10-02), cliente "Pollo y mar". El resultado llega solo a `scale_support_reports`, en `connections[0].auraWriteTest`. Trae:
 
 - `items`: lo que se mandó y lo que quedó, con las diferencias campo por campo.
 - `before` / `after`: la lista completa de productos antes y después.
-- `deleteTest`: el resultado del borrado de prueba.
 - `exchanges`: los bytes de cada comando.
 
 Además hay dos fotos de tickets (PLU 99 y PLU 98).
@@ -22,7 +21,7 @@ Además hay dos fotos de tickets (PLU 99 y PLU 98).
 
 1. **Seguridad (excluyente).**
    - `verdict` tiene que ser `ok`.
-   - `deleteTest.clientIntact` tiene que ser `true`.
+   - La prueba se frena sola, con `verdict` = `otros_cambiaron`, si después de cualquier carga cambió un producto de la clienta. Se frena con `diferencia` si un producto de prueba no se pudo releer, o si volvió con otro nombre, precio, tara o validez.
    - Los 6 productos de la clienta (1, 2, 3, 6, 8 y 11) tienen que estar idénticos en `after`.
    - Si algo de esto falla, se frena todo y se pide ayuda a Kretz.
 2. **Letras (hipótesis H1).**
@@ -40,10 +39,8 @@ Además hay dos fotos de tickets (PLU 99 y PLU 98).
    - Comprobar que el lector de Mostrador (`scale-barcode.ts`) lo entiende con el formato de la clienta.
    - Si el ticket sale sin código de barras, la balanza lo tiene apagado (manual §7.1.7, formato "NO").
 6. **Retirar los productos de prueba.**
-   - `deleteTest.removedPlus = [96]`: 3005 borra el número exacto. Para retirar el 97, el 98 y el 99 se usa 3005 con cada número.
-   - `[97]`: 3005 borra "el siguiente mayor", como 5005. Para borrar el N se manda N−1.
-   - `[]`: 3005 no borra en la Aura. Los de prueba se borran a mano desde la balanza (manual §8.2.3).
-   - En cualquier caso, los productos de la clienta no se tocan.
+   - Esta prueba NO borra nada; los 4 quedan en la balanza.
+   - Cómo retirarlos se decide aparte. El borrado a mano desde la balanza está documentado en el manual (§8.2.3) y no toca otros productos. El borrado por cable (3005) no se usa en la Aura hasta conocer cómo se comporta.
 
 ## Resultado
 

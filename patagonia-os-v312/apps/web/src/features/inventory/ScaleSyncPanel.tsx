@@ -713,15 +713,10 @@ ${sent ? "El resultado ya le llegó al equipo de Patagonia OS." : "Sacale una fo
                       ))}
                     </tbody>
                   </table>
-                  {auraTest.deleteTest && (
-                    <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>
-                      Prueba de borrado (PLU 96): {auraTest.deleteTest.removedPlus.length ? `se borró el PLU ${auraTest.deleteTest.removedPlus.join(", ")}` : "no se borró nada"} (código {auraTest.deleteTest.code ?? "-"}). Tus productos: {auraTest.deleteTest.clientIntact ? "sin cambios" : "¡CAMBIARON!"}.
-                    </p>
-                  )}
                 </div>
               )}
               <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
-                Carga {AURA_TEST_PRODUCTS.map((p) => `"${p.name}" (PLU ${p.plu})`).join(", ")}, los vuelve a leer y comprueba después de cada uno que tus productos quedaron igual (si algo cambia, frena). Al final prueba borrar el de prueba 96. Solo usa esos números: si alguno tiene otro producto, no carga nada. No cambia ni borra ningún producto tuyo. Usar después de "Probar todo".
+                Carga {AURA_TEST_PRODUCTS.map((p) => `"${p.name}" (PLU ${p.plu})`).join(", ")}, los vuelve a leer y comprueba después de cada uno que tus productos quedaron igual (si algo cambia, frena). Solo usa esos números: si alguno tiene otro producto, no carga nada. No cambia ni borra ningún producto tuyo, y no borra nada de la balanza. Usar después de "Probar todo".
               </p>
             </div>
           )}

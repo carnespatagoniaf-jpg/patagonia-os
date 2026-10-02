@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { AURA_FIRST_TEST_READBACK, AURA_TEST_RECORDS, assertTestDelete, assertTestWrite, runAuraWriteTest } from "./aura-write-test";
+import { AURA_FIRST_TEST_READBACK, AURA_TEST_RECORDS, assertTestWrite, runAuraWriteTest } from "./aura-write-test";
 import { kretzChecksum } from "./kretz-frame";
 
 const REAL_SIX = [
@@ -25,8 +25,8 @@ class MemoryAura {
   rejectWrites = false;
   /** Imita lo que hizo la Aura real con el PLU 99: pone el código en 0. */
   zeroCode = false;
-  /** 3005: "exacto" borra ese PLU; "siguiente" borra el siguiente mayor (como 5005). */
-  deleteMode: "exacto" | "siguiente" = "exacto";
+  /** Para simular que la balanza guarda otro precio. */
+  manglePrice = false;
   /** Para simular un desastre: al cargar este PLU, también cambia un producto de la clienta. */
   corruptOnWrite: number | null = null;
   constructor(public plus: string[]) {}
@@ -48,18 +48,14 @@ class MemoryAura {
         } else if (command === "2005") {
           if (self.rejectWrites || data.length !== 42) out = reply("02", "05");
           else {
-            const stored = self.zeroCode ? data.slice(0, 23) + "000000" + data.slice(29) : data;
+            let stored = self.zeroCode ? data.slice(0, 23) + "000000" + data.slice(29) : data;
+            if (self.manglePrice) stored = stored.slice(0, 29) + "009999" + stored.slice(35);
             self.plus = self.plus.filter((r) => r.slice(0, 6) !== data.slice(0, 6)).concat(stored);
             out = reply("02", "01");
           }
           if (self.corruptOnWrite !== null && Number(data.slice(0, 6)) === self.corruptOnWrite) {
             self.plus = self.plus.map((r) => (r.startsWith("000001") ? r.replace("FRUTILLA", "FRUTILLX") : r));
           }
-        } else if (command === "3005") {
-          const sorted = [...self.plus].sort();
-          const target = self.deleteMode === "exacto" ? sorted.find((r) => Number(r.slice(0, 6)) === Number(data)) : sorted.find((r) => Number(r.slice(0, 6)) > Number(data));
-          self.plus = self.plus.filter((r) => r !== target);
-          out = reply("03", target ? "01" : "20");
         } else out = reply("00", "02");
         setTimeout(() => controller.enqueue(out), 2);
       }
@@ -82,19 +78,19 @@ describe("prueba de escritura de la Aura (solo PLU 96 a 99)", () => {
     assert.ok(r.items.every((it) => it.readBack === it.sent));
     assert.deepEqual(r.after.filter((x) => x.plu < 90).map((x) => x.data), REAL_SIX);
     assert.equal(aura.commands.filter((c) => c === "2005").length, 4);
-    assert.equal(aura.commands.filter((c) => c === "3005").length, 1);
-    assert.ok(aura.commands.every((c) => ["0001", "5005", "2005", "3005"].includes(c)), aura.commands.join(","));
-    assert.deepEqual(r.deleteTest, { sent: "000096", code: "01", removedPlus: [96], clientIntact: true });
-    assert.match(r.detail, /sacó el PLU 96/);
+    // Nunca un borrado: solo test de conexión, lecturas y las 4 cargas.
+    assert.ok(aura.commands.every((c) => ["0001", "5005", "2005"].includes(c)), aura.commands.join(","));
+    assert.deepEqual(r.after.filter((x) => x.plu >= 96).map((x) => x.plu), [96, 97, 98, 99]);
     assert.equal(aura.readable, null, "el puerto queda cerrado");
   });
 
-  it("si la balanza cambia el código (como la real), lo informa campo por campo", async () => {
+  it("si la balanza cambia el código (como la real), sigue con los demás y lo informa campo por campo", async () => {
     const aura = new MemoryAura([...REAL_SIX]);
     aura.zeroCode = true;
     const r = await runAuraWriteTest(aura as unknown as SerialPort, responder, { timeoutMs: 50 });
     assert.equal(r.verdict, "ok");
-    assert.match(r.detail, /cambió algún dato/);
+    assert.equal(aura.commands.filter((c) => c === "2005").length, 4);
+    assert.match(r.detail, /cambió la letra o el código/);
     for (const it of r.items) {
       assert.equal(it.same?.codigo, false);
       assert.equal(it.same?.precio, true);
@@ -142,30 +138,21 @@ describe("prueba de escritura de la Aura (solo PLU 96 a 99)", () => {
     assert.deepEqual(r.after.map((x) => x.data), REAL_SIX);
   });
 
-  it("si 3005 funciona como 'el siguiente mayor', borra el 97 (también de prueba) y lo informa; los de la clienta quedan igual", async () => {
+  it("si un producto de prueba vuelve con otro precio, frena ahí: no carga los siguientes", async () => {
     const aura = new MemoryAura([...REAL_SIX]);
-    aura.deleteMode = "siguiente";
+    aura.manglePrice = true;
     const r = await runAuraWriteTest(aura as unknown as SerialPort, responder, { timeoutMs: 50 });
-    assert.equal(r.verdict, "ok");
-    assert.deepEqual(r.deleteTest?.removedPlus, [97]);
-    assert.ok(r.after.some((x) => x.plu === 98) && r.after.some((x) => x.plu === 99), "los de los tickets siguen");
-    assert.deepEqual(r.after.filter((x) => x.plu < 90).map((x) => x.data), REAL_SIX);
+    assert.equal(r.verdict, "diferencia");
+    assert.match(r.detail, /precio/);
+    assert.equal(aura.commands.filter((c) => c === "2005").length, 1);
   });
 
-  it("si al cargar un producto de prueba cambia uno de la clienta, frena ahí: no carga los siguientes ni prueba el borrado", async () => {
+  it("si al cargar un producto de prueba cambia uno de la clienta, frena ahí: no carga los siguientes", async () => {
     const aura = new MemoryAura([...REAL_SIX]);
     aura.corruptOnWrite = 97; // el primero que se carga
     const r = await runAuraWriteTest(aura as unknown as SerialPort, responder, { timeoutMs: 50 });
     assert.equal(r.verdict, "otros_cambiaron");
     assert.equal(aura.commands.filter((c) => c === "2005").length, 1);
-    assert.ok(!aura.commands.includes("3005"));
-  });
-
-  it("el borrado solo se permite con el argumento de prueba y si la clienta no tiene PLU de 96 o más", () => {
-    assert.doesNotThrow(() => assertTestDelete("3005", "000096", [1, 2, 3, 6, 8, 11]));
-    assert.throws(() => assertTestDelete("3005", "000001", [1, 2, 3]), /Bloqueado/);
-    assert.throws(() => assertTestDelete("3005", "000096", [1, 120]), /Bloqueado/);
-    assert.throws(() => assertTestDelete("2005", "000096", [1]), /Bloqueado/);
   });
 
   it("el candado no deja escribir otra cosa", () => {
