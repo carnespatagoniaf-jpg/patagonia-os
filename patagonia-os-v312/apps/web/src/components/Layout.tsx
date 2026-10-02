@@ -75,14 +75,13 @@ const navGroups: Array<{ heading: string | null; items: NavItem[] }> = [
 ];
 
 function BranchSwitcher() {
-  const { branchId, branches, activeBranch, canSwitch, setBranchId, addBranch, renameBranch, setSalesMode } = useActiveBranch();
+  const { branchId, branches, canSwitch, setBranchId, addBranch, renameBranch } = useActiveBranch();
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState("");
   const [showRename, setShowRename] = useState(false);
   const [renameValue, setRenameValue] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
   const [error, setError] = useState("");
-  const [modeBusy, setModeBusy] = useState(false);
 
   const currentName = branches.find((b) => b.id === branchId)?.name;
 
@@ -118,16 +117,6 @@ function BranchSwitcher() {
     }
   }
 
-  async function handleModeChange(mode: "" | "turnos" | "mostrador") {
-    if (!branchId) return;
-    setModeBusy(true);
-    try {
-      await setSalesMode(branchId, mode === "" ? null : mode);
-    } finally {
-      setModeBusy(false);
-    }
-  }
-
   return (
     <div className="branch-switcher">
       <select value={branchId ?? ""} onChange={(e) => setBranchId(e.target.value)}>
@@ -136,12 +125,6 @@ function BranchSwitcher() {
         ))}
       </select>
 
-      <div className="branch-switcher-label" style={{ marginTop: 10 }}>Modo de venta de esta sucursal</div>
-      <select disabled={modeBusy} value={activeBranch?.sales_mode ?? ""} onChange={(e) => void handleModeChange(e.target.value as "" | "turnos" | "mostrador")}>
-        <option value="">Sin definir</option>
-        <option value="turnos">Turnos (carga manual)</option>
-        <option value="mostrador">Mostrador (venta ítem a ítem)</option>
-      </select>
 
       {showRename ? (
         <div className="branch-switcher-new">

@@ -32,7 +32,7 @@ import { buildCloseTicket as buildCloseTicketBytes, buildMovementTicket as build
 import { type ReceiptLine, type ReceiptState, type MovementReceiptState, STALE_SHIFT_HOURS, formatShiftStart, getAutoPrintEnabled, saveAutoPrintEnabled, loadStoredReceipt, saveStoredReceipt } from "./sale-model";
 
 export function Sale() {
-  const { branchId, branches, activeBranch } = useActiveBranch();
+  const { branchId, branches } = useActiveBranch();
   const { profile } = useAuth();
   const { accounts, adjust } = useTreasury();
   const { suppliers } = useSuppliers();
@@ -445,13 +445,6 @@ export function Sale() {
 
   async function checkout() {
     if (cart.length === 0 || !shift) return;
-
-    if (activeBranch?.sales_mode === "turnos") {
-      const confirmed = window.confirm(
-        "Esta sucursal está configurada para vender por Turnos. ¿Seguro que querés cobrar por Mostrador acá también?"
-      );
-      if (!confirmed) return;
-    }
 
     if (!isSplit) {
       if (!payments[0]?.accountId) {

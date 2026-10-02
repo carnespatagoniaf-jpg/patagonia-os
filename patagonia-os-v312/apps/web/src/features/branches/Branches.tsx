@@ -9,8 +9,6 @@ import { useBranchesOverview } from "./useBranchesOverview";
 // dueño/administrador (branches.manage), igual que el selector de sucursal
 // del menú -- ver migración 098_branches_overview.sql.
 
-const SALES_MODE_LABEL: Record<string, string> = { turnos: "Turnos (carga manual)", mostrador: "Mostrador (venta ítem a ítem)" };
-
 function plain(text: string): string {
   return text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
 }
@@ -158,7 +156,6 @@ export function Branches() {
             <thead>
               <tr>
                 <th>Sucursal</th>
-                <th>Modo de venta</th>
                 <th>Turno</th>
                 <th className="num">Productos con stock</th>
                 <th className="num">Stock a costo</th>
@@ -169,7 +166,6 @@ export function Branches() {
               {branches.map((b) => (
                 <tr key={b.branchId}>
                   <td>{b.branchName}</td>
-                  <td className="muted">{b.salesMode ? SALES_MODE_LABEL[b.salesMode] : "Sin definir"}</td>
                   <td>{b.shiftOpen ? <span className="status-pill">Abierto</span> : <span className="muted">Cerrado</span>}</td>
                   <td className="num">{b.productCount}</td>
                   <td className="num">{formatMoney(b.stockValue)}</td>
