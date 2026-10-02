@@ -241,3 +241,33 @@ Conclusión: no es otro proceso que lo retiene, es el adaptador o su driver. **C
 La balanza los reemplazó y igual contestó 01. Qué significan la letra (P/N/D/C) y el código, y por qué los cambió, sigue **desconocido**.
 
 Además, el código probablemente va en el código de barras del ticket que lee Mostrador. Hay que resolver esto antes del envío masivo.
+
+### Análisis sin Kretz (2026-10-02, tarde)
+
+**Documentación pública revisada:**
+
+- El enlace `kretz.com.ar/shop/balanza-aura-eco-332/document/229` ("protocolo Aura") **no es público**: redirige a la tienda, también desde un navegador.
+- La página de la Aura publica cuatro documentos, y ninguno es el protocolo:
+  - 11: manual de usuario;
+  - 114: folleto;
+  - 115: ficha técnica;
+  - 228: guía rápida.
+
+**Comprobado con las tramas reales** (`kretz/aura-real-frames.test.ts`):
+
+- Las respuestas a 5005 tienen checksum correcto.
+- Los 6 productos se separan y se vuelven a armar idénticos.
+- La trama 2005 que salió es exactamente la que arma el código.
+- Las únicas diferencias entre lo mandado y lo guardado son la posición 22 (siempre "D") y las 23-28 (siempre "000000").
+
+**Código de barras de los tickets** (`2099998000008`, el mismo en los dos tickets):
+
+- Es EAN-13 válido.
+- Leído con el formato 2-5-5 del manual (§7.1.7): inicio "20", código "99998" (probable código suma de ticket), valor "00000".
+- No trae producto ni importe.
+
+**Hipótesis no comprobada sobre la escritura:** el formato de escritura podría ir en el orden de la Report NX: código (5) y después tipo (1). En ese caso, lo que mandamos en esas posiciones sería inválido, y la balanza pondría los valores por defecto (D y 0).
+
+- A favor: explica las 5 escrituras.
+- En contra: no es simétrico con la lectura.
+- No se prueba sin autorización ni protocolo.

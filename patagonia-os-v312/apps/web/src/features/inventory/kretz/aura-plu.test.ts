@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { AURA_PLU_LAYOUT, AURA_PLU_RECORD_LENGTH, auraPriceCandidates, auraTypeLetter, buildAuraPluRecord, parseAuraPlu, type AuraTypeLetter } from "./aura-plu";
+import { AURA_PLU_LAYOUT, AURA_PLU_RECORD_LENGTH, auraPriceCandidates, buildAuraPluRecord, parseAuraPlu, type AuraTypeLetter } from "./aura-plu";
 
 describe("PLU de la Kretz Aura (registro real de 5005)", () => {
   const REAL = "000001FRUTILLA        P0000100010500000005"; // Aura AUI-030KMFBAPP4KAR, 2026-10-01
@@ -45,15 +45,6 @@ describe("armado del registro de la Aura", () => {
       const built = buildAuraPluRecord({ plu: r.plu, name: r.name, type: r.type as AuraTypeLetter, priceRaw: Number(r.priceRaw), tareGrams: Number(r.tareRaw), validityDays: r.validityDays });
       assert.equal(built, real);
     }
-  });
-
-  it("la letra (hipótesis H1) explica los 6 reales y el cambio P→D del PLU 99", () => {
-    const sold = { FRUTILLA: true, PASTELITOS: false, "PAN NEGRO": true, "MILA BERENJENA": true, PROMO: false, "HAMB POLLO": true } as Record<string, boolean>;
-    for (const real of REAL_SIX) {
-      const r = parseAuraPlu(real)!;
-      assert.equal(auraTypeLetter(sold[r.name], r.validityDays), r.type, r.name);
-    }
-    assert.equal(auraTypeLetter(true, 0), "D"); // PLU 99: mandamos P sin validez y la balanza lo guardó como D
   });
 
   it("el primer producto de prueba (el que se mandó el 2026-10-02)", () => {

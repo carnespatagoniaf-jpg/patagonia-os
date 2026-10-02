@@ -82,28 +82,20 @@ export function auraPriceCandidates(priceRaw: string): { sinDecimales: number; c
  */
 
 /*
- * Letra (2026-10-02, hipótesis H1 que explica los 7 registros reales, incluido
- * el cambio P→D que hizo la balanza con el PLU 99): la letra NO es solo
- * "pesable sí/no" (el manual §8.2.2 tiene PESA = Sí/No). Depende también de
- * si tiene días de validez:
- *   pesable + validez > 0 → P (FRUTILLA 5 días, PAN NEGRO 1 día)
- *   unitario + validez > 0 → N (PASTELITOS 3 días)
- *   pesable + validez 0   → D (MILA BERENJENA, HAMB POLLO, y el PLU 99 de prueba,
- *                               que la pantalla mostró en $/kg)
- *   unitario + validez 0  → C (PROMO)
- * El documento de la Report NX solo lista P, N y R; D y C no figuran.
- *
- * Código: el manual (§8.2.2) dice "código del producto, hasta 6 dígitos", y el
- * documento Report NX lo da de 5 caracteres. En los 6 reales vale igual al PLU
- * (00001, 00002, 00003, 00006, 00008, 00011) si se toman 5 dígitos, seguidos
- * de un "0". El precio se mostró tal cual, en pesos enteros (1234 → "1234 $/kg").
+ * Letra y código: lo que se sabe (2026-10-02, 2 pruebas reales, 5 escrituras).
+ * - El manual (§8.2.2) solo tiene PESA = Sí/No. El documento de la Report NX lista P, N y R; D y C no figuran.
+ * - En los 6 productos reales: P, N, P, D, C, D, con código = PLU seguido de "0".
+ * - DESCARTADA (2026-10-02 12:59) la hipótesis H1 "la letra sale de pesable + validez":
+ *   con 2005 la balanza guardó SIEMPRE "D" y código "000000", se mandara P, N, C o D
+ *   y código 97, 98, 96 o 500. Nombre, precio, tara y validez sí se guardan tal cual.
+ * - "D" se vende por kilo (tickets reales T.0029 y T.0030).
+ * - Cómo se escriben la letra y el código con 2005 en la Aura es DESCONOCIDO (no hay
+ *   protocolo público de la Aura). Tramas reales y el modelo de lo observado:
+ *   aura-real-frames.test.ts.
+ * El precio va en pesos enteros (1234 → "1234 $/kg", comprobado en pantalla).
  */
 export type AuraTypeLetter = "P" | "N" | "D" | "C";
 
-export function auraTypeLetter(weighable: boolean, validityDays: number): AuraTypeLetter {
-  if (weighable) return validityDays > 0 ? "P" : "D";
-  return validityDays > 0 ? "N" : "C";
-}
 
 export interface AuraPluInput {
   plu: number;
