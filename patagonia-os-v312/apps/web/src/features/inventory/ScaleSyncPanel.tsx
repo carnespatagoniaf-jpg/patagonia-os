@@ -91,7 +91,10 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
   const [verifiedKey, setVerifiedKey] = useState<string | null>(readLocal(VERIFIED_KEY));
   const model = getKretzModel(modelId);
   const writeAllowed = canWritePlu(model);
-  const verified = verifiedKey === verificationKey(model.id, scaleSettings);
+  // La Report LT ya funcionaba sin este paso: no se le agrega (pedido del dueño, 2026-10-02).
+  // Para la Aura y otras Kretz, el envío masivo exige verificar antes con un producto de prueba.
+  const verificationRequired = model.id !== "report-lt";
+  const verified = !verificationRequired || verifiedKey === verificationKey(model.id, scaleSettings);
   const writeLockedReason = writeAllowed ? undefined : `Bloqueado: el envío de productos a ${model.label} todavía no está comprobado con una balanza real.`;
 
   useEffect(() => {
@@ -657,7 +660,9 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
               <button disabled={scaleBusy || noSerial || !writeAllowed} title={writeLockedReason} onClick={handleCheckCompatibility}>
                 Verificar con un producto de prueba
               </button>
-              {verified ? (
+              {!verificationRequired ? (
+                <span className="muted" style={{ fontSize: 13 }}>Opcional con esta balanza.</span>
+              ) : verified ? (
                 <strong style={{ color: "#176329", fontSize: 13 }}>✓ Verificado con esta balanza</strong>
               ) : (
                 <span className="muted" style={{ fontSize: 13 }}>Todavía no verificado con esta configuración.</span>

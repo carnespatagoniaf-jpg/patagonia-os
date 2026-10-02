@@ -28,10 +28,15 @@ import { useAuth } from "./features/auth/AuthProvider";
 import { canAccessPage, firstAccessiblePage } from "./features/auth/permissions";
 import { BranchProvider } from "./features/branches/BranchProvider";
 import { isSupabaseConfigured } from "./lib/supabase";
+import { setSerialTabPage } from "./features/inventory/kretz/serial-tabs";
 
 export default function App() {
   const [page, setPage] = useState<Page>("dashboard");
   const { loading, session, profile, passwordRecovery, isPlatformAdmin } = useAuth();
+
+  useEffect(() => {
+    setSerialTabPage(page);
+  }, [page]);
 
   useEffect(() => {
     if (profile && !canAccessPage(profile, page)) {

@@ -146,6 +146,32 @@ describe("descubrimiento de balanza Kretz (solo lectura)", () => {
     assert.ok(scan.openLog?.some((o) => o.settings.includes("destrabar") && o.ok));
   });
 
+  it("si Windows no deja abrir el puerto en ninguna velocidad: corta en la etapa 'abrir', no manda nada y lo dice", async () => {
+    const sent: Uint8Array[] = [];
+    const blocked = {
+      readable: null,
+      writable: null,
+      async open() {
+        throw Object.assign(new Error("Failed to execute 'open' on 'SerialPort': Failed to open serial port."), { name: "NetworkError" });
+      },
+      async close() {}
+    };
+    const record = await runKretzDiscovery(blocked as unknown as SerialPort, "prueba", getKretzModel("aura"), { releaseOtherTabs: false, openTries: 1, frameTimeoutMs: 10 });
+    assert.equal(record.verdict, "puerto");
+    assert.deepEqual(record.stages?.map((s) => [s.id, s.status]), [["dispositivo", "ok"], ["abrir", "falla"], ["enviar", "no_llego"], ["recibir", "no_llego"], ["interpretar", "no_llego"]]);
+    assert.match(record.stages![1].detail, /ninguna velocidad/);
+    assert.equal(sent.length, 0);
+  });
+
+  it("con la Aura que contesta: todas las etapas en verde", async () => {
+    const scale = new FakeKretzScale("H", "01");
+    const record = await runKretzDiscovery(scale as unknown as SerialPort, "prueba", getKretzModel("aura"), { releaseOtherTabs: false, frameTimeoutMs: 30 });
+    assert.equal(record.verdict, "datos");
+    assert.ok(record.stages?.every((s) => s.status === "ok"), JSON.stringify(record.stages));
+    // Primero prueba la combinación ya comprobada (H, 9600/2): no hace falta barrer.
+    assert.equal(record.exchanges[0].tx.slice(0, 11), "02 48 30 31");
+  });
+
   it("la trama que manda es la del documento de Kretz", () => {
     assert.deepEqual(Array.from(buildKretzFrame("P", "03", "0001")).slice(0, 8), [0x02, 0x50, 0x30, 0x33, 0x30, 0x30, 0x30, 0x31]);
   });

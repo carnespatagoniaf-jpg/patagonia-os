@@ -137,3 +137,28 @@ No hacemos: decompilar iTegra/JDataGate ni la app (por licencia), ni probar coma
 ## Qué le pedimos al cliente (resumen)
 
 Está en la guía para el cliente: `docs/AURA_PRUEBA_CLIENTE.html` (y su PDF).
+
+## Incidente: "Failed to open serial port" (Aura de la clienta, 2026-10-01/02)
+
+Registro real (`scale_support_reports`, con el error exacto de cada apertura desde la versión 2026-10-01e):
+
+- **2026-10-01 10:06 (hora AR): todo anduvo.** Abrió el puerto, la Aura contestó 0001, 0002, 1500, 5002 y 5005. Protocolo compatible: **real**.
+- **Desde las 11:07: Windows rechaza abrir el puerto** con `NetworkError: Failed to open serial port`.
+  - Algunas corridas abrían en 115200 y 4800, y una vez en 9600 justo después de 4800.
+  - El 2026-10-02 hubo 2 corridas con 700 intentos cada una y ninguna apertura, aun recargando la página.
+- **El mismo error ya figuraba el 30/9 a la mañana** en el registro de esa PC, con la configuración de la Report. O sea, es anterior a todo el trabajo de la Aura.
+- **Conclusión:** la falla está en la etapa "abrir la conexión", en la PC, antes de la balanza.
+  - En Windows un puerto serie lo abre UN solo proceso a la vez.
+  - Patagonia deja el puerto abierto después de usarlo: `scale-weight.ts` no lo cierra tras leer el peso, y el `ensureOpen` de `scale-serial.ts` tampoco.
+  - Una pestaña o ventana de Chrome (incluso de otro perfil) o un programa externo que lo tenga tomado produce exactamente este error.
+  - La clienta usa al menos dos perfiles de Chrome (se ven en su barra de tareas).
+
+**Corregido en código:**
+
+- `serial-tabs.ts`: cada pestaña de Patagonia del mismo Chrome y perfil responde por BroadcastChannel. "Probar todo" les pide soltar los puertos que tengan abiertos y no estén en uso, y anota cuáles los tenían.
+- `runKretzDiscovery` por etapas (dispositivo → abrir → enviar → recibir → interpretar):
+  - Si no abre en ninguna velocidad, corta enseguida con veredicto `puerto` y lo explica, en vez de barrer cientos de combinaciones.
+  - Prueba primero la combinación ya comprobada ("H", 9600/2).
+- La Report LT queda igual. El paso de verificación previa al envío masivo es solo para modelos que no son la Report LT.
+
+**No verificable desde el código:** qué proceso tiene tomado el puerto, si es otro perfil de Chrome o un programa. BroadcastChannel no llega a otros perfiles ni a otros programas.

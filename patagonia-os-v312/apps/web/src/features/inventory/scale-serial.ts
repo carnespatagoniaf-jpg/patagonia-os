@@ -1,5 +1,5 @@
 import type { Product } from "@patagonia/domain";
-import { runKretzDiscovery, saveDiagnosticRecord, savePluScan, scanAllPlus, type DiagnosticRecord, type DiscoveryVerdict, type PluScan } from "./kretz/discovery";
+import { STAGE_LABELS, runKretzDiscovery, saveDiagnosticRecord, savePluScan, scanAllPlus, type DiagnosticRecord, type DiscoveryVerdict, type PluScan } from "./kretz/discovery";
 import { getKretzModel, getSavedModelId } from "./kretz/models";
 import { buildKretzFrame, describeKretzCode } from "./kretz/kretz-frame";
 
@@ -471,13 +471,17 @@ export interface ScaleLinkDiagnosis {
  */
 export async function diagnoseScaleLink(
   onProgress: (text: string) => void,
-  options: { frameTimeoutMs?: number; listenMs?: number; modelId?: string; balanceNumber?: string } = {}
+  options: { frameTimeoutMs?: number; listenMs?: number; modelId?: string; balanceNumber?: string; releaseOtherTabs?: boolean; openTries?: number } = {}
 ): Promise<ScaleLinkDiagnosis> {
   const model = getKretzModel(options.modelId ?? getSavedModelId());
   const port = await pickPort();
   const portLabel = describeScalePort(port);
   cachedPortOpenKey = null;
+  const portsSeen = (await navigator.serial.getPorts()).map((p) => describeScalePort(p));
   const record = await runKretzDiscovery(port, portLabel, model, {
+    portsSeen,
+    releaseOtherTabs: options.releaseOtherTabs,
+    openTries: options.openTries,
     balanceNumber: options.balanceNumber,
     frameTimeoutMs: options.frameTimeoutMs,
     listenMs: options.listenMs,
@@ -528,8 +532,38 @@ export async function scanScalePlus(onProgress: (text: string) => void, shouldSt
   return scan;
 }
 
+/** Resumen por etapa: dónde se cortó la comunicación. */
+export function stagesSummary(r: DiagnosticRecord): string {
+  if (!r.stages) return "";
+  const icon = { ok: "✅", falla: "❌", no_llego: "⏸" } as const;
+  return r.stages.map((s, i) => `${icon[s.status]} ${i + 1}. ${STAGE_LABELS[s.id]}${s.detail ? `: ${s.detail}` : s.status === "no_llego" ? ": no se llegó a esta etapa" : ""}`).join("\n");
+}
+
 function diagnosisMessage(r: DiagnosticRecord, modelId: string, portLabel: string): string {
+  const base = diagnosisVerdictMessage(r, modelId, portLabel);
+  const stages = stagesSummary(r);
+  return stages ? `${base}
+
+Etapas:
+${stages}` : base;
+}
+
+function diagnosisVerdictMessage(r: DiagnosticRecord, modelId: string, portLabel: string): string {
   const isAura = modelId === "aura";
+  if (r.verdict === "puerto") {
+    const tabs = r.otherTabs ?? [];
+    const holding = tabs.filter((t) => t.openPorts > 0);
+    const tabsLine = holding.length
+      ? `Había ${holding.length} pestaña(s) de Patagonia con la balanza tomada (${holding.map((t) => t.page).join(", ")}); se les pidió soltarla${holding.some((t) => t.busy > 0) ? ", pero alguna la estaba usando" : ""}.`
+      : "Ninguna otra pestaña de Patagonia de este Chrome la tenía tomada.";
+    return (
+      `❌ Windows no deja abrir el puerto de la balanza (puerto elegido: ${portLabel}). La balanza no llegó a recibir nada: el problema está en la computadora, antes de la balanza.
+` +
+      `${tabsLine}
+` +
+      `Qué hacer: cerrar TODAS las ventanas de Chrome (también las de otros perfiles) y cualquier programa de balanza o caja; desenchufar el USB del cable, esperar 5 segundos y volver a enchufarlo; abrir un solo Chrome y tocar "Probar todo".`
+    );
+  }
   if (r.verdict === "peso") {
     return (
       `✅ El cable, el adaptador y el puerto ANDAN: la balanza mandó el peso (${(r.weight.kg ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg).\n` +

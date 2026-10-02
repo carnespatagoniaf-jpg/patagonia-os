@@ -4,6 +4,7 @@ import * as Sentry from "@sentry/react";
 import App from "./App";
 import { AuthProvider } from "./features/auth/AuthProvider";
 import "./styles.css";
+import { installSerialTabResponder } from "./features/inventory/kretz/serial-tabs";
 
 const sentryDsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
 if (sentryDsn) {
@@ -20,6 +21,9 @@ function ErrorFallback() {
     </div>
   );
 }
+
+// Cada pestaña avisa si tiene la balanza tomada y la suelta si "Probar todo" lo pide.
+installSerialTabResponder();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

@@ -1,6 +1,7 @@
 import { exchangeWeightFrame, WEIGHT_PORT_OPTIONS } from "../../sale/scale-weight-protocol";
 import { buildKretzFrame, describeKretzCode, parseKretzResponse, toHex, toPrintable, type KretzResponse } from "./kretz-frame";
 import type { KretzModel, SerialLink } from "./models";
+import { askOtherTabs, type TabAnswer } from "./serial-tabs";
 
 /**
  * Descubrimiento SOLO DE LECTURA de una balanza Kretz ("Probar todo").
@@ -39,7 +40,22 @@ export interface DiagnosticExchange {
   echo: boolean;
 }
 
-export type DiscoveryVerdict = "datos" | "peso" | "bytes" | "nada";
+export type DiscoveryVerdict = "datos" | "peso" | "bytes" | "nada" | "puerto";
+
+/** Etapas de la comunicación, en orden. Cada prueba dice en cuál se cortó. */
+export type StageId = "dispositivo" | "abrir" | "enviar" | "recibir" | "interpretar";
+export const STAGE_LABELS: Record<StageId, string> = {
+  dispositivo: "Detectar el aparato (adaptador USB)",
+  abrir: "Abrir la conexión (puerto)",
+  enviar: "Enviar la instrucción",
+  recibir: "Recibir respuesta",
+  interpretar: "Entender la respuesta (protocolo Kretz)"
+};
+export interface Stage {
+  id: StageId;
+  status: "ok" | "falla" | "no_llego";
+  detail: string;
+}
 
 export interface DiagnosticRecord {
   version: 1;
@@ -58,6 +74,12 @@ export interface DiagnosticRecord {
   codeVersion?: string;
   /** Cada intento de abrir el puerto, con el error exacto de Windows/Chrome si falló. */
   openLog?: OpenAttempt[];
+  /** Resultado por etapa: dónde se cortó. */
+  stages?: Stage[];
+  /** Puertos serie que este Chrome tiene autorizados (para ver si hay más de uno). */
+  portsSeen?: string[];
+  /** Otras pestañas de Patagonia en este Chrome que tenían un puerto abierto (y si lo soltaron). */
+  otherTabs?: TabAnswer[];
 }
 
 export interface OpenAttempt {
@@ -70,7 +92,7 @@ export interface OpenAttempt {
   before: string;
 }
 
-export const DISCOVERY_VERSION = "2026-10-01f";
+export const DISCOVERY_VERSION = "2026-10-02a";
 
 /** Se llena en cada apertura; runKretzDiscovery y scanAllPlus lo guardan en su registro. */
 let openLog: OpenAttempt[] = [];
@@ -82,6 +104,12 @@ export interface DiscoveryOptions {
   listenMs?: number;
   onProgress?: (text: string) => void;
   shouldStop?: () => boolean;
+  /** Descripción de cada puerto autorizado (lo arma quien llama). */
+  portsSeen?: string[];
+  /** Pedir a otras pestañas que suelten el puerto (por defecto sí; los tests lo apagan). */
+  releaseOtherTabs?: boolean;
+  /** Intentos de abrir por velocidad (por defecto 4). */
+  openTries?: number;
 }
 
 const linkLabel = (l: SerialLink) => `${l.baudRate} baudios, ${l.stopBits} bit(s) de stop`;
@@ -225,8 +253,16 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
   const progress = options.onProgress ?? (() => {});
   const stop = options.shouldStop ?? (() => false);
   const timeout = options.frameTimeoutMs ?? 500;
+  const tries = options.openTries ?? 4;
   const balanceNumber = (options.balanceNumber ?? "").replace(/\D/g, "").slice(-2) || "1";
   const id = balanceNumber.padStart(2, "0");
+  const stages: Record<StageId, Stage> = {
+    dispositivo: { id: "dispositivo", status: "no_llego", detail: "" },
+    abrir: { id: "abrir", status: "no_llego", detail: "" },
+    enviar: { id: "enviar", status: "no_llego", detail: "" },
+    recibir: { id: "recibir", status: "no_llego", detail: "" },
+    interpretar: { id: "interpretar", status: "no_llego", detail: "" }
+  };
   const record: DiagnosticRecord = {
     version: 1,
     model: model.id,
@@ -241,84 +277,180 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
     verdict: "nada",
     anyBytes: false,
     codeVersion: DISCOVERY_VERSION,
-    openLog: []
+    openLog: [],
+    portsSeen: options.portsSeen ?? [],
+    otherTabs: []
   };
   openLog = record.openLog!;
+  const finishStages = () => {
+    record.stages = (Object.keys(STAGE_LABELS) as StageId[]).map((k) => stages[k]);
+  };
+
+  // Lleva la cuenta de qué etapas se alcanzaron en cada intercambio.
+  const noteExchange = (ex: DiagnosticExchange) => {
+    stages.enviar = { id: "enviar", status: "ok", detail: `se mandaron instrucciones (última: ${ex.tx})` };
+    if (ex.rx && !ex.echo) {
+      record.anyBytes = true;
+      stages.recibir = { id: "recibir", status: "ok", detail: `llegaron bytes (${ex.link}): ${ex.rx.slice(0, 60)}` };
+    }
+    if (ex.kretz) {
+      stages.interpretar = {
+        id: "interpretar",
+        status: ex.kretz.checksumOk ? "ok" : "falla",
+        detail: ex.kretz.checksumOk ? `respuesta Kretz válida: equipo "${ex.kretz.deviceType}${ex.kretz.equipmentId}", código ${ex.kretz.code}` : "llegó una respuesta con forma Kretz pero el checksum no cierra"
+      };
+    }
+  };
 
   try {
-    // 1) Modo peso (9600, 2 bits de stop, según el manual de la Aura): escucha y pide "W".
-    progress("Probando si la balanza manda el peso…");
-    try {
-      await openWithRetry(port, WEIGHT_PORT_OPTIONS);
-      const passive = await collect(port, options.listenMs ?? 1200, false);
-      const exchange = await exchangeWeightFrame(port);
-      record.weight = { kg: exchange.frame?.weightKg ?? null, raw: toPrintable(passive) + exchange.raw, passiveBytes: passive.length };
-      if (passive.length > 0 || exchange.raw.length > 0) record.anyBytes = true;
-    } catch (err) {
-      record.weight.raw = `error: ${err instanceof Error ? err.message : String(err)}`;
+    // Etapa 1: el aparato. Quien llama ya eligió el puerto; acá queda anotado qué ve Chrome.
+    stages.dispositivo = {
+      id: "dispositivo",
+      status: "ok",
+      detail: `puerto elegido: ${portLabel}. Autorizados en este Chrome: ${record.portsSeen!.length ? record.portsSeen!.join(" | ") : "?"}`
+    };
+
+    // Otras pestañas de Patagonia que tengan el puerto tomado: pedirles que lo suelten.
+    if (options.releaseOtherTabs !== false) {
+      progress("Pidiendo a otras pestañas de Patagonia que suelten la balanza…");
+      record.otherTabs = await askOtherTabs("release");
     }
-    await closeQuietly(port);
-    if (record.weight.kg !== null) {
-      record.verdict = "peso";
+
+    // Etapa 2: abrir la conexión con la configuración más probable del modelo.
+    const primary = model.links[0];
+    progress(`Abriendo la conexión (${linkLabel(primary)})…`);
+    try {
+      await openWithRetry(port, { baudRate: primary.baudRate, dataBits: 8, stopBits: primary.stopBits, parity: "none" }, tries);
+      stages.abrir = { id: "abrir", status: "ok", detail: `abrió en ${linkLabel(primary)}` };
+    } catch (err) {
+      const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+      // ¿Abre en alguna otra velocidad? Distingue "puerto tomado del todo" de "adaptador trabado en una velocidad".
+      let opensElsewhere = "";
+      for (const link of model.links.slice(1)) {
+        try {
+          await openWithRetry(port, { baudRate: link.baudRate, dataBits: 8, stopBits: link.stopBits, parity: "none" }, 1, 200);
+          opensElsewhere = linkLabel(link);
+          await closeQuietly(port);
+          break;
+        } catch {
+          // sigue
+        }
+      }
+      stages.abrir = {
+        id: "abrir",
+        status: "falla",
+        detail: opensElsewhere
+          ? `Windows no deja abrir en ${linkLabel(primary)} (${msg}), pero sí en ${opensElsewhere}: el adaptador USB quedó trabado.`
+          : `Windows no deja abrir el puerto en ninguna velocidad (${msg}): lo tiene tomado otra pestaña, otra ventana de Chrome u otro programa, o el adaptador quedó trabado.`
+      };
+      record.verdict = "puerto";
       return record;
     }
 
-    // 2) Modo datos: test de conexión 0001 (solo hace un bip) con cada velocidad y letra.
-    const attempts: { link: SerialLink; letter: string; id: string }[] = [];
-    for (const link of model.links) attempts.push({ link, letter: model.deviceTypes[0], id });
-    for (const link of model.links.slice(0, 2)) {
-      for (const letter of model.deviceTypes.slice(1)) attempts.push({ link, letter, id });
+    // Etapas 3-5 con la combinación más probable (para la Aura: "H", 9600, 2 bits de stop, ya comprobada con una Aura real).
+    progress(`Probando la balanza (equipo "${model.deviceTypes[0]}${id}")…`);
+    let first = await sendRead(port, record.exchanges, "test de conexión", primary, model.deviceTypes[0], id, "0001", "", timeout);
+    noteExchange(first);
+    if (!first.kretz) {
+      first = await sendRead(port, record.exchanges, "test de conexión (reintento)", primary, model.deviceTypes[0], id, "0001", "", timeout);
+      noteExchange(first);
     }
-    if (id !== "00") attempts.push({ link: model.links[0], letter: model.deviceTypes[0], id: "00" });
+    if (first.kretz) {
+      record.responder = { link: primary, deviceType: first.kretz.deviceType || model.deviceTypes[0], equipmentId: first.kretz.equipmentId || id };
+    }
 
-    let openKey = "";
-    for (let i = 0; i < attempts.length && !stop(); i++) {
-      const a = attempts[i];
-      const key = `${a.link.baudRate}/${a.link.stopBits}`;
-      progress(`Probando modo datos ${i + 1}/${attempts.length}: ${linkLabel(a.link)}, equipo "${a.letter}${a.id}"…`);
+    // Si no contestó: modo peso (prueba el cable) y el resto de las combinaciones.
+    if (!record.responder) {
+      progress("No contestó en modo Datos. Probando si manda el peso…");
       try {
+        await openWithRetry(port, WEIGHT_PORT_OPTIONS, tries);
+        const passive = await collect(port, options.listenMs ?? 1200, false);
+        const exchange = await exchangeWeightFrame(port);
+        record.weight = { kg: exchange.frame?.weightKg ?? null, raw: toPrintable(passive) + exchange.raw, passiveBytes: passive.length };
+        if (passive.length > 0 || exchange.raw.length > 0) {
+          record.anyBytes = true;
+          stages.recibir = { id: "recibir", status: "ok", detail: `en modo peso llegaron bytes: ${JSON.stringify(record.weight.raw.slice(0, 60))}` };
+        }
+        if (record.weight.kg !== null) {
+          stages.interpretar = { id: "interpretar", status: "ok", detail: `peso leído: ${record.weight.kg} kg (la balanza está en modo peso, no en Datos)` };
+          record.verdict = "peso";
+          return record;
+        }
+      } catch (err) {
+        record.weight.raw = `error: ${err instanceof Error ? err.message : String(err)}`;
+      }
+      await closeQuietly(port);
+
+      const attempts: { link: SerialLink; letter: string; id: string }[] = [];
+      for (const link of model.links.slice(1)) attempts.push({ link, letter: model.deviceTypes[0], id });
+      for (const link of model.links.slice(0, 2)) {
+        for (const letter of model.deviceTypes.slice(1)) attempts.push({ link, letter, id });
+      }
+      if (id !== "00") attempts.push({ link: primary, letter: model.deviceTypes[0], id: "00" });
+
+      let openKey = "";
+      const deadLinks = new Set<string>();
+      for (let i = 0; i < attempts.length && !stop(); i++) {
+        const a = attempts[i];
+        const key = `${a.link.baudRate}/${a.link.stopBits}`;
+        if (deadLinks.has(key)) continue; // no insistir con una velocidad que no abre
+        progress(`Probando otras combinaciones ${i + 1}/${attempts.length}: ${linkLabel(a.link)}, equipo "${a.letter}${a.id}"…`);
         if (key !== openKey) {
-          await openLink(port, a.link);
-          openKey = key;
+          try {
+            await openWithRetry(port, { baudRate: a.link.baudRate, dataBits: 8, stopBits: a.link.stopBits, parity: "none" }, 1, 200);
+            openKey = key;
+          } catch {
+            deadLinks.add(key);
+            openKey = "";
+            continue;
+          }
         }
-        const ex = await sendRead(port, record.exchanges, "test de conexión", a.link, a.letter, a.id, "0001", "", timeout);
-        if (ex.rx.length > 0 && !ex.echo) record.anyBytes = true;
-        if (ex.kretz) {
-          record.responder = { link: a.link, deviceType: ex.kretz.deviceType || a.letter, equipmentId: ex.kretz.equipmentId || a.id };
-          break;
+        try {
+          const ex = await sendRead(port, record.exchanges, "test de conexión", a.link, a.letter, a.id, "0001", "", timeout);
+          noteExchange(ex);
+          if (ex.kretz) {
+            record.responder = { link: a.link, deviceType: ex.kretz.deviceType || a.letter, equipmentId: ex.kretz.equipmentId || a.id };
+            break;
+          }
+        } catch {
+          openKey = "";
+          await closeQuietly(port);
         }
-      } catch {
-        openKey = "";
-        await closeQuietly(port);
       }
     }
 
-    // 3) Si alguien contestó como Kretz: lecturas de solo lectura para identificar el protocolo.
-    if (record.responder) {
-      const r = record.responder;
-      for (const read of READS) {
-        if (stop()) break;
-        progress(`La balanza contestó. Leyendo: ${read.label}…`);
-        try {
-          const ex = await sendRead(port, record.exchanges, read.label, r.link, a2(r.deviceType), r.equipmentId, read.command, read.data, Math.max(timeout, 1500));
-          record.reads.push({
-            command: read.command,
-            data: read.data,
-            label: read.label,
-            code: ex.kretz?.code ?? null,
-            codeLabel: describeKretzCode(ex.kretz?.code ?? null),
-            dataText: ex.kretz?.data ?? ex.rxText
-          });
-        } catch (err) {
-          record.reads.push({ command: read.command, data: read.data, label: read.label, code: null, codeLabel: `error: ${err instanceof Error ? err.message : String(err)}`, dataText: "" });
-        }
-      }
-      record.verdict = "datos";
-    } else {
+    if (!record.responder) {
+      if (stages.recibir.status === "no_llego") stages.recibir = { id: "recibir", status: "falla", detail: "la balanza no mandó ni un byte en ninguna prueba" };
+      else if (stages.interpretar.status === "no_llego") stages.interpretar = { id: "interpretar", status: "falla", detail: "llegaron bytes pero no con el formato Kretz" };
       record.verdict = record.anyBytes ? "bytes" : "nada";
+      return record;
     }
+
+    // Contestó: lecturas de solo lectura para identificar el protocolo (todas pasan por assertReadOnly).
+    const r = record.responder;
+    if (r.link.baudRate !== primary.baudRate || r.link.stopBits !== primary.stopBits) await openLink(port, r.link);
+    for (const read of READS) {
+      if (stop()) break;
+      progress(`La balanza contestó. Leyendo: ${read.label}…`);
+      try {
+        const ex = await sendRead(port, record.exchanges, read.label, r.link, a2(r.deviceType), r.equipmentId, read.command, read.data, Math.max(timeout, 1500));
+        noteExchange(ex);
+        record.reads.push({
+          command: read.command,
+          data: read.data,
+          label: read.label,
+          code: ex.kretz?.code ?? null,
+          codeLabel: describeKretzCode(ex.kretz?.code ?? null),
+          dataText: ex.kretz?.data ?? ex.rxText
+        });
+      } catch (err) {
+        record.reads.push({ command: read.command, data: read.data, label: read.label, code: null, codeLabel: `error: ${err instanceof Error ? err.message : String(err)}`, dataText: "" });
+      }
+    }
+    record.verdict = "datos";
     return record;
   } finally {
+    finishStages();
     await closeQuietly(port);
     record.finishedAt = new Date().toISOString();
   }
