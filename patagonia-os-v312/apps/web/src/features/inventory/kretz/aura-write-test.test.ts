@@ -52,7 +52,7 @@ class MemoryAura {
             // Como la Aura real: con el formato de escritura (código 22-27 y tipo P/N en 28) guarda tipo y código.
             // REAL 2026-10-03: el código vuelve en 5 dígitos + "0" (000097 → 000970). Escrito a mano, sin usar auraWriteToReadOrder.
             // y los devuelve en orden de lectura; con cualquier otra cosa en esas posiciones pone "D" y 0 (lo visto el 2026-10-02).
-            const writeFormat = /^[0-9]{6}$/.test(data.slice(22, 28)) && (data[28] === "P" || data[28] === "N");
+            const writeFormat = /^[0-9]{6}$/.test(data.slice(22, 28)) && "PNDC".includes(data[28]);
             let stored = writeFormat && !self.zeroCode ? data.slice(0, 22) + data[28] + data.slice(23, 28) + "0" + data.slice(29) : data.slice(0, 22) + "D000000" + data.slice(29);
             if (self.manglePrice) stored = stored.slice(0, 29) + "009999" + stored.slice(35);
             self.plus = self.plus.filter((r) => r.slice(0, 6) !== data.slice(0, 6)).concat(stored);
@@ -82,10 +82,10 @@ describe("prueba de escritura de la Aura (solo PLU 96 a 99)", () => {
     assert.deepEqual(r.items.map((it) => it.plu), [97, 98, 96, 99, 97]);
     assert.equal(r.verdict, "ok", r.detail);
     assert.ok(r.items.every((it) => it.readBack === auraWriteToReadOrder(it.sent)), JSON.stringify(r.items));
-    assert.deepEqual(r.items.map((it) => it.readBack![22]), ["P", "N", "N", "P", "P"]);
+    assert.deepEqual(r.items.map((it) => it.readBack![22]), ["D", "C", "C", "D", "D"]);
     assert.deepEqual(r.items.map((it) => it.readBack!.slice(23, 29)), ["000970", "000980", "009600", "005000", "000970"]);
     // Cambio de precio: el PLU 97 pasa de 2000 a 2100 y conserva tipo, código, tara (0) y validez (2 días).
-    assert.equal(r.items[4].readBack, "000097PRUEBA KILO     P0009700021000000002");
+    assert.equal(r.items[4].readBack, "000097PRUEBA KILO     D0009700260000000002");
     assert.deepEqual(r.after.filter((x) => x.plu < 90).map((x) => x.data), REAL_SIX);
     assert.equal(aura.commands.filter((c) => c === "2005").length, 5);
     // Nunca un borrado: solo test de conexión, lecturas y las 4 cargas.
@@ -99,7 +99,7 @@ describe("prueba de escritura de la Aura (solo PLU 96 a 99)", () => {
     aura.zeroCode = true;
     const r = await runAuraWriteTest(aura as unknown as SerialPort, responder, { timeoutMs: 50 });
     assert.equal(r.verdict, "diferencia");
-    assert.match(r.detail, /letra, codigo/);
+    assert.match(r.detail, /codigo/);
     assert.equal(aura.commands.filter((c) => c === "2005").length, 1);
     assert.equal(r.items[0].same?.precio, true);
   });

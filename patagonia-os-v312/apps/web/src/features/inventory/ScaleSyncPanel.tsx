@@ -761,7 +761,7 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
                 </div>
               )}
               <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
-                Carga {AURA_TEST_PRODUCTS.map((p) => `"${p.name}" (PLU ${p.plu})`).join(", ")}, los vuelve a leer, después le cambia el precio a uno y comprueba que no se pierda nada. Después de cada paso revisa que tus productos sigan igual (si algo no coincide, frena). Solo usa esos números: si alguno tiene otro producto, no carga nada. No cambia ni borra ningún producto tuyo, y no borra nada de la balanza. Usar después de "Probar todo".
+                Carga {AURA_TEST_PRODUCTS.map((p) => `"${p.name}" (PLU ${p.plu})`).join(", ")}, los vuelve a leer (por kilo y por unidad, con precios en pesos enteros), después le cambia el precio a uno y comprueba que no se pierda nada. Después de cada paso revisa que tus productos sigan igual (si algo no coincide, frena). Solo usa esos números: si alguno tiene otro producto, no carga nada. No cambia ni borra ningún producto tuyo, y no borra nada de la balanza. Usar después de "Probar todo".
               </p>
             </div>
           )}

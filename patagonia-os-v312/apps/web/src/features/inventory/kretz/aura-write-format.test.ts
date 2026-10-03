@@ -63,7 +63,7 @@ describe("formato de escritura de la Aura (capturado de iTegra)", () => {
   });
 
   it("frena datos inválidos", () => {
-    assert.throws(() => buildAuraWriteRecord({ plu: 1, name: "X", type: "D" as "P", code: 1, priceRaw: 1 }));
+    assert.throws(() => buildAuraWriteRecord({ plu: 1, name: "X", type: "X" as "P", code: 1, priceRaw: 1 }));
     assert.throws(() => buildAuraWriteRecord({ plu: 1, name: "X", type: "P", code: 100000, priceRaw: 1 }));
     assert.throws(() => buildAuraWriteRecord({ plu: 1, name: "X", type: "P", code: 1, priceRaw: 1000000 }));
   });

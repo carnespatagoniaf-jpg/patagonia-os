@@ -39,17 +39,31 @@ import { claimPort, closeQuietly, errorClassification, freshPortFor, newSession,
  * de prueba (assertTestWrite). Los productos de prueba quedan en la balanza.
  */
 
-export const AURA_WRITE_TEST_VERSION = "2026-10-03b";
+export const AURA_WRITE_TEST_VERSION = "2026-10-03c";
 
 export interface AuraTestProduct extends AuraWriteInput {
   purpose: string;
 }
 
+/**
+ * Versión 2026-10-03b (REAL, todo OK): P y N se guardan con su tipo y código, pero
+ * el precio va en centavos (tope $9.999,99). Esta versión prueba D (por kilo) y
+ * C (por unidad), que en la balanza de la clienta parecen ser con pesos enteros,
+ * con precios reales como $25.000/kg.
+ */
 export const AURA_TEST_PRODUCTS: AuraTestProduct[] = [
-  { plu: 97, name: "PRUEBA KILO", type: "P", code: 97, priceRaw: 2000, validityDays: 2, purpose: "por kilo, código 97, 2 días: ¿queda P y el código?" },
-  { plu: 98, name: "PRUEBA UNIDAD", type: "N", code: 98, priceRaw: 500, validityDays: 0, purpose: "por unidad, código 98: ¿queda N y se vende por unidad? (ticket)" },
-  { plu: 96, name: "PRUEBA UNIDAD V", type: "N", code: 960, priceRaw: 300, validityDays: 3, purpose: "por unidad, código 960 (distinto del PLU), 3 días: ¿queda N y el código?" },
-  { plu: 99, name: "PRUEBA PATAGONIA", type: "P", code: 500, priceRaw: 1234, validityDays: 0, purpose: "por kilo, código 500 (distinto del PLU): ¿queda el código? ¿qué lleva el código de barras? (ticket)" }
+  { plu: 97, name: "PRUEBA KILO", type: "D", code: 97, priceRaw: 25000, validityDays: 2, purpose: "por kilo (D), $25.000/kg: ¿el ticket dice 25000$/kg? (ticket)" },
+  { plu: 98, name: "PRUEBA UNIDAD", type: "C", code: 98, priceRaw: 1500, validityDays: 0, purpose: "por unidad (C), $1.500: ¿se vende por unidad a $1.500? (ticket)" },
+  { plu: 96, name: "PRUEBA UNIDAD V", type: "C", code: 960, priceRaw: 300, validityDays: 3, purpose: "por unidad (C), código 960, 3 días: ¿queda C y el código?" },
+  { plu: 99, name: "PRUEBA PATAGONIA", type: "D", code: 500, priceRaw: 1234, validityDays: 0, purpose: "por kilo (D), código 500: ¿queda D y el código?" }
+];
+
+/** Lo que dejó en la balanza la versión 2026-10-03b (REAL): se permite pisarlo. */
+const PREVIOUS_B_PRODUCTS: AuraWriteInput[] = [
+  { plu: 97, name: "PRUEBA KILO", type: "P", code: 97, priceRaw: 2100, validityDays: 2 },
+  { plu: 98, name: "PRUEBA UNIDAD", type: "N", code: 98, priceRaw: 500 },
+  { plu: 96, name: "PRUEBA UNIDAD V", type: "N", code: 960, priceRaw: 300, validityDays: 3 },
+  { plu: 99, name: "PRUEBA PATAGONIA", type: "P", code: 500, priceRaw: 1234 }
 ];
 
 /** Registros a mandar (orden de ESCRITURA) y cómo se espera releerlos (orden de LECTURA). */
@@ -57,9 +71,9 @@ export const AURA_TEST_RECORDS = AURA_TEST_PRODUCTS.map((p) => buildAuraWriteRec
 export const AURA_TEST_EXPECTED_READBACK = AURA_TEST_RECORDS.map(auraWriteToReadOrder);
 export const AURA_TEST_PLUS = AURA_TEST_PRODUCTS.map((p) => p.plu);
 
-/** Cambio de precio (como iTegra: reenvía el registro completo con el mismo código y tipo): PLU 97 de 2000 a 2100. */
-export const AURA_TEST_PRICE_CHANGE = { plu: 97, from: 2000, to: 2100 };
-export const AURA_TEST_PRICE_CHANGE_RECORD = rewriteWithNewPrice(AURA_TEST_EXPECTED_READBACK[0], AURA_TEST_PRICE_CHANGE.to)!;
+/** Cambio de precio (como iTegra: reenvía el registro completo con el mismo código y tipo): PLU 97 de 25000 a 26000. */
+export const AURA_TEST_PRICE_CHANGE = { plu: 97, from: 25000, to: 26000 };
+export const AURA_TEST_PRICE_CHANGE_RECORD = rewriteWithNewPrice(AURA_TEST_EXPECTED_READBACK[0], AURA_TEST_PRICE_CHANGE.to, ["D"])!;
 export const AURA_TEST_PRICE_CHANGE_READBACK = auraWriteToReadOrder(AURA_TEST_PRICE_CHANGE_RECORD);
 
 /** Lo que quedó en la balanza real de las pruebas anteriores (lo único que se permite pisar en 96 a 99). */
@@ -70,7 +84,8 @@ export const AURA_PREVIOUS_TEST_READBACKS = [
   "000098PRUEBA UNIDAD   D0000000005000000000",
   "000096PRUEBA UNIDAD V D0000000003000000003",
   // Prueba 2026-10-03 18:03 (frenó acá: esperábamos leer el código 000097 y la Aura lo devuelve 000970).
-  "000097PRUEBA KILO     P0009700020000000002"
+  "000097PRUEBA KILO     P0009700020000000002",
+  ...PREVIOUS_B_PRODUCTS.map((p) => auraWriteToReadOrder(buildAuraWriteRecord(p)))
 ];
 
 export function assertTestWrite(command: string, data: string): void {

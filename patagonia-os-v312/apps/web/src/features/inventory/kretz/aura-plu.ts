@@ -156,7 +156,15 @@ export function buildAuraPluRecord(input: AuraPluInput): string {
  * código y tipo, sin borrar nada.
  */
 
-export type AuraWriteType = "P" | "N";
+/**
+ * P = por kilo y N = por unidad, con el precio en CENTAVOS (REAL 2026-10-03:
+ * 001234 se imprimió "12.34$/kg" y 000500 "5.00$/U"; tope $9.999,99).
+ * D y C: por la balanza de la clienta, parecen ser por kilo y por unidad con el
+ * precio en PESOS ENTEROS (el mismo 001234 con tipo D se imprimió "1234.00$/kg";
+ * sus productos D/C tienen precios como 10800 o 18900). HIPÓTESIS hasta la prueba
+ * real; solo los usa la prueba de los PLU 96 a 99.
+ */
+export type AuraWriteType = "P" | "N" | "D" | "C";
 
 export interface AuraWriteInput {
   plu: number;
@@ -177,7 +185,7 @@ export function buildAuraWriteRecord(input: AuraWriteInput): string {
   const days = input.validityDays ?? 0;
   if (!Number.isInteger(plu) || plu < 1 || plu > 9999) throw new Error(`PLU fuera de rango (1 a 9999): ${plu}`);
   if (!Number.isInteger(code) || code < 0 || code > 99999) throw new Error(`Código fuera de rango (hasta 5 dígitos, la Aura guarda 5): ${code}`);
-  if (type !== "P" && type !== "N") throw new Error(`Tipo inválido: ${type} (P = por kilo, N = por unidad)`);
+  if (type !== "P" && type !== "N" && type !== "D" && type !== "C") throw new Error(`Tipo inválido: ${type} (P/D = por kilo, N/C = por unidad)`);
   if (!Number.isInteger(priceRaw) || priceRaw < 0 || priceRaw > 999999) throw new Error(`Precio fuera de rango (6 dígitos): ${priceRaw}`);
   if (!Number.isInteger(tare) || tare < 0 || tare > 9999) throw new Error(`Tara fuera de rango: ${tare}`);
   if (!Number.isInteger(days) || days < 0 || days > 250) throw new Error(`Validez fuera de rango (0 a 250 días): ${days}`);
@@ -210,10 +218,10 @@ export function auraWriteToReadOrder(writeRecord: string): string {
  * escritura con el precio nuevo. Solo P y N (los que usa iTegra). D y C devuelven
  * null porque todavía no se sabe cómo se escriben.
  */
-export function rewriteWithNewPrice(readRecord: string, priceRaw: number): string | null {
+export function rewriteWithNewPrice(readRecord: string, priceRaw: number, allowedTypes: readonly string[] = ["P", "N"]): string | null {
   if (readRecord.length !== AURA_PLU_RECORD_LENGTH) return null;
   const type = readRecord[22];
-  if (type !== "P" && type !== "N") return null;
+  if (!allowedTypes.includes(type)) return null;
   // Leído: código en 5 dígitos (23-27) + "0" (28). Para escribirlo: "0" + esos 5 dígitos.
   if (!/^\d{5}0$/.test(readRecord.slice(23, 29))) return null;
   if (!Number.isInteger(priceRaw) || priceRaw < 0 || priceRaw > 999999) return null;
