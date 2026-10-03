@@ -110,3 +110,10 @@ Corrección (versión `2026-10-03b`): `auraWriteToReadOrder` espera código de 5
 - **REAL, tickets 18:23/18:24:** el 98 se vende "1 U @ 5.00$/U" (por unidad funciona) y el 99 "0.480kg @ 12.34$/kg" (por kilo funciona).
 - **REAL: el precio va en centavos** (`001234` = $12,34), igual que lo manda iTegra (×100). El primer ticket del 2026-10-02 ("1234.00$/kg") era de un registro tipo D y no vale como referencia. Tope con 6 dígitos: $9.999,99.
 - Código de barras del ticket: `20` + `99998` (código de ticket total de la balanza) + importe en centavos en 5 dígitos + verificador (`2099998005928` = $5,92). Tope del importe en el código: $999,99 por ticket. Hay que revisarlo antes de usar esos tickets en Mostrador con precios reales.
+
+## 11. Prueba real versión `2026-10-03c` (18:49): TODO OK, pesos enteros
+
+- Los 4 productos con tipos **D** (por kilo) y **C** (por unidad) y el cambio de precio del 97 ($25.000 → $26.000) volvieron idénticos ("Distinto: nada"). Los productos de la clienta, sin cambios.
+- **REAL, tickets 18:49:** 97 = "0.475kg @ 26000.0$/kg", total 12350.00$. 98 = "1 U @ 1500.00$/U".
+- **Conclusión REAL:** D = por kilo y C = por unidad, con precio en PESOS ENTEROS (tope $999.999). P y N son lo mismo pero con centavos (tope $9.999,99). Para Argentina se usan D y C.
+- Código de barras de esos tickets: `2099998000008` → el importe vino en `00000`. Con importes de $1.000 o más el campo de 5 dígitos (en centavos) no alcanza y la balanza manda 0. Para leer esos tickets en Mostrador hay que cambiar el formato del código de barras en el menú de la balanza (pendiente, aparte de la carga de precios).
