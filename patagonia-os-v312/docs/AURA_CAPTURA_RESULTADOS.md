@@ -103,3 +103,10 @@ Reenvía **el registro completo** con el mismo código y tipo, y el precio nuevo
 - Ticket del PLU 99: el código de barras fue `2099998586007` = "20" + `99998` + `58600` (importe $586,00 en centavos, 5 dígitos, tope $999,99) + verificador. Hay que revisar ese formato antes de usarlo en Mostrador.
 
 Corrección (versión `2026-10-03b`): `auraWriteToReadOrder` espera código de 5 dígitos + "0"; `rewriteWithNewPrice` vuelve a escribir "0" + esos 5 dígitos; el código máximo pasa a 99999.
+
+## 10. Prueba real versión `2026-10-03b` (18:20 aprox.): TODO OK
+
+- Los 4 productos (97 P, 98 N, 96 N, 99 P) y el cambio de precio del 97 (2000 → 2100) volvieron idénticos en todos los campos ("Distinto: nada"). Los 6 productos de la clienta, sin cambios.
+- **REAL, tickets 18:23/18:24:** el 98 se vende "1 U @ 5.00$/U" (por unidad funciona) y el 99 "0.480kg @ 12.34$/kg" (por kilo funciona).
+- **REAL: el precio va en centavos** (`001234` = $12,34), igual que lo manda iTegra (×100). El primer ticket del 2026-10-02 ("1234.00$/kg") era de un registro tipo D y no vale como referencia. Tope con 6 dígitos: $9.999,99.
+- Código de barras del ticket: `20` + `99998` (código de ticket total de la balanza) + importe en centavos en 5 dígitos + verificador (`2099998005928` = $5,92). Tope del importe en el código: $999,99 por ticket. Hay que revisarlo antes de usar esos tickets en Mostrador con precios reales.
