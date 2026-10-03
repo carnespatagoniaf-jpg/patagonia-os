@@ -39,7 +39,7 @@ import { claimPort, closeQuietly, errorClassification, freshPortFor, newSession,
  * de prueba (assertTestWrite). Los productos de prueba quedan en la balanza.
  */
 
-export const AURA_WRITE_TEST_VERSION = "2026-10-03a";
+export const AURA_WRITE_TEST_VERSION = "2026-10-03b";
 
 export interface AuraTestProduct extends AuraWriteInput {
   purpose: string;
@@ -68,7 +68,9 @@ export const AURA_PREVIOUS_TEST_READBACKS = [
   AURA_FIRST_TEST_READBACK,
   "000097PRUEBA KILO     D0000000020000000002",
   "000098PRUEBA UNIDAD   D0000000005000000000",
-  "000096PRUEBA UNIDAD V D0000000003000000003"
+  "000096PRUEBA UNIDAD V D0000000003000000003",
+  // Prueba 2026-10-03 18:03 (frenó acá: esperábamos leer el código 000097 y la Aura lo devuelve 000970).
+  "000097PRUEBA KILO     P0009700020000000002"
 ];
 
 export function assertTestWrite(command: string, data: string): void {

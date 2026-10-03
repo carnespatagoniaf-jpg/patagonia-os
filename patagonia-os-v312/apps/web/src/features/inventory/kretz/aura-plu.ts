@@ -176,7 +176,7 @@ export function buildAuraWriteRecord(input: AuraWriteInput): string {
   const tare = input.tareGrams ?? 0;
   const days = input.validityDays ?? 0;
   if (!Number.isInteger(plu) || plu < 1 || plu > 9999) throw new Error(`PLU fuera de rango (1 a 9999): ${plu}`);
-  if (!Number.isInteger(code) || code < 0 || code > 999999) throw new Error(`Código fuera de rango (6 dígitos): ${code}`);
+  if (!Number.isInteger(code) || code < 0 || code > 99999) throw new Error(`Código fuera de rango (hasta 5 dígitos, la Aura guarda 5): ${code}`);
   if (type !== "P" && type !== "N") throw new Error(`Tipo inválido: ${type} (P = por kilo, N = por unidad)`);
   if (!Number.isInteger(priceRaw) || priceRaw < 0 || priceRaw > 999999) throw new Error(`Precio fuera de rango (6 dígitos): ${priceRaw}`);
   if (!Number.isInteger(tare) || tare < 0 || tare > 9999) throw new Error(`Tara fuera de rango: ${tare}`);
@@ -194,9 +194,14 @@ export function buildAuraWriteRecord(input: AuraWriteInput): string {
   return record;
 }
 
-/** Cómo devolvería la Aura con 5005 un registro escrito con buildAuraWriteRecord (tipo y código intercambiados). */
+/**
+ * Cómo devuelve la Aura con 5005 un registro escrito con buildAuraWriteRecord.
+ * REAL (balanza de la clienta, 2026-10-03 18:03): se escribió el código "000097"
+ * con tipo P y se releyó "P" + "000970". Al leer, el tipo va primero y el código
+ * viene en 5 dígitos seguidos de un "0" (por eso FRUTILLA, código 1, se lee "000010").
+ */
 export function auraWriteToReadOrder(writeRecord: string): string {
-  return writeRecord.slice(0, 22) + writeRecord[28] + writeRecord.slice(22, 28) + writeRecord.slice(29);
+  return writeRecord.slice(0, 22) + writeRecord[28] + writeRecord.slice(23, 28) + "0" + writeRecord.slice(29);
 }
 
 /**
@@ -209,7 +214,8 @@ export function rewriteWithNewPrice(readRecord: string, priceRaw: number): strin
   if (readRecord.length !== AURA_PLU_RECORD_LENGTH) return null;
   const type = readRecord[22];
   if (type !== "P" && type !== "N") return null;
-  if (!/^\d{6}$/.test(readRecord.slice(23, 29))) return null;
+  // Leído: código en 5 dígitos (23-27) + "0" (28). Para escribirlo: "0" + esos 5 dígitos.
+  if (!/^\d{5}0$/.test(readRecord.slice(23, 29))) return null;
   if (!Number.isInteger(priceRaw) || priceRaw < 0 || priceRaw > 999999) return null;
-  return readRecord.slice(0, 22) + readRecord.slice(23, 29) + type + String(priceRaw).padStart(6, "0") + readRecord.slice(35);
+  return readRecord.slice(0, 22) + "0" + readRecord.slice(23, 28) + type + String(priceRaw).padStart(6, "0") + readRecord.slice(35);
 }

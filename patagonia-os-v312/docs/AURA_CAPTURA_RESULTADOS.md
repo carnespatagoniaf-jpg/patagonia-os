@@ -92,3 +92,14 @@ Reenvía **el registro completo** con el mismo código y tipo, y el precio nuevo
 
 - **Éxito:** que vuelvan con su tipo (P/N) y su código, sin cambios en los 6 productos de la clienta.
 - Más dos tickets, uno del PLU 98 (por unidad) y uno del PLU 99 (código 500), para ver la venta por unidad y el código de barras.
+
+## 9. Prueba real del 2026-10-03 18:03 (versión `2026-10-03a`, en la balanza de la clienta)
+
+- Mandado al PLU 97: `000097PRUEBA KILO     000097P0020000000002` (formato de iTegra).
+- Releído: `000097PRUEBA KILO     P0009700020000000002`.
+- **REAL:** el tipo P quedó guardado (antes siempre quedaba D). Precio, nombre y validez, iguales.
+- **REAL:** el código se guardó, pero al leer vuelve en 5 dígitos seguidos de un "0" (97 → `000970`). Es lo mismo que pasa con los productos de la clienta (FRUTILLA, código 1, se lee `000010`). Lo que estaba mal era lo que Patagonia esperaba leer, no lo que mandó.
+- La prueba frenó en el primer producto, como estaba diseñada. Los productos de la clienta quedaron idénticos.
+- Ticket del PLU 99: el código de barras fue `2099998586007` = "20" + `99998` + `58600` (importe $586,00 en centavos, 5 dígitos, tope $999,99) + verificador. Hay que revisar ese formato antes de usarlo en Mostrador.
+
+Corrección (versión `2026-10-03b`): `auraWriteToReadOrder` espera código de 5 dígitos + "0"; `rewriteWithNewPrice` vuelve a escribir "0" + esos 5 dígitos; el código máximo pasa a 99999.

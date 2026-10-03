@@ -67,7 +67,7 @@ describe("plan de precios con el formato de iTegra (sin enviar nada)", () => {
   });
 
   it("FRUTILLA y PASTELITOS: cambia solo el precio; al releer se espera el mismo tipo, código, tara y validez", () => {
-    assert.equal(plan[1].record, "000001FRUTILLA        000010P0011000000005");
+    assert.equal(plan[1].record, "000001FRUTILLA        000001P0011000000005");
     assert.equal(plan[1].expectedReadBack, "000001FRUTILLA        P0000100011000000005");
     assert.equal(plan[2].expectedReadBack, "000002PASTELITOS      N0000200001000000003");
   });

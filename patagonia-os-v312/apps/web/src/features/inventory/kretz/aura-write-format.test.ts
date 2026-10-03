@@ -39,9 +39,13 @@ describe("formato de escritura de la Aura (capturado de iTegra)", () => {
     assert.equal(ok[28], "P");
   });
 
-  it("al leer, la Aura devuelve el tipo primero: así se vería con 5005 un producto escrito", () => {
-    const w = buildAuraWriteRecord({ plu: 2, name: "Pastelitos", type: "N", code: 20, priceRaw: 90, validityDays: 3 });
-    assert.equal(auraWriteToReadOrder(w), CLIENT[1]);
+  it("al leer, la Aura devuelve el tipo primero y el código en 5 dígitos + 0 (REAL, 2026-10-03 18:03)", () => {
+    const sent = "000097PRUEBA KILO     000097P0020000000002";
+    const readOnTheRealScale = "000097PRUEBA KILO     P0009700020000000002";
+    assert.equal(buildAuraWriteRecord({ plu: 97, name: "Prueba kilo", type: "P", code: 97, priceRaw: 2000, validityDays: 2 }), sent);
+    assert.equal(auraWriteToReadOrder(sent), readOnTheRealScale);
+    // Con la misma regla, PASTELITOS (código 2 en iTegra) se lee igual que en la balanza.
+    assert.equal(auraWriteToReadOrder(buildAuraWriteRecord({ plu: 2, name: "Pastelitos", type: "N", code: 2, priceRaw: 90, validityDays: 3 })), CLIENT[1]);
   });
 
   it("cambio de precio: igual que iTegra, reenvía el registro completo con el mismo código y tipo", () => {
@@ -50,7 +54,7 @@ describe("formato de escritura de la Aura (capturado de iTegra)", () => {
 
   it("cambio de precio de los productos de la clienta: P y N conservan código, tipo, tara y validez; D y C no se tocan", () => {
     const frutilla = rewriteWithNewPrice(CLIENT[0], 1100)!;
-    assert.equal(frutilla, "000001FRUTILLA        000010P0011000000005");
+    assert.equal(frutilla, "000001FRUTILLA        000001P0011000000005", "FRUTILLA conserva el código 1");
     assert.equal(auraWriteToReadOrder(frutilla), "000001FRUTILLA        P0000100011000000005");
     assert.equal(auraWriteToReadOrder(rewriteWithNewPrice(CLIENT[2], 500)!), "000003PAN NEGRO       P0000300005000100001", "tara 100 g y 1 día se conservan");
     assert.equal(rewriteWithNewPrice(CLIENT[1], 100)![28], "N", "sigue por unidad");
@@ -60,7 +64,7 @@ describe("formato de escritura de la Aura (capturado de iTegra)", () => {
 
   it("frena datos inválidos", () => {
     assert.throws(() => buildAuraWriteRecord({ plu: 1, name: "X", type: "D" as "P", code: 1, priceRaw: 1 }));
-    assert.throws(() => buildAuraWriteRecord({ plu: 1, name: "X", type: "P", code: 1000000, priceRaw: 1 }));
+    assert.throws(() => buildAuraWriteRecord({ plu: 1, name: "X", type: "P", code: 100000, priceRaw: 1 }));
     assert.throws(() => buildAuraWriteRecord({ plu: 1, name: "X", type: "P", code: 1, priceRaw: 1000000 }));
   });
 });
