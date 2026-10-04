@@ -77,3 +77,11 @@ Revisión de solo lectura: código de la web (`apps/web/src`) y estructura de la
 | 3 | Guía de puesta en marcha para 6 locales (cuentas por local) | Documento |
 | 9 | Informe consolidado por período (ventas por local y total) | Mediano, **solo si el cliente lo necesita** |
 | 7 | Separación por sucursal en la base para roles que no son dueño/admin | Grande; para más adelante |
+
+## 6. Errores encontrados al preparar la campaña (2026-10-04, en staging con datos ficticios)
+
+Staging se igualó con producción (estructura, sin datos de clientes) y se cargó la empresa ficticia "Carnicería Don Julio" con dos semanas de actividad hecha con las mismas funciones que usa la web. Credenciales: `.env.demo-staging` (no se sube). Aparecieron tres errores reales que también están en producción:
+
+1. **Rentabilidad, vista previa:** "Cierre del período" calcula las ventas solo con Turnos (`loadRange` en `Profitability.tsx`). No suma Mostrador ni fiado, así que para cualquier cliente que usa Mostrador muestra **Ventas $0** y una ganancia negativa. El cierre guardado (`close_profitability_period`) sí está bien, porque suma Turnos, Mostrador y fiado. La pantalla y la base no coinciden.
+2. **Sueldos, premios y descuentos contados dos veces:** `close_payroll_liquidation` suma los `payroll_adjustments` por fecha **sin excluir los que ya se liquidaron** (los vales sí los excluye). La vista previa de Empleados hace lo mismo. Si dos liquidaciones se superponen en fechas, el premio o el descuento se cobra o se paga dos veces. Además la base acepta cerrar una liquidación sin pagos (la pantalla lo impide).
+3. **"Qué se compró más" siempre vacío:** la consulta pide `products(name)` y desde la migración 051 `authenticated` no tiene SELECT sobre `products`. El error queda oculto y el panel sale vacío.
