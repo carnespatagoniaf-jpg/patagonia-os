@@ -153,6 +153,22 @@ To enable the Aura you need:
 
 Only then set `plu.evidence = "real"`. The scale is in ONE communication mode at a time (Datos for PLU upload vs "A pedido de peso" for weight reading).
 
+## Systel scales (module started 2026-10-04, NOT published)
+
+`features/inventory/systel/` is independent of every Kretz file (nothing in `kretz/` or `scale-serial.ts` was touched). The source of truth is `docs/SYSTEL_INFORME.md`, built from Systel's official downloads (protocol Cuora 2 V4.0 and Cuora Max V6.0/V6.2/V7.0, the Qendra CSV import, the Cuora Neo CSV).
+
+- **Frame:** address byte + function byte + ASCII data + XOR byte. The frame ends on silence.
+- **Connection:** Cuora Max over USB = FTDI at 115200 baud.
+- **Product layouts:** there are 4 (`cuora2`, `max60`, `max62`, `max7`). They differ by firmware, so the layout is detected from the read-reply length and Patagonia only writes the layout it read.
+- **Function whitelist** (`assertSystelFunctionAllowed`):
+  - read: 1/2/3/23/28/31/39/62;
+  - write: only 33 (price change, keeps everything else) and 61/4 (new PLU on a free number), always re-read and compared;
+  - never: 5/9/26/32/42 or any config function.
+- **Flow:** backup first (`takeSystelBackup`), then `planSystelSync` / `runSystelSync`, which stop on the first difference. `runSystelWriteTest` is the single controlled physical test.
+- **UI:** `SystelPanel.tsx` is mounted in `Inventory.tsx` behind `SHOW_SYSTEL_PANEL = false`. Real sending is blocked until `systel-models.ts` has `evidence: "real"`.
+- **Tests:** `systel.test.ts` runs against `FakeCuora`, a simulator built from the documents.
+- **Still unconfirmed:** whether 61/4 carries the XOR byte (it is tried with it, then without on E5), the letter for "versión" in 33, and the parity/stop bits.
+
 ## AI help chat (LIVE since 2026-09-28)
 
 Edge Function `supabase/functions/help-chat` (single file with the help guide embedded; Claude Haiku via the Anthropic API, secret `ANTHROPIC_API_KEY`, 150 questions/day/company via `bump_help_chat_usage`, questions it can't answer are logged in `help_chat_unanswered`) plus `features/help/HelpChat.tsx`, mounted in `Layout.tsx` only when the web build has `VITE_HELP_CHAT=1`. It answers how-to questions only and never sees company data (deliberate, to avoid cross-tenant leaks). **The GUIDE must always match the real screens — owner requirement (2026-09-29).** Any change that adds, renames or moves a screen, button or flow a client uses must update the GUIDE in `supabase/functions/help-chat/index.ts` in the same change, and redeploy it (`npx supabase functions deploy help-chat --project-ref tayylvhfmoybchutybcz`, with the Windows user env var `SUPABASE_ACCESS_TOKEN`; no linking needed). A change is not done until that is live. `apps/web/src/features/help/help-guide-sync.test.ts` fails `npm run test` when a menu item in `Layout.tsx` is missing from the GUIDE's menu line. It only catches missing screens, not stale wording inside them, so still reread the matching GUIDE section. Questions the chat could not answer are logged in `help_chat_unanswered` (prod); check it to find gaps.

@@ -16,6 +16,10 @@ import {
 import { parseAmount } from "../../lib/money";
 import { downloadScaleExportCsv } from "./scale-export";
 import { ScaleSyncPanel } from "./ScaleSyncPanel";
+import { SystelPanel } from "./systel/SystelPanel";
+
+/** Balanzas Systel: módulo nuevo, oculto hasta que el dueño autorice publicarlo. */
+const SHOW_SYSTEL_PANEL = false;
 import { PriceTools } from "./PriceTools";
 
 function formatMoney(value: number) {
@@ -325,6 +329,7 @@ export function Inventory() {
             Descargar lista para balanza
           </button>
           <ScaleSyncPanel products={products} />
+          {SHOW_SYSTEL_PANEL && <SystelPanel products={products} />}
         </div>
         <p className="muted" style={{ margin: "-8px 0 14px", fontSize: 12 }}>
           CSV para importar en el software de PC de la balanza (Kretz Simplex/iTegra) -- formato de prueba, todavía sin confirmar contra el importador real.
