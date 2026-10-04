@@ -1,7 +1,8 @@
-import { Fragment } from "react";
+import { Fragment, useState } from "react";
 import type { Product, TreasuryAccount } from "@patagonia/domain";
 import { parseAmount } from "../../lib/money";
 import { formatMoney } from "../shifts/format";
+import { parseQuantity } from "./quantity";
 import { UNIT_LABELS } from "./sale-model";
 import type { SaleTicket } from "./useSaleTicket";
 
@@ -15,6 +16,10 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout }: {
   busy: boolean;
   onCheckout: () => void;
 }) {
+  // Lo que se está tipeando en la cantidad de cada renglón. Sin esto, al borrar
+  // la cantidad para escribir los kilos el campo volvía a mostrar "0" y se
+  // terminaba escribiendo detrás de ese cero (pedido del dueño, 2026-10-04).
+  const [qtyDrafts, setQtyDrafts] = useState<Record<string, string>>({});
   const {
     search,
     setSearch,
@@ -132,15 +137,24 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout }: {
           style={{ width: 100 }}
         />
         <input
-          type="number"
-          min={manualUnit === "kg" ? "0.001" : "1"}
-          step={manualUnit === "kg" ? "0.001" : "1"}
-          placeholder="Cant."
+          type="text"
+          inputMode="decimal"
+          placeholder={manualUnit === "kg" ? "Kilos" : "Cant."}
           value={manualQty}
+          onFocus={(e) => e.target.select()}
           onChange={(e) => setManualQty(e.target.value)}
           style={{ width: 70 }}
         />
-        <select value={manualUnit} onChange={(e) => setManualUnit(e.target.value as Product["unit"])}>
+        <select
+          value={manualUnit}
+          onChange={(e) => {
+            const unit = e.target.value as Product["unit"];
+            setManualUnit(unit);
+            // Por kilo no tiene sentido arrancar con "1": el campo queda vacío para tipear los kilos.
+            if (unit === "kg" && manualQty === "1") setManualQty("");
+            if (unit !== "kg" && manualQty === "") setManualQty("1");
+          }}
+        >
           <option value="unit">Unidad</option>
           <option value="kg">Kg</option>
         </select>
@@ -197,12 +211,18 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout }: {
               </small>
             </div>
             <input
-              type="number"
+              type="text"
+              inputMode="decimal"
               className="pos-qty-input"
-              min={line.unit === "kg" ? "0.001" : "1"}
-              step={line.unit === "kg" ? "0.001" : "1"}
-              value={line.quantity}
-              onChange={(e) => updateCartQuantity(line.key, e.target.value)}
+              value={qtyDrafts[line.key] ?? String(line.quantity).replace(".", ",")}
+              onFocus={(e) => e.target.select()}
+              onChange={(e) => {
+                const raw = e.target.value;
+                setQtyDrafts((d) => ({ ...d, [line.key]: raw }));
+                const q = parseQuantity(raw);
+                if (q > 0) updateCartQuantity(line.key, String(q));
+              }}
+              onBlur={() => setQtyDrafts(({ [line.key]: _done, ...rest }) => rest)}
             />
             <input
               type="text"

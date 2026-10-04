@@ -58,7 +58,8 @@ PRODUCTOS Y STOCK (pantalla "Stock")
 MOSTRADOR (venta en el mostrador)
 - Para vender hay que tener un turno abierto. Si no hay, aparece "No hay un turno abierto": se pone el fondo inicial de caja y se toca "Abrir turno".
 - Para agregar un producto a la venta: escanear el código de barras o etiqueta de la balanza, o escribir el nombre o código en el buscador y elegirlo. Los productos por kg se cargan con el peso que trae la etiqueta de la balanza.
-- "Vender algo sin código" sirve para cargar un ítem que no está en el sistema (se escribe descripción, precio y cantidad). Ese ítem no descuenta stock.
+- "Vender algo sin código" sirve para cargar un ítem que no está en el sistema (se escribe descripción, precio y cantidad). Para venderlo por kilo se elige "Kg" y se escriben los kilos (con coma o punto, por ejemplo 0,750). Ese ítem no descuenta stock.
+- Para cambiar los kilos o la cantidad de un renglón del ticket, se toca el número y se escribe el nuevo (también con coma o punto).
 - Los tickets de total de la balanza Kretz Aura (un ticket con varios productos y un solo código de barras) se escanean y entran como una línea "Ticket de balanza" con el importe; esa línea no descuenta stock.
 - Se puede aplicar "Descuento o recargo". Para cobrar se elige la forma de pago (Efectivo y las demás cuentas configuradas) y se toca Cobrar (también sirve la tecla Enter). Con "Dividir el pago en más de un medio" se cobra parte en efectivo y parte con otra cuenta. Si el pago es con tarjeta o transferencia se pide el número de cupón u operación.
 - Cada venta puede reimprimirse desde el comprobante ("Reimprimir" o "2 copias").

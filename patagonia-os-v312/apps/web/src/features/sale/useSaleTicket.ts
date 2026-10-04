@@ -7,6 +7,7 @@ import { parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM,
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
 import type { PosShift } from "./pos-shift-service";
 import type { PaymentRow, TicketLine } from "./sale-model";
+import { parseQuantity } from "./quantity";
 
 // Estado y acciones del ticket que se está armando en Mostrador: búsqueda,
 // carrito, descuentos y recargos, medios de pago y sus totales. Es la parte
@@ -187,7 +188,8 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     setMessage("");
     const desc = manualDesc.trim();
     const price = parseAmount(manualPrice || "0") || 0;
-    const qty = Number(manualQty || "1");
+    if (manualUnit === "kg" && !manualQty.trim()) { setMessage("Ingresá los kilos."); return; }
+    const qty = manualQty.trim() ? parseQuantity(manualQty) : 1;
     if (!desc) { setMessage("Ingresá una descripción para el artículo."); return; }
     if (!(price >= 0)) { setMessage("Precio inválido."); return; }
     if (!(qty > 0)) { setMessage("Cantidad inválida."); return; }
