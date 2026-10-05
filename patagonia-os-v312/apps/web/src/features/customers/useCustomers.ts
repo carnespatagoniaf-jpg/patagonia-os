@@ -60,12 +60,14 @@ export function useCustomers() {
   // reciente para descartar cualquier respuesta que ya quedó vieja.
   const latestDetailRequestRef = useRef<string | null>(null);
 
-  const reload = useCallback(async () => {
-    if (!isSupabaseConfigured) return;
+  const reload = useCallback(async (): Promise<CustomerWithBalance[] | undefined> => {
+    if (!isSupabaseConfigured) return undefined;
     setLoading(true);
     setError(null);
     try {
-      setCustomers(await listCustomersWithBalance());
+      const list = await listCustomersWithBalance();
+      setCustomers(list);
+      return list;
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudieron cargar los clientes.");
     } finally {
@@ -88,8 +90,8 @@ export function useCustomers() {
       }
 
       const result = await createCustomer({ ...input, branchId });
-      await reload();
-      return result;
+      const list = await reload();
+      return { id: result.id, number: list?.find((c) => c.id === result.id)?.number };
     },
     [branchId, reload]
   );

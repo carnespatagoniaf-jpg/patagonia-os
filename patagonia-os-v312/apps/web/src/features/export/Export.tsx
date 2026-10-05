@@ -70,8 +70,8 @@ export function Export() {
     setMessage("");
     try {
       const customers = await listCustomersWithBalance();
-      const rows = customers.map((c) => [c.name, c.phone ?? "-", c.balance]);
-      const csv = toCsv(["Nombre", "Teléfono", "Saldo"], rows);
+      const rows = customers.map((c) => [c.number ?? "-", c.name, c.phone ?? "-", c.balance]);
+      const csv = toCsv(["N.º", "Nombre", "Teléfono", "Saldo"], rows);
       downloadCsv(`clientes_${todayIso()}.csv`, csv);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo exportar clientes.");

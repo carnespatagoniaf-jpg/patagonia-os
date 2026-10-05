@@ -1,11 +1,23 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
-import { isOverdueDebt, type Product } from "@patagonia/domain";
+import type { Product } from "@patagonia/domain";
 import { useCustomers } from "./useCustomers";
 import { useTreasury } from "../shifts/useTreasury";
 import { todayIso } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
 import { listProductsForBranch } from "../inventory/inventory-service";
 import type { CustomerChargeItem } from "./customers-service";
+import { countByStatus, customerStatus, filterAndSortCustomers, type CustomerFilter, type CustomerStatus } from "./customer-list";
+
+const STATUS_BADGE: Record<CustomerStatus, { label: string; bg: string; color: string }> = {
+  overdue: { label: "Atrasado", bg: "#fdecea", color: "#b3261e" },
+  owes: { label: "Debe", bg: "#fff4e0", color: "#8a5300" },
+  clear: { label: "Al día", bg: "#e6f4ea", color: "#2e7d32" }
+};
+
+function formatShortDate(iso: string) {
+  const [y, m, d] = iso.slice(0, 10).split("-");
+  return `${d}/${m}/${y.slice(2)}`;
+}
 
 const UNIT_LABELS: Record<Product["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
 
@@ -156,6 +168,12 @@ export function Customers() {
 
   const selectedCustomer = customers.find((c) => c.id === selectedId) ?? null;
 
+  const [search, setSearch] = useState("");
+  const [listFilter, setListFilter] = useState<CustomerFilter>("all");
+  const today = todayIso();
+  const visibleCustomers = useMemo(() => filterAndSortCustomers(customers, search, listFilter, today), [customers, search, listFilter, today]);
+  const statusCounts = useMemo(() => countByStatus(customers, today), [customers, today]);
+
   useEffect(() => {
     if (selectedCustomer) {
       setEditName(selectedCustomer.name);
@@ -248,7 +266,7 @@ export function Customers() {
       setLocality("");
       setProvince("");
       selectCustomer(result.id);
-      setMessage("Cliente creado.");
+      setMessage(result.number !== undefined ? `Cliente creado: es el N.º ${result.number}.` : "Cliente creado.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo crear el cliente.");
     } finally {
@@ -435,23 +453,48 @@ export function Customers() {
         <section className="panel">
           <div className="panel-title">
             <h2>Clientes</h2>
-            <span>{loading ? "Cargando…" : `${customers.length}`}</span>
+            <span>{loading ? "Cargando…" : `${visibleCustomers.length} de ${customers.length}`}</span>
+          </div>
+          <input
+            placeholder="Buscar por número, nombre, teléfono o localidad"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            style={{ width: "100%", marginBottom: 8 }}
+          />
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+            {(
+              [
+                ["all", `Todos (${statusCounts.all})`],
+                ["owes", `Deben (${statusCounts.owes})`],
+                ["overdue", `Atrasados (${statusCounts.overdue})`],
+                ["clear", `Al día (${statusCounts.clear})`]
+              ] as [CustomerFilter, string][]
+            ).map(([value, label]) => (
+              <button key={value} className={listFilter === value ? "" : "secondary"} onClick={() => setListFilter(value)}>
+                {label}
+              </button>
+            ))}
           </div>
           <div className="panel-list-scroll">
             <table className="data-table">
               <thead>
-                <tr><th>Nombre</th><th className="num">Saldo</th><th></th></tr>
+                <tr><th>N.º</th><th>Nombre</th><th>Estado</th><th className="num">Saldo</th><th>Últ. movimiento</th><th></th></tr>
               </thead>
               <tbody>
-                {customers.map((c) => {
-                  const overdue = isOverdueDebt(c, todayIso());
+                {visibleCustomers.map((c) => {
+                  const status = customerStatus(c, today);
+                  const badge = STATUS_BADGE[status];
                   return (
-                    <tr key={c.id} style={overdue ? { background: "#fdecea" } : undefined}>
+                    <tr key={c.id} style={status === "overdue" ? { background: "#fdecea" } : undefined}>
+                      <td><b>{c.number ?? "—"}</b></td>
+                      <td>{c.name}</td>
                       <td>
-                        {c.name}
-                        {overdue && <span className="message warning" style={{ display: "inline-block", marginLeft: 8, padding: "1px 8px", fontSize: 11 }}>Atrasado</span>}
+                        <span style={{ display: "inline-block", padding: "1px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: badge.bg, color: badge.color, whiteSpace: "nowrap" }}>
+                          {status === "clear" && c.balance <= -1 ? "A favor" : badge.label}
+                        </span>
                       </td>
-                      <td className="num">{formatMoney(c.balance)}</td>
+                      <td className="num" style={{ color: status === "clear" ? "#2e7d32" : undefined }}>{formatMoney(c.balance)}</td>
+                      <td className="muted" style={{ whiteSpace: "nowrap" }}>{c.lastActivityDate ? formatShortDate(c.lastActivityDate) : "—"}</td>
                       <td>
                         <button className={c.id === selectedId ? "" : "secondary"} onClick={() => selectCustomer(c.id)}>
                           {c.id === selectedId ? "Seleccionado" : "Ver cuenta"}
@@ -464,6 +507,7 @@ export function Customers() {
             </table>
           </div>
           {customers.length === 0 && !loading && <p className="muted">Todavía no cargaste ningún cliente.</p>}
+          {customers.length > 0 && visibleCustomers.length === 0 && <p className="muted">Ningún cliente coincide con la búsqueda.</p>}
 
           <div className="cash-banner-form" style={{ marginTop: 16, flexWrap: "wrap" }}>
             <input placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} />
@@ -482,7 +526,7 @@ export function Customers() {
           {!selectedCustomer && <p className="muted">Elegí un cliente para ver su cuenta.</p>}
           {selectedCustomer && !editingCustomer && (
             <div className="totals">
-              <span>Cliente <b>{selectedCustomer.name}</b></span>
+              <span>Cliente <b>{selectedCustomer.number !== undefined ? `N.º ${selectedCustomer.number} · ` : ""}{selectedCustomer.name}</b></span>
               <span>Total vendido <b>{formatMoney(balance?.totalCharged ?? 0)}</b></span>
               <span>Pagado <b>{formatMoney(balance?.totalPaid ?? 0)}</b></span>
               <strong>Saldo (te debe) <b>{formatMoney(balance?.balance ?? 0)}</b></strong>
@@ -528,7 +572,7 @@ export function Customers() {
             </div>
           </div>
           <div className="print-only-header">
-            <p className="muted">{selectedCustomer?.name}</p>
+            <p className="muted">{selectedCustomer?.number !== undefined ? `Cliente N.º ${selectedCustomer.number} · ` : ""}{selectedCustomer?.name}</p>
             <p className="muted">Fecha de venta: {printCharge.date}</p>
             {printCharge.reason && <p className="muted">{printCharge.reason}</p>}
           </div>

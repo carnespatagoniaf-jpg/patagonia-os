@@ -392,6 +392,8 @@ export interface CreditorBalance {
 export interface Customer {
   id: string;
   branchId: string;
+  /** Número de cliente correlativo por empresa (109_customer_number.sql). */
+  number?: number;
   name: string;
   phone?: string;
   notes?: string;

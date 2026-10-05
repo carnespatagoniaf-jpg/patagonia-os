@@ -4,6 +4,7 @@ import { supabase } from "../../lib/supabase";
 interface CustomerRow {
   id: string;
   branch_id: string;
+  number: number | null;
   name: string;
   phone: string | null;
   notes: string | null;
@@ -17,6 +18,7 @@ function mapCustomer(row: CustomerRow): Customer {
   return {
     id: row.id,
     branchId: row.branch_id,
+    number: row.number ?? undefined,
     name: row.name,
     phone: row.phone ?? undefined,
     notes: row.notes ?? undefined,
@@ -30,7 +32,7 @@ function mapCustomer(row: CustomerRow): Customer {
 export async function listCustomers(includeInactive = false): Promise<Customer[]> {
   if (!supabase) return [];
 
-  let query = supabase.from("customers").select("id,branch_id,name,phone,notes,locality,province,payment_term_days,active").order("name");
+  let query = supabase.from("customers").select("id,branch_id,number,name,phone,notes,locality,province,payment_term_days,active").order("name");
   if (!includeInactive) query = query.eq("active", true);
 
   const { data, error } = await query;
