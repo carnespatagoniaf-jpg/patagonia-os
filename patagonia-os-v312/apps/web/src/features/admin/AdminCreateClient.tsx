@@ -1,7 +1,6 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Building2, LockKeyhole, MapPin, Plus, Search } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
-import { AdminScaleReports } from "./AdminScaleReports";
 import {
   PROVINCES, createClient, deleteClient, deleteCompanyPayment, listCompanies, listCompanyPayments, listCompanyPlans, registerCompanyPayment,
   setCompanyActive, setCompanyLocation, setCompanyPaidUntil, setCompanyPlan, setCompanyTrial,
@@ -650,7 +649,6 @@ export function AdminCreateClient() {
         </section>
       )}
 
-      <AdminScaleReports />
 
       <div className="admin-search">
         <Search size={16} />

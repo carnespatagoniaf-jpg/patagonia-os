@@ -1,3 +1,6 @@
+// Oculto del panel de administrador desde 2026-10-05 (pedido del dueño: "esto borralo").
+// Los reportes se siguen guardando en la base (scale_support_reports); para volver
+// a verlos, montar <AdminScaleReports /> otra vez en AdminCreateClient.tsx.
 import { useCallback, useEffect, useState } from "react";
 import { Scale } from "lucide-react";
 import { listScaleSupportReports, setScaleSupportReportResolved, type ScaleSupportReport } from "./admin-service";
