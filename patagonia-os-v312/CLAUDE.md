@@ -153,7 +153,7 @@ To enable the Aura you need:
 
 Only then set `plu.evidence = "real"`. The scale is in ONE communication mode at a time (Datos for PLU upload vs "A pedido de peso" for weight reading).
 
-**Aura product sending is LIVE (2026-10-05).** The real write format was confirmed on the client's Aura in tests 2026-10-03 b and c:
+**Aura product sending is LIVE (2026-10-05), and confirmed on real hardware the same day: the client (Pollo y mar) sent all 223 products, each verified on re-read, and the other PLUs were unchanged.** The real write format was confirmed on the client's Aura in tests 2026-10-03 b and c:
 
 - Write = PLU(6) + name(16) + code(6) + type(1) + price(6) + tare(4) + validity(3).
 - The read-back has the type first and the code as 5 digits + "0".
