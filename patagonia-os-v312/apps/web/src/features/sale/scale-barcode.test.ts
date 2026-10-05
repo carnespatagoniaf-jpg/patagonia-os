@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { detectScaleConfig, parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM } from "./scale-barcode";
+import { detectScaleConfig, parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, parseAuraSumTicket } from "./scale-barcode";
 
 /** Dígito verificador EAN-13 para los primeros 12 dígitos. */
 function withCheckDigit(first12: string): string {
@@ -97,5 +97,29 @@ describe("detectScaleConfig (asistente de calibración)", () => {
 
   it("devuelve null si el peso indicado no coincide con nada", () => {
     assert.equal(detectScaleConfig(withCheckDigit("200012012500"), 99.9), null);
+  });
+});
+
+describe("ticket de suma de la Kretz Aura (parseAuraSumTicket)", () => {
+  const withCheck = (twelve: string) => {
+    const d = twelve.split("").map(Number);
+    const sum = d.reduce((acc, x, i) => acc + x * (i % 2 === 0 ? 1 : 3), 0);
+    return twelve + ((10 - (sum % 10)) % 10);
+  };
+  it("REAL: ticket de más de $999,99 con el formato de fábrica 2-5-5 llega sin importe", () => {
+    assert.deepEqual(parseAuraSumTicket("2099998000008"), { amount: null, format: "2-5-5" });
+  });
+  it("REAL: ticket chico con 2-5-5 trae el importe en centavos", () => {
+    assert.deepEqual(parseAuraSumTicket(withCheck("209999800592")), { amount: 5.92, format: "2-5-5" });
+  });
+  it("con 2-3-7 o 1-4-7 entran tickets grandes", () => {
+    assert.deepEqual(parseAuraSumTicket(withCheck("209980210600")), { amount: 2106, format: "2-3-7" });
+    assert.deepEqual(parseAuraSumTicket(withCheck("299986306800")), { amount: 63068, format: "1-4-7" });
+    assert.deepEqual(parseAuraSumTicket(withCheck("209990210600")), { amount: 2106, format: "2-3-7" });
+  });
+  it("no confunde etiquetas de producto ni códigos con el verificador mal", () => {
+    assert.equal(parseAuraSumTicket(withCheck("200001201234")), null);
+    assert.equal(parseAuraSumTicket("2099998000009"), null);
+    assert.equal(parseAuraSumTicket("7790001234567"), null);
   });
 });

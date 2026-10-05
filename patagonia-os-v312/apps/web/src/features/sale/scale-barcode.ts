@@ -76,6 +76,35 @@ export function parseWeightBarcode(code: string, config: ScaleConfig = DEFAULT_S
  */
 export const TICKET_TOTAL_CONFIRM_FROM = 100000;
 
+/**
+ * Ticket de SUMA de la Kretz Aura (balanza de la clienta Pollo y mar, REAL 2026-10-05):
+ * EAN-13 = inicio "20" (o "2") + código suma (99998, o sus últimas cifras si el campo es
+ * más corto) + importe en CENTAVOS + verificador. Formatos del manual (§7.1.7):
+ * 2-5-5 (el de fábrica), 2-4-6, 2-3-7, 1-4-7, 1-5-6, 1-6-5. Con 2-5-5 el importe tiene
+ * 5 cifras y la balanza pone 00000 si el ticket pasa de $999,99 (real: "2099998000008"
+ * en tickets de $2.106 y $63.068; "20 99998 00592" en uno de $5,92). Con 2-3-7 o 1-4-7
+ * entran hasta $99.999,99.
+ * Devuelve null si no es un ticket de suma; amount null si es de suma pero sin importe.
+ */
+const AURA_SUM_FORMATS: [number, number, number][] = [[2, 5, 5], [2, 4, 6], [2, 3, 7], [1, 4, 7], [1, 5, 6], [1, 6, 5]];
+
+export function parseAuraSumTicket(rawCode: string): { amount: number | null; format: string } | null {
+  const code = rawCode.trim();
+  if (!/^2[0-9]{12}$/.test(code)) return null;
+  const digits = code.split("").map(Number);
+  const sum = digits.slice(0, 12).reduce((acc, d, i) => acc + d * (i % 2 === 0 ? 1 : 3), 0);
+  if ((10 - (sum % 10)) % 10 !== digits[12]) return null;
+  for (const [p, c, v] of AURA_SUM_FORMATS) {
+    if (code.slice(0, p) !== (p === 2 ? "20" : "2")) continue;
+    const codePart = code.slice(p, p + c);
+    // El código suma es 99998; si el campo es más corto la balanza puede dejar las últimas o las primeras cifras.
+    if (codePart.length < 3 || !("999998".endsWith(codePart) || "99998".startsWith(codePart))) continue;
+    const cents = parseInt(code.slice(p + c, p + c + v), 10);
+    return { amount: cents > 0 ? cents / 100 : null, format: `${p}-${c}-${v}` };
+  }
+  return null;
+}
+
 export function parseTicketTotalBarcode(rawCode: string): number | null {
   // Muchos lectores devuelven un EAN-13 que empieza en 0 como UPC-A de 12
   // dígitos (sin ese primer cero) -- pasó con un cliente real. Se repone.

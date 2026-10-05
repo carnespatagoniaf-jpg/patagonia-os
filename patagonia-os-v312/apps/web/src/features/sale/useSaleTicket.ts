@@ -5,6 +5,7 @@ import { formatMoney } from "../shifts/format";
 import type { ProductCategory } from "../inventory/product-categories-service";
 import { parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, type ScaleConfig } from "./scale-config-service";
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
+import { parseAuraSumTicket } from "./scale-barcode";
 import type { PosShift } from "./pos-shift-service";
 import type { PaymentRow, TicketLine } from "./sale-model";
 import { parseQuantity } from "./quantity";
@@ -234,7 +235,14 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     // importe, no los productos -- va como línea manual, sin descontar stock.
     // Se evalúa antes que la etiqueta por PLU (los 5 ceros iniciales la
     // confundirían con el PLU 1) y solo si no hay un producto con ese código.
-    const ticketTotal = parseTicketTotalBarcode(raw);
+    const auraSum = products.some((p) => p.code === raw) ? null : parseAuraSumTicket(raw);
+    if (auraSum && auraSum.amount === null) {
+      setMessage("Este ticket de la balanza no trae el importe en el código de barras (con el formato actual de la balanza solo entran tickets de hasta $999,99). Cargá el TOTAL impreso con \"Vender algo sin código\" y avisale al encargado: en la balanza hay que poner el formato de código de barras 2-3-7.");
+      setSearch("");
+      setHighlightedIndex(-1);
+      return;
+    }
+    const ticketTotal = auraSum?.amount ?? parseTicketTotalBarcode(raw);
     if (ticketTotal !== null && !products.some((p) => p.code === raw)) {
       const key = `ticket-${raw.padStart(13, "0")}`;
       if (cart.some((l) => l.key === key)) {
