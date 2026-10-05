@@ -2,6 +2,7 @@ import type { Product } from "@patagonia/domain";
 import { STAGE_LABELS, runKretzDiscovery, saveDiagnosticRecord, savePluScan, scanAllPlus, type DiagnosticRecord, type DiscoveryVerdict, type PluScan } from "./kretz/discovery";
 import { runAuraWriteTest, saveAuraWriteTest, type AuraWriteTestResult } from "./kretz/aura-write-test";
 import { runAuraModelProbe, saveModelProbe, type ModelProbeResult } from "./kretz/aura-model-probe";
+import { readAuraList, runAuraSync, type AuraSyncItem, type AuraSyncResult } from "./kretz/aura-sync";
 import { getKretzModel, getSavedModelId } from "./kretz/models";
 import { buildKretzFrame, describeKretzCode } from "./kretz/kretz-frame";
 
@@ -564,6 +565,31 @@ export async function runAuraModelProbeOnScale(onProgress: (text: string) => voi
   cachedPortOpenKey = null;
   saveModelProbe(result);
   return result;
+}
+
+/** Configuración de la Aura: la que encontró "Probar todo" o, si no, la comprobada en la Aura real (H01, 9600, 2 bits de stop). */
+function auraResponder() {
+  const settings = getScaleSerialSettings();
+  const aura = settings.deviceType === "H" ? settings : { ...settings, baudRate: 9600, stopBits: 2 as const, deviceType: "H", equipmentId: "01" };
+  return { link: { baudRate: aura.baudRate, stopBits: aura.stopBits }, deviceType: aura.deviceType, equipmentId: aura.equipmentId };
+}
+
+/** Aura: lee todos los productos de la balanza (SOLO LECTURA). Ver kretz/aura-sync.ts. */
+export async function readAuraListOnScale(onProgress: (text: string) => void) {
+  const port = await pickPort();
+  cachedPortOpenKey = null;
+  const r = await readAuraList(port, auraResponder(), { onProgress });
+  cachedPortOpenKey = null;
+  return r;
+}
+
+/** Aura: manda el plan armado con planAuraSync (relee cada producto y frena ante cualquier diferencia). Ver kretz/aura-sync.ts. */
+export async function runAuraSyncOnScale(plan: AuraSyncItem[], onProgress: (text: string) => void, shouldStop: () => boolean): Promise<AuraSyncResult> {
+  const port = await pickPort();
+  cachedPortOpenKey = null;
+  const r = await runAuraSync(port, auraResponder(), plan, { onProgress, shouldStop });
+  cachedPortOpenKey = null;
+  return r;
 }
 
 /** Resumen por etapa: dónde se cortó la comunicación. */

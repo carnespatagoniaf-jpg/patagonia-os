@@ -15,6 +15,8 @@ import {
   scanScalePlus,
   runAuraWriteTestOnScale,
   runAuraModelProbeOnScale,
+  readAuraListOnScale,
+  runAuraSyncOnScale,
   getScalePortDescription,
   getScaleSerialSettings,
   isScalePortPaired,
@@ -32,9 +34,21 @@ import { getLastDiagnosticRecord, getLastPluScan, summarizeDiagnosticRecord, typ
 import { auraPriceCandidates, parseAuraPlu } from "./kretz/aura-plu";
 import { AURA_TEST_PLUS, AURA_TEST_PRODUCTS, getLastAuraWriteTest, type AuraWriteTestResult } from "./kretz/aura-write-test";
 import { analyzeModelProbe, getLastModelProbe, type ModelProbeResult } from "./kretz/aura-model-probe";
+import { planAuraSync, summarizeAuraPlan, type AuraSyncAction } from "./kretz/aura-sync";
 
 /** El botón de diagnóstico de la Aura no se muestra todavía (decisión del dueño). */
 const SHOW_AURA_DIAGNOSTIC = false;
+/** La prueba de PLU 96 a 99 ya cumplió (2026-10-03): queda el código, pero no se muestra. */
+const SHOW_AURA_TEST = false;
+
+const AURA_ACTION_LABEL: Record<AuraSyncAction, string> = {
+  crear: "Se crea",
+  actualizar: "Cambia el precio",
+  reemplazar: "Se reemplaza",
+  sin_cambios: "Ya está igual",
+  conflicto: "No se toca",
+  omitir: "No se manda"
+};
 import { EVIDENCE_LABELS, KRETZ_MODELS, canWritePlu, getKretzModel, getSavedModelId, saveModelId, type KretzModelId } from "./kretz/models";
 
 const BALANCE_NUMBER_KEY = "patagonia-scale-balance-number";
@@ -94,6 +108,11 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
   const [auraTest, setAuraTest] = useState<AuraWriteTestResult | null>(getLastAuraWriteTest());
   const [modelProbe, setModelProbe] = useState<ModelProbeResult | null>(getLastModelProbe());
   const stopScanRef = useRef(false);
+  // Kretz Aura: envío real (kretz/aura-sync.ts)
+  const [auraList, setAuraList] = useState<{ records: { plu: number; data: string }[]; complete: boolean; detail: string; readAt: string } | null>(null);
+  const [auraReplace, setAuraReplace] = useState(false);
+  const [auraShowPlan, setAuraShowPlan] = useState(false);
+  const auraStopRef = useRef(false);
   const [scanning, setScanning] = useState(false);
   const [modelId, setModelId] = useState<KretzModelId>(getSavedModelId());
   const [balanceNumber, setBalanceNumber] = useState(readLocal(BALANCE_NUMBER_KEY) ?? "1");
@@ -227,6 +246,59 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
       }
     } catch (err) {
       report(err instanceof Error ? err.message : "Falló la prueba.");
+    } finally {
+      setScaleBusy(false);
+    }
+  }
+
+  /** Aura: lee todo lo que hay en la balanza (solo lectura) para armar el envío y guardar una copia. */
+  async function handleAuraRead() {
+    setScaleBusy(true);
+    setScaleLog("Leyendo los productos de la balanza… no desenchufes el cable.");
+    try {
+      const r = await readAuraListOnScale((text) => setScaleLog(text));
+      setAuraList({ records: r.records, complete: r.complete, detail: r.detail, readAt: new Date().toISOString() });
+      report(r.complete ? `Listo: ${r.detail}. Revisá abajo qué se va a mandar.` : `No se pudo leer la balanza completa: ${r.detail}. No se va a mandar nada hasta poder leerla.`);
+    } catch (err) {
+      report(err instanceof Error ? err.message : "No se pudo leer la balanza.");
+    } finally {
+      setScaleBusy(false);
+    }
+  }
+
+  function downloadAuraBackup() {
+    if (!auraList) return;
+    const text = auraList.records.map((r) => r.data).join("\r\n");
+    const blob = new Blob([text], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `copia_balanza_aura_${auraList.readAt.slice(0, 10)}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  }
+
+  async function handleAuraSend(plan: ReturnType<typeof planAuraSync>) {
+    const s = summarizeAuraPlan(plan);
+    const total = s.crear + s.actualizar + s.reemplazar;
+    if (!window.confirm(`Se van a mandar ${total} productos a la balanza (${s.crear} nuevos, ${s.actualizar} con precio nuevo${s.reemplazar ? `, ${s.reemplazar} reemplazos` : ""}). No se borra nada. Tarda unos minutos: no desenchufes la balanza ni cierres esta pantalla. ¿Seguir?`)) return;
+    auraStopRef.current = false;
+    setScaleBusy(true);
+    setScaleLog("Mandando productos a la balanza…");
+    try {
+      const r = await runAuraSyncOnScale(plan, (text) => setScaleLog(text), () => auraStopRef.current);
+      if (r.after.length || r.before.length) setAuraList({ records: r.after.length ? r.after : r.before, complete: r.verdict === "ok", detail: r.detail, readAt: new Date().toISOString() });
+      if (r.verdict === "ok") {
+        report(`✅ Listo: ${r.detail}. Los demás productos de la balanza quedaron igual.`);
+      } else {
+        const canSend = profile?.role === "owner" || profile?.role === "admin";
+        const sent = canSend ? await handleSendToSupport(`Envío Aura (${r.verdict}): ${r.detail}`) : false;
+        report(`❌ Se frenó: ${r.detail}. Se mandaron bien ${r.written.length} productos antes de frenar.\n\n${sent ? "El detalle ya le llegó al equipo de Patagonia OS." : "Sacale una foto a esta pantalla y mandala por WhatsApp."}`);
+      }
+    } catch (err) {
+      report(err instanceof Error ? err.message : "Falló el envío.");
     } finally {
       setScaleBusy(false);
     }
@@ -537,13 +609,15 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
             </div>
             <p style={{ margin: "8px 0 0", fontSize: 13 }}>
               Envío de productos a esta balanza:{" "}
-              {writeAllowed ? (
+              {model.id === "aura" ? (
+                <strong style={{ color: "#176329" }}>habilitado, por kilo y por unidad en pesos enteros (comprobado con una Aura real)</strong>
+              ) : writeAllowed ? (
                 <strong style={{ color: "#176329" }}>habilitado (comprobado con una balanza real)</strong>
               ) : (
                 <strong style={{ color: "#8a1f11" }}>bloqueado hasta comprobarlo con una balanza real</strong>
               )}
             </p>
-            {!writeAllowed && (
+            {!writeAllowed && model.id !== "aura" && (
               <p className="muted" style={{ margin: "4px 0 0", fontSize: 12 }}>
                 Mientras tanto, "Probar todo" averigua cómo se comunica esta balanza SIN escribir nada en ella, y "Enviar a soporte" nos manda el resultado para terminar de habilitarla.
               </p>
@@ -727,8 +801,86 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
             </div>
           )}
 
-          {/* 3 (Aura). Prueba de escritura de UN producto en un PLU libre */}
-          {model.id === "aura" && (
+          {/* 3 (Aura). Envío real de productos */}
+          {model.id === "aura" && (() => {
+            const auraProducts = products
+              .filter((p) => p.active ?? true)
+              .map((p) => ({ code: p.code, name: p.name, byWeight: p.unit === "kg", price: p.priceRetail }));
+            const auraPlan = auraList?.complete ? planAuraSync(auraList.records.map((r) => r.data), auraProducts, { replaceConflicts: auraReplace }) : [];
+            const sum = summarizeAuraPlan(auraPlan);
+            const toSend = sum.crear + sum.actualizar + sum.reemplazar;
+            const conflicts = auraList?.complete ? summarizeAuraPlan(planAuraSync(auraList.records.map((r) => r.data), auraProducts)).conflicto : 0;
+            return (
+              <div style={step}>
+                <p style={stepTitle}>3. Mandar productos a la balanza</p>
+                <p className="muted" style={{ margin: "0 0 10px", fontSize: 12 }}>
+                  Primero leé la balanza: Patagonia guarda una copia de lo que tiene y te muestra qué va a hacer con cada producto. Los productos por kilo se cargan por kilo y los por unidad, por unidad; el precio va en pesos enteros (se redondea al peso). El número de producto en la balanza es el código del producto en Patagonia. No borra nada de la balanza.
+                </p>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                  <button disabled={scaleBusy || noSerial || !scalePortReady} onClick={() => void handleAuraRead()}>
+                    {auraList ? "Volver a leer la balanza" : "Leer la balanza"}
+                  </button>
+                  {auraList && (
+                    <button className="secondary" disabled={scaleBusy} onClick={downloadAuraBackup}>
+                      Descargar copia de la balanza ({auraList.records.length})
+                    </button>
+                  )}
+                </div>
+                {auraList?.complete && (
+                  <>
+                    <p style={{ margin: "12px 0 6px", fontSize: 14 }}>
+                      En la balanza hay <strong>{auraList.records.length}</strong> productos. Con los {auraProducts.length} productos activos de Patagonia:{" "}
+                      <strong>{sum.crear}</strong> se crean, <strong>{sum.actualizar}</strong> cambian de precio
+                      {sum.reemplazar > 0 && <>, <strong>{sum.reemplazar}</strong> se reemplazan</>}, {sum.sin_cambios} ya están igual
+                      {sum.conflicto > 0 && <>, <strong style={{ color: "#8b1e1e" }}>{sum.conflicto}</strong> no se tocan (en la balanza ese número es otro producto)</>}
+                      {sum.omitir > 0 && <>, {sum.omitir} no se pueden mandar</>}.
+                    </p>
+                    {conflicts > 0 && (
+                      <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontSize: 13, margin: "6px 0" }}>
+                        <input type="checkbox" checked={auraReplace} disabled={scaleBusy} onChange={(e) => setAuraReplace(e.target.checked)} />
+                        <span>Reemplazar los {conflicts} productos de la balanza que tienen el mismo número que un producto de Patagonia pero con otro nombre (se pisan con el de Patagonia).</span>
+                      </label>
+                    )}
+                    <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
+                      <button disabled={scaleBusy || noSerial || toSend === 0} onClick={() => void handleAuraSend(auraPlan)}>
+                        Mandar {toSend} productos a la balanza
+                      </button>
+                      {scaleBusy && (
+                        <button className="secondary" onClick={() => { auraStopRef.current = true; }}>
+                          Frenar
+                        </button>
+                      )}
+                      <button className="secondary" disabled={scaleBusy} onClick={() => setAuraShowPlan((v) => !v)}>
+                        {auraShowPlan ? "Ocultar detalle" : "Ver detalle"}
+                      </button>
+                    </div>
+                    {auraShowPlan && (
+                      <div style={{ maxHeight: 320, overflowY: "auto", border: "1px solid #eef0f3", borderRadius: 6, marginTop: 10 }}>
+                        <table className="data-table">
+                          <thead>
+                            <tr><th>N.º</th><th>Producto</th><th>Qué pasa</th><th>Detalle</th></tr>
+                          </thead>
+                          <tbody>
+                            {auraPlan.map((it, idx) => (
+                              <tr key={idx}>
+                                <td>{it.plu ?? "-"}</td>
+                                <td>{it.name}</td>
+                                <td>{AURA_ACTION_LABEL[it.action]}</td>
+                                <td className="muted" style={{ fontSize: 12 }}>{it.reason}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+                  </>
+                )}
+              </div>
+            );
+          })()}
+
+          {/* (Aura) Prueba de escritura de los PLU 96 a 99: ya cumplió, queda oculta */}
+          {model.id === "aura" && SHOW_AURA_TEST && (
             <div style={step}>
               <p style={stepTitle}>Kretz Aura: cargar productos de prueba</p>
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
@@ -766,6 +918,7 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
             </div>
           )}
 
+          {model.id !== "aura" && (<>
           {/* 3. Verificar con un PLU de prueba */}
           <div style={step}>
             <p style={stepTitle}>3. Verificar con un producto de prueba</p>
@@ -858,6 +1011,7 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
               </div>
             )}
           </div>
+          </>)}
 
           {scaleLog && (
             <p style={{ margin: "14px 0 0", fontSize: 13, whiteSpace: "pre-wrap", background: "#f7f7f8", borderRadius: 6, padding: 10 }}>{scaleLog}</p>
