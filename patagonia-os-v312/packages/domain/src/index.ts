@@ -264,6 +264,8 @@ export interface PayrollAdjustment {
   type: PayrollAdjustmentType;
   amount: Money;
   reason: string;
+  /** true si ya lo consumió una liquidación cerrada (payroll_liquidation_id). */
+  liquidated?: boolean;
 }
 
 export interface PayrollLiquidationPayment {

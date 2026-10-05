@@ -290,6 +290,31 @@ interface PosSaleRangeRow {
  * forma (fecha, cuenta, monto) que las ventas de Turnos, para poder
  * sumarlas juntas -- ver 049 y la discusión de "Ventas hoy" incompleto
  * porque solo miraba Turnos. */
+/** Total vendido en Mostrador entre dos fechas (sin anuladas), sumando el total de cada venta: igual que
+ * close_profitability_period (sumar los pagos puede diferir por redondeos de centavos). */
+export async function sumPosSalesTotalInRange(branchId: string, fromDate: string, toDate: string): Promise<number> {
+  if (!supabase) return 0;
+  const fromIso = new Date(`${fromDate}T00:00:00`).toISOString();
+  const toIso = new Date(`${toDate}T23:59:59.999`).toISOString();
+  const PAGE_SIZE = 1000;
+  let total = 0;
+  for (let start = 0; ; start += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("pos_sales")
+      .select("id,total")
+      .eq("branch_id", branchId)
+      .is("voided_at", null)
+      .gte("created_at", fromIso)
+      .lte("created_at", toIso)
+      .order("id")
+      .range(start, start + PAGE_SIZE - 1);
+    if (error) throw error;
+    for (const row of data ?? []) total += Number(row.total);
+    if (!data || data.length < PAGE_SIZE) break;
+  }
+  return Math.round(total * 100) / 100;
+}
+
 export async function listPosSalesInRange(branchId: string, fromDate: string, toDate: string): Promise<MostradorSaleEntry[]> {
   if (!supabase) return [];
 

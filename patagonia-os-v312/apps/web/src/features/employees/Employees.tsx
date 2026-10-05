@@ -111,7 +111,8 @@ export function Employees() {
   }, [selectedEmployee]);
 
   const periodAdjustments = useMemo(
-    () => adjustments.filter((a) => a.adjustmentDate >= periodStart && a.adjustmentDate <= periodEnd),
+    // Los ya liquidados no se vuelven a sumar (igual que la base: no permite liquidaciones superpuestas, así que un premio ya liquidado no se vuelve a cobrar).
+    () => adjustments.filter((a) => !a.liquidated && a.adjustmentDate >= periodStart && a.adjustmentDate <= periodEnd),
     [adjustments, periodStart, periodEnd]
   );
 

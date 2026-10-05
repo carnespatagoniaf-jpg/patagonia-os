@@ -90,7 +90,7 @@ interface PurchaseItemRangeRow {
   unit: "kg" | "unit";
   line_total: number;
   description: string | null;
-  products: { name: string } | null;
+  product_id: string | null;
   purchases: { branch_id: string; purchase_date: string; status: string } | null;
 }
 
@@ -99,7 +99,7 @@ export async function listPurchasedProductsInRange(branchId: string, fromDate: s
 
   const { data, error } = await supabase
     .from("purchase_items")
-    .select("quantity,unit,line_total,description,products(name),purchases!inner(branch_id,purchase_date,status)")
+    .select("quantity,unit,line_total,description,product_id,purchases!inner(branch_id,purchase_date,status)")
     .eq("purchases.branch_id", branchId)
     .eq("purchases.status", "active")
     .gte("purchases.purchase_date", fromDate)
@@ -107,9 +107,24 @@ export async function listPurchasedProductsInRange(branchId: string, fromDate: s
 
   if (error) throw error;
 
+  // Los nombres se leen de products_with_stock: desde la migración 051 (ocultar el costo a los cajeros)
+  // la tabla products no se puede leer directo, y pedir products(name) hacía fallar toda la consulta.
+  const rows = (data ?? []) as unknown as PurchaseItemRangeRow[];
+  const ids = [...new Set(rows.map((r) => r.product_id).filter((id): id is string => !!id))];
+  const names = new Map<string, string>();
+  for (let i = 0; i < ids.length; i += 200) {
+    const { data: prods, error: prodError } = await supabase
+      .from("products_with_stock")
+      .select("id,name")
+      .eq("branch_id", branchId)
+      .in("id", ids.slice(i, i + 200));
+    if (prodError) throw prodError;
+    for (const p of prods ?? []) names.set(p.id as string, p.name as string);
+  }
+
   const byLabel = new Map<string, PurchasedProductRanking>();
-  for (const row of (data ?? []) as unknown as PurchaseItemRangeRow[]) {
-    const label = row.products?.name ?? row.description ?? "-";
+  for (const row of rows) {
+    const label = (row.product_id ? names.get(row.product_id) : undefined) ?? row.description ?? "-";
     const current = byLabel.get(label) ?? { label, unit: row.unit, quantity: 0, amount: 0 };
     current.quantity += Number(row.quantity);
     current.amount += Number(row.line_total);

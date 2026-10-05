@@ -48,13 +48,16 @@ export function useProfitability() {
     setLoading(true);
     setError(null);
     try {
-      setFixedCosts(await listFixedCosts());
+      // Cada costo fijo es de un local: se muestran y se restan solo los del local activo,
+      // igual que close_profitability_period (antes se restaban los de todos los locales).
+      const all = await listFixedCosts();
+      setFixedCosts(branchId ? all.filter((f) => f.branchId === branchId) : all);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudieron cargar los costos fijos.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [branchId]);
 
   useEffect(() => {
     void reload();

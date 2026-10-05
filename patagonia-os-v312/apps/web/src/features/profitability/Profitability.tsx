@@ -6,6 +6,8 @@ import { addDaysIso, endOfMonthIso, endOfWeekIso, formatMoney, startOfMonthIso, 
 import { parseAmount } from "../../lib/money";
 import { listTreasuryMovements } from "../shifts/treasury-service";
 import { MOVEMENT_TYPE_LABELS } from "../shifts/Treasury";
+import { sumPosSalesTotalInRange } from "../sale/pos-shift-service";
+import { listCustomerChargesInRange } from "../customers/customers-service";
 
 interface CashSummary {
   totalIn: number;
@@ -104,8 +106,18 @@ export function Profitability() {
     if (!branchId) return;
     setPreviewLoading(true);
     try {
-      const [rangeRows, purchases] = await Promise.all([loadRange(from, to), getPurchasesTotal(from, to)]);
-      setSalesTotal(rangeRows.reduce((sum, row) => sum + row.sales.reduce((s, r) => s + r.amount, 0), 0));
+      // Igual que close_profitability_period: Turnos + Mostrador (sin anuladas) + entregas a cuenta corriente
+      // de los clientes de este local. Antes solo sumaba Turnos y con Mostrador daba Ventas $0 (2026-10-05).
+      const [rangeRows, purchases, mostrador, charges] = await Promise.all([
+        loadRange(from, to),
+        getPurchasesTotal(from, to),
+        sumPosSalesTotalInRange(branchId, from, to),
+        listCustomerChargesInRange(branchId, from, to).catch(() => [])
+      ]);
+      const turnos = rangeRows.reduce((sum, row) => sum + row.sales.reduce((s, r) => s + r.amount, 0), 0);
+      const pos = mostrador;
+      const fiado = charges.reduce((sum, c) => sum + c.amount, 0);
+      setSalesTotal(Math.round((turnos + pos + fiado) * 100) / 100);
       setPurchasesTotal(purchases);
     } finally {
       setPreviewLoading(false);

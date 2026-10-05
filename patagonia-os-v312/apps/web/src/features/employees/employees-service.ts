@@ -97,6 +97,7 @@ interface PayrollAdjustmentRow {
   type: PayrollAdjustmentType;
   amount: number;
   reason: string;
+  payroll_liquidation_id: string | null;
 }
 
 function mapAdjustment(row: PayrollAdjustmentRow): PayrollAdjustment {
@@ -106,7 +107,8 @@ function mapAdjustment(row: PayrollAdjustmentRow): PayrollAdjustment {
     adjustmentDate: row.adjustment_date,
     type: row.type,
     amount: Number(row.amount),
-    reason: row.reason
+    reason: row.reason,
+    liquidated: row.payroll_liquidation_id != null
   };
 }
 
@@ -115,7 +117,7 @@ export async function listPayrollAdjustments(employeeId: string): Promise<Payrol
 
   const { data, error } = await supabase
     .from("payroll_adjustments")
-    .select("id,employee_id,adjustment_date,type,amount,reason")
+    .select("id,employee_id,adjustment_date,type,amount,reason,payroll_liquidation_id")
     .eq("employee_id", employeeId)
     .order("adjustment_date", { ascending: false });
 
