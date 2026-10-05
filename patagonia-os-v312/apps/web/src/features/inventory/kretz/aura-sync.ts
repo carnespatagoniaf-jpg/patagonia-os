@@ -25,6 +25,16 @@ import { claimPort, closeQuietly, errorClassification, freshPortFor, newSession,
  * - Al final se releen todos y los que no estaban en el plan tienen que estar idénticos.
  */
 
+/**
+ * Formato del código de barras de los tickets (comando 1070, "Multiprotocolo Report NX"):
+ * inicio pesable "20" + importe (0) + inicio no pesable "20" + importe (0) + formato 5 = 2-3-7.
+ * iTegra le manda a la Aura el mismo comando con formato 1 (2-5-5): "2002001" (capturado 2026-10-02).
+ * Con 2-5-5 el importe tiene 5 cifras en centavos y los tickets de más de $999,99 salen en 0 (REAL);
+ * con 2-3-7 entran hasta $99.999,99. Autorizado por el dueño (2026-10-05). Mostrador lee todos los
+ * formatos del manual, así que si la Aura numerara distinto no queda peor que antes.
+ */
+export const AURA_BARCODE_CONFIG = "2002005";
+
 export const AURA_MAX_PLU = 9999;
 export const AURA_MAX_CODE = 99999;
 
@@ -123,6 +133,8 @@ export interface AuraSyncResult {
   detail: string;
   written: { plu: number; action: AuraSyncAction }[];
   stoppedAt: { plu: number; sent: string; readBack: string | null; expected: string } | null;
+  /** Ajuste del código de barras (1070), si se pidió: ok, la balanza lo rechazó, no contestó, o no se mandó. */
+  barcode: "ok" | "rechazada" | "sin_respuesta" | "no_enviado";
   before: { plu: number; data: string }[];
   after: { plu: number; data: string }[];
   exchanges: DiagnosticExchange[];
@@ -156,13 +168,13 @@ export async function runAuraSync(
   port: SerialPort,
   responder: KretzResponder,
   plan: AuraSyncItem[],
-  options: { timeoutMs?: number; onProgress?: (text: string) => void; shouldStop?: () => boolean } = {}
+  options: { timeoutMs?: number; onProgress?: (text: string) => void; shouldStop?: () => boolean; configureBarcode?: boolean } = {}
 ): Promise<AuraSyncResult> {
   const timeout = options.timeoutMs ?? 1500;
   const progress = options.onProgress ?? (() => {});
   const work = plan.filter((p) => p.record && p.expected && p.plu !== null && (p.action === "crear" || p.action === "actualizar" || p.action === "reemplazar"));
   const allowed = new Set(work.map((w) => w.record!));
-  const result: AuraSyncResult = { verdict: "error", detail: "", written: [], stoppedAt: null, before: [], after: [], exchanges: [], openLog: [], startedAt: new Date().toISOString(), finishedAt: "" };
+  const result: AuraSyncResult = { verdict: "error", detail: "", written: [], stoppedAt: null, barcode: "no_enviado", before: [], after: [], exchanges: [], openLog: [], startedAt: new Date().toISOString(), finishedAt: "" };
   const finish = (verdict: AuraSyncVerdict, detail: string) => {
     result.verdict = verdict;
     result.detail = detail;
@@ -232,6 +244,21 @@ export async function runAuraSync(
     const changed = before.records.filter((r) => !touched.has(r.plu) && afterMap.get(r.plu) !== r.data).map((r) => r.plu);
     if (after.stoppedBy !== "fin") return finish("lectura_incompleta", `se mandaron ${result.written.length} productos, pero no se pudo releer la lista completa al final`);
     if (changed.length) return finish("otros_cambiaron", `cambiaron productos que no estaban en el envío: ${changed.slice(0, 20).join(", ")}`);
+    if (options.configureBarcode) {
+      progress("Ajustando el código de barras de los tickets…");
+      const frame = buildKretzFrame(deviceType, equipmentId, "1070", AURA_BARCODE_CONFIG);
+      const writer = port.writable!.getWriter();
+      const t0 = Date.now();
+      try {
+        await writer.write(frame);
+      } finally {
+        writer.releaseLock();
+      }
+      const rx = await collect(port, Math.max(timeout, 2000), true);
+      const kretz = parseKretzResponse(rx);
+      result.exchanges.push({ step: "código de barras (1070)", link: `${link.baudRate}/${link.stopBits}`, tx: toHex(frame), rx: toHex(rx), rxText: toPrintable(rx), ms: Date.now() - t0, kretz, echo: false });
+      result.barcode = !kretz ? "sin_respuesta" : kretz.code === "01" ? "ok" : "rechazada";
+    }
     return finish("ok", `se mandaron ${result.written.length} productos y cada uno quedó exactamente como se mandó`);
   } catch (err) {
     return finish("error", err instanceof Error ? err.message : String(err));

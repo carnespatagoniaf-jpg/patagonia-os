@@ -34,7 +34,10 @@ import { getLastDiagnosticRecord, getLastPluScan, summarizeDiagnosticRecord, typ
 import { auraPriceCandidates, parseAuraPlu } from "./kretz/aura-plu";
 import { AURA_TEST_PLUS, AURA_TEST_PRODUCTS, getLastAuraWriteTest, type AuraWriteTestResult } from "./kretz/aura-write-test";
 import { analyzeModelProbe, getLastModelProbe, type ModelProbeResult } from "./kretz/aura-model-probe";
-import { planAuraSync, summarizeAuraPlan, type AuraSyncAction } from "./kretz/aura-sync";
+import { AURA_BARCODE_CONFIG, planAuraSync, summarizeAuraPlan, type AuraSyncAction } from "./kretz/aura-sync";
+
+/** En esta PC ya se le mandó a la Aura el formato de código de barras (comando 1070). */
+const AURA_BARCODE_KEY = "patagonia-aura-barcode-config";
 
 /** El botón de diagnóstico de la Aura no se muestra todavía (decisión del dueño). */
 const SHOW_AURA_DIAGNOSTIC = false;
@@ -113,6 +116,7 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
   const [auraReplace, setAuraReplace] = useState(false);
   const [auraShowPlan, setAuraShowPlan] = useState(false);
   const auraStopRef = useRef(false);
+  const [auraBarcodeDone, setAuraBarcodeDone] = useState(() => readLocal(AURA_BARCODE_KEY) === AURA_BARCODE_CONFIG);
   const [scanning, setScanning] = useState(false);
   const [modelId, setModelId] = useState<KretzModelId>(getSavedModelId());
   const [balanceNumber, setBalanceNumber] = useState(readLocal(BALANCE_NUMBER_KEY) ?? "1");
@@ -283,15 +287,29 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
   async function handleAuraSend(plan: ReturnType<typeof planAuraSync>) {
     const s = summarizeAuraPlan(plan);
     const total = s.crear + s.actualizar + s.reemplazar;
-    if (!window.confirm(`Se van a mandar ${total} productos a la balanza (${s.crear} nuevos, ${s.actualizar} con precio nuevo${s.reemplazar ? `, ${s.reemplazar} reemplazos` : ""}). No se borra nada. Tarda unos minutos: no desenchufes la balanza ni cierres esta pantalla. ¿Seguir?`)) return;
+    const barcode = !auraBarcodeDone;
+    const what = total > 0 ? `Se van a mandar ${total} productos a la balanza (${s.crear} nuevos, ${s.actualizar} con precio nuevo${s.reemplazar ? `, ${s.reemplazar} reemplazos` : ""})` : "No hay productos para mandar";
+    if (!window.confirm(`${what}${barcode ? ". También se ajusta el código de barras de los tickets para que Mostrador los lea" : ""}. No se borra nada. Tarda unos minutos: no desenchufes la balanza ni cierres esta pantalla. ¿Seguir?`)) return;
     auraStopRef.current = false;
     setScaleBusy(true);
     setScaleLog("Mandando productos a la balanza…");
     try {
-      const r = await runAuraSyncOnScale(plan, (text) => setScaleLog(text), () => auraStopRef.current);
+      const r = await runAuraSyncOnScale(plan, (text) => setScaleLog(text), () => auraStopRef.current, barcode);
+      if (r.barcode === "ok") {
+        writeLocal(AURA_BARCODE_KEY, AURA_BARCODE_CONFIG);
+        setAuraBarcodeDone(true);
+      }
+      const barcodeText =
+        r.barcode === "ok"
+          ? " También se ajustó el código de barras de los tickets: desde ahora Mostrador los lee con el importe."
+          : r.barcode === "rechazada"
+            ? " La balanza no aceptó el ajuste del código de barras."
+            : r.barcode === "sin_respuesta"
+              ? " La balanza no contestó el ajuste del código de barras."
+              : "";
       if (r.after.length || r.before.length) setAuraList({ records: r.after.length ? r.after : r.before, complete: r.verdict === "ok", detail: r.detail, readAt: new Date().toISOString() });
       if (r.verdict === "ok") {
-        report(`✅ Listo: ${r.detail}. Los demás productos de la balanza quedaron igual.`);
+        report(`✅ Listo: ${r.detail}. Los demás productos de la balanza quedaron igual.${barcodeText}`);
       } else {
         const canSend = profile?.role === "owner" || profile?.role === "admin";
         const sent = canSend ? await handleSendToSupport(`Envío Aura (${r.verdict}): ${r.detail}`) : false;
@@ -842,8 +860,8 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
                       </label>
                     )}
                     <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", marginTop: 8 }}>
-                      <button disabled={scaleBusy || noSerial || toSend === 0} onClick={() => void handleAuraSend(auraPlan)}>
-                        Mandar {toSend} productos a la balanza
+                      <button disabled={scaleBusy || noSerial || (toSend === 0 && auraBarcodeDone)} onClick={() => void handleAuraSend(auraPlan)}>
+                        {toSend > 0 ? `Mandar ${toSend} productos a la balanza` : "Ajustar el código de barras de la balanza"}
                       </button>
                       {scaleBusy && (
                         <button className="secondary" onClick={() => { auraStopRef.current = true; }}>

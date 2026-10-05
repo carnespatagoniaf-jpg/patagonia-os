@@ -237,7 +237,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     // confundirían con el PLU 1) y solo si no hay un producto con ese código.
     const auraSum = products.some((p) => p.code === raw) ? null : parseAuraSumTicket(raw);
     if (auraSum && auraSum.amount === null) {
-      setMessage("Este ticket de la balanza no trae el importe en el código de barras (con el formato actual de la balanza solo entran tickets de hasta $999,99). Cargá el TOTAL impreso con \"Vender algo sin código\" y avisale al encargado: en la balanza hay que poner el formato de código de barras 2-3-7.");
+      setMessage("Este ticket de la balanza no trae el importe en el código de barras (con el formato actual de la balanza solo entran tickets de hasta $999,99). Cargá el TOTAL impreso con \"Vender algo sin código\" y avisale al encargado: en Productos → \"Balanza por cable\" → \"Mandar productos a la balanza\", Patagonia le ajusta el código de barras a la balanza.");
       setSearch("");
       setHighlightedIndex(-1);
       return;

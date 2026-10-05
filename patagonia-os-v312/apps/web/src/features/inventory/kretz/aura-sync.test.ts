@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { auraName, planAuraSync, runAuraSync, summarizeAuraPlan, type AuraSyncProduct } from "./aura-sync";
+import { AURA_BARCODE_CONFIG, auraName, planAuraSync, runAuraSync, summarizeAuraPlan, type AuraSyncProduct } from "./aura-sync";
 import { kretzChecksum } from "./kretz-frame";
 
 /** Lo que había en la balanza de la clienta después de la prueba del 2026-10-03c (REAL). */
@@ -29,6 +29,7 @@ class MemoryAura {
   commands: string[] = [];
   mangleOn: number | null = null;
   rejectOn: number | null = null;
+  barcodeConfig: string | null = null;
   constructor(public plus: string[]) {}
   async open() {
     let controller!: ReadableStreamDefaultController<Uint8Array>;
@@ -54,6 +55,9 @@ class MemoryAura {
             self.plus = self.plus.filter((r) => r.slice(0, 6) !== data.slice(0, 6)).concat(stored);
             out = reply("02", "01");
           }
+        } else if (command === "1070") {
+          self.barcodeConfig = data;
+          out = reply("00", "01");
         } else out = reply("00", "02");
         setTimeout(() => controller.enqueue(out), 2);
       }
@@ -119,11 +123,39 @@ describe("envío real a la Aura simulada", () => {
     assert.equal(again.filter((p) => p.record).length, 0);
   });
 
-  it("si un producto no queda como se mandó, frena ahí", async () => {
+  it("con el ajuste pedido, al final manda SOLO el formato de código de barras 2-3-7 con importe", async () => {
+    const aura = new MemoryAura([...SCALE_NOW]);
+    const r = await runAuraSync(aura as unknown as SerialPort, responder, planAuraSync(SCALE_NOW, PRODUCTS), { timeoutMs: 200, configureBarcode: true });
+    assert.equal(r.verdict, "ok", r.detail);
+    assert.equal(r.barcode, "ok");
+    assert.equal(aura.barcodeConfig, "2002005");
+    assert.equal(AURA_BARCODE_CONFIG, "2002005");
+    assert.equal(aura.commands.filter((c) => c === "1070").length, 1);
+    assert.deepEqual([...new Set(aura.commands)].sort(), ["0001", "1070", "2005", "5005"]);
+  });
+
+  it("si no hay productos para mandar, igual ajusta el código de barras (caso de la clienta hoy) sin grabar productos", async () => {
+    const aura = new MemoryAura([...SCALE_NOW]);
+    const same = [{ code: "11", name: "Hamb pollo", byWeight: true, price: 10800 }];
+    const r = await runAuraSync(aura as unknown as SerialPort, responder, planAuraSync(SCALE_NOW, same), { timeoutMs: 200, configureBarcode: true });
+    assert.equal(r.verdict, "ok", r.detail);
+    assert.equal(r.barcode, "ok");
+    assert.ok(!aura.commands.includes("2005"));
+  });
+
+  it("sin el ajuste pedido no manda el formato", async () => {
+    const aura = new MemoryAura([...SCALE_NOW]);
+    const r = await runAuraSync(aura as unknown as SerialPort, responder, planAuraSync(SCALE_NOW, PRODUCTS), { timeoutMs: 200 });
+    assert.equal(r.barcode, "no_enviado");
+    assert.ok(!aura.commands.includes("1070"));
+  });
+
+  it("si un producto no queda como se mandó, frena ahí (y no toca el código de barras)", async () => {
     const aura = new MemoryAura([...SCALE_NOW]);
     aura.mangleOn = 120;
-    const r = await runAuraSync(aura as unknown as SerialPort, responder, planAuraSync(SCALE_NOW, PRODUCTS), { timeoutMs: 200 });
+    const r = await runAuraSync(aura as unknown as SerialPort, responder, planAuraSync(SCALE_NOW, PRODUCTS), { timeoutMs: 200, configureBarcode: true });
     assert.equal(r.verdict, "diferencia");
+    assert.equal(r.barcode, "no_enviado");
     assert.equal(r.stoppedAt?.plu, 120);
     assert.ok(!aura.plus.some((x) => x.startsWith("000121")), "no siguió con el siguiente");
   });
