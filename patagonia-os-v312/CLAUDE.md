@@ -153,6 +153,24 @@ To enable the Aura you need:
 
 Only then set `plu.evidence = "real"`. The scale is in ONE communication mode at a time (Datos for PLU upload vs "A pedido de peso" for weight reading).
 
+**Aura product sending is LIVE (2026-10-05).** The real write format was confirmed on the client's Aura in tests 2026-10-03 b and c:
+
+- Write = PLU(6) + name(16) + code(6) + type(1) + price(6) + tare(4) + validity(3).
+- The read-back has the type first and the code as 5 digits + "0".
+- `D` = sold by kg and `C` = sold by unit, price in whole pesos. `P`/`N` are the same but in cents, capped at $9.999,99, and are never written.
+
+The flow lives in `kretz/aura-sync.ts`:
+
+1. `readAuraList` takes a backup.
+2. `planAuraSync` builds the plan:
+   - PLU = the product code;
+   - same name → price-only rewrite;
+   - different product on that PLU → `conflicto`, never touched unless "Reemplazar" is ticked (Patagonia's own test products 96-99 are replaced automatically);
+   - free PLU → create.
+3. `runAuraSync` sends only 0001, 5005 and 2005 with records from the plan. It re-reads each PLU and stops on any difference, then re-reads everything and checks that untouched PLUs are identical.
+
+UI: "3. Mandar productos a la balanza" in `ScaleSyncPanel` when the model is Aura; the generic Report steps 3 and 4 are hidden for the Aura. `models.ts` Aura evidence is still not `real` on purpose, so the generic Report-format sender stays blocked for the Aura. Tests: `aura-sync.test.ts`.
+
 ## Systel scales (module started 2026-10-04, NOT published)
 
 `features/inventory/systel/` is independent of every Kretz file (nothing in `kretz/` or `scale-serial.ts` was touched). The source of truth is `docs/SYSTEL_INFORME.md`, built from Systel's official downloads (protocol Cuora 2 V4.0 and Cuora Max V6.0/V6.2/V7.0, the Qendra CSV import, the Cuora Neo CSV).
