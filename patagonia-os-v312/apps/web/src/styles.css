@@ -597,3 +597,18 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .recipe-summary { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; margin-top: 18px; }
 .recipe-summary > div { background: #f7f8fa; border: 1px solid #edf0f4; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 4px; }
 .recipe-summary strong { font-size: 18px; font-variant-numeric: tabular-nums; }
+.admin-client-number {
+  display: inline-block; margin-right: 8px; padding: 1px 8px; border-radius: 8px; background: #18202b; color: white;
+  font-size: 13px; font-weight: 800; vertical-align: 1px;
+}
+.admin-card-overdue, .admin-card-trial_expired { border-left: 5px solid #b42318; }
+.admin-card-due_soon { border-left: 5px solid #d98a00; }
+.admin-card-paid { border-left: 5px solid #2f9e44; }
+.admin-card-trial { border-left: 5px solid #3b6fd8; }
+.admin-card-none { border-left: 5px solid #c4cad4; }
+.admin-trial-trial { background: #eaf1fd; color: #1f4fae; }
+.admin-pay-field { display: grid; gap: 4px; font-size: 12px; font-weight: 700; color: #47505c; }
+.admin-pay-history-row { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; border-bottom: 1px solid #eef0f3; padding-bottom: 4px; }
+.admin-filters { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.admin-sort { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: #47505c; }
+.admin-sort select { padding: 8px 10px; border: 1px solid #d6dce5; border-radius: 10px; background: white; }

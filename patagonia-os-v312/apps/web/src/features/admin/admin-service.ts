@@ -60,6 +60,12 @@ export interface CompanySummary {
   city: string | null;
   /** null = sin vencimiento (cliente pago o excepción). */
   trialEndsAt: string | null;
+  /** Número de cliente fijo (migración 110). undefined en una base sin la migración. */
+  clientNumber?: number;
+  /** Hasta qué día está pagado el abono (YYYY-MM-DD). null = nunca se registró un pago. */
+  paidUntil: string | null;
+  lastPaymentDate: string | null;
+  lastPaymentAmount: number | null;
 }
 
 export const PROVINCES = [
@@ -92,6 +98,7 @@ export async function listCompanies(): Promise<CompanySummary[]> {
     id: string; name: string; active: boolean; created_at: string; branch_count: number; user_count: number;
     owner_full_name: string | null; owner_email: string | null; contact_phone: string | null;
     province: string | null; city: string | null; trial_ends_at: string | null;
+    client_number?: number | null; paid_until?: string | null; last_payment_date?: string | null; last_payment_amount?: number | null;
   }
   return ((data ?? []) as Row[]).map((row) => ({
     id: row.id,
@@ -105,8 +112,66 @@ export async function listCompanies(): Promise<CompanySummary[]> {
     contactPhone: row.contact_phone,
     province: row.province,
     city: row.city,
-    trialEndsAt: row.trial_ends_at
+    trialEndsAt: row.trial_ends_at,
+    clientNumber: row.client_number ?? undefined,
+    paidUntil: row.paid_until ?? null,
+    lastPaymentDate: row.last_payment_date ?? null,
+    lastPaymentAmount: row.last_payment_amount === null || row.last_payment_amount === undefined ? null : Number(row.last_payment_amount)
   }));
+}
+
+/** Pagos del abono (migración 110). Solo un registro nuestro: no cobra ni bloquea nada. */
+export interface CompanyPayment {
+  id: string;
+  paymentDate: string;
+  amount: number | null;
+  months: number;
+  paidUntil: string;
+  note: string | null;
+}
+
+export async function registerCompanyPayment(input: { companyId: string; months: number; amount?: number; paymentDate?: string; note?: string }): Promise<string> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.rpc("register_company_payment", {
+    p_company_id: input.companyId,
+    p_months: input.months,
+    p_amount: input.amount ?? null,
+    p_payment_date: input.paymentDate ?? null,
+    p_note: input.note ?? null
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+export async function setCompanyPaidUntil(companyId: string, paidUntil: string | null): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("set_company_paid_until", { p_company_id: companyId, p_paid_until: paidUntil });
+  if (error) throw error;
+}
+
+export async function listCompanyPayments(companyId: string): Promise<CompanyPayment[]> {
+  if (!supabase) return [];
+
+  const { data, error } = await supabase.rpc("list_company_payments", { p_company_id: companyId });
+  if (error) throw error;
+  interface Row { id: string; payment_date: string; amount: number | null; months: number; paid_until: string; note: string | null }
+  return ((data ?? []) as Row[]).map((row) => ({
+    id: row.id,
+    paymentDate: row.payment_date,
+    amount: row.amount === null ? null : Number(row.amount),
+    months: row.months,
+    paidUntil: row.paid_until,
+    note: row.note
+  }));
+}
+
+export async function deleteCompanyPayment(paymentId: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("delete_company_payment", { p_payment_id: paymentId });
+  if (error) throw error;
 }
 
 /** Plan de cada cliente + sucursales y usuarios activos (migración 101). */
