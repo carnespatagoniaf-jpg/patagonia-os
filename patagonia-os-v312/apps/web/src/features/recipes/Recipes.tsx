@@ -435,9 +435,8 @@ export function Recipes() {
                           </td>
                           <td className="num">
                             <input
-                              type="number"
-                              min="0"
-                              step="0.001"
+                              type="text"
+                              inputMode="decimal"
                               value={item.quantity}
                               onChange={(e) => updateItem(index, { quantity: e.target.value })}
                               style={{ width: 90, textAlign: "right" }}
@@ -474,7 +473,7 @@ export function Recipes() {
                 <label className="muted">
                   Rinde el lote ({unitLabel})
                   <br />
-                  <input type="number" min="0" step="0.001" value={draft.yieldQty} onChange={(e) => updateDraft({ yieldQty: e.target.value })} style={{ width: 130 }} />
+                  <input type="text" inputMode="decimal" value={draft.yieldQty} onChange={(e) => updateDraft({ yieldQty: e.target.value })} style={{ width: 130 }} />
                 </label>
                 <label className="muted">
                   Otros costos del lote $ (packaging, mano de obra)

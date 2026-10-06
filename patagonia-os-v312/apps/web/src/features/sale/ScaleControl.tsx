@@ -7,6 +7,7 @@ import type { ScaleConfig } from "./scale-barcode";
 import { compareScaleControl, describeScaleTicket, type ScaleComparison, type ScannedScaleTicket } from "./scale-control";
 import { getScaleControl, listScaleVoids, saveScaleControl, voidScaleTicket, type ScaleControlState, type ScaleVoid } from "./scale-control-service";
 import type { PosShift } from "./pos-shift-service";
+import { quantityNumber } from "./quantity";
 
 /**
  * Control de la balanza que imprime tickets (migración 104):
@@ -212,7 +213,7 @@ export function ScaleCloseControl({ shift, onStatusChange }: {
       setError("Cargá el TOTAL DE VENTAS que imprimió la balanza.");
       return;
     }
-    const kgValue = kgInput.trim() ? Number(kgInput) : null;
+    const kgValue = kgInput.trim() ? quantityNumber(kgInput) : null;
     const ticketsValue = ticketsInput.trim() ? Number(ticketsInput) : null;
     if ((kgValue !== null && !Number.isFinite(kgValue)) || (ticketsValue !== null && !Number.isInteger(ticketsValue))) {
       setError("Revisá los kilos y la cantidad de tickets.");
@@ -256,7 +257,7 @@ export function ScaleCloseControl({ shift, onStatusChange }: {
           </label>
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <label className="muted" style={{ fontSize: 13 }}>Total de peso (kg)
-              <input type="number" step="0.001" min="0" placeholder="opcional" value={kgInput} onChange={(e) => setKgInput(e.target.value)} />
+              <input type="text" inputMode="decimal" placeholder="opcional" value={kgInput} onChange={(e) => setKgInput(e.target.value)} />
             </label>
             <label className="muted" style={{ fontSize: 13 }}>Tiques emitidos
               <input type="number" step="1" min="0" placeholder="opcional" value={ticketsInput} onChange={(e) => setTicketsInput(e.target.value)} />

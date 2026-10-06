@@ -1,6 +1,7 @@
 import { recipeCost, type Product, type RecipeCostResult } from "@patagonia/domain";
 import { parseAmount } from "../../lib/money";
 import type { Recipe, RecipeItem, SaveRecipeInput } from "./recipes-service";
+import { quantityNumber } from "../sale/quantity";
 
 // Lógica pura de la pantalla de Recetas (sin Supabase, para poder probarla con
 // node --test): costo de una receta con el costo ACTUAL de cada insumo y si el
@@ -80,7 +81,7 @@ export type ParsedDraft = { ok: true; input: SaveRecipeInput } | { ok: false; er
 export function parseRecipeDraft(draft: RecipeDraft): ParsedDraft {
   if (!draft.productId) return { ok: false, error: "Elegí el producto terminado." };
 
-  const yieldQty = Number(draft.yieldQty);
+  const yieldQty = quantityNumber(draft.yieldQty);
   if (!Number.isFinite(yieldQty) || yieldQty <= 0) return { ok: false, error: "Poné cuánto rinde el lote (un número mayor que cero)." };
 
   if (draft.items.length === 0) return { ok: false, error: "Agregá al menos un insumo." };
@@ -88,7 +89,7 @@ export function parseRecipeDraft(draft: RecipeDraft): ParsedDraft {
   const items: RecipeItem[] = [];
   for (let i = 0; i < draft.items.length; i += 1) {
     const raw = draft.items[i];
-    const quantity = Number(raw.quantity);
+    const quantity = quantityNumber(raw.quantity);
     if (!Number.isFinite(quantity) || quantity <= 0) return { ok: false, error: `Revisá la cantidad del insumo ${i + 1}: tiene que ser mayor que cero.` };
     const wastePct = raw.wastePct.trim() === "" ? 0 : Number(raw.wastePct);
     if (!Number.isFinite(wastePct) || wastePct < 0 || wastePct >= 100) return { ok: false, error: `Revisá la merma del insumo ${i + 1}: entre 0 y 99,99.` };

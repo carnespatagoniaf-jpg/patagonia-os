@@ -21,6 +21,7 @@ import { SystelPanel } from "./systel/SystelPanel";
 /** Balanzas Systel: módulo nuevo, oculto hasta que el dueño autorice publicarlo. */
 const SHOW_SYSTEL_PANEL = false;
 import { PriceTools } from "./PriceTools";
+import { quantityNumber } from "../sale/quantity";
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
@@ -280,7 +281,7 @@ export function Inventory() {
   async function handleAdjustStock() {
     try {
       if (!branchId || !adjustingId) return;
-      const counted = Number(adjustCounted);
+      const counted = quantityNumber(adjustCounted);
       if (!Number.isFinite(counted) || counted < 0) throw new Error("La cantidad contada no puede ser negativa.");
       if (!adjustReason.trim()) throw new Error("Ingresá un motivo (ej. conteo mensual, merma).");
 
@@ -548,11 +549,11 @@ export function Inventory() {
                     <td className="num">{formatMoney(product.priceRetail)}</td>
                     <td className="num">
                       <input
-                        type="number"
-                        min="0"
-                        step={product.unit === "kg" ? "0.001" : "1"}
+                        type="text"
+                        inputMode="decimal"
                         className="num"
                         value={adjustCounted}
+                        onFocus={(e) => e.target.select()}
                         onChange={(e) => setAdjustCounted(e.target.value)}
                         style={{ width: 70 }}
                       />

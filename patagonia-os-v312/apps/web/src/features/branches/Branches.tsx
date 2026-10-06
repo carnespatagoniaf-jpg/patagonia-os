@@ -3,6 +3,7 @@ import type { Product } from "@patagonia/domain";
 import { formatMoney } from "../shifts/format";
 import { listProductsForBranch } from "../inventory/inventory-service";
 import { useBranchesOverview } from "./useBranchesOverview";
+import { quantityNumber } from "../sale/quantity";
 
 // Sucursales: resumen de cada una (stock, ventas de hoy, turno abierto) con
 // el total de todas juntas, y transferir stock de una sucursal a otra. Solo
@@ -97,7 +98,7 @@ export function Branches() {
     if (!fromBranchId || !toBranchId) { setMessage("Elegí la sucursal de origen y la de destino."); return; }
     if (fromBranchId === toBranchId) { setMessage("Elegí dos sucursales distintas."); return; }
     if (!product) { setMessage("Buscá y elegí el producto a transferir."); return; }
-    const qty = Number(quantity);
+    const qty = quantityNumber(quantity);
     if (!Number.isFinite(qty) || qty <= 0) { setMessage("Ingresá una cantidad mayor que cero."); return; }
     if (qty > product.stock) { setMessage(`En esa sucursal solo hay ${product.stock} de "${product.name}".`); return; }
 
@@ -229,9 +230,8 @@ export function Branches() {
               <div>
                 <label className="muted" style={{ display: "block", marginBottom: 4 }}>Cantidad</label>
                 <input
-                  type="number"
-                  min={product.unit === "kg" ? "0.001" : "1"}
-                  step={product.unit === "kg" ? "0.001" : "1"}
+                  type="text"
+                  inputMode="decimal"
                   placeholder={product.unit === "kg" ? "kg" : "unidades"}
                   value={quantity}
                   onChange={(e) => setQuantity(e.target.value)}

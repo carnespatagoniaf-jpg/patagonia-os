@@ -7,6 +7,8 @@ import { parseAmount } from "../../lib/money";
 import { listProductsForBranch } from "../inventory/inventory-service";
 import type { CustomerChargeItem } from "./customers-service";
 import { countByStatus, customerStatus, filterAndSortCustomers, type CustomerFilter, type CustomerStatus } from "./customer-list";
+import { QuantityInput } from "../../components/QuantityInput";
+import { parseQuantity } from "../sale/quantity";
 
 const STATUS_BADGE: Record<CustomerStatus, { label: string; bg: string; color: string }> = {
   overdue: { label: "Atrasado", bg: "#fdecea", color: "#b3261e" },
@@ -109,7 +111,11 @@ export function Customers() {
     setMessage("");
     const desc = manualDesc.trim();
     const price = parseAmount(manualPrice || "0") || 0;
-    const qty = Number(manualQty || "1");
+    if (manualUnit === "kg" && !manualQty.trim()) {
+      setMessage("Ingresá los kilos.");
+      return;
+    }
+    const qty = manualQty.trim() ? parseQuantity(manualQty) : 1;
     if (!desc) { setMessage("Ingresá una descripción para el artículo."); return; }
     if (!(price >= 0)) { setMessage("Precio inválido."); return; }
     if (!(qty > 0)) { setMessage("Cantidad inválida."); return; }
@@ -659,15 +665,24 @@ export function Customers() {
                     style={{ width: 100 }}
                   />
                   <input
-                    type="number"
-                    min={manualUnit === "kg" ? "0.001" : "1"}
-                    step={manualUnit === "kg" ? "0.001" : "1"}
-                    placeholder="Cant."
+                    type="text"
+                    inputMode="decimal"
+                    placeholder={manualUnit === "kg" ? "Kilos" : "Cant."}
                     value={manualQty}
+                    onFocus={(e) => e.target.select()}
                     onChange={(e) => setManualQty(e.target.value)}
                     style={{ width: 70 }}
                   />
-                  <select value={manualUnit} onChange={(e) => setManualUnit(e.target.value as Product["unit"])}>
+                  <select
+                    value={manualUnit}
+                    onChange={(e) => {
+                      const unit = e.target.value as Product["unit"];
+                      setManualUnit(unit);
+                      // Por kilo no arranca en "1": queda vacío para tipear los kilos (igual que Mostrador).
+                      if (unit === "kg" && manualQty === "1") setManualQty("");
+                      if (unit !== "kg" && manualQty === "") setManualQty("1");
+                    }}
+                  >
                     <option value="unit">Unidad</option>
                     <option value="kg">Kg</option>
                   </select>
@@ -686,14 +701,7 @@ export function Customers() {
                         {line.name}
                         <small>{formatMoney(line.unitPrice)} /{UNIT_LABELS[line.unit]}</small>
                       </div>
-                      <input
-                        type="number"
-                        className="pos-qty-input"
-                        min={line.unit === "kg" ? "0.001" : "1"}
-                        step={line.unit === "kg" ? "0.001" : "1"}
-                        value={line.quantity}
-                        onChange={(e) => updateChargeItemQty(line.key, e.target.value)}
-                      />
+                      <QuantityInput className="pos-qty-input" value={line.quantity} onChange={(q) => updateChargeItemQty(line.key, String(q))} />
                       <span className="pos-line-total">{formatMoney(line.quantity * line.unitPrice)}</span>
                       <button className="pos-remove-btn" onClick={() => removeChargeItem(line.key)} aria-label="Quitar" title="Quitar">×</button>
                     </div>

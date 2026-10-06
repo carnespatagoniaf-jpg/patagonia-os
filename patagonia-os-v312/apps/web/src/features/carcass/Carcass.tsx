@@ -8,6 +8,7 @@ import { useActiveBranch } from "../branches/BranchProvider";
 import { listProductsForBranch } from "../inventory/inventory-service";
 import { todayIso } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
+import { quantityNumber } from "../sale/quantity";
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
@@ -82,14 +83,14 @@ export function Carcass() {
 
   const cutsTotal = useMemo(() => cuts.reduce((sum, c) => sum + c.lineTotal, 0), [cuts]);
   const previewCutTotal = carcassCutLineTotal({
-    weight: Number.isFinite(Number(cutWeight)) ? Number(cutWeight || "0") : 0,
+    weight: Number.isFinite(quantityNumber(cutWeight)) ? quantityNumber(cutWeight || "0") : 0,
     unitPrice: Number.isFinite(parseAmount(cutPrice || "0")) ? parseAmount(cutPrice || "0") : 0
   });
 
-  const weightValue = Number(totalWeight || "0");
+  const weightValue = quantityNumber(totalWeight || "0");
   const pricePerKgValue = parseAmount(pricePerKg || "0");
   const computedTotalCost = Number.isFinite(weightValue) && Number.isFinite(pricePerKgValue) ? weightValue * pricePerKgValue : 0;
-  const batchBoxTotal = Math.round((Number(batchBoxCount) || 0) * (Number(batchBoxWeight) || 0) * 1000) / 1000;
+  const batchBoxTotal = Math.round((Number(batchBoxCount) || 0) * (quantityNumber(batchBoxWeight) || 0) * 1000) / 1000;
 
   // Mismo peso de referencia que "Peso de referencia" en la Plantilla de
   // cortes (misma clave de localStorage por tipo de animal) -- si ya lo
@@ -213,7 +214,7 @@ export function Carcass() {
     try {
       if (!selectedBatch) return;
       if (!cutName.trim()) throw new Error("Ingresá el nombre del corte.");
-      const weight = Number(cutWeight);
+      const weight = quantityNumber(cutWeight);
       const price = parseAmount(cutPrice);
       if (!Number.isFinite(weight) || weight <= 0) throw new Error("Ingresá el peso del corte.");
       if (!Number.isFinite(price) || price < 0) throw new Error("Ingresá el precio de venta.");
@@ -273,7 +274,7 @@ export function Carcass() {
 
   const templatesForType = templates.filter((t) => t.animalType === templateAnimalType);
   const templateYieldSum = templatesForType.reduce((sum, t) => sum + t.yieldPercent, 0);
-  const refWeight = Number(templateRefWeight) || 0;
+  const refWeight = quantityNumber(templateRefWeight) || 0;
 
   // Trae/guarda el peso de referencia de este tipo de animal, por navegador
   // -- así cada tipo (Mocho, Cerdo, Pollo...) recuerda el suyo.
@@ -307,7 +308,7 @@ export function Carcass() {
    * % que en verdad guarda la plantilla. En modo kg hace falta el peso de
    * referencia. */
   function parseYieldInput(raw: string): number {
-    const value = Number(raw);
+    const value = quantityNumber(raw);
     if (yieldInputMode === "percent") {
       if (!Number.isFinite(value) || value <= 0 || value > 100) throw new Error("Ingresá un % de rendimiento válido.");
       return value;
@@ -435,9 +436,8 @@ export function Carcass() {
               <label className="muted" style={{ display: "flex", alignItems: "center", gap: 6 }}>
                 Peso de referencia de un "{templateAnimalType}" (kg)
                 <input
-                  type="number"
-                  min="0"
-                  step="0.1"
+                  type="text"
+                  inputMode="decimal"
                   placeholder="ej. 100"
                   value={templateRefWeight}
                   onChange={(e) => handleRefWeightChange(e.target.value)}
@@ -469,10 +469,8 @@ export function Carcass() {
                     <td><input value={editTplCutName} onChange={(e) => setEditTplCutName(e.target.value)} /></td>
                     <td className="num">
                       <input
-                        type="number"
-                        min="0"
-                        max={yieldInputMode === "percent" ? "100" : undefined}
-                        step={yieldInputMode === "kg" ? "0.1" : "0.1"}
+                        type="text"
+                        inputMode="decimal"
                         value={editTplYield}
                         onChange={(e) => setEditTplYield(e.target.value)}
                         style={{ width: 80, textAlign: "right" }}
@@ -520,10 +518,8 @@ export function Carcass() {
           <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 16 }}>
             <input placeholder="Corte (ej. Bola de lomo)" value={newTplCutName} onChange={(e) => setNewTplCutName(e.target.value)} />
             <input
-              type="number"
-              min="0"
-              max={yieldInputMode === "percent" ? "100" : undefined}
-              step="0.1"
+              type="text"
+              inputMode="decimal"
               placeholder={yieldInputMode === "kg" ? "Peso (kg)" : "% del peso"}
               value={newTplYield}
               onChange={(e) => setNewTplYield(e.target.value)}
@@ -561,7 +557,7 @@ export function Carcass() {
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
                 </select>
-                <input type="number" min="0" step="0.001" placeholder="Peso total (kg)" value={totalWeight} onChange={(e) => setTotalWeight(e.target.value)} />
+                <input type="text" inputMode="decimal" placeholder="Peso total (kg)" value={totalWeight} onChange={(e) => setTotalWeight(e.target.value)} />
                 <input type="text" inputMode="decimal" placeholder="Precio por kg ($)" value={pricePerKg} onChange={(e) => setPricePerKg(e.target.value)} />
                 <button onClick={handleSaveBatch}>{editingBatchId ? "Guardar cambio" : "Guardar res"}</button>
                 <button className="secondary" onClick={resetBatchForm}>Cancelar</button>
@@ -571,9 +567,8 @@ export function Carcass() {
                 <input type="number" min="1" step="1" value={batchBoxCount} onChange={(e) => setBatchBoxCount(e.target.value)} style={{ width: 55 }} />
                 <span className="muted">de</span>
                 <input
-                  type="number"
-                  min="0"
-                  step="0.001"
+                  type="text"
+                  inputMode="decimal"
                   placeholder={`peso c/u "${animalType}" (kg)`}
                   value={batchBoxWeight}
                   onChange={(e) => handleBatchBoxWeightChange(e.target.value)}
@@ -676,7 +671,7 @@ export function Carcass() {
           </p>
           <div className="cash-banner-form no-print" style={{ flexWrap: "wrap", marginBottom: 4 }}>
             <input placeholder="Corte (ej. Asado)" value={cutName} onChange={(e) => setCutName(e.target.value)} />
-            <input type="number" min="0" step="0.001" placeholder="Peso (kg)" value={cutWeight} onChange={(e) => setCutWeight(e.target.value)} />
+            <input type="text" inputMode="decimal" placeholder="Peso (kg)" value={cutWeight} onChange={(e) => setCutWeight(e.target.value)} />
             <input type="text" inputMode="decimal" placeholder="Precio venta ($/kg)" value={cutPrice} onChange={(e) => setCutPrice(e.target.value)} />
             <select value={cutProductId} onChange={(e) => setCutProductId(e.target.value)}>
               <option value="">Sin producto (no suma stock)</option>

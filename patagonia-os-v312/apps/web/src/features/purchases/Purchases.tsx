@@ -10,6 +10,7 @@ import { usePurchases } from "./usePurchases";
 import { useTreasury } from "../shifts/useTreasury";
 import type { PurchaseLineInput } from "./purchases-service";
 import { parseAmount } from "../../lib/money";
+import { quantityNumber } from "../sale/quantity";
 
 interface DraftLine {
   key: string;
@@ -132,7 +133,7 @@ export function Purchases() {
   const draftTotal = useMemo(() => {
     const parsed: PurchaseLineInput[] = lines
       .filter((line) => line.quantity && line.unitPrice)
-      .map((line) => ({ quantity: Number(line.quantity), unitPrice: parseAmount(line.unitPrice), unit: line.unit }));
+      .map((line) => ({ quantity: quantityNumber(line.quantity), unitPrice: parseAmount(line.unitPrice), unit: line.unit }));
     return purchaseTotal(parsed);
   }, [lines]);
 
@@ -214,7 +215,7 @@ export function Purchases() {
       if (!selectedSupplierId) throw new Error("Elegí un proveedor primero.");
 
       const parsed: PurchaseLineInput[] = lines.map((line) => {
-        const quantity = Number(line.quantity);
+        const quantity = quantityNumber(line.quantity);
         const unitPrice = parseAmount(line.unitPrice);
         if (!Number.isFinite(quantity) || quantity <= 0) throw new Error("Cada ítem necesita una cantidad válida.");
         if (!Number.isFinite(unitPrice) || unitPrice < 0) throw new Error("Cada ítem necesita un precio válido.");
@@ -259,7 +260,7 @@ export function Purchases() {
     setBusy(true);
     try {
       if (!selectedSupplierId) return;
-      const quantity = Number(editQuantity);
+      const quantity = quantityNumber(editQuantity);
       const unitPrice = parseAmount(editUnitPrice);
       if (!Number.isFinite(quantity) || quantity <= 0) throw new Error("Cantidad inválida.");
       if (!Number.isFinite(unitPrice) || unitPrice < 0) throw new Error("Precio inválido.");
@@ -571,7 +572,7 @@ export function Purchases() {
                 const productMatches = !line.productId && line.description.trim()
                   ? products.filter((p) => p.name.toLowerCase().includes(line.description.toLowerCase())).slice(0, 8)
                   : [];
-                const qty = Number(line.quantity);
+                const qty = quantityNumber(line.quantity);
                 const price = parseAmount(line.unitPrice);
                 const subtotal = Number.isFinite(qty) && Number.isFinite(price) ? qty * price : 0;
                 return (
@@ -617,11 +618,11 @@ export function Purchases() {
                       )}
                     </div>
                     <input
-                      type="number"
+                      type="text"
+                      inputMode="decimal"
                       aria-label="Cantidad"
-                      min={line.unit === "kg" ? "0.001" : "1"}
-                      step={line.unit === "kg" ? "0.001" : "1"}
                       value={line.quantity}
+                      onFocus={(e) => e.target.select()}
                       onChange={(e) => updateLine(line.key, { quantity: e.target.value })}
                     />
                     <select aria-label="Unidad" value={line.unit} onChange={(e) => updateLine(line.key, { unit: e.target.value as "kg" | "unit" })}>
@@ -720,9 +721,8 @@ export function Purchases() {
                             <>
                               <td>
                                 <input
-                                  type="number"
-                                  min={item.unit === "kg" ? "0.001" : "1"}
-                                  step={item.unit === "kg" ? "0.001" : "1"}
+                                  type="text"
+                                  inputMode="decimal"
                                   value={editQuantity}
                                   onChange={(e) => setEditQuantity(e.target.value)}
                                   style={{ width: 80 }}
