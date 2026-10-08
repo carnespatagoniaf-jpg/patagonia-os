@@ -113,7 +113,7 @@ COMPRAS Y PROVEEDORES
 - Abajo están las listas de Compras y Pagos ya cargados y el detalle de cuenta corriente del proveedor.
 
 DESPIECE
-- Sirve para cargar una res entera y repartirla en cortes. "+ Agregar res" (fecha, tipo de animal, proveedor, peso total y precio por kg). Al elegir una res se cargan sus cortes (nombre, peso, precio de venta y opcionalmente el producto, que suma al stock).
+- Sirve para cargar una res entera y repartirla en cortes. "+ Agregar res" (fecha, tipo de animal, proveedor, peso total y precio por kg). El tipo se elige de la lista (Vaca / media res, Cerdo, Pollo, Mocho y los nombres que ya usaste) o con "+ Escribir otro nombre…" se pone uno propio (por ejemplo "Media res de cerdo" o "Cordero"); ese nombre queda en la lista para la próxima y también sirve para armar su plantilla de cortes. Al elegir una res se cargan sus cortes (nombre, peso, precio de venta y opcionalmente el producto, que suma al stock).
 - La "Plantilla de cortes esperados" permite definir, por tipo de animal, cuánto pesa cada corte; al cargar una res nueva se generan los cortes solos ("Generar cortes desde plantilla"). Los cortes se pueden cargar en kg o en %: para cargarlos en kg primero se pone el "Peso de referencia" (el peso típico de ese animal, por ejemplo 100 kg para un mocho) y el sistema calcula el % solo. Cuando llega una res de otro peso, los kilos de cada corte se ajustan en proporción.
 - Para mercadería que viene en unidades iguales (por ejemplo 3 cajones de pollo de 20 kg): en "+ Agregar res" está "¿Varias unidades iguales?", se pone la cantidad y el peso de cada una y el sistema completa el peso total.
 - El resumen muestra compra, venta de los cortes, ganancia, margen y rendimiento.

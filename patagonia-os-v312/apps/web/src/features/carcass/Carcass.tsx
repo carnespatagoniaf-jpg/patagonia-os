@@ -14,7 +14,60 @@ function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
 }
 
-const ANIMAL_TYPES = ["Vaca / media res", "Cerdo", "Pollo", "Mocho", "Otro"];
+const ANIMAL_TYPES = ["Vaca / media res", "Cerdo", "Pollo", "Mocho"];
+const CUSTOM_OPTION = "__otro__";
+
+/**
+ * Tipo de animal / mercadería: los de siempre + los nombres que el negocio ya
+ * usó (en reses o plantillas) + "Escribir otro nombre…" (ej. "Media res de
+ * cerdo", "Cordero"). El nombre es texto libre en la base; la plantilla de
+ * cortes se busca por ese mismo nombre.
+ */
+function AnimalTypePicker({ value, options, onChange }: { value: string; options: string[]; onChange: (value: string) => void }) {
+  const [typing, setTyping] = useState(false);
+  if (typing || !options.includes(value)) {
+    return (
+      <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+        <input
+          autoFocus={typing}
+          placeholder="Nombre (ej. Media res de cerdo)"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          style={{ width: 220 }}
+        />
+        <button
+          type="button"
+          className="secondary"
+          title="Elegir de la lista"
+          onClick={() => {
+            setTyping(false);
+            if (!options.includes(value)) onChange(options[0]);
+          }}
+        >
+          Elegir de la lista
+        </button>
+      </span>
+    );
+  }
+  return (
+    <select
+      value={value}
+      onChange={(e) => {
+        if (e.target.value === CUSTOM_OPTION) {
+          setTyping(true);
+          onChange("");
+        } else {
+          onChange(e.target.value);
+        }
+      }}
+    >
+      {options.map((t) => (
+        <option key={t} value={t}>{t}</option>
+      ))}
+      <option value={CUSTOM_OPTION}>+ Escribir otro nombre…</option>
+    </select>
+  );
+}
 
 export function Carcass() {
   const { batches, loading, error, saveBatch, removeBatch, cuts, cutsLoading, loadCuts, saveCut, saveCutSilent, removeCut } = useCarcass();
@@ -80,6 +133,20 @@ export function Carcass() {
   }, [branchId]);
 
   const selectedBatch = batches.find((b) => b.id === selectedId) ?? null;
+
+  // Los de siempre primero, después los nombres propios que ya se usaron.
+  const animalTypeOptions = useMemo(() => {
+    const seen = new Set(ANIMAL_TYPES.map((t) => t.toLowerCase()));
+    const own: string[] = [];
+    for (const name of [...batches.map((b) => b.animalType), ...templates.map((t) => t.animalType)]) {
+      const clean = name.trim();
+      if (clean && !seen.has(clean.toLowerCase())) {
+        seen.add(clean.toLowerCase());
+        own.push(clean);
+      }
+    }
+    return [...ANIMAL_TYPES, ...own.sort((a, b) => a.localeCompare(b, "es"))];
+  }, [batches, templates]);
 
   const cutsTotal = useMemo(() => cuts.reduce((sum, c) => sum + c.lineTotal, 0), [cuts]);
   const previewCutTotal = carcassCutLineTotal({
@@ -170,6 +237,7 @@ export function Carcass() {
 
   async function handleSaveBatch() {
     try {
+      if (!animalType.trim()) throw new Error("Escribí qué es (ej. Media res de cerdo).");
       if (!Number.isFinite(weightValue) || weightValue <= 0) throw new Error("Ingresá el peso total.");
       if (!Number.isFinite(pricePerKgValue) || pricePerKgValue < 0) throw new Error("Ingresá el precio por kg.");
       const result = await saveBatch({
@@ -330,6 +398,7 @@ export function Carcass() {
 
   async function handleAddTemplateCut() {
     try {
+      if (!templateAnimalType.trim()) throw new Error("Escribí para qué es la plantilla (ej. Media res de cerdo).");
       if (!newTplCutName.trim()) throw new Error("Ingresá el nombre del corte.");
       const yieldPercent = parseYieldInput(newTplYield);
       await saveTemplate({
@@ -420,11 +489,7 @@ export function Carcass() {
             Cargá una vez, por tipo de animal, qué cortes esperás y cuánto pesa cada uno. Al cargar una res nueva de ese tipo, se generan solos con el peso proporcional — vos después los ajustás con la balanza real. No hace falta que sumen el peso entero: el resto queda como merma esperada (hueso, grasa, descarte).
           </p>
           <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10, alignItems: "center" }}>
-            <select value={templateAnimalType} onChange={(e) => setTemplateAnimalType(e.target.value)}>
-              {ANIMAL_TYPES.map((t) => (
-                <option key={t} value={t}>{t}</option>
-              ))}
-            </select>
+            <AnimalTypePicker value={templateAnimalType} options={animalTypeOptions} onChange={setTemplateAnimalType} />
             <label className="muted" style={{ display: "flex", alignItems: "center", gap: 6 }}>
               Cargar cortes en:
               <select value={yieldInputMode} onChange={(e) => handleYieldModeChange(e.target.value as "kg" | "percent")}>
@@ -546,11 +611,7 @@ export function Carcass() {
             <>
               <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10 }}>
                 <input type="date" value={batchDate} onChange={(e) => setBatchDate(e.target.value)} />
-                <select value={animalType} onChange={(e) => setAnimalType(e.target.value)}>
-                  {ANIMAL_TYPES.map((t) => (
-                    <option key={t} value={t}>{t}</option>
-                  ))}
-                </select>
+                <AnimalTypePicker value={animalType} options={animalTypeOptions} onChange={setAnimalType} />
                 <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
                   <option value="">Proveedor (opcional)…</option>
                   {suppliers.map((s) => (
