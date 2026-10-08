@@ -177,6 +177,16 @@ The flow lives in `kretz/aura-sync.ts`:
 
 UI: "3. Mandar productos a la balanza" in `ScaleSyncPanel` when the model is Aura; the generic Report steps 3 and 4 are hidden for the Aura. `models.ts` Aura evidence is still not `real` on purpose, so the generic Report-format sender stays blocked for the Aura. Tests: `aura-sync.test.ts`.
 
+**Barcode format, REAL (2026-10-06).** Pollo y mar charged scanned total tickets of up to $39.651. So 1070 "2002005" leaves 2-3-7 with the amount on the Aura, and the Aura uses the Nx numbering of formats.
+
+**Per-product barcode, LIVE 2026-10-08 but NOT yet confirmed on a real Aura.** Step "4. Código de barras por producto en el ticket" calls `setAuraItemBarcodes`, which sends only 0001, then 1070 (same config), then 1080 "1"/"0" (Nx §4.18). The command is not in the Aura menu and iTegra never sends it. If the scale doesn't have it, it answers "02" and nothing changes.
+- On "01", the branch scale config is saved as `AURA_ITEM_SCALE_CONFIG` (2-3-7, amount in cents). Mostrador then reads each line as product + amount, and kg = amount ÷ Patagonia price, rounded to the gram.
+- The total code (998) is still checked first.
+- Mostrador warns when both lines and the total of a ticket are scanned (double charge).
+- Every result is auto-sent to support.
+- Tests: `kretz/aura-item-barcode.test.ts`.
+- Next: wait for the client's support report.
+
 ## Systel scales (module started 2026-10-04, NOT published)
 
 `features/inventory/systel/` is independent of every Kretz file (nothing in `kretz/` or `scale-serial.ts` was touched). The source of truth is `docs/SYSTEL_INFORME.md`, built from Systel's official downloads (protocol Cuora 2 V4.0 and Cuora Max V6.0/V6.2/V7.0, the Qendra CSV import, the Cuora Neo CSV).

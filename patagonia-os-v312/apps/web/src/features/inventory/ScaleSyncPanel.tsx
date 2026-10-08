@@ -17,6 +17,7 @@ import {
   runAuraModelProbeOnScale,
   readAuraListOnScale,
   runAuraSyncOnScale,
+  setAuraItemBarcodesOnScale,
   getScalePortDescription,
   getScaleSerialSettings,
   isScalePortPaired,
@@ -34,7 +35,8 @@ import { getLastDiagnosticRecord, getLastPluScan, summarizeDiagnosticRecord, typ
 import { auraPriceCandidates, parseAuraPlu } from "./kretz/aura-plu";
 import { AURA_TEST_PLUS, AURA_TEST_PRODUCTS, getLastAuraWriteTest, type AuraWriteTestResult } from "./kretz/aura-write-test";
 import { analyzeModelProbe, getLastModelProbe, type ModelProbeResult } from "./kretz/aura-model-probe";
-import { planAuraSync, summarizeAuraPlan, type AuraSyncAction } from "./kretz/aura-sync";
+import { AURA_ITEM_SCALE_CONFIG, planAuraSync, summarizeAuraPlan, type AuraSyncAction } from "./kretz/aura-sync";
+import { saveBranchScaleConfig } from "../sale/scale-config-service";
 
 /** El botón de diagnóstico de la Aura no se muestra todavía (decisión del dueño). */
 const SHOW_AURA_DIAGNOSTIC = false;
@@ -312,6 +314,52 @@ export function ScaleSyncPanel({ products }: { products: ScaleSyncableProduct[] 
       }
     } catch (err) {
       report(err instanceof Error ? err.message : "Falló el envío.");
+    } finally {
+      setScaleBusy(false);
+    }
+  }
+
+  /**
+   * Aura: código de barras por producto en el ticket (1080, kretz/aura-sync.ts). Si la balanza lo
+   * acepta, Mostrador de esta sucursal pasa a leer esos códigos (2-3-7 con importe). Siempre manda
+   * el resultado a soporte (dueño/admin), para no tener que pedirle fotos a la clienta.
+   */
+  async function handleAuraItemBarcodes(enable: boolean) {
+    const question = enable
+      ? "Se le va a pedir a la balanza que en cada ticket imprima un código de barras por producto (además del total). No toca productos ni precios, y se puede apagar. ¿Seguir?"
+      : "Se le va a pedir a la balanza que vuelva a imprimir solo el código del total. ¿Seguir?";
+    if (!window.confirm(question)) return;
+    setScaleBusy(true);
+    setScaleLog(enable ? "Activando el código por producto…" : "Apagando el código por producto…");
+    try {
+      const r = await setAuraItemBarcodesOnScale(enable, (text) => setScaleLog(text));
+      logScaleActivity({ kind: r.verdict === "ok" ? "test" : "error", message: `Aura código por producto (${enable ? "activar" : "apagar"}): ${r.verdict} - ${r.detail}` });
+      let mostradorText = "";
+      if (r.verdict === "ok" && enable && branchId) {
+        try {
+          await saveBranchScaleConfig(branchId, AURA_ITEM_SCALE_CONFIG);
+          mostradorText = " Mostrador de esta sucursal ya quedó preparado para leer esos códigos.";
+        } catch {
+          mostradorText = " Pero no se pudo preparar Mostrador: avisale al equipo de Patagonia OS.";
+        }
+      }
+      const canSend = profile?.role === "owner" || profile?.role === "admin";
+      const exchanges = r.exchanges.map((e) => `${e.step}: tx ${e.tx} | rx ${e.rx || "(nada)"}${e.kretz ? ` [${e.kretz.code}]` : ""}`).join("\n");
+      const sent = canSend ? await handleSendToSupport(`Aura código por producto (1080 ${enable ? "1" : "0"}): ${r.verdict} - ${r.detail}\n${exchanges}`) : false;
+      const supportText = sent ? " El resultado ya le llegó al equipo de Patagonia OS." : "";
+      if (r.verdict === "ok") {
+        report(
+          enable
+            ? `✅ La balanza aceptó imprimir un código por producto.${mostradorText}\n\nAhora: pesá 2 productos, imprimí el ticket y en Mostrador escaneá el código de CADA producto (no el del total de abajo).${supportText}`
+            : `✅ La balanza vuelve a imprimir solo el código del total.${supportText}`
+        );
+      } else if (r.verdict === "rechazada") {
+        report(`Esta balanza no tiene la opción de un código por producto (${r.detail}). No se cambió nada: los tickets siguen saliendo con el código del total, que Mostrador lee igual.${supportText}`);
+      } else {
+        report(`❌ No se pudo: ${r.detail}. No se cambió nada.${supportText}`);
+      }
+    } catch (err) {
+      report(err instanceof Error ? err.message : "No se pudo hablar con la balanza.");
     } finally {
       setScaleBusy(false);
     }
@@ -891,6 +939,26 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
               </div>
             );
           })()}
+
+          {/* 4 (Aura). Código de barras por producto en el ticket (1080) */}
+          {model.id === "aura" && (
+            <div style={step}>
+              <p style={stepTitle}>4. Código de barras por producto en el ticket</p>
+              <p className="muted" style={{ margin: "0 0 10px", fontSize: 12 }}>
+                Hoy el ticket trae un solo código de barras con el total: Mostrador cobra la plata pero no sabe qué productos ni cuántos kilos, y no descuenta stock.
+                Con esta opción la balanza imprime además un código por cada producto: al escanearlos, Mostrador carga cada producto con sus kilos y descuenta stock.
+                No toca productos ni precios. Si la balanza no tiene esta opción, avisa y no cambia nada.
+              </p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <button disabled={scaleBusy || noSerial || !scalePortReady} onClick={() => void handleAuraItemBarcodes(true)}>
+                  Imprimir un código por producto
+                </button>
+                <button className="secondary" disabled={scaleBusy || noSerial || !scalePortReady} onClick={() => void handleAuraItemBarcodes(false)}>
+                  Volver a solo el total
+                </button>
+              </div>
+            </div>
+          )}
 
           {/* (Aura) Prueba de escritura de los PLU 96 a 99: ya cumplió, queda oculta */}
           {model.id === "aura" && SHOW_AURA_TEST && (

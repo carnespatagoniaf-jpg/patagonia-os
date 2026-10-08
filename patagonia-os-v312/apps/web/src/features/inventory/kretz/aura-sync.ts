@@ -1,4 +1,4 @@
-import { buildKretzFrame, parseKretzResponse, toHex, toPrintable } from "./kretz-frame";
+import { buildKretzFrame, describeKretzCode, parseKretzResponse, toHex, toPrintable } from "./kretz-frame";
 import { auraWriteToReadOrder, buildAuraWriteRecord, parseAuraPlu, rewriteWithNewPrice, AURA_PLU_RECORD_LENGTH } from "./aura-plu";
 import { collect, readPluList, sendRead, type DiagnosticExchange, type KretzResponder } from "./discovery";
 import { claimPort, closeQuietly, errorClassification, freshPortFor, newSession, openForSession, releasePort, type OpenAttempt } from "./port-session";
@@ -34,6 +34,29 @@ import { claimPort, closeQuietly, errorClassification, freshPortFor, newSession,
  * formatos del manual, así que si la Aura numerara distinto no queda peor que antes.
  */
 export const AURA_BARCODE_CONFIG = "2002005";
+
+/**
+ * Código de barras INDIVIDUAL por producto en el ticket de suma (comando 1080, Multiprotocolo
+ * Report NX §4.18: un dato, "1" = sí, "0" = no). Pedido del dueño 2026-10-08: la clienta quiere
+ * que Mostrador sepa productos y kilos, no solo el total del ticket.
+ * - DOCUMENTADO para la Report NX. NO figura en el menú de la Aura ni lo manda iTegra: si la Aura
+ *   no lo tiene, contesta "02" (comando inexistente) sin efecto, como ya pasó con 0002 (REAL).
+ * - REAL (2026-10-06, Pollo y mar): con 1070 "2002005" la Aura imprime 2-3-7 con importe
+ *   (Mostrador cobró tickets de hasta $39.651). HIPÓTESIS: cada renglón usa ese mismo formato:
+ *   "20" + código del producto (3 cifras) + importe en centavos (7) + verificador.
+ * - Se vuelve atrás mandando "0".
+ */
+export const AURA_ITEM_BARCODE_COMMAND = "1080";
+
+/** Cómo lee Mostrador el código de cada renglón (2-3-7 con importe en centavos). Se guarda como calibración de la sucursal. */
+export const AURA_ITEM_SCALE_CONFIG = {
+  prefixLength: 2,
+  pluLength: 3,
+  weightLength: 7,
+  weightDivisor: 100,
+  totalLength: 13,
+  payloadType: "amount" as const
+};
 
 export const AURA_MAX_PLU = 9999;
 export const AURA_MAX_CODE = 99999;
@@ -260,6 +283,98 @@ export async function runAuraSync(
       result.barcode = !kretz ? "sin_respuesta" : kretz.code === "01" ? "ok" : "rechazada";
     }
     return finish("ok", `se mandaron ${result.written.length} productos y cada uno quedó exactamente como se mandó`);
+  } catch (err) {
+    return finish("error", err instanceof Error ? err.message : String(err));
+  } finally {
+    await closeQuietly(port);
+    releasePort(claimed);
+    result.finishedAt = new Date().toISOString();
+  }
+}
+
+export type AuraItemBarcodeVerdict = "ok" | "rechazada" | "sin_respuesta" | "puerto" | "error";
+
+export interface AuraItemBarcodeResult {
+  verdict: AuraItemBarcodeVerdict;
+  detail: string;
+  enable: boolean;
+  /** Respuesta de la balanza al formato 1070 (solo al activar) y al 1080. */
+  formatCode: string | null;
+  itemCode: string | null;
+  exchanges: DiagnosticExchange[];
+  openLog: OpenAttempt[];
+  startedAt: string;
+  finishedAt: string;
+}
+
+/**
+ * Activa (o apaga) el código de barras por producto en los tickets de la Aura.
+ * Solo manda: 0001 (test de conexión), 1070 con AURA_BARCODE_CONFIG (al activar, el mismo
+ * ajuste que ya hace "Mandar productos") y 1080 "1"/"0". No toca productos ni precios.
+ */
+export async function setAuraItemBarcodes(
+  port: SerialPort,
+  responder: KretzResponder,
+  enable: boolean,
+  options: { timeoutMs?: number; onProgress?: (text: string) => void } = {}
+): Promise<AuraItemBarcodeResult> {
+  const timeout = options.timeoutMs ?? 1500;
+  const progress = options.onProgress ?? (() => {});
+  const result: AuraItemBarcodeResult = { verdict: "error", detail: "", enable, formatCode: null, itemCode: null, exchanges: [], openLog: [], startedAt: new Date().toISOString(), finishedAt: "" };
+  const finish = (verdict: AuraItemBarcodeVerdict, detail: string) => {
+    result.verdict = verdict;
+    result.detail = detail;
+    return result;
+  };
+  if (!claimPort(port)) {
+    result.finishedAt = new Date().toISOString();
+    return finish("puerto", "ya hay otra operación con esta balanza en esta pestaña");
+  }
+  const claimed = port;
+  const { link, deviceType, equipmentId } = responder;
+
+  async function send(step: string, command: string, data: string) {
+    const frame = buildKretzFrame(deviceType, equipmentId, command, data);
+    const writer = port.writable!.getWriter();
+    const t0 = Date.now();
+    try {
+      await writer.write(frame);
+    } finally {
+      writer.releaseLock();
+    }
+    const rx = await collect(port, Math.max(timeout, 2000), true);
+    const kretz = parseKretzResponse(rx);
+    result.exchanges.push({ step, link: `${link.baudRate}/${link.stopBits}`, tx: toHex(frame), rx: toHex(rx), rxText: toPrintable(rx), ms: Date.now() - t0, kretz, echo: false });
+    return kretz;
+  }
+
+  try {
+    port = await freshPortFor(port);
+    progress("Abriendo la conexión con la balanza…");
+    try {
+      await openForSession(port, { baudRate: link.baudRate, dataBits: 8, stopBits: link.stopBits, parity: "none" }, newSession(4, result.openLog));
+    } catch (err) {
+      const c = errorClassification(err);
+      return finish("puerto", `no se pudo abrir el puerto: ${c ? c.explanation : ""} (${err instanceof Error ? `${err.name}: ${err.message}` : String(err)})`);
+    }
+    let hello = await sendRead(port, result.exchanges, "test de conexión", link, deviceType, equipmentId, "0001", "", timeout);
+    if (!hello.kretz) hello = await sendRead(port, result.exchanges, "test de conexión (reintento)", link, deviceType, equipmentId, "0001", "", timeout);
+    if (!hello.kretz) return finish("sin_respuesta", "la balanza no contestó: no se mandó nada");
+
+    if (enable) {
+      progress("Ajustando el formato del código de barras…");
+      const format = await send("código de barras (1070)", "1070", AURA_BARCODE_CONFIG);
+      result.formatCode = format?.code ?? null;
+      if (!format) return finish("sin_respuesta", "la balanza no contestó el ajuste del formato del código de barras: no se activó nada");
+      if (format.code !== "01") return finish("rechazada", `la balanza no aceptó el formato del código de barras (respuesta ${format.code}: ${describeKretzCode(format.code)})`);
+    }
+
+    progress(enable ? "Activando el código por producto en los tickets…" : "Apagando el código por producto en los tickets…");
+    const item = await send(`código por producto (1080 ${enable ? "1" : "0"})`, AURA_ITEM_BARCODE_COMMAND, enable ? "1" : "0");
+    result.itemCode = item?.code ?? null;
+    if (!item) return finish("sin_respuesta", "la balanza no contestó el pedido del código por producto");
+    if (item.code !== "01") return finish("rechazada", `la balanza no tiene esa opción o no la aceptó (respuesta ${item.code}: ${describeKretzCode(item.code)})`);
+    return finish("ok", enable ? "la balanza aceptó imprimir un código por producto" : "la balanza volvió a imprimir solo el código del total");
   } catch (err) {
     return finish("error", err instanceof Error ? err.message : String(err));
   } finally {

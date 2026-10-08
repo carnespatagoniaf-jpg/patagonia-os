@@ -2,7 +2,7 @@ import type { Product } from "@patagonia/domain";
 import { STAGE_LABELS, runKretzDiscovery, saveDiagnosticRecord, savePluScan, scanAllPlus, type DiagnosticRecord, type DiscoveryVerdict, type PluScan } from "./kretz/discovery";
 import { runAuraWriteTest, saveAuraWriteTest, type AuraWriteTestResult } from "./kretz/aura-write-test";
 import { runAuraModelProbe, saveModelProbe, type ModelProbeResult } from "./kretz/aura-model-probe";
-import { readAuraList, runAuraSync, type AuraSyncItem, type AuraSyncResult } from "./kretz/aura-sync";
+import { readAuraList, runAuraSync, setAuraItemBarcodes, type AuraItemBarcodeResult, type AuraSyncItem, type AuraSyncResult } from "./kretz/aura-sync";
 import { getKretzModel, getSavedModelId } from "./kretz/models";
 import { buildKretzFrame, describeKretzCode } from "./kretz/kretz-frame";
 
@@ -588,6 +588,15 @@ export async function runAuraSyncOnScale(plan: AuraSyncItem[], onProgress: (text
   const port = await pickPort();
   cachedPortOpenKey = null;
   const r = await runAuraSync(port, auraResponder(), plan, { onProgress, shouldStop, configureBarcode });
+  cachedPortOpenKey = null;
+  return r;
+}
+
+/** Aura: activa o apaga el código de barras por producto en los tickets (1080). Ver kretz/aura-sync.ts. */
+export async function setAuraItemBarcodesOnScale(enable: boolean, onProgress: (text: string) => void): Promise<AuraItemBarcodeResult> {
+  const port = await pickPort();
+  cachedPortOpenKey = null;
+  const r = await setAuraItemBarcodes(port, auraResponder(), enable, { onProgress });
   cachedPortOpenKey = null;
   return r;
 }

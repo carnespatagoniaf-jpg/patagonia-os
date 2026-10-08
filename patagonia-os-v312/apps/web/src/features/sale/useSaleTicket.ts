@@ -248,6 +248,13 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       if (cart.some((l) => l.key === key)) {
         setMessage("Ese ticket de la balanza ya está cargado en esta venta.");
       } else if (
+        // Con la Aura imprimiendo un código por producto, el ticket trae también el del total:
+        // si ya se escanearon los productos, cargar el total los cobraría dos veces.
+        cart.some((l) => l.source === "scale") &&
+        !window.confirm("Ya escaneaste productos de la balanza en esta venta. Si son de este mismo ticket, NO cargues también el total (se cobraría dos veces). ¿Cargar el total igual?")
+      ) {
+        setMessage("No se cargó el total del ticket.");
+      } else if (
         ticketTotal >= TICKET_TOTAL_CONFIRM_FROM &&
         !window.confirm(`El ticket de la balanza indica ${formatMoney(ticketTotal)}. ¿Coincide con el TOTAL impreso en el ticket?`)
       ) {
@@ -265,6 +272,15 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     if (scanned) {
       const match = products.find((p) => (p.active ?? true) && p.code === scanned.plu);
       if (match) {
+        if (
+          cart.some((l) => l.source === "scale_total") &&
+          !window.confirm("En esta venta ya está cargado el TOTAL de un ticket de la balanza. Si este producto es de ese mismo ticket, se cobraría dos veces. ¿Agregarlo igual?")
+        ) {
+          setMessage("No se agregó el producto.");
+          setSearch("");
+          setHighlightedIndex(-1);
+          return;
+        }
         if (scanned.kind === "weight") {
           quickAdd(match, scanned.weightKg, "scale");
         } else {
@@ -272,7 +288,8 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
           // la cantidad al precio actual del producto (mismo criterio que
           // el peso: el precio no se lee del código, siempre se usa el
           // precio vigente en el sistema).
-          const quantity = match.priceRetail > 0 ? scanned.amount / match.priceRetail : 0;
+          // Al gramo (o milésima de unidad): la venta guarda 3 decimales y el total se calcula con eso.
+          const quantity = match.priceRetail > 0 ? Math.round((scanned.amount / match.priceRetail) * 1000) / 1000 : 0;
           if (quantity > 0) quickAdd(match, quantity, "scale");
         }
         return;
