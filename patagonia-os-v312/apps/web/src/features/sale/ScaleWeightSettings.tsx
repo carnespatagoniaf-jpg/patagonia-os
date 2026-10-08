@@ -12,6 +12,7 @@ import {
 import { describeRawFrame } from "./scale-weight-parser";
 import { useAuth } from "../auth/AuthProvider";
 import { planAllows } from "../auth/permissions";
+import { SettingSection } from "../../components/SettingSection";
 
 /** Sección del engranaje de Mostrador para leer el peso directo de la balanza
  * Kretz Aura por cable. Solo se activa después de una prueba confirmada: el
@@ -33,10 +34,9 @@ export function ScaleWeightSettings() {
 
   if (!isWeightScaleSupported()) {
     return (
-      <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 18 }}>
-        <p style={{ margin: "0 0 8px", fontWeight: 700 }}>Peso directo de la balanza (cable)</p>
-        <p className="muted" style={{ margin: 0, fontSize: 13 }}>Este navegador no soporta la conexión por cable. Abrí Patagonia OS en Chrome o Edge.</p>
-      </div>
+      <SettingSection title="Peso directo de la balanza (cable)" status="Solo en Chrome o Edge">
+        <p className="setting-help">Este navegador no soporta la conexión por cable. Abrí Patagonia OS en Chrome o Edge.</p>
+      </SettingSection>
     );
   }
 
@@ -54,19 +54,10 @@ export function ScaleWeightSettings() {
   }
 
   return (
-    <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 18 }}>
-      <p style={{ margin: "0 0 8px", fontWeight: 700 }}>
-        Peso directo de la balanza (cable){" "}
-        <span className={enabled ? "scale-weight-pill scale-weight-on" : "scale-weight-pill"}>{enabled ? "Activado" : "Desactivado"}</span>
+    <SettingSection title="Peso directo de la balanza (cable)" status={enabled ? "Activado" : "Desactivado"} tone={enabled ? "ok" : "neutral"}>
+      <p className="setting-help">
+        Kretz Aura: al elegir un producto por kilo, Mostrador toma el peso de la balanza. En la balanza: COMUNI → MODO "A pedido de peso", puerto RS-232. Después: "Conectar balanza", un producto en el plato y "Probar lectura".
       </p>
-      <p className="muted" style={{ margin: "0 0 4px", fontSize: 13 }}>
-        Para la Kretz Aura: al elegir un producto por kilo en Mostrador, el peso lo trae la balanza solo. Así el stock baja producto por producto.
-      </p>
-      <ol className="muted" style={{ margin: "0 0 10px", paddingLeft: 18, fontSize: 13, display: "grid", gap: 2 }}>
-        <li>Conectá la balanza a la PC con el cable serie (RS-232). Está explicado en la guía que te dimos.</li>
-        <li>En la balanza: menú COMUNI → MODO = "A pedido de peso" y puerto RS-232.</li>
-        <li>Tocá "Conectar balanza", elegí el puerto, poné un producto en el plato y tocá "Probar lectura".</li>
-      </ol>
 
       <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
         <button
@@ -158,6 +149,6 @@ export function ScaleWeightSettings() {
       )}
 
       {message && <p className="message" style={{ marginTop: 12 }}>{message}</p>}
-    </div>
+    </SettingSection>
   );
 }

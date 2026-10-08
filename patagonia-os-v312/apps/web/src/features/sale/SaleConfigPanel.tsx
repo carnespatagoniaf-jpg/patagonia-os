@@ -5,6 +5,7 @@ import { ScaleWeightSettings } from "./ScaleWeightSettings";
 import { setMostradorPin } from "./company-settings-service";
 import { isThermalPrintSupported } from "./thermal-printer";
 import { PrinterAgentSettings } from "./PrinterAgentSettings";
+import { SettingSection } from "../../components/SettingSection";
 
 // Panel de configuración de Mostrador (engranaje): impresora, balanza (peso
 // directo y calibración de etiquetas) y PIN. El asistente de calibración y el
@@ -39,6 +40,7 @@ export function SaleConfigPanel({
   const [scaleWizardResult, setScaleWizardResult] = useState<"idle" | "success" | "not_found">("idle");
   const [pinSettingInput, setPinSettingInput] = useState("");
   const [pinSettingBusy, setPinSettingBusy] = useState(false);
+  const [agentStatus, setAgentStatus] = useState<"checking" | "up" | "down">("checking");
 
   // Al abrir o cerrar el panel se limpia el resultado del asistente.
   useEffect(() => {
@@ -105,130 +107,125 @@ export function SaleConfigPanel({
   }
 
   if (!visible) return null;
+
+  const printStatus =
+    agentStatus === "up" ? (autoPrintEnabled ? "Imprime solo al cobrar" : "Conectada · no imprime sola") : autoPrintEnabled ? "Abre el diálogo de Windows" : "Sin configurar";
+  const printTone = agentStatus === "up" && autoPrintEnabled ? "ok" : agentStatus === "up" ? "neutral" : autoPrintEnabled ? "warn" : "neutral";
+
   return (
     <section className="panel" style={{ marginBottom: 18 }}>
       <div className="panel-title">
         <h2>Configuración</h2>
       </div>
-      <div style={{ display: "grid", gap: 18 }}>
-        <div>
-          <p style={{ margin: "0 0 8px", fontWeight: 700 }}>Impresora</p>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
-            <input
-              type="checkbox"
-              checked={autoPrintEnabled}
-              onChange={(e) => onAutoPrintChange(e.target.checked)}
-            />
-            Imprimir el comprobante automáticamente al cobrar
-          </label>
-          <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
-            Con el programa de impresión instalado (más abajo), el ticket sale directo en tu térmica, sin ningún diálogo ni clic extra. Sin él, al cobrar se abre el diálogo de impresión de Windows -- ahí elegís tu impresora por su nombre y confirmás "Imprimir". Si no tenés impresora, dejalo apagado y nunca te va a aparecer nada solo.
-          </p>
-          <PrinterAgentSettings />
-          <details style={{ marginTop: 14 }}>
-            <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 700 }}>
-              Otras formas de conectar la impresora (solo si el programa de impresión no te sirve)
-            </summary>
-            <div style={{ marginTop: 10 }}>
-              {isThermalPrintSupported() && (
-                <>
-                  <button className="secondary" disabled={thermalConnectBusy} onClick={onConnectThermal}>
-                    {thermalConnectBusy ? "Conectando…" : thermalPaired ? "Volver a elegir impresora térmica" : "Conectar impresora térmica (USB directo)"}
-                  </button>
-                  <p className="muted" style={{ margin: "6px 0 0", fontSize: 13 }}>
-                    Conexión USB directa desde Chrome. Solo anda si Windows no le puso ningún driver a la impresora; si tira "Access denied", usá el programa de impresión.
-                  </p>
-                </>
-              )}
-              <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>
-                Modo kiosco (usa el driver de Windows, por eso solo sirve si el driver es el correcto de la impresora):{" "}
-                <a href="/kiosco-impresora.bat" download>kiosco-impresora.bat</a>
-              </p>
-            </div>
-          </details>
-        </div>
 
-        <ScaleWeightSettings />
-
-        <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 18 }}>
-          <p style={{ margin: "0 0 8px", fontWeight: 700 }}>Balanza</p>
-          <p className="muted" style={{ margin: "0 0 4px", fontSize: 13 }}>
-            {scaleConfigCalibrated ? "Tu balanza ya está calibrada." : "Todavía no calibraste tu balanza (usando el formato Kretz por defecto)."}
-          </p>
-          <p className="muted" style={{ margin: "0 0 4px", fontSize: 13 }}>
-            Poné cualquier producto en la balanza, anotá lo que te muestra, escaneá acá la etiqueta que imprime, y decinos ese valor -- el sistema detecta el formato solo, sin que tengas que entender nada técnico.
-          </p>
-          <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
-            Ojo: esto sirve para etiquetas de UN producto por código (con su PLU). Los tickets de total de las balanzas tipo caja (Kretz Aura) se leen solos al escanearlos en Mostrador, sin calibrar nada: entran como una línea "Ticket de balanza" con el importe, sin descontar stock.
-          </p>
-          <div style={{ display: "grid", gap: 10, maxWidth: 420 }}>
-            <div style={{ display: "flex", gap: 16, fontSize: 14 }}>
-              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <input type="radio" checked={scaleWizardPayload === "weight"} onChange={() => setScaleWizardPayload("weight")} />
-                Mi balanza muestra el <b>peso</b>
-              </label>
-              <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <input type="radio" checked={scaleWizardPayload === "amount"} onChange={() => setScaleWizardPayload("amount")} />
-                Mi balanza muestra el <b>importe</b> final
-              </label>
-            </div>
-            <input
-              placeholder="Escaneá acá la etiqueta de la balanza…"
-              value={scaleWizardCode}
-              onChange={(e) => setScaleWizardCode(e.target.value)}
-            />
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder={scaleWizardPayload === "weight" ? "¿Qué peso mostró la balanza? (ej. 0,472)" : "¿Qué importe mostró la balanza? (ej. 1250)"}
-              value={scaleWizardWeight}
-              onChange={(e) => setScaleWizardWeight(e.target.value)}
-            />
-            <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-              <button disabled={scaleWizardBusy} onClick={handleCalibrateScale}>{scaleWizardBusy ? "Detectando…" : "Detectar formato"}</button>
-              {scaleConfigCalibrated && (
-                <button className="secondary" onClick={handleResetScaleConfig}>Borrar calibración</button>
-              )}
-            </div>
-            {scaleWizardResult === "success" && (
-              <p style={{ margin: 0, color: "#1a7a3c", fontWeight: 700 }}>Listo, detectado y guardado -- probá escanear otra etiqueta para confirmar.</p>
-            )}
-            {scaleWizardResult === "not_found" && (
-              <p style={{ margin: 0, color: "#8a4b00", fontWeight: 700 }}>
-                No pudimos detectar el formato solos con esa etiqueta. Probá de nuevo con otro producto/peso distinto, o escribinos y lo configuramos nosotros.
-              </p>
-            )}
-          </div>
-        </div>
-
-        {canSeeShiftTotals && (
-          <div style={{ borderTop: "1px solid #eef0f3", paddingTop: 18 }}>
-            <p style={{ margin: "0 0 8px", fontWeight: 700 }}>PIN para ver movimientos</p>
-            <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
-              {mostradorPin
-                ? "Configurado -- hay que tipearlo para revelar \"Ver movimientos\" y \"Ver movimientos de caja\", así no queda a la vista de cualquiera que pase por el mostrador."
-                : "Sin configurar -- \"Ver movimientos\" y \"Ver movimientos de caja\" se revelan con un clic, sin pedir nada."}
-            </p>
-            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-              <input
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                placeholder="Nuevo PIN (4 dígitos)"
-                value={pinSettingInput}
-                onChange={(e) => setPinSettingInput(e.target.value)}
-                style={{ width: 160 }}
-              />
-              <button disabled={pinSettingBusy} onClick={() => handleSavePin()}>Guardar</button>
-              {mostradorPin && (
-                <button className="secondary" disabled={pinSettingBusy} onClick={() => void handleSavePin(null)}>
-                  Sacar PIN
+      <SettingSection title="Impresora de tickets" status={printStatus} tone={printTone}>
+        <PrinterAgentSettings onStatusChange={setAgentStatus} />
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontWeight: 700 }}>
+          <input type="checkbox" checked={autoPrintEnabled} onChange={(e) => onAutoPrintChange(e.target.checked)} />
+          Imprimir automáticamente al cobrar
+        </label>
+        <details>
+          <summary className="setting-help" style={{ cursor: "pointer" }}>Otras formas de conectar la impresora (solo si el programa no te sirve)</summary>
+          <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+            {isThermalPrintSupported() && (
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                <button className="secondary" disabled={thermalConnectBusy} onClick={onConnectThermal}>
+                  {thermalConnectBusy ? "Conectando…" : thermalPaired ? "Volver a elegir impresora (USB directo)" : "Conectar impresora (USB directo)"}
                 </button>
-              )}
-            </div>
+                <span className="setting-help">Solo si Windows no le instaló driver; si dice "Access denied", usá el programa.</span>
+              </div>
+            )}
+            <p className="setting-help">
+              Modo kiosco (solo con el driver correcto de la impresora): <a href="/kiosco-impresora.bat" download>kiosco-impresora.bat</a>
+            </p>
           </div>
-        )}
-      </div>
+        </details>
+      </SettingSection>
+
+      <ScaleWeightSettings />
+
+      <SettingSection
+        title="Etiquetas de la balanza"
+        status={scaleConfigCalibrated ? "Calibradas" : "Formato Kretz de fábrica"}
+        tone={scaleConfigCalibrated ? "ok" : "neutral"}
+        actionLabel={scaleConfigCalibrated ? "Volver a calibrar" : "Calibrar"}
+      >
+        <p className="setting-help">
+          Solo si al escanear una etiqueta de producto el peso o el importe no da bien. Poné un producto en la balanza, escaneá acá su etiqueta y escribí lo que mostró la balanza: el sistema detecta el formato solo. (Los tickets de total de la Kretz Aura no necesitan esto.)
+        </p>
+        <div style={{ display: "grid", gap: 10, maxWidth: 420 }}>
+          <div style={{ display: "flex", gap: 16, fontSize: 14, flexWrap: "wrap" }}>
+            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input type="radio" checked={scaleWizardPayload === "weight"} onChange={() => setScaleWizardPayload("weight")} />
+              La etiqueta trae el <b>peso</b>
+            </label>
+            <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <input type="radio" checked={scaleWizardPayload === "amount"} onChange={() => setScaleWizardPayload("amount")} />
+              Trae el <b>importe</b>
+            </label>
+          </div>
+          <input
+            name="scale-label-code"
+            autoComplete="off"
+            placeholder="Escaneá acá la etiqueta de la balanza…"
+            value={scaleWizardCode}
+            onChange={(e) => setScaleWizardCode(e.target.value)}
+          />
+          <input
+            name="scale-label-value"
+            autoComplete="off"
+            type="text"
+            inputMode="decimal"
+            placeholder={scaleWizardPayload === "weight" ? "¿Qué peso mostró la balanza? (ej. 0,472)" : "¿Qué importe mostró la balanza? (ej. 1250)"}
+            value={scaleWizardWeight}
+            onChange={(e) => setScaleWizardWeight(e.target.value)}
+          />
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <button disabled={scaleWizardBusy} onClick={handleCalibrateScale}>{scaleWizardBusy ? "Detectando…" : "Detectar formato"}</button>
+            {scaleConfigCalibrated && (
+              <button className="secondary" onClick={handleResetScaleConfig}>Borrar calibración</button>
+            )}
+          </div>
+          {scaleWizardResult === "success" && (
+            <p style={{ margin: 0, color: "#1a7a3c", fontWeight: 700 }}>Listo, guardado. Probá escanear otra etiqueta para confirmar.</p>
+          )}
+          {scaleWizardResult === "not_found" && (
+            <p style={{ margin: 0, color: "#8a4b00", fontWeight: 700 }}>
+              No se pudo detectar con esa etiqueta. Probá con otro producto o peso, o escribinos y lo configuramos nosotros.
+            </p>
+          )}
+        </div>
+      </SettingSection>
+
+      {canSeeShiftTotals && (
+        <SettingSection
+          title="PIN para ver movimientos"
+          status={mostradorPin ? "Activado" : "Sin PIN"}
+          tone={mostradorPin ? "ok" : "neutral"}
+          actionLabel={mostradorPin ? "Cambiar" : "Poner PIN"}
+        >
+          <p className="setting-help">Pide un PIN de 4 números para ver "Ver movimientos" y "Ver movimientos de caja", así no quedan a la vista en el mostrador.</p>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+            <input
+              type="password"
+              name="mostrador-pin"
+              autoComplete="new-password"
+              inputMode="numeric"
+              maxLength={4}
+              placeholder="PIN nuevo (4 números)"
+              value={pinSettingInput}
+              onChange={(e) => setPinSettingInput(e.target.value.replace(/\D/g, ""))}
+              style={{ width: 170 }}
+            />
+            <button disabled={pinSettingBusy} onClick={() => handleSavePin()}>Guardar</button>
+            {mostradorPin && (
+              <button className="secondary" disabled={pinSettingBusy} onClick={() => void handleSavePin(null)}>
+                Sacar PIN
+              </button>
+            )}
+          </div>
+        </SettingSection>
+      )}
     </section>
   );
 }

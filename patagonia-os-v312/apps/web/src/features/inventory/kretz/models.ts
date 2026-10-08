@@ -121,7 +121,7 @@ export const KRETZ_MODELS: KretzModel[] = [
     deviceTypes: order(["C"], ALL_LETTERS),
     weight: "desconocido",
     plu: { evidence: "desconocido", range: null },
-    facts: [{ text: "Modelo no probado: \"Probar todo\" averigua qué contesta, sin escribir nada.", evidence: "desconocido", source: "—" }]
+    facts: [{ text: "Modelo no probado: \"Probar la conexión\" averigua qué contesta, sin escribir nada.", evidence: "desconocido", source: "—" }]
   }
 ];
 

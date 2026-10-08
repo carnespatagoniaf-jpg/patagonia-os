@@ -631,7 +631,7 @@ function diagnosisVerdictMessage(r: DiagnosticRecord, modelId: string, portLabel
       return "⏳ Ya hay una prueba corriendo con esta balanza. Esperá a que termine (dice \"Listo\").";
     }
     if (kind === "desconectado") {
-      return `❌ El adaptador USB de la balanza no está conectado a la computadora (puerto elegido: ${portLabel}). Enchufalo, esperá 5 segundos y tocá "Probar todo".`;
+      return `❌ El adaptador USB de la balanza no está conectado a la computadora (puerto elegido: ${portLabel}). Enchufalo, esperá 5 segundos y tocá "Probar la conexión".`;
     }
     if (kind === "sin_permiso") {
       return `❌ Chrome no dio permiso para usar el puerto. Tocá "Elegir otro puerto", elegí el de la balanza y tocá "Conectar".`;
@@ -641,13 +641,13 @@ function diagnosisVerdictMessage(r: DiagnosticRecord, modelId: string, portLabel
 ` +
       `${tabsLine}
 ` +
-      `Qué hacer: cerrar TODAS las ventanas de Chrome (también las de otros perfiles) y cualquier programa de balanza o caja; desenchufar el USB del cable, esperar 5 segundos y volver a enchufarlo; abrir un solo Chrome y tocar "Probar todo".`
+      `Qué hacer: cerrar TODAS las ventanas de Chrome (también las de otros perfiles) y cualquier programa de balanza o caja; desenchufar el USB del cable, esperar 5 segundos y volver a enchufarlo; abrir un solo Chrome y tocar "Probar la conexión".`
     );
   }
   if (r.verdict === "peso") {
     return (
       `✅ El cable, el adaptador y el puerto ANDAN: la balanza mandó el peso (${(r.weight.kg ?? 0).toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg).\n` +
-      `Está en modo PESO. Para probar la carga de productos, en la balanza: menú COMUNI → MODO = "Datos" (PUERT = RS-232), y tocá de nuevo "Probar todo".`
+      `Está en modo PESO. Para probar la carga de productos, en la balanza: menú COMUNI → MODO = "Datos" (PUERT = RS-232), y tocá de nuevo "Probar la conexión".`
     );
   }
   if (r.verdict === "datos" && r.responder) {
@@ -680,7 +680,7 @@ function diagnosisVerdictMessage(r: DiagnosticRecord, modelId: string, portLabel
     `2) El cable: tiene que ser DIRECTO (pin 2 con 2, 3 con 3, 5 con 5), macho del lado de la balanza. Los cables "null modem", "cruzados" o el cable de PC de otras Kretz NO sirven para la Aura.\n` +
     `3) El adaptador USB: en Windows, Administrador de dispositivos → Puertos (COM y LPT): si aparece con un signo amarillo, le falta el driver.\n` +
     `4) La balanza: encendida y en el menú COMUNI con PUERT = RS-232.\n` +
-    `Prueba que aísla el cable: poné la balanza en COMUNI → MODO = "A pedido de peso" y tocá "Probar todo". Si así contesta el peso, el cable anda.`
+    `Prueba que aísla el cable: poné la balanza en COMUNI → MODO = "A pedido de peso" y tocá "Probar la conexión". Si así contesta el peso, el cable anda.`
   );
 }
 

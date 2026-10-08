@@ -4,6 +4,8 @@ import { marginPercent, priceFromMargin } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
+import { useAuth } from "../auth/AuthProvider";
+import { planAllows } from "../auth/permissions";
 import { adjustProductStock, createProduct, listProductsForBranch, setProductStockSource, updateProduct } from "./inventory-service";
 import {
   createProductCategory,
@@ -82,6 +84,7 @@ function draftFromProduct(p: Product): DraftProduct {
 
 export function Inventory() {
   const { branchId } = useActiveBranch();
+  const { profile } = useAuth();
 
   const [products, setProducts] = useState<Product[]>(isSupabaseConfigured ? [] : demoProducts);
   const [loading, setLoading] = useState(isSupabaseConfigured);
@@ -450,9 +453,22 @@ export function Inventory() {
           </p>
         ) : (
           <div style={{ marginTop: 6 }}>
-            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
               <input type="radio" checked={!editLink.linked} onChange={() => setEditLink({ ...editLink, linked: false })} />
               Tiene su propio stock
+              {!editLink.linked && !product.stockSourceId && (
+                <button
+                  type="button"
+                  className="secondary"
+                  style={{ marginLeft: 8 }}
+                  onClick={() => {
+                    setEditingId(null);
+                    openPresentations(product);
+                  }}
+                >
+                  Vincularle ofertas o mayorista (mismo stock, otro precio)
+                </button>
+              )}
             </label>
             <label style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
               <input type="radio" checked={editLink.linked} onChange={() => setEditLink({ ...editLink, linked: true })} />
@@ -622,15 +638,15 @@ export function Inventory() {
           <button className="secondary" onClick={() => setShowCategoryManager((v) => !v)}>
             {showCategoryManager ? "Ocultar categorías" : "Gestionar categorías"}
           </button>
-          <button className="secondary" onClick={() => downloadScaleExportCsv(products, categories)}>
-            Descargar lista para balanza
-          </button>
-          <ScaleSyncPanel products={products} />
+          {/* Con balanza por cable (Estándar y Full) la lista CSV va adentro de su panel; en Básico queda acá. */}
+          {!planAllows(profile, "estandar") && (
+            <button className="secondary" onClick={() => downloadScaleExportCsv(products, categories)}>
+              Descargar lista para balanza
+            </button>
+          )}
+          <ScaleSyncPanel products={products} onDownloadCsv={() => downloadScaleExportCsv(products, categories)} />
           {SHOW_SYSTEL_PANEL && <SystelPanel products={products} />}
         </div>
-        <p className="muted" style={{ margin: "-8px 0 14px", fontSize: 12 }}>
-          CSV para importar en el software de PC de la balanza (Kretz Simplex/iTegra) -- formato de prueba, todavía sin confirmar contra el importador real.
-        </p>
 
         <PriceTools products={products} categories={categories} onApplied={reload} />
 
@@ -898,10 +914,16 @@ export function Inventory() {
                       <button className="secondary" onClick={() => startEdit(product)}>Editar</button>{" "}
                       {product.stockSourceId ? null : (
                         <>
-                          <button className="secondary" onClick={() => startAdjustStock(product)}>Ajustar stock</button>{" "}
-                          <button className="secondary" onClick={() => openPresentations(product)}>
-                            Presentaciones{presentationsOf(product.id).length > 0 ? ` (${presentationsOf(product.id).length})` : ""}
-                          </button>
+                          <button className="secondary" onClick={() => startAdjustStock(product)}>Ajustar stock</button>
+                          {/* Solo en los que ya tienen: para vincular la primera, Editar → bloque "Stock". */}
+                          {presentationsOf(product.id).length > 0 && (
+                            <>
+                              {" "}
+                              <button className="secondary" onClick={() => openPresentations(product)}>
+                                Presentaciones ({presentationsOf(product.id).length})
+                              </button>
+                            </>
+                          )}
                         </>
                       )}
                     </td>

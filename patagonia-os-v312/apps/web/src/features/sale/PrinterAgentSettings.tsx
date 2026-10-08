@@ -17,7 +17,7 @@ import {
 
 type Status = "checking" | "up" | "down";
 
-export function PrinterAgentSettings() {
+export function PrinterAgentSettings({ onStatusChange }: { onStatusChange?: (status: "checking" | "up" | "down") => void } = {}) {
   const [status, setStatus] = useState<Status>("checking");
   const [printers, setPrinters] = useState<AgentPrinter[]>([]);
   const [selected, setSelected] = useState(getAgentPrinterName());
@@ -59,6 +59,10 @@ export function PrinterAgentSettings() {
     void refresh(false);
   }, [refresh]);
 
+  useEffect(() => {
+    onStatusChange?.(status);
+  }, [status, onStatusChange]);
+
   function handleSelect(name: string) {
     setSelected(name);
     setAgentPrinterName(name);
@@ -70,7 +74,7 @@ export function PrinterAgentSettings() {
     setTestBusy(true);
     try {
       await printBytes(buildTestTicket(getThermalPrintSettings()));
-      setNote("Listo: mandó un ticket de prueba. Si salió bien, tildá 'Imprimir el comprobante automáticamente al cobrar' (arriba) y los comprobantes van a salir solos.");
+      setNote("Listo: mandó un ticket de prueba. Si salió bien, tildá 'Imprimir automáticamente al cobrar'.");
     } catch (err) {
       setNote(err instanceof Error ? err.message : "No se pudo imprimir el ticket de prueba.");
     } finally {
@@ -79,52 +83,42 @@ export function PrinterAgentSettings() {
   }
 
   return (
-    <div style={{ marginTop: 12 }}>
-      <p style={{ margin: "0 0 6px", fontWeight: 700 }}>
-        Impresora de tickets{" "}
-        {status === "up" && <span className="badge-ok" style={{ fontSize: 12, fontWeight: 600, color: "#1a7f37" }}>· Programa de impresión activo</span>}
-      </p>
-
-      {status === "checking" && <p className="muted" style={{ margin: 0, fontSize: 13 }}>Buscando el programa de impresión de esta PC…</p>}
+    <div style={{ display: "grid", gap: 8 }}>
+      {status === "checking" && <p className="setting-help">Buscando el programa de impresión de esta PC…</p>}
 
       {status === "down" && (
         <>
-          <p className="muted" style={{ margin: "0 0 8px", fontSize: 13 }}>
-            Para imprimir los tickets directo en tu térmica, sin ningún cartel y sin importar la marca ni el driver de Windows, instalá el programa de impresión. Se hace una sola vez en esta PC: descargá el archivo, abrilo con doble clic y esperá el "LISTO".
+          <p className="setting-help">
+            Para que el ticket salga directo en tu térmica (cualquier marca), instalá el programa de impresión. Una sola vez por PC: descargalo, abrilo con doble clic y esperá el "LISTO".
           </p>
-          <p style={{ margin: "0 0 8px" }}>
-            <a href="/instalar-impresora.bat" download>Descargar instalar-impresora.bat</a>
-          </p>
-          <button className="secondary" onClick={() => void refresh(true)}>Ya lo instalé, volver a buscar</button>
-          <p className="muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
-            Si Chrome pregunta si permitís que este sitio acceda a dispositivos de tu red local, tocá <strong>Permitir</strong>: es el programa de impresión que está en esta misma PC. Si tocaste Bloquear sin querer: clic en el candado de la barra de direcciones → Configuración del sitio → "Acceso a la red local" (o "Dispositivos de la red local") → Permitir, y volvé a buscar.
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <a className="button-link" href="/instalar-impresora.bat" download>Descargar el programa</a>
+            <button className="secondary" onClick={() => void refresh(true)}>Ya lo instalé</button>
+          </div>
+          <p className="setting-help" style={{ fontSize: 12 }}>
+            Si Chrome pregunta por "dispositivos de tu red local", tocá <strong>Permitir</strong> (es el programa de esta misma PC).
           </p>
         </>
       )}
 
       {status === "up" && (
-        <>
-          <label style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: 14 }}>
-            Imprimir en
-            <select value={selected} onChange={(e) => handleSelect(e.target.value)}>
-              <option value="">Elegí tu impresora de tickets…</option>
-              {printers.map((p) => (
-                <option key={p.name} value={p.name}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className="secondary" disabled={testBusy || !selected} onClick={() => void handleTest()}>
-              {testBusy ? "Imprimiendo…" : "Imprimir ticket de prueba"}
-            </button>
-            <button className="secondary" onClick={() => void refresh(true)}>Actualizar lista</button>
-          </div>
-        </>
+        <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+          <select value={selected} onChange={(e) => handleSelect(e.target.value)}>
+            <option value="">Elegí tu impresora de tickets…</option>
+            {printers.map((p) => (
+              <option key={p.name} value={p.name}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+          <button className="secondary" disabled={testBusy || !selected} onClick={() => void handleTest()}>
+            {testBusy ? "Imprimiendo…" : "Imprimir prueba"}
+          </button>
+          <button className="secondary" onClick={() => void refresh(true)}>Actualizar</button>
+        </div>
       )}
 
-      {note && <p className="muted" style={{ margin: "8px 0 0", fontSize: 13 }}>{note}</p>}
+      {note && <p className="setting-help">{note}</p>}
     </div>
   );
 }

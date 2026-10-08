@@ -612,3 +612,19 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .admin-filters { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
 .admin-sort { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: #47505c; }
 .admin-sort select { padding: 8px 10px; border: 1px solid #d6dce5; border-radius: 10px; background: white; }
+
+/* Fila de configuración: título + estado en una línea; el detalle se abre al tocarla. */
+.setting-section { border-top: 1px solid #eef0f3; }
+.setting-section > summary { list-style: none; display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 14px 0; cursor: pointer; }
+.setting-section > summary::-webkit-details-marker { display: none; }
+.setting-section > summary .setting-title { font-weight: 700; }
+.setting-section > summary .setting-action { margin-left: auto; font-size: 13px; font-weight: 700; color: #47505c; border: 1px solid #d6dce5; border-radius: 8px; padding: 4px 10px; }
+.setting-section[open] > summary .setting-action { background: #f2f4f7; }
+.setting-section > .setting-body { padding: 0 0 16px; display: grid; gap: 10px; }
+.setting-status { padding: 2px 10px; border-radius: 999px; background: #f2f4f7; color: #47505c; font-size: 12px; font-weight: 800; }
+.setting-status.ok { background: #eef7ef; color: #176329; }
+.setting-status.warn { background: #fff6e5; color: #8a4b00; }
+.setting-help { margin: 0; font-size: 13px; color: #5b6472; }
+/* Link de descarga con aspecto de botón principal. */
+a.button-link { display: inline-flex; align-items: center; min-height: 38px; padding: 8px 14px; border-radius: 10px; font-size: 14px; font-weight: 700; background: #8b1e1e; color: white; text-decoration: none; }
+a.button-link:hover { background: #731818; }
