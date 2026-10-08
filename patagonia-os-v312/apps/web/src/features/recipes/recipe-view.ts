@@ -57,6 +57,41 @@ export function suggestedYieldKg(
   return Math.round(total * 1000) / 1000;
 }
 
+/** Cuánto saldría el combo si se compraran sus productos sueltos, al precio de venta actual de cada uno. */
+export function comboRetailTotal(
+  items: Array<{ ingredientProductId: string; quantity: number }>,
+  productsById: Map<string, Product>
+): number {
+  const total = items.reduce((sum, item) => {
+    const price = productsById.get(item.ingredientProductId)?.priceRetail ?? 0;
+    return Number.isFinite(item.quantity) ? sum + item.quantity * price : sum;
+  }, 0);
+  return Math.round(total * 100) / 100;
+}
+
+/** Descuento del combo frente a comprar todo suelto, en % (positivo = más barato). null si no se puede calcular. */
+export function comboDiscountPct(comboPrice: number, retailTotal: number): number | null {
+  if (!(retailTotal > 0) || !Number.isFinite(comboPrice) || comboPrice <= 0) return null;
+  return Math.round((1 - comboPrice / retailTotal) * 1000) / 10;
+}
+
+export interface PriceCheck {
+  /** Lo que queda por unidad/kg/combo: precio − costo. */
+  profit: number;
+  /** Margen sobre el costo, igual que en Stock ((precio − costo) / costo). null sin costo. */
+  marginPct: number | null;
+  /** Solo combos: descuento frente a comprar todo suelto. */
+  discountPct: number | null;
+}
+
+/** "Si lo vendo a $X, ¿cuánto gano?": para el casillero "Probá un precio de venta". */
+export function checkPrice(price: number, unitCost: number, retailTotal = 0): PriceCheck | null {
+  if (!Number.isFinite(price) || price <= 0) return null;
+  const profit = Math.round((price - unitCost) * 100) / 100;
+  const marginPct = unitCost > 0 ? Math.round(((price - unitCost) / unitCost) * 1000) / 10 : null;
+  return { profit, marginPct, discountPct: comboDiscountPct(price, retailTotal) };
+}
+
 /** Costos con centavos: en recetas importan (una hamburguesa que cuesta $850,42
  * no es $850). El resto del sistema muestra pesos enteros; acá no. */
 export function formatCost(value: number): string {

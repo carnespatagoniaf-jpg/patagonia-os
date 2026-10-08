@@ -46,7 +46,10 @@ export function ProductsLookup() {
     if (labelProduct) labelRef.current?.scrollIntoView({ behavior: "smooth", block: "center" });
   }, [labelProduct]);
 
-  const filtered = products.filter((p) => p.name.toLowerCase().includes(search.toLowerCase()) || p.code.toLowerCase().includes(search.toLowerCase()));
+  // Sin importar acentos ni mayúsculas ("cajon" encuentra "Cajón").
+  const plain = (text: string) => text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+  const searchText = plain(search);
+  const filtered = products.filter((p) => plain(p.name).includes(searchText) || plain(p.code).includes(searchText));
   const sizeStyle = LABEL_SIZE_STYLES[labelSize];
 
   function handlePrint() {

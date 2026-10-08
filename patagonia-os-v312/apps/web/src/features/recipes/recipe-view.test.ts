@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import type { Product } from "@patagonia/domain";
-import { suggestedYieldKg, summarizeRecipe } from "./recipe-view";
+import { checkPrice, comboDiscountPct, comboRetailTotal, suggestedYieldKg, summarizeRecipe } from "./recipe-view";
 import type { Recipe } from "./recipes-service";
 
 function product(id: string, name: string, unit: Product["unit"], cost: number): Product {
@@ -129,4 +129,53 @@ test("parseRecipeDraft rechaza lo que no sirve, con un mensaje claro", () => {
 
 test("formatCost muestra centavos", () => {
   assert.match(formatCost(17804.35), /17\.804,35/);
+});
+
+test("combo: costo como receta sin merma que rinde 1, y cuánto saldría suelto", () => {
+  const conPrecio = new Map<string, Product>(
+    [
+      { ...product("mila-pollo", "Milanesa de pollo", "kg", 7800), priceRetail: 11800 },
+      { ...product("pata", "Pata muslo", "kg", 3400), priceRetail: 5200 },
+      { ...product("hamb", "Hamburguesas x4", "unit", 3900), priceRetail: 6200 },
+      { ...product("combo", "Combo familiar", "unit", 0), priceRetail: 0 }
+    ].map((p) => [p.id, p])
+  );
+  const combo: Recipe = {
+    id: "c1",
+    kind: "combo",
+    productId: "combo",
+    yieldQty: 1,
+    extraCost: 300,
+    marginPct: 30,
+    notes: "",
+    updatedAt: "2026-10-08T00:00:00Z",
+    items: [
+      { ingredientProductId: "mila-pollo", quantity: 1, wastePct: 0 },
+      { ingredientProductId: "pata", quantity: 1, wastePct: 0 },
+      { ingredientProductId: "hamb", quantity: 2, wastePct: 0 }
+    ]
+  };
+  const summary = summarizeRecipe(combo, conPrecio);
+  // 7.800 + 3.400 + 2 × 3.900 + 300 de bolsa = 19.300
+  assert.equal(summary.cost.unitCost, 19300);
+  assert.equal(summary.cost.suggestedPrice, 25090);
+  // Suelto: 11.800 + 5.200 + 2 × 6.200 = 29.400
+  const suelto = comboRetailTotal(combo.items, conPrecio);
+  assert.equal(suelto, 29400);
+  // Vendido a 25.090: 14,7 % más barato que suelto.
+  assert.equal(comboDiscountPct(25090, suelto), 14.7);
+  assert.equal(comboDiscountPct(0, suelto), null);
+  assert.equal(comboDiscountPct(1000, 0), null);
+});
+
+test("probar un precio: cuánto se gana en plata y en %, y el descuento del combo", () => {
+  // Combo que cuesta $19.300 y suelto saldría $29.400, vendido a $25.000.
+  assert.deepEqual(checkPrice(25000, 19300, 29400), { profit: 5700, marginPct: 29.5, discountPct: 15 });
+  // Receta (sin precio suelto): milanesa que cuesta $17.804,35 a $26.000.
+  assert.deepEqual(checkPrice(26000, 17804.35), { profit: 8195.65, marginPct: 46, discountPct: null });
+  // Por debajo del costo: pérdida y margen negativo.
+  assert.deepEqual(checkPrice(15000, 19300, 29400), { profit: -4300, marginPct: -22.3, discountPct: 49 });
+  assert.equal(checkPrice(0, 19300), null);
+  // Sin costo cargado no hay %.
+  assert.equal(checkPrice(1000, 0)?.marginPct, null);
 });

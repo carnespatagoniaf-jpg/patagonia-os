@@ -11,8 +11,12 @@ export interface RecipeItem {
   wastePct: number;
 }
 
+/** "combo": varios productos que se venden juntos (sin merma, rinde 1 combo). Ver migración 112. */
+export type RecipeKind = "receta" | "combo";
+
 export interface Recipe {
   id: string;
+  kind: RecipeKind;
   productId: string;
   yieldQty: number;
   extraCost: number;
@@ -24,6 +28,7 @@ export interface Recipe {
 
 interface RecipeRow {
   id: string;
+  kind?: string | null;
   product_id: string;
   yield_qty: number | string;
   extra_cost: number | string;
@@ -47,7 +52,7 @@ export async function listRecipes(): Promise<Recipe[]> {
 
   const { data: rows, error } = await supabase
     .from("recipes")
-    .select("id,product_id,yield_qty,extra_cost,margin_pct,notes,updated_at")
+    .select("id,kind,product_id,yield_qty,extra_cost,margin_pct,notes,updated_at")
     .order("updated_at", { ascending: false });
   if (error) throw error;
 
@@ -74,6 +79,7 @@ export async function listRecipes(): Promise<Recipe[]> {
 
   return ((rows ?? []) as RecipeRow[]).map((row) => ({
     id: row.id,
+    kind: row.kind === "combo" ? "combo" : "receta",
     productId: row.product_id,
     yieldQty: Number(row.yield_qty),
     extraCost: Number(row.extra_cost),
@@ -110,6 +116,13 @@ export async function saveRecipe(input: SaveRecipeInput): Promise<string> {
   });
   if (error) throw error;
   return data as string;
+}
+
+/** Marca una receta como combo (o la vuelve a receta). Se llama después de saveRecipe. */
+export async function setRecipeKind(recipeId: string, kind: RecipeKind): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("set_recipe_kind", { p_recipe_id: recipeId, p_kind: kind });
+  if (error) throw error;
 }
 
 export async function deleteRecipe(recipeId: string): Promise<void> {

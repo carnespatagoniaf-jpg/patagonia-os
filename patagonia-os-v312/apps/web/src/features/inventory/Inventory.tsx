@@ -64,6 +64,11 @@ function draftLinkFromProduct(p: Product): DraftLink {
   };
 }
 
+/** Para buscar sin importar acentos ni mayúsculas ("cajon" encuentra "Cajón"). */
+function plainText(text: string) {
+  return text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+}
+
 function formatQty(value: number) {
   return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 3 }).format(value);
 }
@@ -110,6 +115,7 @@ export function Inventory() {
 
   const [categories, setCategories] = useState<ProductCategory[]>([]);
   const [categoryFilter, setCategoryFilter] = useState("");
+  const [productSearch, setProductSearch] = useState("");
   const [showCategoryManager, setShowCategoryManager] = useState(false);
   const [newCategoryName, setNewCategoryName] = useState("");
   const [renamingCategoryId, setRenamingCategoryId] = useState<string | null>(null);
@@ -142,7 +148,13 @@ export function Inventory() {
     return categories.find((c) => c.id === categoryId)?.name ?? "—";
   }
 
-  const visibleProducts = categoryFilter ? products.filter((p) => p.categoryId === categoryFilter) : products;
+  // Buscador: por nombre o código, sin importar acentos ni mayúsculas; se suma al filtro de categoría.
+  const searchText = plainText(productSearch);
+  const visibleProducts = products.filter(
+    (p) =>
+      (!categoryFilter || p.categoryId === categoryFilter) &&
+      (!searchText || plainText(p.name).includes(searchText) || plainText(p.code).includes(searchText))
+  );
 
   const productById = new Map(products.map((p) => [p.id, p]));
   function presentationsOf(principalId: string) {
@@ -629,6 +641,18 @@ export function Inventory() {
         </div>
 
         <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 14 }}>
+          <input
+            type="search"
+            name="stock-product-search"
+            autoComplete="off"
+            placeholder="Buscar producto por nombre o código…"
+            value={productSearch}
+            onChange={(e) => setProductSearch(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") setProductSearch("");
+            }}
+            style={{ flex: "1 1 260px", minWidth: 220 }}
+          />
           <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
             <option value="">Todas las categorías</option>
             {categories.map((c) => (
@@ -950,7 +974,7 @@ export function Inventory() {
             ))}
           </tbody>
         </table>
-        {visibleProducts.length === 0 && !loading && <p className="muted">No hay productos para mostrar.</p>}
+        {visibleProducts.length === 0 && !loading && <p className="muted">{searchText ? `Ningún producto coincide con "${productSearch.trim()}".` : "No hay productos para mostrar."}</p>}
 
       </section>
     </>
