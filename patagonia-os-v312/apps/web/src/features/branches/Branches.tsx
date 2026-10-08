@@ -85,7 +85,8 @@ export function Branches() {
     if (!id) return;
     setProductsLoading(true);
     try {
-      setFromProducts(await listProductsForBranch(id));
+      // Las presentaciones (ofertas, mayorista...) usan el stock del principal: se transfiere el principal.
+      setFromProducts((await listProductsForBranch(id)).filter((p) => !p.stockSourceId));
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo cargar el stock de esa sucursal.");
     } finally {

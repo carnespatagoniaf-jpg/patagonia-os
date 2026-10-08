@@ -4,7 +4,7 @@ import { marginPercent, priceFromMargin } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
-import { adjustProductStock, createProduct, listProductsForBranch, updateProduct } from "./inventory-service";
+import { adjustProductStock, createProduct, listProductsForBranch, setProductStockSource, updateProduct } from "./inventory-service";
 import {
   createProductCategory,
   deleteProductCategory,
@@ -45,6 +45,27 @@ function emptyDraft(): DraftProduct {
   return { code: "", name: "", unit: "kg", cost: "", margin: "", priceRetail: "", minStock: "", active: true, categoryId: "" };
 }
 
+/** Bloque "Stock" de la ficha: stock propio o descuenta de otro producto (el principal). */
+interface DraftLink {
+  linked: boolean;
+  sourceId: string;
+  factor: string;
+  moveStock: boolean;
+}
+
+function draftLinkFromProduct(p: Product): DraftLink {
+  return {
+    linked: Boolean(p.stockSourceId),
+    sourceId: p.stockSourceId ?? "",
+    factor: String(p.stockFactor ?? 1).replace(".", ","),
+    moveStock: true
+  };
+}
+
+function formatQty(value: number) {
+  return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 3 }).format(value);
+}
+
 function draftFromProduct(p: Product): DraftProduct {
   return {
     code: p.code,
@@ -71,6 +92,14 @@ export function Inventory() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<DraftProduct>(emptyDraft());
+  const [editLink, setEditLink] = useState<DraftLink>({ linked: false, sourceId: "", factor: "1", moveStock: true });
+
+  // Panel "Presentaciones" de un producto principal.
+  const [presentationsOfId, setPresentationsOfId] = useState<string | null>(null);
+  const [linkSearch, setLinkSearch] = useState("");
+  const [linkSelected, setLinkSelected] = useState<Record<string, string>>({});
+  const [linkMoveStock, setLinkMoveStock] = useState(true);
+  const [linkBusy, setLinkBusy] = useState(false);
 
   const [adjustingId, setAdjustingId] = useState<string | null>(null);
   const [adjustCounted, setAdjustCounted] = useState("");
@@ -111,6 +140,21 @@ export function Inventory() {
   }
 
   const visibleProducts = categoryFilter ? products.filter((p) => p.categoryId === categoryFilter) : products;
+
+  const productById = new Map(products.map((p) => [p.id, p]));
+  function presentationsOf(principalId: string) {
+    return products.filter((p) => p.stockSourceId === principalId);
+  }
+  /** Puede ser principal: no es presentación de otro y está activo. */
+  function sourceOptionsFor(product: Product) {
+    return products
+      .filter((p) => p.id !== product.id && !p.stockSourceId && (p.active ?? true))
+      .sort(compareByCode);
+  }
+  /** Si las unidades difieren (cajón vs kg) hay que decir cuánto descuenta cada unidad. */
+  function needsFactor(unit: Product["unit"], source: Product | undefined) {
+    return Boolean(source) && source!.unit !== unit;
+  }
 
   function compareByCode(a: Product, b: Product) {
     const na = Number(a.code);
@@ -240,6 +284,7 @@ export function Inventory() {
   function startEdit(product: Product) {
     setEditingId(product.id);
     setEditDraft(draftFromProduct(product));
+    setEditLink(draftLinkFromProduct(product));
   }
 
   async function handleUpdate() {
@@ -251,6 +296,19 @@ export function Inventory() {
       const minStock = parseAmount(editDraft.minStock || "0");
       if (!Number.isFinite(cost) || cost < 0) throw new Error("El costo no puede ser negativo.");
       if (!Number.isFinite(priceRetail) || priceRetail < 0) throw new Error("El precio no puede ser negativo.");
+
+      // Bloque "Stock": se valida antes de guardar nada.
+      const original = productById.get(editingId);
+      const wantedSourceId = editLink.linked ? editLink.sourceId : null;
+      if (editLink.linked && !wantedSourceId) throw new Error("Elegí de qué producto descuenta el stock.");
+      const wantedSource = wantedSourceId ? productById.get(wantedSourceId) : undefined;
+      const factor = needsFactor(editDraft.unit, wantedSource) ? quantityNumber(editLink.factor) : 1;
+      if (wantedSourceId && (!Number.isFinite(factor) || factor <= 0)) {
+        throw new Error(`Indicá cuántos ${UNIT_LABELS[wantedSource!.unit]} descuenta cada ${UNIT_LABELS[editDraft.unit]}.`);
+      }
+      const linkChanged =
+        wantedSourceId !== (original?.stockSourceId ?? null) ||
+        (wantedSourceId !== null && factor !== (original?.stockFactor ?? 1));
 
       await updateProduct({
         branchId,
@@ -264,11 +322,92 @@ export function Inventory() {
         active: editDraft.active,
         categoryId: editDraft.categoryId || undefined
       });
+      let linkMessage = "";
+      if (linkChanged) {
+        const result = await setProductStockSource({
+          productId: editingId,
+          sourceId: wantedSourceId,
+          factor,
+          moveStock: editLink.moveStock
+        });
+        if (wantedSource) {
+          linkMessage = ` Ahora descuenta stock de ${wantedSource.name}.`;
+          if (result.moved !== 0) linkMessage += ` Se pasaron ${formatQty(result.moved)} ${UNIT_LABELS[wantedSource.unit]} a ${wantedSource.name}.`;
+        } else {
+          linkMessage = " Ahora tiene su propio stock.";
+        }
+      }
       setEditingId(null);
-      setMessage("Producto actualizado.");
+      setMessage("Producto actualizado." + linkMessage);
       await reload();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo actualizar el producto.");
+      await reload();
+    }
+  }
+
+  function openPresentations(product: Product) {
+    setPresentationsOfId(presentationsOfId === product.id ? null : product.id);
+    setLinkSearch("");
+    setLinkSelected({});
+    setLinkMoveStock(true);
+  }
+
+  async function handleLinkPresentations(principal: Product) {
+    const ids = Object.keys(linkSelected);
+    if (ids.length === 0) {
+      setMessage("Marcá al menos un producto para vincular.");
+      return;
+    }
+    const plan: { product: Product; factor: number }[] = [];
+    for (const id of ids) {
+      const product = productById.get(id);
+      if (!product) continue;
+      const factor = needsFactor(product.unit, principal) ? quantityNumber(linkSelected[id]) : 1;
+      if (!Number.isFinite(factor) || factor <= 0) {
+        setMessage(`Indicá cuántos ${UNIT_LABELS[principal.unit]} descuenta cada ${UNIT_LABELS[product.unit]} de ${product.name}.`);
+        return;
+      }
+      plan.push({ product, factor });
+    }
+    setLinkBusy(true);
+    let done = 0;
+    let moved = 0;
+    try {
+      for (const item of plan) {
+        const result = await setProductStockSource({
+          productId: item.product.id,
+          sourceId: principal.id,
+          factor: item.factor,
+          moveStock: linkMoveStock
+        });
+        done += 1;
+        moved += result.moved;
+      }
+      setLinkSelected({});
+      setLinkSearch("");
+      setMessage(
+        `${done === 1 ? "Se vinculó 1 presentación" : `Se vincularon ${done} presentaciones`} a ${principal.name}.` +
+          (moved !== 0 ? ` Se pasaron ${formatQty(moved)} ${UNIT_LABELS[principal.unit]} a ${principal.name}.` : "")
+      );
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : "No se pudo vincular.";
+      setMessage(done > 0 ? `Se vincularon ${done}, pero falló una: ${reason}` : reason);
+    } finally {
+      setLinkBusy(false);
+      await reload();
+    }
+  }
+
+  async function handleUnlinkPresentation(product: Product) {
+    if (!window.confirm(`¿Desvincular "${product.name}"? Va a volver a tener su propio stock (empieza en 0).`)) return;
+    try {
+      await setProductStockSource({ productId: product.id, sourceId: null, factor: 1, moveStock: false });
+      setMessage(`"${product.name}" ahora tiene su propio stock.`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo desvincular.");
+    } finally {
+      await reload();
     }
   }
 
@@ -296,6 +435,163 @@ export function Inventory() {
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo ajustar el stock.");
     }
+  }
+
+  function renderStockBlock(product: Product) {
+    const variants = presentationsOf(product.id);
+    const source = editLink.sourceId ? productById.get(editLink.sourceId) : undefined;
+    const wasLinked = Boolean(product.stockSourceId);
+    return (
+      <div>
+        <strong>Stock</strong>
+        {variants.length > 0 ? (
+          <p className="muted" style={{ margin: "6px 0 0" }}>
+            Es el producto principal de {variants.map((v) => v.name).join(", ")}: tiene su propio stock y ellas descuentan de acá.
+          </p>
+        ) : (
+          <div style={{ marginTop: 6 }}>
+            <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input type="radio" checked={!editLink.linked} onChange={() => setEditLink({ ...editLink, linked: false })} />
+              Tiene su propio stock
+            </label>
+            <label style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 4 }}>
+              <input type="radio" checked={editLink.linked} onChange={() => setEditLink({ ...editLink, linked: true })} />
+              Descuenta stock de otro producto (misma mercadería, otro precio)
+            </label>
+            {editLink.linked && (
+              <div style={{ margin: "8px 0 0 24px", display: "flex", flexDirection: "column", gap: 8, maxWidth: 520 }}>
+                <select value={editLink.sourceId} onChange={(e) => setEditLink({ ...editLink, sourceId: e.target.value })}>
+                  <option value="">Elegí el producto principal…</option>
+                  {sourceOptionsFor(product).map((p) => (
+                    <option key={p.id} value={p.id}>{p.code} · {p.name}</option>
+                  ))}
+                </select>
+                {source && needsFactor(editDraft.unit, source) && (
+                  <span>
+                    Cada {UNIT_LABELS[editDraft.unit]} descuenta{" "}
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      className="num"
+                      value={editLink.factor}
+                      onFocus={(e) => e.target.select()}
+                      onChange={(e) => setEditLink({ ...editLink, factor: e.target.value })}
+                      style={{ width: 70 }}
+                    />{" "}
+                    {UNIT_LABELS[source.unit]} de {source.name}
+                  </span>
+                )}
+                {source && !wasLinked && product.stock !== 0 && (
+                  <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <input type="checkbox" checked={editLink.moveStock} onChange={(e) => setEditLink({ ...editLink, moveStock: e.target.checked })} />
+                    Sumar a {source.name} el stock que tiene hoy este producto ({formatQty(product.stock)} {UNIT_LABELS[product.unit]})
+                  </label>
+                )}
+                {source && (
+                  <span className="muted" style={{ fontSize: 12 }}>
+                    Al venderlo o comprarlo, el stock se mueve en {source.name}. Stock de {source.name}: {formatQty(source.stock)} {UNIT_LABELS[source.unit]}.
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  function renderPresentationsPanel(principal: Product) {
+    const variants = presentationsOf(principal.id).sort(compareByCode);
+    const q = linkSearch.trim().toLowerCase();
+    const candidates = products
+      .filter((p) => p.id !== principal.id && !p.stockSourceId && presentationsOf(p.id).length === 0 && (p.active ?? true))
+      .filter((p) => !q || p.name.toLowerCase().includes(q) || p.code.toLowerCase().includes(q))
+      .sort(compareByCode)
+      .slice(0, 40);
+    const selectedIds = Object.keys(linkSelected);
+    const selectedWithStock = selectedIds.map((id) => productById.get(id)).filter((p): p is Product => Boolean(p) && p!.stock !== 0);
+    return (
+      <div>
+        <strong>Se vende también como</strong>
+        <p className="muted" style={{ margin: "4px 0 8px", fontSize: 12 }}>
+          Productos con otro código y otro precio (ofertas, mayorista, cajón) que descuentan stock de {principal.name}.
+          Stock de {principal.name}: {formatQty(principal.stock)} {UNIT_LABELS[principal.unit]}.
+        </p>
+        {variants.length === 0 && <p className="muted">Todavía no tiene presentaciones vinculadas.</p>}
+        {variants.map((v) => (
+          <div key={v.id} className="list-row">
+            <span>
+              {v.code} · {v.name} — {formatMoney(v.priceRetail)}
+              {v.unit !== principal.unit && (
+                <span className="muted"> ({formatQty(v.stockFactor ?? 1)} {UNIT_LABELS[principal.unit]} por {UNIT_LABELS[v.unit]})</span>
+              )}
+            </span>
+            <button className="secondary" onClick={() => handleUnlinkPresentation(v)}>Desvincular</button>
+          </div>
+        ))}
+
+        <div style={{ marginTop: 12 }}>
+          <strong>Vincular presentaciones</strong>
+          <input
+            placeholder="Buscar por nombre o código"
+            value={linkSearch}
+            onChange={(e) => setLinkSearch(e.target.value)}
+            style={{ display: "block", width: "100%", maxWidth: 360, margin: "6px 0" }}
+          />
+          <div style={{ maxHeight: 260, overflowY: "auto", border: "1px solid #e5e5e5", borderRadius: 6, padding: 6 }}>
+            {candidates.map((p) => {
+              const checked = p.id in linkSelected;
+              return (
+                <div key={p.id} style={{ display: "flex", gap: 8, alignItems: "center", padding: "3px 0", flexWrap: "wrap" }}>
+                  <label style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                    <input
+                      type="checkbox"
+                      checked={checked}
+                      onChange={(e) => {
+                        const next = { ...linkSelected };
+                        if (e.target.checked) next[p.id] = "1";
+                        else delete next[p.id];
+                        setLinkSelected(next);
+                      }}
+                    />
+                    {p.code} · {p.name} — {formatMoney(p.priceRetail)}
+                  </label>
+                  {checked && needsFactor(p.unit, principal) && (
+                    <span style={{ fontSize: 12 }}>
+                      cada {UNIT_LABELS[p.unit]} descuenta{" "}
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        className="num"
+                        value={linkSelected[p.id]}
+                        onFocus={(e) => e.target.select()}
+                        onChange={(e) => setLinkSelected({ ...linkSelected, [p.id]: e.target.value })}
+                        style={{ width: 60 }}
+                      />{" "}
+                      {UNIT_LABELS[principal.unit]}
+                    </span>
+                  )}
+                </div>
+              );
+            })}
+            {candidates.length === 0 && <p className="muted">No hay productos para mostrar.</p>}
+          </div>
+          {selectedWithStock.length > 0 && (
+            <label style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 8 }}>
+              <input type="checkbox" checked={linkMoveStock} onChange={(e) => setLinkMoveStock(e.target.checked)} />
+              Sumar a {principal.name} el stock que tienen hoy los productos marcados (
+              {selectedWithStock.map((p) => `${p.name}: ${formatQty(p.stock)}`).join(", ")})
+            </label>
+          )}
+          <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
+            <button disabled={linkBusy} onClick={() => handleLinkPresentations(principal)}>
+              {linkBusy ? "Vinculando…" : `Vincular ${selectedIds.length || ""}`.trim()}
+            </button>
+            <button className="secondary" onClick={() => setPresentationsOfId(null)}>Cerrar</button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -466,7 +762,8 @@ export function Inventory() {
                   </td>
                 </tr>
                 {group.products.map((product) => (
-              <tr key={product.id}>
+              <Fragment key={product.id}>
+              <tr>
                 {editingId === product.id ? (
                   <>
                     <td><input value={editDraft.code} onChange={(e) => setEditDraft({ ...editDraft, code: e.target.value })} style={{ width: 90 }} /></td>
@@ -574,22 +871,58 @@ export function Inventory() {
                 ) : (
                   <>
                     <td>{product.code}</td>
-                    <td>{product.name}</td>
+                    <td>
+                      {product.name}
+                      {presentationsOf(product.id).length > 0 && (
+                        <div className="muted" style={{ fontSize: 11 }}>
+                          + {presentationsOf(product.id).length} {presentationsOf(product.id).length === 1 ? "presentación" : "presentaciones"} con otro precio
+                        </div>
+                      )}
+                    </td>
                     <td>{categoryName(product.categoryId)}</td>
                     <td>{UNIT_LABELS[product.unit]}</td>
                     <td className="num">{formatMoney(product.cost)}</td>
                     <td className="num">{marginPercent(product.cost, product.priceRetail)}%</td>
                     <td className="num">{formatMoney(product.priceRetail)}</td>
-                    <td className="num">{product.stock} {product.stock <= product.minStock ? "⚠" : ""}</td>
+                    <td className="num">
+                      {product.stock} {product.stock <= product.minStock ? "⚠" : ""}
+                      {product.stockSourceId && (
+                        <div className="muted" style={{ fontSize: 11 }}>
+                          usa stock de {productById.get(product.stockSourceId)?.name ?? "otro producto"}
+                        </div>
+                      )}
+                    </td>
                     <td className="num">{product.minStock}</td>
                     <td>{(product.active ?? true) ? "Activo" : "Inactivo"}</td>
                     <td>
                       <button className="secondary" onClick={() => startEdit(product)}>Editar</button>{" "}
-                      <button className="secondary" onClick={() => startAdjustStock(product)}>Ajustar stock</button>
+                      {product.stockSourceId ? null : (
+                        <>
+                          <button className="secondary" onClick={() => startAdjustStock(product)}>Ajustar stock</button>{" "}
+                          <button className="secondary" onClick={() => openPresentations(product)}>
+                            Presentaciones{presentationsOf(product.id).length > 0 ? ` (${presentationsOf(product.id).length})` : ""}
+                          </button>
+                        </>
+                      )}
                     </td>
                   </>
                 )}
               </tr>
+              {editingId === product.id && (
+                <tr>
+                  <td colSpan={11} style={{ background: "#fafafa", padding: "10px 14px" }}>
+                    {renderStockBlock(product)}
+                  </td>
+                </tr>
+              )}
+              {presentationsOfId === product.id && editingId !== product.id && !product.stockSourceId && (
+                <tr>
+                  <td colSpan={11} style={{ background: "#fafafa", padding: "10px 14px" }}>
+                    {renderPresentationsPanel(product)}
+                  </td>
+                </tr>
+              )}
+              </Fragment>
                 ))}
               </Fragment>
             ))}

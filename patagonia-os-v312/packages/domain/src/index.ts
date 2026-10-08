@@ -21,6 +21,10 @@ export interface Product {
   minStock: Quantity;
   active?: boolean;
   categoryId?: string;
+  /** Presentación que usa el stock de otro producto (el principal). `stock` ya viene en unidades de esta presentación. */
+  stockSourceId?: string;
+  /** Cuánto del principal descuenta cada unidad de esta presentación (1 si es la misma unidad). */
+  stockFactor?: number;
 }
 
 export interface CartItem {

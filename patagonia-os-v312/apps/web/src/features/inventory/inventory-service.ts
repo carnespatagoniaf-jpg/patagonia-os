@@ -10,11 +10,12 @@ export async function listProductsForBranch(branchId: string, includeInactive = 
   const rows: {
     id: string; code: string; name: string; unit: Product["unit"]; cost: number | string; price_retail: number | string;
     min_stock: number | string; stock: number | string; active: boolean; category_id: string | null;
+    stock_source_id: string | null; stock_factor: number | string | null;
   }[] = [];
   for (let from = 0; ; from += PAGE_SIZE) {
     let query = supabase
       .from("products_with_stock")
-      .select("id,code,name,unit,cost,price_retail,min_stock,stock,active,category_id")
+      .select("id,code,name,unit,cost,price_retail,min_stock,stock,active,category_id,stock_source_id,stock_factor")
       .eq("branch_id", branchId)
       .order("name")
       .order("id")
@@ -37,8 +38,33 @@ export async function listProductsForBranch(branchId: string, includeInactive = 
     stock: Number(row.stock),
     minStock: Number(row.min_stock),
     active: row.active,
-    categoryId: row.category_id ?? undefined
+    categoryId: row.category_id ?? undefined,
+    stockSourceId: row.stock_source_id ?? undefined,
+    stockFactor: row.stock_source_id ? Number(row.stock_factor ?? 1) : undefined
   }));
+}
+
+/**
+ * Vincula una presentación a su producto principal (descuenta stock de él) o
+ * la desvincula (sourceId null). Al vincular, el stock propio que tenía queda
+ * en cero y, con moveStock, se suma al principal (x factor).
+ */
+export async function setProductStockSource(input: {
+  productId: string;
+  sourceId: string | null;
+  factor: number;
+  moveStock: boolean;
+}): Promise<{ cleared: number; moved: number }> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.rpc("set_product_stock_source", {
+    p_product_id: input.productId,
+    p_source_id: input.sourceId,
+    p_factor: input.factor,
+    p_move_stock: input.moveStock
+  });
+  if (error) throw error;
+  return { cleared: Number(data?.cleared ?? 0), moved: Number(data?.moved ?? 0) };
 }
 
 export interface CreateProductInput {
