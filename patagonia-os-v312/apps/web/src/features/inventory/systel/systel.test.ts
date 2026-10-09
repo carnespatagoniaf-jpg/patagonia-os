@@ -6,7 +6,7 @@ import { buildCuoraNeoCsv, buildQendraCsv } from "./systel-csv";
 import { FakeCuora, fakeReadRecord } from "./systel-fake";
 import { buildSystelFrame, parseSystelReply, toCuoraText, xorChecksum } from "./systel-frame";
 import { buildNewPluData, detectPluLayouts, LAYOUT_INFO, parsePluList, parseSignature, priceToRaw, type SystelLayout } from "./systel-plu";
-import { planSystelSync, runSystelSync } from "./systel-sync";
+import { namesLookAlike, planSystelSync, runSystelSync } from "./systel-sync";
 import { parseCuoraWeight, parseWeightReply } from "./systel-weight";
 import { runSystelWriteTest } from "./systel-write-test";
 
@@ -172,6 +172,37 @@ describe("plan y envío desde Patagonia", () => {
     assert.deepEqual(plan.map((p) => p.action), ["actualizar", "revisar", "revisar", "crear", "omitir", "omitir"]);
     assert.match(plan[1].reason, /por unidad/);
     assert.match(plan[2].reason, /otro código de barras/);
+  });
+
+  it("sin precio en Patagonia no se manda, y mismo número con otro producto no se toca", async () => {
+    const fake = loadedFake("max7");
+    const backup = await takeSystelBackup(new SystelClient(fake, { address: 1 }));
+    const plan = planSystelSync(backup, [
+      { code: "1", name: "Nalga", byWeight: true, price: 0 },
+      { code: "1", name: "Pollo entero", byWeight: true, price: 19000 },
+      { code: "1", name: "NALGA x kg", byWeight: true, price: 19000 }
+    ]);
+    assert.deepEqual(plan.map((p) => p.action), ["omitir", "revisar", "actualizar"]);
+    assert.match(plan[0].reason, /no tiene precio en Patagonia/);
+    assert.match(plan[1].reason, /parecen productos distintos/);
+  });
+
+  it("los nombres se comparan sin mayúsculas, acentos ni agregados", () => {
+    assert.equal(namesLookAlike("PATA MUSLO", "Pata muslo x kg"), true);
+    assert.equal(namesLookAlike("CAJON PATA MUSLO", "Cajón pata muslo x15"), true);
+    assert.equal(namesLookAlike("POLLO ENTERO", "Pata muslo"), false);
+  });
+
+  it("crea primero los productos nuevos y después cambia precios", async () => {
+    const fake = loadedFake("max62");
+    const client = new SystelClient(fake, { address: 1 });
+    const backup = await takeSystelBackup(client);
+    const plan = planSystelSync(backup, [
+      { code: "1", name: "Nalga", byWeight: true, price: 19000 },
+      { code: "30", name: "Chorizo", byWeight: true, price: 9000 }
+    ]);
+    const res = await runSystelSync(client, "max62", plan);
+    assert.deepEqual(res.done.map((d) => d.action), ["crear", "actualizar"]);
   });
 
   it("con precio en centavos, $25.000 no entra y no se manda", async () => {

@@ -670,8 +670,12 @@ export function Inventory() {
               Descargar lista para balanza
             </button>
           )}
-          <ScaleSyncPanel products={products} onDownloadCsv={() => downloadScaleExportCsv(products, categories)} />
-          {(SHOW_SYSTEL_PANEL || SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? "")) && <SystelPanel products={products} />}
+          {SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? "") ? (
+            <SystelPanel products={products} pilot />
+          ) : (
+            <ScaleSyncPanel products={products} onDownloadCsv={() => downloadScaleExportCsv(products, categories)} />
+          )}
+          {SHOW_SYSTEL_PANEL && <SystelPanel products={products} />}
         </div>
 
         <PriceTools products={products} categories={categories} onApplied={reload} />

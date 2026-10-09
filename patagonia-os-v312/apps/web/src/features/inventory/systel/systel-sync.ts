@@ -11,7 +11,22 @@ import { LAYOUT_INFO, priceToRaw, rawToPesos, type SystelLayout, type SystelPlu 
  * - Si está con otro código o con otro tipo: "revisar", no se toca.
  * - Si no está: se crea (función 61/4), por kilo (P) o por unidad (U).
  * - Nunca se borra nada. Se frena ante la primera diferencia.
+ * - Sin precio en Patagonia (0): no se manda; la balanza conserva el suyo (real: Los gringos tenía
+ *   102 de 103 productos en $0, 2026-10-09).
+ * - Mismo número pero OTRO producto (el nombre no se parece): "revisar", no se toca. Si no, un
+ *   "5 = Pata muslo" de Patagonia le cambiaba el precio al "5 = Pollo entero" de la balanza.
+ * - Se crean primero los nuevos (números libres, no arriesgan nada) y después se cambian precios.
  */
+
+/** "Pata Muslo x kg" ≈ "PATA MUSLO": mayúsculas, sin acentos ni signos, y se parecen si uno contiene al otro o comparten la primera palabra. */
+export function namesLookAlike(a: string, b: string): boolean {
+  const norm = (t: string) => t.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toUpperCase().replace(/[^A-Z0-9 ]/g, " ").replace(/\s+/g, " ").trim();
+  const x = norm(a);
+  const y = norm(b);
+  if (!x || !y) return false;
+  if (x === y || x.includes(y) || y.includes(x)) return true;
+  return x.split(" ")[0] === y.split(" ")[0];
+}
 
 export interface SystelProductInput {
   code: string;
@@ -46,6 +61,9 @@ export function planSystelSync(backup: SystelBackup, products: SystelProductInpu
     if (!Number.isInteger(number) || number < 1 || number > Math.min(info.maxPlu, info.maxCode)) {
       return { ...base, number: null, action: "omitir" as const, reason: `el código "${p.code}" no es un número de 1 a ${Math.min(info.maxPlu, info.maxCode)}`, priceRaw: null };
     }
+    if (!(p.price > 0)) {
+      return { ...base, number, action: "omitir" as const, reason: "no tiene precio en Patagonia: en la balanza queda el que tiene", priceRaw: null };
+    }
     const priceRaw = priceToRaw(p.price, decimals);
     if (priceRaw === null) {
       const max = decimals === 2 ? "$9.999,99" : "$999.999";
@@ -56,6 +74,9 @@ export function planSystelSync(backup: SystelBackup, products: SystelProductInpu
     if (!current) return { ...base, number, action: "crear" as const, reason: p.byWeight ? "nuevo, por kilo" : "nuevo, por unidad", priceRaw };
     const wantType = p.byWeight ? "P" : "U";
     if (current.code !== number) return { ...base, current, number, action: "revisar" as const, reason: `en la balanza el PLU ${number} tiene otro código de barras (${current.code}); no se toca`, priceRaw };
+    if (!namesLookAlike(current.name, p.name)) {
+      return { ...base, current, number, action: "revisar" as const, reason: `en la balanza el ${number} es "${current.name.trim()}" y en Patagonia "${p.name}": parecen productos distintos; no se toca`, priceRaw };
+    }
     const typeOk = wantType === "P" ? current.saleType !== "U" : current.saleType === "U";
     if (!typeOk) return { ...base, current, number, action: "revisar" as const, reason: `en la balanza es "${current.name.trim()}" ${current.saleType === "U" ? "por unidad" : "por kilo"} y en Patagonia ${p.byWeight ? "por kilo" : "por unidad"}; no se toca`, priceRaw };
     if (current.prices[0] === priceRaw) return { ...base, current, number, action: "sin_cambios" as const, reason: "ya tiene ese precio", priceRaw };
@@ -90,7 +111,10 @@ export interface SystelSyncResult {
  * planificar desde un respaldo nuevo retoma lo que falta sin repetir nada.
  */
 export async function runSystelSync(client: SystelClient, layout: SystelLayout, plan: SystelPlanItem[], onProgress: (text: string) => void = () => {}): Promise<SystelSyncResult> {
-  const work = plan.filter((p) => (p.action === "actualizar" || p.action === "crear") && p.number !== null && p.priceRaw !== null);
+  const work = plan
+    .filter((p) => (p.action === "actualizar" || p.action === "crear") && p.number !== null && p.priceRaw !== null)
+    // Primero los nuevos (números libres): si algo del protocolo no anda, frena sin haber tocado un producto existente.
+    .sort((a, b) => Number(a.action === "actualizar") - Number(b.action === "actualizar"));
   const list = await client.list();
   if (!list) {
     return { done: [], stoppedAt: { number: 0, action: "actualizar", outcome: { ok: false, verdict: "sin_relectura", detail: "no se pudo leer la lista de productos antes de empezar", readBack: null, diff: [] } }, pending: work.length };

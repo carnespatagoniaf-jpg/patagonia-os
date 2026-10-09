@@ -47,7 +47,12 @@ const ACTION_LABEL: Record<SystelPlanItem["action"], string> = {
   omitir: "No se manda"
 };
 
-export function SystelPanel({ products }: { products: SystelPanelProduct[] }) {
+/**
+ * `pilot`: un solo botón "Mandar productos a la balanza" (lee y respalda → plan → manda, primero
+ * los nuevos, relee cada uno y frena ante cualquier diferencia → resultado a soporte). Pedido del
+ * dueño 2026-10-09: al cliente se le pide UNA sola acción. Sin marcas a la vista.
+ */
+export function SystelPanel({ products, pilot = false }: { products: SystelPanelProduct[]; pilot?: boolean }) {
   const [open, setOpen] = useState(false);
   const [modelId, setModelId] = useState<SystelModelId>("cuora_max");
   const [address, setAddress] = useState(1);
@@ -160,6 +165,94 @@ export function SystelPanel({ products }: { products: SystelPanelProduct[] }) {
   }
 
   const decimals = backup?.signature?.priceDecimals ?? 0;
+
+  async function handleOneClick() {
+    const result = await withClient(async (c) => {
+      setProgress("Leyendo lo que tiene la balanza (no cambia nada)…");
+      const b = await takeSystelBackup(c, setProgress);
+      setBackup(b);
+      saveBackupLocally(b);
+      if (!b.complete || !b.layout) return { b, p: [] as SystelPlanItem[], r: null as SystelSyncResult | null };
+      const p = planSystelSync(b, csvProducts);
+      const r = await runSystelSync(c, b.layout, p, setProgress);
+      return { b, p, r };
+    });
+    if (!result) return;
+    setSync(result.r);
+    const sent = result.r?.done.length ?? 0;
+    const skipped = result.p.filter((x) => x.action === "revisar" || x.action === "omitir").length;
+    const detail = !result.r
+      ? `no se pudo leer la balanza completa: ${result.b.detail}`
+      : result.r.stoppedAt
+        ? `se frenó en el PLU ${result.r.stoppedAt.number}: ${result.r.stoppedAt.outcome.detail} (${sent} ya mandados)`
+        : `${sent} mandados, ${skipped} sin tocar, ${result.b.plus.length} productos leídos de la balanza`;
+    void autoReport("mandar productos (un botón)", detail, { backup: result.b, sync: result.r });
+  }
+
+  if (pilot) {
+    const done = sync?.done ?? [];
+    const created = done.filter((d) => d.action === "crear").length;
+    const updated = done.filter((d) => d.action === "actualizar").length;
+    const untouched = plan.filter((p) => p.action === "revisar" || p.action === "omitir");
+    return (
+      <>
+        <button className="secondary" onClick={() => setOpen((v) => !v)}>{open ? "Ocultar balanza" : "Balanza"}</button>
+        {open && (
+          <div className="panel" style={{ width: "100%", marginTop: 12, display: "grid", gap: 10 }}>
+            <div>
+              <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 16 }}>Balanza</p>
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>Con la balanza conectada por USB, manda tus productos y precios. No borra nada de la balanza.</p>
+            </div>
+            <div>
+              <button disabled={busy} onClick={() => void handleOneClick()}>{busy ? "Mandando…" : "Mandar productos a la balanza"}</button>
+              <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>La primera vez, Chrome pregunta qué puerto usar: elegí el que dice USB y tocá Conectar.</p>
+            </div>
+            {progress && <p className="muted" style={{ margin: 0 }}>{progress}</p>}
+            {error && <p className="message warning" style={{ margin: 0 }}>No se pudo: {error}. No se cambió nada en la balanza.</p>}
+            {backup && !sync && !busy && !error && <p className="message warning" style={{ margin: 0 }}>Se leyó la balanza pero no se mandó nada: {backup.detail}</p>}
+            {sync && (
+              <p className={sync.stoppedAt ? "message warning" : "message"} style={{ margin: 0 }}>
+                {sync.stoppedAt
+                  ? `Se frenó para no arriesgar nada (${sync.stoppedAt.outcome.detail}). Se mandaron bien ${done.length}. No se borró nada.`
+                  : `✅ Listo: ${created} productos nuevos y ${updated} precios actualizados en la balanza.${untouched.length ? ` ${untouched.length} quedaron como estaban (ver detalle).` : ""}`}
+              </p>
+            )}
+            {reportNote && <p className="muted" style={{ margin: 0, fontSize: 12 }}>{reportNote}</p>}
+            {plan.length > 0 && (
+              <details>
+                <summary style={{ cursor: "pointer", fontSize: 13, fontWeight: 700 }}>Ver detalle por producto</summary>
+                <div style={{ maxHeight: 300, overflowY: "auto", marginTop: 6 }}>
+                  <table className="data-table">
+                    <thead><tr><th>N.º</th><th>Producto</th><th>Qué pasó</th><th>Detalle</th></tr></thead>
+                    <tbody>
+                      {plan.map((p, i) => (
+                        <tr key={i}><td>{p.number ?? "-"}</td><td>{p.name}</td><td>{ACTION_LABEL[p.action]}</td><td className="muted" style={{ fontSize: 12 }}>{p.reason}</td></tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            )}
+            <details>
+              <summary style={{ cursor: "pointer", fontSize: 13, color: "#47505c" }}>Opciones</summary>
+              <div style={{ display: "grid", gap: 8, marginTop: 6 }}>
+                <label style={{ fontSize: 13 }}>
+                  Número de balanza{" "}
+                  <input type="number" min={1} max={99} value={address} onChange={(e) => setAddress(Number(e.target.value) || 1)} style={{ width: 70 }} disabled={busy} />
+                  <span className="muted" style={{ fontSize: 12 }}> (de fábrica es 1)</span>
+                </label>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {linkRef.current && <button className="secondary" disabled={busy} onClick={changePort}>Elegir otro puerto</button>}
+                  {backup && <button className="secondary" onClick={() => download(`respaldo_balanza_${backup.takenAt.slice(0, 10)}.json`, backupToJson(backup), "application/json")}>Descargar copia de la balanza</button>}
+                  <button className="secondary" onClick={() => download("productos_qendra.csv", buildQendraCsv(csvProducts).csv, "text/csv")}>Archivo para el programa de la balanza (Qendra)</button>
+                </div>
+              </div>
+            </details>
+          </div>
+        )}
+      </>
+    );
+  }
 
   return (
     <>
