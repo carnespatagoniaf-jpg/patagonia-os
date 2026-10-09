@@ -93,7 +93,7 @@ describe("Cuora simulada: respaldo, cambio de precio, alta", () => {
   for (const layout of LAYOUTS) {
     it(`${layout}: respalda todo y reconoce el formato`, async () => {
       const fake = loadedFake(layout);
-      const backup = await takeSystelBackup(new SystelClient(fake, { allowWrites: true, address: 1 }));
+      const backup = await takeSystelBackup(new SystelClient(fake, { writes: { price: true, create: true }, address: 1 }));
       assert.equal(backup.layout, layout);
       assert.equal(backup.complete, true);
       assert.equal(backup.plus.length, 3);
@@ -103,7 +103,7 @@ describe("Cuora simulada: respaldo, cambio de precio, alta", () => {
 
     it(`${layout}: el cambio de precio conserva código, tipo, tara y el resto`, async () => {
       const fake = loadedFake(layout);
-      const client = new SystelClient(fake, { allowWrites: true, address: 1 });
+      const client = new SystelClient(fake, { writes: { price: true, create: true }, address: 1 });
       const before = (await client.readPlu(layout, 7))!;
       const out = await client.changePrice(before, 10500);
       assert.equal(out.ok, true, out.detail);
@@ -115,7 +115,7 @@ describe("Cuora simulada: respaldo, cambio de precio, alta", () => {
 
     it(`${layout}: crea un producto nuevo y no escribe encima de uno existente`, async () => {
       const fake = loadedFake(layout);
-      const client = new SystelClient(fake, { allowWrites: true, address: 1 });
+      const client = new SystelClient(fake, { writes: { price: true, create: true }, address: 1 });
       const known = new Set([1, 2, 7]);
       const ok = await client.createPlu(layout, { number: 50, name: "Vacio", code: 50, saleType: "P", priceRaw: 16000 }, known);
       assert.equal(ok.ok, true, ok.detail);
@@ -126,18 +126,40 @@ describe("Cuora simulada: respaldo, cambio de precio, alta", () => {
     });
   }
 
-  it("si la balanza espera la escritura SIN verificación, contesta E5 y se reintenta sin (nada quedó grabado)", async () => {
+  it("alta: si la balanza contesta E5 se frena; NO prueba sola la forma sin control", async () => {
     const fake = loadedFake("max7", { writeChecksum: false });
-    const client = new SystelClient(fake, { allowWrites: true, address: 1 });
+    const client = new SystelClient(fake, { writes: { create: true }, address: 1 });
+    const before = fake.received.length;
+    const out = await client.createPlu("max7", { number: 60, name: "Pollo", code: 60, saleType: "P", priceRaw: 5200 }, new Set([1, 2, 7]));
+    assert.equal(out.ok, false);
+    assert.equal(out.verdict, "rechazada");
+    assert.equal(fake.received.slice(before).filter((x) => x.fn === 61).length, 1, "un solo intento de alta");
+    assert.equal(fake.plus.has(60), false);
+  });
+
+  it("alta sin control solo si se pide explícitamente (laboratorio)", async () => {
+    const fake = loadedFake("max7", { writeChecksum: false });
+    const client = new SystelClient(fake, { writes: { create: true }, createChecksum: "sin_experimental", address: 1 });
     const out = await client.createPlu("max7", { number: 60, name: "Pollo", code: 60, saleType: "P", priceRaw: 5200 }, new Set([1, 2, 7]));
     assert.equal(out.ok, true, out.detail);
-    assert.equal(client.writeChecksum, "sin");
+  });
+
+  it("precio y alta se habilitan por separado: con solo precio, el alta queda bloqueada (y al revés)", async () => {
+    const fake = loadedFake("max60");
+    const onlyPrice = new SystelClient(fake, { writes: { price: true }, address: 1 });
+    const b = await takeSystelBackup(onlyPrice);
+    const created = await onlyPrice.createPlu("max60", { number: 60, name: "Pollo", code: 60, saleType: "P", priceRaw: 5200 }, new Set([1, 2, 7]));
+    assert.equal(created.verdict, "bloqueado");
+    const changed = await onlyPrice.changePrice(b.plus.find((p) => p.number === 1)!, 19000);
+    assert.equal(changed.ok, true, changed.detail);
+    const onlyCreate = new SystelClient(fake, { writes: { create: true }, address: 1 });
+    assert.equal((await onlyCreate.changePrice(b.plus.find((p) => p.number === 2)!, 1)).verdict, "bloqueado");
   });
 
   it("frena si la relectura no coincide o si la balanza no aplicó el precio", async () => {
     const fake = loadedFake("max7");
     fake.corruptAfterWrite = 61;
-    const client = new SystelClient(fake, { allowWrites: true, address: 1 });
+    const client = new SystelClient(fake, { writes: { price: true, create: true }, address: 1 });
     const bad = await client.createPlu("max7", { number: 61, name: "Pollo", code: 61, saleType: "P", priceRaw: 5200 }, new Set([1, 2, 7]));
     assert.equal(bad.verdict, "diferencia");
     fake.ignorePriceChange = true;
@@ -148,7 +170,7 @@ describe("Cuora simulada: respaldo, cambio de precio, alta", () => {
 
   it("sin respuesta a una escritura: relee en vez de reenviar", async () => {
     const fake = loadedFake("max62");
-    const client = new SystelClient(fake, { allowWrites: true, address: 1 });
+    const client = new SystelClient(fake, { writes: { price: true, create: true }, address: 1 });
     const before = (await client.readPlu("max62", 1))!;
     fake.silent = true;
     const out = await client.changePrice(before, 19000);
@@ -158,7 +180,7 @@ describe("Cuora simulada: respaldo, cambio de precio, alta", () => {
 });
 
 describe("envío bloqueado por defecto", () => {
-  it("sin allowWrites no manda cambio de precio ni alta: ninguna función de escritura sale", async () => {
+  it("sin permisos de escritura no manda cambio de precio ni alta: ninguna función de escritura sale", async () => {
     const fake = loadedFake("max60");
     const client = new SystelClient(fake, { address: 1 });
     const backup = await takeSystelBackup(client);
@@ -173,7 +195,7 @@ describe("envío bloqueado por defecto", () => {
 describe("plan y envío desde Patagonia", () => {
   it("actualiza, crea, deja sin cambios, revisa y omite según corresponda", async () => {
     const fake = loadedFake("max7");
-    const backup = await takeSystelBackup(new SystelClient(fake, { allowWrites: true, address: 1 }));
+    const backup = await takeSystelBackup(new SystelClient(fake, { writes: { price: true, create: true }, address: 1 }));
     const plan = planSystelSync(backup, [
       { code: "1", name: "Nalga", byWeight: true, price: 19000 },
       { code: "2", name: "Hamburguesa x4", byWeight: true, price: 4200 },
@@ -189,7 +211,7 @@ describe("plan y envío desde Patagonia", () => {
 
   it("sin precio en Patagonia no se manda, y mismo número con otro producto no se toca", async () => {
     const fake = loadedFake("max7");
-    const backup = await takeSystelBackup(new SystelClient(fake, { allowWrites: true, address: 1 }));
+    const backup = await takeSystelBackup(new SystelClient(fake, { writes: { price: true, create: true }, address: 1 }));
     const plan = planSystelSync(backup, [
       { code: "1", name: "Nalga", byWeight: true, price: 0 },
       { code: "1", name: "Pollo entero", byWeight: true, price: 19000 },
@@ -208,7 +230,7 @@ describe("plan y envío desde Patagonia", () => {
 
   it("crea primero los productos nuevos y después cambia precios", async () => {
     const fake = loadedFake("max62");
-    const client = new SystelClient(fake, { allowWrites: true, address: 1 });
+    const client = new SystelClient(fake, { writes: { price: true, create: true }, address: 1 });
     const backup = await takeSystelBackup(client);
     const plan = planSystelSync(backup, [
       { code: "1", name: "Nalga", byWeight: true, price: 19000 },
@@ -220,7 +242,7 @@ describe("plan y envío desde Patagonia", () => {
 
   it("con precio en centavos, $25.000 no entra y no se manda", async () => {
     const fake = loadedFake("max7", { decimals: 2 });
-    const backup = await takeSystelBackup(new SystelClient(fake, { allowWrites: true, address: 1 }));
+    const backup = await takeSystelBackup(new SystelClient(fake, { writes: { price: true, create: true }, address: 1 }));
     const plan = planSystelSync(backup, [{ code: "40", name: "Lomo", byWeight: true, price: 25000 }]);
     assert.equal(plan[0].action, "omitir");
     assert.match(plan[0].reason, /9\.999,99/);
@@ -228,7 +250,7 @@ describe("plan y envío desde Patagonia", () => {
 
   it("balanza sin decimales: un precio con centavos no se redondea a escondidas, no se manda", async () => {
     const fake = loadedFake("max60", { decimals: 0 });
-    const backup = await takeSystelBackup(new SystelClient(fake, { allowWrites: true, address: 1 }));
+    const backup = await takeSystelBackup(new SystelClient(fake, { writes: { price: true, create: true }, address: 1 }));
     const plan = planSystelSync(backup, [{ code: "40", name: "Lomo", byWeight: true, price: 4599.5 }, { code: "41", name: "Vacio", byWeight: true, price: 4600 }]);
     assert.equal(plan[0].action, "omitir");
     assert.match(plan[0].reason, /centavos/);
@@ -237,7 +259,7 @@ describe("plan y envío desde Patagonia", () => {
 
   it("manda solo lo planificado, con funciones permitidas, y los demás productos quedan iguales", async () => {
     const fake = loadedFake("max62");
-    const client = new SystelClient(fake, { allowWrites: true, address: 1 });
+    const client = new SystelClient(fake, { writes: { price: true, create: true }, address: 1 });
     const backup = await takeSystelBackup(client);
     const untouched = fake.plus.get(7);
     const plan = planSystelSync(backup, [
@@ -255,7 +277,7 @@ describe("plan y envío desde Patagonia", () => {
 
   it("si un PLU cambió en la balanza después del respaldo, frena", async () => {
     const fake = loadedFake("max7");
-    const client = new SystelClient(fake, { allowWrites: true, address: 1 });
+    const client = new SystelClient(fake, { writes: { price: true, create: true }, address: 1 });
     const backup = await takeSystelBackup(client);
     fake.plus.set(1, fakeReadRecord("max7", { number: 1, name: "NALGA CAMBIADA", price: 18500, code: 1, type: "P" }));
     const res = await runSystelSync(client, "max7", planSystelSync(backup, [{ code: "1", name: "Nalga", byWeight: true, price: 19000 }]));
@@ -268,7 +290,7 @@ describe("prueba controlada (una sola visita)", () => {
     it(`${layout}: crea 2 de prueba en números libres, cambia un precio y los del cliente quedan idénticos`, async () => {
       const fake = loadedFake(layout);
       const before = new Map(fake.plus);
-      const res = await runSystelWriteTest(new SystelClient(fake, { allowWrites: true, address: 1 }));
+      const res = await runSystelWriteTest(new SystelClient(fake, { writes: { price: true, create: true }, address: 1 }));
       assert.equal(res.verdict, "ok", res.detail);
       assert.equal(res.testNumbers.length, 2);
       for (const [n, rec] of before) assert.equal(fake.plus.get(n), rec);
@@ -279,7 +301,7 @@ describe("prueba controlada (una sola visita)", () => {
   it("sin respuesta de la balanza no escribe nada", async () => {
     const fake = loadedFake("max7");
     fake.silent = true;
-    const res = await runSystelWriteTest(new SystelClient(fake, { allowWrites: true, address: 1 }));
+    const res = await runSystelWriteTest(new SystelClient(fake, { writes: { price: true, create: true }, address: 1 }));
     assert.equal(res.verdict, "sin_respaldo");
     assert.ok(fake.received.every((r) => !SYSTEL_WRITE_FUNCTIONS.includes(r.fn as never)));
   });

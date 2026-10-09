@@ -164,7 +164,7 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
         await linkRef.current.connect();
       }
       // Escribe solo si la firma + el formato leído están en SYSTEL_VERIFIED_WRITE_PROFILES (hoy vacío).
-      return await fn(new SystelClient(linkRef.current, { address, allowWrites: systelWriteVerified(backup?.signature?.protocolVersion, backup?.layout) }));
+      return await fn(new SystelClient(linkRef.current, { address, writes: { price: systelWriteVerified("precio", backup?.signature?.protocolVersion, backup?.layout), create: systelWriteVerified("alta", backup?.signature?.protocolVersion, backup?.layout) } }));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);

@@ -84,14 +84,22 @@ export interface SystelClientOptions {
   timeoutMs?: number;
   /** Esperas entre reintentos de una lectura cuando la balanza contesta E1/E2/E3. */
   busyRetryMs?: number[];
-  /** La función 61/4 se documenta SIN verificación; las demás con. HIPÓTESIS: se prueba "con" y, si contesta E5, "sin". */
-  writeChecksum?: "con" | "sin";
+  /**
+   * Byte de control en el ALTA (61/4). Por defecto "con": la regla general del documento (V6.0 pág. 3,
+   * "Trama de transmisión PC-Balanza: … Verificación") lo incluye en toda trama; cuando Systel quiere
+   * decir lo contrario lo aclara (función 87: "Esta función no tiene en cuenta el CRC", pág. 30) y para
+   * la 61 no lo aclara; la V4.0 lo pone en la función 4 (pág. 8) y el ejemplo oficial lo agrega siempre.
+   * "sin_experimental" existe SOLO para la herramienta de laboratorio (balanza de banco) y nunca se
+   * prueba sola: ya no hay reintento automático con la otra forma.
+   */
+  createChecksum?: "con" | "sin_experimental";
   log?: SystelExchangeLog[];
   /**
-   * Escrituras (33 cambio de precio, 61/4 alta). BLOQUEADAS por defecto (decisión del dueño
-   * 2026-10-09): hasta que Systel confirme el E3 y el formato de escritura, Patagonia solo lee.
+   * Escrituras habilitadas POR OPERACIÓN (bloqueadas por defecto, decisión del dueño 2026-10-09).
+   * Que una funcione no habilita la otra: en producción salen de SYSTEL_VERIFIED_WRITE_PROFILES
+   * (por firma + formato + operación), hoy vacío.
    */
-  allowWrites?: boolean;
+  writes?: { price?: boolean; create?: boolean };
 }
 
 export class SystelError extends Error {
@@ -106,15 +114,15 @@ export class SystelClient {
   readonly log: SystelExchangeLog[];
   private readonly timeoutMs: number;
   private readonly busyRetryMs: number[];
-  writeChecksum: "con" | "sin";
-  private readonly allowWrites: boolean;
+  private readonly createChecksum: "con" | "sin_experimental";
+  private readonly writes: { price: boolean; create: boolean };
 
   constructor(private readonly link: SystelLink, options: SystelClientOptions) {
     this.address = options.address;
     this.timeoutMs = options.timeoutMs ?? 1500;
-    this.writeChecksum = options.writeChecksum ?? "con";
+    this.createChecksum = options.createChecksum ?? "con";
     this.log = options.log ?? [];
-    this.allowWrites = options.allowWrites ?? false;
+    this.writes = { price: options.writes?.price === true, create: options.writes?.create === true };
     this.busyRetryMs = options.busyRetryMs ?? [300, 800, 1500, 3000, 5000];
   }
 
@@ -239,7 +247,7 @@ export class SystelClient {
    * `current` tiene que ser una lectura reciente de ese PLU.
    */
   async changePrice(current: SystelPlu, newPriceRaw: number): Promise<WriteOutcome> {
-    if (!this.allowWrites) return BLOCKED;
+    if (!this.writes.price) return BLOCKED;
     const data = buildPriceChangeData(current, newPriceRaw);
     const expected = expectedAfterPriceChange(current, newPriceRaw);
     const r = await this.call(`cambiar precio PLU ${current.number}`, 33, data, { token: WRITE_TOKEN });
@@ -251,19 +259,16 @@ export class SystelClient {
    * leída recién: si el número ya existe, no escribe.
    */
   async createPlu(layout: SystelLayout, input: NewPluInput, knownNumbers: Set<number>): Promise<WriteOutcome> {
-    if (!this.allowWrites) return BLOCKED;
+    if (!this.writes.create) return BLOCKED;
     if (knownNumbers.has(input.number)) return { ok: false, verdict: "ocupado", detail: `el PLU ${input.number} ya existe en la balanza: no se escribe encima`, readBack: null, diff: [] };
     const fresh = await this.readPlu(layout, input.number);
     if (fresh) return { ok: false, verdict: "ocupado", detail: `el PLU ${input.number} ya existe en la balanza: no se escribe encima`, readBack: fresh, diff: [] };
     const data = buildNewPluData(layout, input);
     const expected = expectedReadOfNew(layout, input);
     const fn = LAYOUT_INFO[layout].writeFn;
-    let r = await this.call(`crear PLU ${input.number}`, fn, data, { token: WRITE_TOKEN, checksum: this.writeChecksum === "con" });
-    if (r?.kind === "error" && r.errorCode === "E5") {
-      // E5 = largo incorrecto: la balanza no guardó nada. Se prueba la otra forma documentada (con/sin verificación).
-      this.writeChecksum = this.writeChecksum === "con" ? "sin" : "con";
-      r = await this.call(`crear PLU ${input.number} (${this.writeChecksum} verificación)`, fn, data, { token: WRITE_TOKEN, checksum: this.writeChecksum === "con" });
-    }
+    // Una sola forma por intento. Si la balanza contesta E5 (largo incorrecto) se frena: NO se prueba la otra.
+    const variant = this.createChecksum === "con" ? "con control" : "SIN control (experimental, solo laboratorio)";
+    const r = await this.call(`crear PLU ${input.number} (${variant})`, fn, data, { token: WRITE_TOKEN, checksum: this.createChecksum === "con" });
     return this.confirmWrite(layout, input.number, r, expected, null);
   }
 

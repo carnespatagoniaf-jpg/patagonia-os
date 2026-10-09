@@ -71,16 +71,26 @@ export function systelCanWriteProducts(model: SystelModel): boolean {
  * - "Versión del PLU" de la 33 no tiene valores documentados.
  * Recién con la prueba de banco de docs/SYSTEL_DIAGNOSTICO_LOS_GRINGOS.md se agrega un perfil.
  */
+export type SystelWriteOperation = "precio" | "alta";
+
 export interface SystelWriteProfile {
+  /** Una operación por perfil: validar el cambio de precio NO habilita el alta (ni al revés). */
+  operation: SystelWriteOperation;
   protocolVersion: string;
   layout: "cuora2" | "max60" | "max62" | "max7";
+  /** Solo para "alta": la forma validada del byte de control. */
+  createChecksum?: "con" | "sin_experimental";
+  /** Qué balanza, cuándo, archivo del registro de laboratorio. */
   evidence: string;
 }
 
 export const SYSTEL_VERIFIED_WRITE_PROFILES: SystelWriteProfile[] = [];
 
-/** ¿Se puede escribir en una balanza con esta firma y este formato leído? Sin perfil validado: no. */
-export function systelWriteVerified(protocolVersion: string | null | undefined, layout: string | null | undefined): boolean {
+/**
+ * ¿Se puede hacer ESTA operación en una balanza con esta firma y este formato leído? Coincidencia
+ * exacta de los tres: no hay comodines por modelo ni por versión. Sin perfil validado: no.
+ */
+export function systelWriteVerified(operation: SystelWriteOperation, protocolVersion: string | null | undefined, layout: string | null | undefined): boolean {
   if (!protocolVersion || !layout) return false;
-  return SYSTEL_VERIFIED_WRITE_PROFILES.some((p) => p.protocolVersion === protocolVersion && p.layout === layout);
+  return SYSTEL_VERIFIED_WRITE_PROFILES.some((p) => p.operation === operation && p.protocolVersion === protocolVersion && p.layout === layout);
 }

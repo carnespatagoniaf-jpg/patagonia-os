@@ -238,3 +238,97 @@ Lo hace el equipo de Patagonia con una Cuora Max de prueba (prestada por un ATAS
    Anotar qué lo provoca y qué lo destraba.
 
 **Resultado:** si los pasos 2 a 6 dan bien, se agrega el perfil (firma + formato + evidencia) a `SYSTEL_VERIFIED_WRITE_PROFILES`. Recién ahí se puede habilitar el envío en Patagonia.
+
+> **La sección F queda REEMPLAZADA por la H de la revisión 5.** Ya no se prueba el alta "con y sin control" en la misma corrida, y precio y alta se validan por separado.
+
+---
+
+# Revisión 5: versión preparada para validar (2026-10-09, NO publicada)
+
+## G. Versiones, por identificador
+
+| Despliegue Netlify | Código | Systel |
+|---|---|---|
+| `6ac91088b654987e9033c6b8` | `1ff060f` | Piloto que **manda precios**. Búsqueda automática de la conexión. |
+| `6ac915e551b21bad6da0b7fd` | `f03d3b7` | Igual, más la lista con espera de cierre. |
+| `6ac9184a9f486cd94d7dfd21` | `751d036` + `c7e0c28` | Igual, más reintentos ante E3. |
+| `6ac91bb01e087b307ebf0730` | `099dd2f` de **otra sesión** (embudo de ventas, migración 116), sobre `c7e0c28` | Piloto que **manda precios**. |
+| **`6ac937fb0dec4c31d6693851`** (**EN PRODUCCIÓN**) | `294d9d9` (incluye `099dd2f`) | **Escritura bloqueada** (`allowWrites ?? false`, comprobado en el JS publicado). El piloto solo lee. |
+
+**Guardado y NO publicado**, sobre `294d9d9`:
+- **`45e2214`:** cierra el puerto al salir de la pantalla; "puerto ocupado" se informa distinto de "no contestó"; el 20 como alternativa en la búsqueda; reporte acotado; pruebas [REAL]/[SINTÉTICO].
+- **`e687813`:**
+  - la respuesta es la última trama completa (dos tramas válidas pegadas verifican juntas por XOR);
+  - una orden por vez en el cable y un intento a la vez;
+  - suelta el puerto al desenchufar;
+  - escritura solo con un perfil validado;
+  - pruebas de la secuencia contra las 16:08 y del ejemplo oficial.
+- **Commit de esta revisión:**
+  - permisos **por operación** (`writes: { price, create }`), con perfiles por operación + firma + formato, sin comodines;
+  - el alta ya no prueba sola "sin control" ante un E5;
+  - herramienta de laboratorio.
+
+La secuencia de recuperación del E3 (1 → 0 → número) es una **HIPÓTESIS**: reproduce el orden de la sesión que anduvo, pero no está comprobado que evite ni que destrabe el E3.
+
+## H. Formato del alta y validaciones separadas
+
+- **Byte de control en la 61, forma por defecto "con control".** Justificación:
+  - la regla general del protocolo pone "Verificación" en toda trama PC→balanza (V6.0 pág. 3);
+  - cuando Systel exceptúa una orden lo dice expresamente (función 87: "Esta función no tiene en cuenta el CRC", V6.0 pág. 30), y para la 61 no lo dice;
+  - la V4.0 pone "+ CRC" en la función 4 (pág. 8);
+  - el ejemplo oficial lo agrega a todas las órdenes.
+
+  La omisión en la 61 (V6.0 pág. 20, V6.2/V7 pág. 18) se trata como posible error del documento, **no comprobado**.
+- **"Sin control"** existe solo como variante **experimental**: la elige la persona, en otra corrida, en el laboratorio. Ante un E5 la herramienta **se detiene** con un único intento. Hay prueba.
+- **Validación por operación:**
+  - un perfil = una operación ("precio" o "alta") + una firma exacta + un formato exacto + evidencia;
+  - validar el cambio de precio no habilita el alta, ni al revés (hay prueba);
+  - no hay comodines por modelo ni por versión.
+
+## I. Herramienta de laboratorio (`systel-lab.ts` + `SystelLabPanel.tsx`)
+
+- **Solo en una compilación con `VITE_SYSTEL_LAB=1`.** La compilación normal no la incluye: comprobado buscando su texto en el JS de producción (ausente) y en el de laboratorio (presente). Cada función exige `lab: true`.
+- **Cambio de precio** (`runPriceChangeLab`):
+  1. identificar (2 + 23);
+  2. lista completa (31);
+  3. formato inequívoco (62, o 3 si la 62 no existe), que tiene que coincidir con los dígitos de la lista;
+  4. segunda lectura idéntica;
+  5. **estado inicial guardado**;
+  6. confirmación de la persona;
+  7. cambio de **solo** la lista 1 (33);
+  8. releer (solo cambió la lista 1);
+  9. restaurar el precio original (33);
+  10. releer y comparar con el inicial;
+  11. lista igual a la del comienzo.
+- **Alta** (`runCreateLab`): número libre, formato reconocido sobre un producto existente leído dos veces, confirmación, **una** forma de control, releer campo por campo, lista. La restauración es **borrarlo a mano desde el menú** (Patagonia nunca manda la función 5) y después `verifyCreateRestored`.
+- **Se detiene ANTES de escribir** si:
+  - la lista está incompleta;
+  - una respuesta no pasa el control;
+  - el formato es ambiguo o no reconocido;
+  - las dos lecturas difieren;
+  - la persona no confirma.
+
+  Hay prueba de cada caso, una de ellas con los bytes reales de Los gringos (se detiene en "lista completa").
+- **El informe** (JSON descargable) trae: cada paso con su resultado, ms y órdenes (bytes enviados y recibidos, ms, interpretación); el protocolo usado (firma, dígitos, formato, función de lectura y de escritura); los estados inicial, después y restaurado; los eventos del cable.
+- Las pruebas de la herramienta usan el simulador ([SINTÉTICO]), salvo una [REAL]. **No validan una balanza real.**
+
+## J. Procedimiento para una Cuora Max de banco (reemplaza la sección F)
+
+1. **Preparar.** Compilación de laboratorio (`VITE_SYSTEL_LAB=1 npm run dev -w @patagonia/web`) en la PC del banco. Anotar el modelo, el firmware y la identificación. Cargar a mano el PLU 7999 con precio y código conocidos; foto de la pantalla.
+2. **Cambio de precio** ("Probar cambio de precio", PLU 7999, precio actual + 1). Se aprueba si:
+   - el resultado es `aprobado`;
+   - el 7999 vuelve a su estado inicial;
+   - la lista queda igual;
+   - la pantalla de la balanza coincide.
+
+   Repetir 3 veces. Descargar los 3 informes.
+3. **Alta, en otra sesión y con otro informe** ("Probar alta (con control)", PLU 7998 libre). Se aprueba si:
+   - el resultado es `restaurar_a_mano`;
+   - la relectura coincide campo por campo;
+   - la lista tiene el nuevo y no pierde ninguno.
+
+   Borrar el 7998 a mano y tocar "Verificar restauración" (tiene que dar ✔).
+   - Si da `fallo_al_escribir` con E5: **detenerse y analizar** el informe.
+   - "Alta SIN control" se intenta solo después de ese análisis, como prueba aparte, con su propio informe.
+4. **E3**, en una corrida aparte y solo lectura: intentar reproducirlo (hablarle apenas abierto el puerto, cortar una lista a la mitad, un menú abierto) con el registro del cable. Anotar qué lo provoca y qué lo destraba.
+5. **Con los informes aprobados**, una persona agrega a `SYSTEL_VERIFIED_WRITE_PROFILES` **un perfil por operación aprobada**, con la firma y el formato **exactos** de esa balanza y la referencia a los informes. Otra firma u otro formato siguen bloqueados.

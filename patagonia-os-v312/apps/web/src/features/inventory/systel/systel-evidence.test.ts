@@ -134,7 +134,9 @@ describe("guardas de recepción", () => {
 
   it("escritura: ningún perfil validado; S0060 con cualquier formato de 4 dígitos queda bloqueado", () => {
     assert.equal(SYSTEL_VERIFIED_WRITE_PROFILES.length, 0);
-    for (const layout of ["cuora2", "max60", "max62", "max7"]) assert.equal(systelWriteVerified("0060", layout), false);
-    assert.equal(systelWriteVerified(null, "max60"), false);
+    for (const op of ["precio", "alta"] as const) {
+      for (const layout of ["cuora2", "max60", "max62", "max7"]) assert.equal(systelWriteVerified(op, "0060", layout), false);
+      assert.equal(systelWriteVerified(op, null, "max60"), false);
+    }
   });
 });
