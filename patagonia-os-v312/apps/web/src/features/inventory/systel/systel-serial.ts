@@ -140,9 +140,10 @@ export class SerialSystelLink implements SystelLink {
         lastChange = Date.now();
       }
       if (lastLen > 0 && Date.now() - lastChange >= quiet) {
-        // Pausa a mitad de una respuesta larga: se espera hasta INCOMPLETE_QUIET_MS más antes de darla por terminada.
+        // Pausa a mitad de una respuesta: se sigue esperando en silencio hasta el plazo de esa orden
+        // (la lista de PLU tiene 15 s). Real: la Cuora hace una pausa antes de la "F" final de la lista.
         const incomplete = options.isComplete && !options.isComplete(Uint8Array.from(this.buffer));
-        if (!incomplete || Date.now() - lastChange >= INCOMPLETE_QUIET_MS) break;
+        if (!incomplete || Date.now() - lastChange >= Math.max(INCOMPLETE_QUIET_MS, options.timeoutMs)) break;
       }
       if (lastLen === 0 && Date.now() - start >= options.timeoutMs) return null;
       if (Date.now() - start >= options.timeoutMs + 60_000) break;

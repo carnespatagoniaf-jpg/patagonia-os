@@ -64,6 +64,11 @@ export function planSystelSync(backup: SystelBackup, products: SystelProductInpu
     if (!(p.price > 0)) {
       return { ...base, number, action: "omitir" as const, reason: "no tiene precio en Patagonia: en la balanza queda el que tiene", priceRaw: null };
     }
+    // Sin decimales (la de Los gringos: firma D0, configuración CPr=0) $4.599,50 quedaría $4.600 en la
+    // balanza y el ticket cobraría distinto que Patagonia: no se manda y se avisa.
+    if (decimals === 0 && Math.round(p.price * 100) % 100 !== 0) {
+      return { ...base, number, action: "omitir" as const, reason: "tiene centavos y esta balanza trabaja sin centavos: redondeá el precio en Patagonia", priceRaw: null };
+    }
     const priceRaw = priceToRaw(p.price, decimals);
     if (priceRaw === null) {
       const max = decimals === 2 ? "$9.999,99" : "$999.999";

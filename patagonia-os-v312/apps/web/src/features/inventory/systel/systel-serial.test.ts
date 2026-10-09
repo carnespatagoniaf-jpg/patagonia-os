@@ -56,12 +56,54 @@ describe("balanza ocupada (E3)", () => {
     assert.ok(sig, "después de los E3 tiene que leer la firma");
   });
 
-  it("con un solo E3 la lectura se pide una vez más y listo", async () => {
+  it("con un solo E3 repite la secuencia de arranque (ping al 1 y general) y pide una vez más, solo con pings", async () => {
     const cuora = new FakeCuora("max62", { address: 20 });
     const client = new SystelClient(cuora, { address: 20, busyRetryMs: [5, 5, 5] });
     cuora.busyReplies = 1;
     const before = cuora.received.length;
-    await client.ping();
-    assert.equal(cuora.received.length - before, 2, "la lectura se pidió dos veces (E3 y reintento)");
+    assert.ok(await client.ping());
+    const sent = cuora.received.slice(before);
+    assert.equal(sent.length, 4, "E3, ping al 1, ping general, reintento");
+    assert.ok(sent.every((r) => r.fn === 23));
+  });
+});
+
+/** Puerto que se "desenchufa" (el stream de lectura da error) después de la primera respuesta. */
+class UnpluggingPort {
+  readable: ReadableStream<Uint8Array> | null = null;
+  writable: WritableStream<Uint8Array> | null = null;
+  opens = 0;
+  writes = 0;
+  async open() {
+    this.opens += 1;
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    this.readable = new ReadableStream<Uint8Array>({ start: (c) => { controller = c; } });
+    const self = this;
+    this.writable = new WritableStream<Uint8Array>({
+      write(frame) {
+        self.writes += 1;
+        const answer = reply(frame[0], frame[1], "00T");
+        setTimeout(() => controller.enqueue(answer), 2);
+        if (self.opens === 1) setTimeout(() => controller.error(new Error("device lost")), 120);
+      }
+    });
+  }
+  async close() {
+    this.readable = null;
+    this.writable = null;
+  }
+}
+
+describe("desconexión del cable", () => {
+  it("si el cable se corta, la próxima orden reabre el puerto una vez y sigue", async () => {
+    const port = new UnpluggingPort();
+    const link = new SerialSystelLink(port as unknown as SerialPort);
+    await link.connect();
+    const client = new SystelClient(link, { address: 20 });
+    assert.ok(await client.ping());
+    await new Promise((r) => setTimeout(r, 200));
+    assert.ok(await client.ping(), "después de reabrir contesta");
+    assert.equal(port.opens, 2);
+    await link.close();
   });
 });

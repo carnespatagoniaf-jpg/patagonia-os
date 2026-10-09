@@ -60,8 +60,9 @@ const label = (s: SystelSerialSettings) => `${s.baudRate} ${s.parity === "none" 
  * contestó: con 0 (broadcast) la balanza responde con el suyo, que se lee de los bytes.
  */
 async function pingAt(link: SerialSystelLink, address: number, log: SystelExchangeLog[], timeoutMs: number): Promise<number | null> {
-  const client = new SystelClient(link, { address, timeoutMs, log });
-  if (await client.ping()) return address;
+  const client = new SystelClient(link, { address, timeoutMs, log, busyRetryMs: [] });
+  if (address !== 0 && (await client.ping())) return address;
+  if (address === 0) await client.ping();
   const last = log[log.length - 1];
   if (!last?.rx) return null;
   const bytes = Uint8Array.from(last.rx.split(" ").filter(Boolean).map((h) => parseInt(h, 16)));
@@ -77,7 +78,9 @@ export async function discoverSystelLink(
   pingTimeoutMs = 350
 ): Promise<SystelFoundLink | null> {
   const plan: { settings: SystelSerialSettings; addresses: number[] }[] = [];
-  if (preferred) plan.push({ settings: preferred.settings, addresses: [preferred.address] });
+  // Con lo guardado se repite la secuencia que anduvo en la balanza real (1, 0 y recién su número):
+  // las 3 veces que se le habló directo a su número contestó E3 a todo.
+  if (preferred) plan.push({ settings: preferred.settings, addresses: [...new Set([1, 0, preferred.address])] });
   const firstAddresses = [1, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10];
   for (const settings of SYSTEL_SERIAL_CANDIDATES) plan.push({ settings, addresses: firstAddresses });
   plan.push({ settings: SYSTEL_SERIAL_CANDIDATES[0], addresses: Array.from({ length: 89 }, (_, i) => i + 11) });

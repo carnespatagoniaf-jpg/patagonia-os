@@ -1,4 +1,4 @@
-import { buildSystelFrame, describeSystelError, parseSystelReply, toHex, type SystelReply } from "./systel-frame";
+import { buildSystelFrame, describeSystelError, findSystelReply, parseSystelReply, toHex, type SystelReply } from "./systel-frame";
 import {
   buildNewPluData,
   buildPriceChangeData,
@@ -113,10 +113,9 @@ export class SystelClient {
 
   /**
    * Manda una función y devuelve la respuesta validada (dirección, función y verificación).
-   * Real 2026-10-09 (Los gringos): la misma balanza que había contestado bien, 18 minutos
-   * después contestó E3 ("se desatendieron datos") a todo; la balanza estaba ocupada.
-   * En las LECTURAS, ante E1/E2/E3 (errores de transmisión, la orden no se hizo) se espera y
-   * se reintenta. Las escrituras no se reintentan acá: el cliente relee antes de volver a mandar.
+   * En las LECTURAS, ante E1/E2/E3 (la balanza dice que no hizo la orden) se repite la secuencia
+   * de arranque comprobada (`wake`) y se reintenta. Las escrituras no se reintentan acá: el cliente
+   * relee antes de volver a mandar.
    */
   private async call(step: string, fn: number, data: string, opts: { token?: symbol; checksum?: boolean; timeoutMs?: number } = {}): Promise<SystelReply | null> {
     const isRead = (SYSTEL_READ_FUNCTIONS as readonly number[]).includes(fn);
@@ -124,28 +123,55 @@ export class SystelClient {
     for (const wait of isRead ? this.busyRetryMs : []) {
       if (!(reply && reply.kind === "error" && TRANSIENT_ERRORS.has(reply.errorCode ?? ""))) break;
       await new Promise((r) => setTimeout(r, wait));
+      await this.wake();
       reply = await this.callOnce(`${step} (reintento)`, fn, data, opts);
     }
     return reply;
   }
 
-  private async callOnce(step: string, fn: number, data: string, opts: { token?: symbol; checksum?: boolean; timeoutMs?: number }): Promise<SystelReply | null> {
+  /**
+   * Secuencia de arranque COMPROBADA en la balanza real (Los gringos, 2026-10-09 16:08): ping al
+   * número 1 y ping general (0) antes de hablarle a su número. Con esa secuencia contestó bien todo;
+   * en las 3 sesiones en que se le habló directo a su número contestó E3 a todo (HIPÓTESIS sobre
+   * la causa; ver docs/SYSTEL_DIAGNOSTICO_LOS_GRINGOS.md). Solo función 23 (lectura).
+   * Devuelve el número que contestó al ping general, si contestó.
+   */
+  async wake(): Promise<number | null> {
+    if (this.address !== 1) await this.rawCall("arranque: ping al 1", 1, 23, "", 350);
+    const r = await this.rawCall("arranque: ping general (0)", 0, 23, "", 350);
+    return r && r.checksumOk && r.fn === 23 && r.address >= 1 && r.address <= 99 ? r.address : null;
+  }
+
+  private callOnce(step: string, fn: number, data: string, opts: { token?: symbol; checksum?: boolean; timeoutMs?: number }): Promise<SystelReply | null> {
     assertSystelFunctionAllowed(fn, opts.token);
-    const frame = buildSystelFrame(this.address, fn, data, { checksum: opts.checksum });
+    return this.rawCall(step, this.address, fn, data, opts.timeoutMs ?? this.timeoutMs, opts.checksum);
+  }
+
+  /**
+   * Manda una orden YA AUTORIZADA (la llaman `callOnce`, que controla la lista blanca, y `wake`,
+   * que solo manda la 23). Con 0 (general) la balanza contesta con su propio número.
+   */
+  private async rawCall(step: string, address: number, fn: number, data: string, timeoutMs: number, checksum?: boolean): Promise<SystelReply | null> {
+    const frame = buildSystelFrame(address, fn, data, { checksum });
     const t0 = Date.now();
-    const rx = await this.link.exchange(frame, { timeoutMs: opts.timeoutMs ?? this.timeoutMs, isComplete: replyIsComplete });
-    const reply = rx ? parseSystelReply(rx) : null;
-    const valid = !!reply && reply.checksumOk && reply.address === this.address && reply.fn === fn;
+    const match = (rx: Uint8Array): SystelReply | null => {
+      if (address !== 0) return findSystelReply(rx, address, fn);
+      const r = parseSystelReply(rx);
+      return r && r.checksumOk && r.fn === fn ? r : null;
+    };
+    const rx = await this.link.exchange(frame, { timeoutMs, isComplete: (b) => match(b) !== null });
+    const reply = rx ? match(rx) : null;
+    const loose = rx ? parseSystelReply(rx) : null;
     this.log.push({
       step,
       fn,
       tx: toHex(frame),
       rx: rx ? toHex(rx) : "",
-      rxText: reply ? reply.data.replace(/[^\x20-\x7e]/g, ".") : "",
+      rxText: (reply ?? loose)?.data.replace(/[^\x20-\x7e]/g, ".") ?? "",
       ms: Date.now() - t0,
-      result: !rx ? "sin respuesta" : !reply ? "respuesta ilegible" : !valid ? "respuesta con otra dirección/función o verificación mal" : reply.kind
+      result: !rx ? "sin respuesta" : !loose ? "respuesta ilegible" : !reply ? "respuesta con otra dirección/función o verificación mal" : reply.kind
     });
-    return valid ? reply : null;
+    return reply;
   }
 
   async signature(): Promise<SystelSignature | null> {

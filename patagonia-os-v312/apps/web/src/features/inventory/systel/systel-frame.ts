@@ -79,8 +79,34 @@ export function parseSystelReply(bytes: Uint8Array): SystelReply | null {
   if (bytes.length < 3) return null;
   const body = bytes.subarray(0, bytes.length - 1);
   const check = bytes[bytes.length - 1];
-  const data = String.fromCharCode(...body.subarray(2));
   const checksumOk = xorChecksum(body) === check;
+  return classify(body[0], body[1], latin1(body.subarray(2)), checksumOk);
+}
+
+/** Bytes a texto de a tramos (una lista de 8.000 PLU tiene 56 KB: no entra en un solo spread). */
+function latin1(bytes: Uint8Array): string {
+  let s = "";
+  for (let i = 0; i < bytes.length; i += 4096) s += String.fromCharCode(...bytes.subarray(i, i + 4096));
+  return s;
+}
+
+/**
+ * La respuesta a una orden concreta (dirección + función), aunque delante haya quedado el final
+ * de una respuesta anterior que llegó tarde. Si la trama entera no verifica, se busca desde dónde
+ * empieza una que sí. null si no hay ninguna.
+ */
+export function findSystelReply(bytes: Uint8Array, address: number, fn: number): SystelReply | null {
+  const whole = parseSystelReply(bytes);
+  if (whole && whole.checksumOk && whole.address === address && whole.fn === fn) return whole;
+  for (let i = 1; i + 2 < bytes.length; i++) {
+    if (bytes[i] !== address || bytes[i + 1] !== fn) continue;
+    const r = parseSystelReply(bytes.subarray(i));
+    if (r && r.checksumOk) return r;
+  }
+  return null;
+}
+
+function classify(address: number, fn: number, data: string, checksumOk: boolean): SystelReply {
   let kind: SystelReplyKind = "data";
   let errorCode: string | null = null;
   if (data === "ACK") kind = "ack";
@@ -88,7 +114,7 @@ export function parseSystelReply(bytes: Uint8Array): SystelReply | null {
     kind = "error";
     errorCode = data;
   } else if (data === "I") kind = "working";
-  return { address: body[0], fn: body[1], data, kind, errorCode, checksumOk };
+  return { address, fn, data, kind, errorCode, checksumOk };
 }
 
 export function describeSystelError(code: string | null): string {

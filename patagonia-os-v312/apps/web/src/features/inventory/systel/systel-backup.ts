@@ -44,8 +44,8 @@ export async function takeSystelBackup(client: SystelClient, onProgress: (text: 
     const last = client.log[client.log.length - 1];
     backup.detail =
       last?.result === "error"
-        ? `la balanza contestó que está ocupada (${last.rxText}). Dejala en la pantalla de pesar, sin nada en el plato, y tocá de nuevo`
-        : "la balanza no contestó (revisá el cable, el puerto y el número de identificación de la balanza)";
+        ? `la balanza contestó ${last.rxText} (no atendió el pedido) a todo. No se cambió nada y ya nos llegó el aviso`
+        : "la balanza no contestó. No se cambió nada y ya nos llegó el aviso";
     return backup;
   }
   onProgress("Leyendo la configuración…");

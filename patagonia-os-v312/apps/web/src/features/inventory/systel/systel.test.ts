@@ -213,6 +213,15 @@ describe("plan y envío desde Patagonia", () => {
     assert.match(plan[0].reason, /9\.999,99/);
   });
 
+  it("balanza sin decimales: un precio con centavos no se redondea a escondidas, no se manda", async () => {
+    const fake = loadedFake("max60", { decimals: 0 });
+    const backup = await takeSystelBackup(new SystelClient(fake, { address: 1 }));
+    const plan = planSystelSync(backup, [{ code: "40", name: "Lomo", byWeight: true, price: 4599.5 }, { code: "41", name: "Vacio", byWeight: true, price: 4600 }]);
+    assert.equal(plan[0].action, "omitir");
+    assert.match(plan[0].reason, /centavos/);
+    assert.equal(plan[1].priceRaw, 4600);
+  });
+
   it("manda solo lo planificado, con funciones permitidas, y los demás productos quedan iguales", async () => {
     const fake = loadedFake("max62");
     const client = new SystelClient(fake, { address: 1 });
