@@ -628,3 +628,28 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 /* Link de descarga con aspecto de botón principal. */
 a.button-link { display: inline-flex; align-items: center; min-height: 38px; padding: 8px 14px; border-radius: 10px; font-size: 14px; font-weight: 700; background: #8b1e1e; color: white; text-decoration: none; }
 a.button-link:hover { background: #731818; }
+
+/* Panel de plataforma: embudo de ventas (AdminSalesPipeline, migración 116) */
+.admin-tabs { display: flex; gap: 4px; border-bottom: 1px solid #e5e7eb; }
+.admin-tabs button {
+  background: transparent; border: 0; border-bottom: 3px solid transparent; padding: 10px 16px;
+  font-size: 15px; font-weight: 700; color: #697386; cursor: pointer;
+}
+.admin-tabs button.active { color: #8b1e1e; border-bottom-color: #8b1e1e; }
+.sales-pipeline { display: grid; gap: 18px; }
+.sales-funnel { display: grid; gap: 12px; }
+.sales-funnel-steps { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }
+.sales-funnel-steps .kpi-card { padding: 14px 16px; display: grid; gap: 4px; }
+.sales-funnel-steps small { font-size: 14px; color: #697386; font-weight: 700; }
+.sales-today { display: grid; gap: 12px; }
+.sales-followup { border-left: 4px solid #8b1e1e; }
+.sales-message { margin: 6px 0 0; font-size: 13px; white-space: pre-wrap; background: #f7f8fa; border-radius: 10px; padding: 8px 10px; }
+.sales-wa-button {
+  display: inline-flex; align-items: center; gap: 6px; background: #1f8f4e; color: white; border-radius: 10px;
+  padding: 8px 14px; font-size: 13px; font-weight: 700; text-decoration: none;
+}
+.sales-pipeline textarea, .admin-form textarea {
+  padding: 10px 12px; border: 1px solid #d6dce5; border-radius: 10px; background: white; font: inherit; resize: vertical;
+}
+@media (max-width: 900px) { .sales-funnel-steps { grid-template-columns: repeat(2, 1fr); } }
+@media (max-width: 640px) { .sales-funnel-steps { grid-template-columns: 1fr; } }

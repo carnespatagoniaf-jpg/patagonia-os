@@ -4,12 +4,14 @@ import { useAuth } from "../auth/AuthProvider";
 import {
   PROVINCES, createClient, deleteClient, deleteCompanyPayment, listCompanies, listCompanyPayments, listCompanyPlans, registerCompanyPayment,
   setCompanyActive, setCompanyLocation, setCompanyPaidUntil, setCompanyPlan, setCompanyTrial,
-  type CompanyPayment, type CompanyPlanInfo, type CompanySummary, type CreateClientResult
+  saveLead, type CompanyPayment, type CompanyPlanInfo, type CompanySummary, type CreateClientResult
 } from "./admin-service";
 import { PLAN_LABELS, PLAN_LIMITS, type Plan } from "../auth/permissions";
 import { billingLabel, billingStatus, formatDayMonth, matchesBillingFilter, matchesCompanySearch, sortByBilling, type BillingFilter, type BillingStatus } from "./company-billing";
 import { todayIso } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
+import { AdminSalesPipeline } from "./AdminSalesPipeline";
+import type { Lead } from "./sales-pipeline";
 
 const PLAN_OPTIONS: Plan[] = ["basico", "estandar", "full"];
 const PLAN_PRICES: Record<Plan, string> = { basico: "$20.000", estandar: "$39.000", full: "$69.000" };
@@ -26,6 +28,7 @@ const BILLING_TONE: Record<BillingStatus, string> = {
 };
 
 type SortMode = "status" | "number" | "province";
+type AdminTab = "clientes" | "ventas";
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
@@ -100,6 +103,10 @@ export function AdminCreateClient() {
   const [copied, setCopied] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch] = useState("");
+  const [tab, setTab] = useState<AdminTab>("clientes");
+  /** Interesado del embudo de ventas que se está dando de alta con el formulario. */
+  const [leadForForm, setLeadForForm] = useState<Lead | null>(null);
+  const [pipelineReloadKey, setPipelineReloadKey] = useState(0);
 
   const [companies, setCompanies] = useState<CompanySummary[]>([]);
   const [companiesLoading, setCompaniesLoading] = useState(true);
@@ -347,6 +354,16 @@ export function AdminCreateClient() {
           setMessage("El cliente se creó, pero no se pudo guardar la ubicación. Cargala desde la lista.");
         }
       }
+      if (leadForForm) {
+        try {
+          const { createdAt: _createdAt, ...lead } = leadForForm;
+          await saveLead({ ...lead, stage: "alta", companyId: created.companyId, nextContactOn: null });
+        } catch {
+          setMessage("El cliente se creó, pero no se pudo marcar al interesado como dado de alta. Hacelo desde Ventas.");
+        }
+        setLeadForForm(null);
+        setPipelineReloadKey((k) => k + 1);
+      }
       setResult(created);
       setResultCompanyName(draft.companyName.trim());
       setCopied(false);
@@ -378,6 +395,22 @@ export function AdminCreateClient() {
     .map((c) => ({ company: c, days: trialDaysLeft(c) }))
     .filter((x): x is { company: CompanySummary; days: number } => x.days !== null && x.days <= 2)
     .sort((a, b) => a.days - b.days);
+
+  function createFromLead(lead: Lead) {
+    setLeadForForm(lead);
+    setResult(null);
+    setShowForm(true);
+    setDraft({
+      ...emptyDraft(),
+      companyName: lead.businessName,
+      branchName: lead.city ? `Sucursal ${lead.city}` : "Principal",
+      ownerFullName: lead.contactName ?? "",
+      contactPhone: lead.phone ?? "",
+      province: lead.province ?? "",
+      city: lead.city ?? ""
+    });
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  }
 
   function renderCard(company: CompanySummary) {
     const editing = editingLocationId === company.id;
@@ -565,24 +598,29 @@ export function AdminCreateClient() {
           </div>
         </div>
         <div className="admin-actions">
-          <button onClick={() => { setShowForm((v) => !v); setResult(null); }}>
+          <button onClick={() => { setShowForm((v) => !v); setResult(null); setLeadForForm(null); }}>
             <Plus size={16} style={{ verticalAlign: "-3px" }} /> {showForm ? "Cerrar" : "Nuevo cliente"}
           </button>
           <button className="secondary" onClick={() => void signOut()}>Salir</button>
         </div>
       </header>
 
-      <div className="admin-kpis">
+      <div className="admin-tabs">
+        <button className={tab === "clientes" ? "active" : ""} onClick={() => setTab("clientes")}>Clientes</button>
+        <button className={tab === "ventas" ? "active" : ""} onClick={() => setTab("ventas")}>Ventas</button>
+      </div>
+
+      {tab === "clientes" && <div className="admin-kpis">
         <div className="kpi-card"><span>Clientes activos</span><strong>{activeCompanies.length}</strong></div>
         <div className="kpi-card"><span>Pagaron</span><strong>{billingCounts.paid}</strong></div>
         <div className="kpi-card"><span>Deben</span><strong>{billingCounts.owes}</strong></div>
         <div className="kpi-card"><span>En prueba</span><strong>{billingCounts.trial}</strong></div>
-      </div>
+      </div>}
 
       {(showForm || result) && (
         <section className="panel admin-form-panel">
           <div className="panel-title">
-            <h2>{result ? "Cliente creado" : "Dar de alta un cliente"}</h2>
+            <h2>{result ? "Cliente creado" : leadForForm ? `Dar de alta a ${leadForForm.businessName}` : "Dar de alta un cliente"}</h2>
           </div>
           {result ? (
             <div className="message" style={{ borderColor: "#2f9e44" }}>
@@ -633,6 +671,9 @@ export function AdminCreateClient() {
 
       {message && <div className="message warning">{message}</div>}
 
+      {tab === "ventas" && <AdminSalesPipeline companies={companies} onCreateFromLead={createFromLead} reloadKey={pipelineReloadKey} />}
+
+      {tab === "clientes" && <>
       {trialAlerts.length > 0 && (
         <section className="admin-trial-alert">
           <strong>Prueba gratuita por vencer o vencida</strong>
@@ -698,6 +739,7 @@ export function AdminCreateClient() {
           <div className="admin-grid" style={{ marginTop: 12 }}>{inactiveCompanies.map(renderCard)}</div>
         </details>
       )}
+      </>}
     </main>
   );
 }

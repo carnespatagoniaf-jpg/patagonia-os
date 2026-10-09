@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import type { Plan } from "../auth/permissions";
+import type { CompanyUsage, Lead, LeadStage } from "./sales-pipeline";
 
 export interface CreateClientInput {
   companyName: string;
@@ -280,5 +281,104 @@ export async function setScaleSupportReportResolved(id: string, resolved: boolea
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("set_scale_support_report_resolved", { p_id: id, p_resolved: resolved });
+  if (error) throw error;
+}
+
+/** Embudo de ventas (migración 116): uso real de cada cliente, interesados y seguimiento. */
+export async function listSalesPipeline(): Promise<Record<string, CompanyUsage>> {
+  if (!supabase) return {};
+
+  const { data, error } = await supabase.rpc("list_sales_pipeline_for_admin");
+  if (error) throw error;
+
+  interface Row {
+    company_id: string; product_count: number; sale_count: number; sales_last_7d: number; first_sale_at: string | null; last_sale_at: string | null;
+    closed_shift_count: number; purchase_count: number; last_sign_in_at: string | null; sales_note: string | null; sales_contacted_at: string | null; sales_lost_reason: string | null;
+  }
+  const result: Record<string, CompanyUsage> = {};
+  for (const row of (data ?? []) as Row[]) {
+    result[row.company_id] = {
+      productCount: Number(row.product_count),
+      saleCount: Number(row.sale_count),
+      salesLast7d: Number(row.sales_last_7d),
+      firstSaleAt: row.first_sale_at,
+      lastSaleAt: row.last_sale_at,
+      closedShiftCount: Number(row.closed_shift_count),
+      purchaseCount: Number(row.purchase_count),
+      lastSignInAt: row.last_sign_in_at,
+      salesNote: row.sales_note,
+      salesContactedAt: row.sales_contacted_at,
+      salesLostReason: row.sales_lost_reason
+    };
+  }
+  return result;
+}
+
+export async function setCompanySalesFollowup(input: { companyId: string; note: string | null; lostReason: string | null; markContacted: boolean }): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("set_company_sales_followup", {
+    p_company_id: input.companyId,
+    p_note: input.note,
+    p_lost_reason: input.lostReason,
+    p_mark_contacted: input.markContacted
+  });
+  if (error) throw error;
+}
+
+export async function listLeads(): Promise<Lead[]> {
+  if (!supabase) return [];
+
+  const { data, error } = await supabase.rpc("list_platform_leads");
+  if (error) throw error;
+
+  interface Row {
+    id: string; business_name: string; contact_name: string | null; phone: string | null; province: string | null; city: string | null;
+    stage: LeadStage; source: string | null; note: string | null; next_contact_on: string | null; lost_reason: string | null; company_id: string | null; created_at: string;
+  }
+  return ((data ?? []) as Row[]).map((row) => ({
+    id: row.id,
+    businessName: row.business_name,
+    contactName: row.contact_name,
+    phone: row.phone,
+    province: row.province,
+    city: row.city,
+    stage: row.stage,
+    source: row.source,
+    note: row.note,
+    nextContactOn: row.next_contact_on,
+    lostReason: row.lost_reason,
+    companyId: row.company_id,
+    createdAt: row.created_at
+  }));
+}
+
+export type LeadInput = Omit<Lead, "id" | "createdAt"> & { id: string | null };
+
+export async function saveLead(lead: LeadInput): Promise<string> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.rpc("save_platform_lead", {
+    p_id: lead.id,
+    p_business_name: lead.businessName,
+    p_contact_name: lead.contactName,
+    p_phone: lead.phone,
+    p_province: lead.province,
+    p_city: lead.city,
+    p_stage: lead.stage,
+    p_source: lead.source,
+    p_note: lead.note,
+    p_next_contact_on: lead.nextContactOn,
+    p_lost_reason: lead.lostReason,
+    p_company_id: lead.companyId
+  });
+  if (error) throw error;
+  return data as string;
+}
+
+export async function deleteLead(id: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("delete_platform_lead", { p_id: id });
   if (error) throw error;
 }
