@@ -39,6 +39,16 @@ export class SerialSystelLink implements SystelLink {
     this.startReading();
   }
 
+  /** DTR y RTS encendidos: algunos cables/adaptadores no pasan datos sin esas señales. Si el puerto no lo permite, se sigue igual. */
+  async setSignals(on: boolean): Promise<void> {
+    try {
+      const port = this.port as SerialPort & { setSignals?: (signals: { dataTerminalReady?: boolean; requestToSend?: boolean }) => Promise<void> };
+      await port.setSignals?.({ dataTerminalReady: on, requestToSend: on });
+    } catch {
+      // no soportado: no es crítico
+    }
+  }
+
   private startReading(): void {
     const readable = this.port.readable;
     if (!readable) return;

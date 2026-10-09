@@ -7,6 +7,8 @@ import { LAYOUT_INFO, rawToPesos } from "./systel-plu";
 import { CUORA_SERIAL, pickSystelPort, SerialSystelLink } from "./systel-serial";
 import { planSystelSync, runSystelSync, type SystelPlanItem, type SystelSyncResult } from "./systel-sync";
 import { runSystelWriteTest, type SystelWriteTestResult } from "./systel-write-test";
+import { discoverSystelLink, loadSavedSystelLink, saveSystelLink } from "./systel-discovery";
+import type { SystelExchangeLog } from "./systel-client";
 import { submitScaleSupportReport } from "../../scales/support-service";
 import { logScaleActivity } from "../../scales/activity-log";
 import { useAuth } from "../../auth/AuthProvider";
@@ -67,6 +69,9 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
   const { profile } = useAuth();
   const { branchId } = useActiveBranch();
   const [reportNote, setReportNote] = useState("");
+  const portRef = useRef<SerialPort | null>(null);
+  /** Cada pedido y respuesta (bytes en hex), para el reporte a soporte. */
+  const logRef = useRef<SystelExchangeLog[]>([]);
 
   /**
    * Cada paso (respaldo, prueba, envío o error) le llega solo a soporte, con todo lo que se
@@ -91,7 +96,7 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
             connectedNow: Boolean(linkRef.current),
             pluScan: extra.backup ?? backup ?? undefined,
             auraWriteTest: extra.test ?? test ?? undefined,
-            diagnosticRecord: { sync: extra.sync ?? sync ?? null, error: extra.error ?? null }
+            diagnosticRecord: { sync: extra.sync ?? sync ?? null, error: extra.error ?? null, log: logRef.current.slice(-400), savedLink: loadSavedSystelLink() }
           }
         ],
         branchId: branchId ?? null
@@ -131,6 +136,7 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
   async function changePort() {
     await linkRef.current?.close();
     linkRef.current = null;
+    portRef.current = null;
     setBackup(null);
   }
 
@@ -167,26 +173,62 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
   const decimals = backup?.signature?.priceDecimals ?? 0;
 
   async function handleOneClick() {
-    const result = await withClient(async (c) => {
+    setBusy(true);
+    setError("");
+    setReportNote("");
+    setSync(null);
+    logRef.current = [];
+    let backupTaken: SystelBackup | null = null;
+    try {
+      if (!portRef.current) {
+        try {
+          portRef.current = await pickSystelPort();
+        } catch {
+          setError("no se eligió el puerto de la balanza. Tocá de nuevo y elegí el que dice USB");
+          return;
+        }
+      }
+      let runAddress = address;
+      if (!linkRef.current) {
+        const found = await discoverSystelLink(portRef.current, logRef.current, setProgress, loadSavedSystelLink());
+        if (!found) {
+          const msg = "la balanza no contestó en ninguna configuración";
+          setError(msg);
+          void autoReport("buscar la balanza", msg, { error: msg });
+          portRef.current = null;
+          return;
+        }
+        linkRef.current = found.link;
+        runAddress = found.address;
+        setAddress(found.address);
+        saveSystelLink({ settings: found.settings, address: found.address });
+      }
+      const client = new SystelClient(linkRef.current, { address: runAddress, log: logRef.current });
       setProgress("Leyendo lo que tiene la balanza (no cambia nada)…");
-      const b = await takeSystelBackup(c, setProgress);
+      const b = await takeSystelBackup(client, setProgress);
+      backupTaken = b;
       setBackup(b);
       saveBackupLocally(b);
-      if (!b.complete || !b.layout) return { b, p: [] as SystelPlanItem[], r: null as SystelSyncResult | null };
+      if (!b.complete || !b.layout) {
+        void autoReport("mandar productos (un botón)", `no se pudo leer la balanza completa: ${b.detail}`, { backup: b });
+        return;
+      }
       const p = planSystelSync(b, csvProducts);
-      const r = await runSystelSync(c, b.layout, p, setProgress);
-      return { b, p, r };
-    });
-    if (!result) return;
-    setSync(result.r);
-    const sent = result.r?.done.length ?? 0;
-    const skipped = result.p.filter((x) => x.action === "revisar" || x.action === "omitir").length;
-    const detail = !result.r
-      ? `no se pudo leer la balanza completa: ${result.b.detail}`
-      : result.r.stoppedAt
-        ? `se frenó en el PLU ${result.r.stoppedAt.number}: ${result.r.stoppedAt.outcome.detail} (${sent} ya mandados)`
-        : `${sent} mandados, ${skipped} sin tocar, ${result.b.plus.length} productos leídos de la balanza`;
-    void autoReport("mandar productos (un botón)", detail, { backup: result.b, sync: result.r });
+      const r = await runSystelSync(client, b.layout, p, setProgress);
+      setSync(r);
+      const skipped = p.filter((x) => x.action === "revisar" || x.action === "omitir").length;
+      const detail = r.stoppedAt
+        ? `se frenó en el PLU ${r.stoppedAt.number}: ${r.stoppedAt.outcome.detail} (${r.done.length} ya mandados)`
+        : `${r.done.length} mandados, ${skipped} sin tocar, ${b.plus.length} productos leídos de la balanza`;
+      void autoReport("mandar productos (un botón)", detail, { backup: b, sync: r });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      void autoReport("error", message, { error: message, backup: backupTaken });
+    } finally {
+      setBusy(false);
+      setProgress("");
+    }
   }
 
   if (pilot) {
