@@ -1,4 +1,4 @@
-import { buildSystelFrame, describeSystelError, findSystelReply, parseSystelReply, toHex, type SystelReply } from "./systel-frame";
+import { buildSystelFrame, describeSystelError, findSystelReplies, parseSystelReply, toHex, type SystelReply } from "./systel-frame";
 import {
   buildNewPluData,
   buildPriceChangeData,
@@ -169,14 +169,15 @@ export class SystelClient {
   private async rawCall(step: string, address: number, fn: number, data: string, timeoutMs: number, checksum?: boolean): Promise<SystelReply | null> {
     const frame = buildSystelFrame(address, fn, data, { checksum });
     const t0 = Date.now();
-    const match = (rx: Uint8Array): SystelReply | null => {
-      if (address !== 0) return findSystelReply(rx, address, fn);
-      const r = parseSystelReply(rx);
-      return r && r.checksumOk && r.fn === fn ? r : null;
-    };
-    const rx = await this.link.exchange(frame, { timeoutMs, isComplete: (b) => match(b) !== null });
-    const reply = rx ? match(rx) : null;
+    // Correspondencia con ESTA orden: misma dirección (o una de 1-99 si se preguntó a la general),
+    // misma función, control correcto y UNA sola trama posible. El contenido lo verifica después quien
+    // lo interpreta (el número de PLU en la 62, el formato en 2/23/31/39, ACK o En en las escrituras).
+    const want = address === 0 ? null : address;
+    const rx = await this.link.exchange(frame, { timeoutMs, isComplete: (b) => findSystelReplies(b, want, fn).length > 0 });
+    const candidates = rx ? findSystelReplies(rx, want, fn) : [];
+    const reply = candidates.length === 1 ? candidates[0].reply : null;
     const loose = rx ? parseSystelReply(rx) : null;
+    const prefix = reply && candidates[0].start > 0 ? ` · ${candidates[0].start} bytes previos que no son de esta orden` : "";
     this.log.push({
       step,
       fn,
@@ -184,7 +185,13 @@ export class SystelClient {
       rx: rx ? toHex(rx) : "",
       rxText: (reply ?? loose)?.data.replace(/[^\x20-\x7e]/g, ".") ?? "",
       ms: Date.now() - t0,
-      result: !rx ? "sin respuesta" : !loose ? "respuesta ilegible" : !reply ? "respuesta con otra dirección/función o verificación mal" : reply.kind
+      result: !rx
+        ? "sin respuesta"
+        : candidates.length > 1
+          ? `AMBIGUA: ${candidates.length} tramas válidas para esta orden (una puede ser de una orden anterior); no se usa`
+          : !reply
+            ? loose ? "respuesta con otra dirección/función o verificación mal" : "respuesta ilegible"
+            : reply.kind + prefix
     });
     return reply;
   }
@@ -276,11 +283,17 @@ export class SystelClient {
     if (reply && reply.kind === "error") {
       return { ok: false, verdict: "rechazada", detail: `la balanza rechazó el PLU ${number} (${describeSystelError(reply.errorCode)})`, readBack: null, diff: [] };
     }
-    // Sin ACK (o sin respuesta): no se reenvía a ciegas. Se relee para saber qué pasó.
+    // Se relee SIEMPRE antes de cualquier otra cosa (y antes de un eventual reintento, que nunca es automático).
     const back = await this.readPlu(layout, number);
+    if (!reply || reply.kind !== "ack") {
+      // Sin respuesta, respuesta ambigua o algo que no es ACK: la escritura queda INDETERMINADA aunque la
+      // relectura coincida. Se informa lo que muestra la relectura y no se cuenta como confirmada.
+      const shows = !back ? "no se pudo releer" : diffPlu(expected, back).length === 0 ? "la relectura muestra el valor nuevo" : before && diffPlu(expectedAfterPriceChange(before, before.prices[0]), back).length === 0 ? "la relectura muestra el valor anterior" : `la relectura muestra otra cosa (${diffPlu(expected, back).join(", ")})`;
+      return { ok: false, verdict: "indeterminado", detail: `la balanza no confirmó la escritura del PLU ${number} (${reply ? `contestó "${reply.data}"` : "sin respuesta o respuesta ambigua"}); ${shows}`, readBack: back, diff: back ? diffPlu(expected, back) : [] };
+    }
     if (!back) return { ok: false, verdict: "sin_relectura", detail: `no se pudo releer el PLU ${number} después de escribirlo`, readBack: null, diff: [] };
     const diff = diffPlu(expected, back);
-    if (diff.length === 0) return { ok: true, verdict: reply && reply.kind === "ack" ? "confirmado" : "confirmado_sin_ack", detail: "", readBack: back, diff };
+    if (diff.length === 0) return { ok: true, verdict: "confirmado", detail: "", readBack: back, diff };
     if (before && diffPlu(expectedAfterPriceChange(before, before.prices[0]), back).length === 0) {
       return { ok: false, verdict: "sin_cambios", detail: `el PLU ${number} quedó como estaba (la balanza no aplicó el cambio)`, readBack: back, diff };
     }
@@ -290,7 +303,7 @@ export class SystelClient {
 
 export interface WriteOutcome {
   ok: boolean;
-  verdict: "confirmado" | "confirmado_sin_ack" | "rechazada" | "ocupado" | "sin_relectura" | "sin_cambios" | "diferencia" | "bloqueado";
+  verdict: "confirmado" | "indeterminado" | "rechazada" | "ocupado" | "sin_relectura" | "sin_cambios" | "diferencia" | "bloqueado";
   detail: string;
   readBack: SystelPlu | null;
   diff: PluField[];

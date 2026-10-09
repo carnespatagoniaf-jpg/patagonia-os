@@ -101,6 +101,20 @@ describe("[SINTÉTICO] laboratorio: cambio de precio", () => {
   });
 });
 
+describe("[SINTÉTICO] laboratorio: escritura sin confirmación", () => {
+  it("si no llega el ACK del cambio de precio: resultado INDETERMINADO, relee antes de restaurar y deja el estado inicial", async () => {
+    const f = fake();
+    const link = new Tamper(f, (frame, rep) => (frame[1] === 33 ? null : rep));
+    const r = await runPriceChangeLab(link, { lab: true, address: 20, plu: 1, newPriceRaw: 18501, confirm: yes });
+    assert.equal(r.outcome, "indeterminado", JSON.stringify(r.steps.map((s) => [s.name, s.ok, s.detail])));
+    const change = r.steps.find((s) => s.name.startsWith("cambiar SOLO"))!;
+    assert.match(change.detail, /^indeterminado/);
+    const restore = r.steps.find((s) => s.name.startsWith("restaurar"))!;
+    assert.equal(restore.commands[0].fn, 62, "lo primero al restaurar es releer");
+    assert.equal(r.afterRestore?.prices[0], 18500);
+  });
+});
+
 describe("[REAL] laboratorio con los bytes de Los gringos", () => {
   it("la lista real sin cierre: se detiene en 'lista completa' y no manda ninguna escritura", async () => {
     const sent: number[] = [];

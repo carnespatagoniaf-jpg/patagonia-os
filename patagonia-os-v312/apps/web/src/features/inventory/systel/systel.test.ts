@@ -168,13 +168,28 @@ describe("Cuora simulada: respaldo, cambio de precio, alta", () => {
     assert.equal(same.verdict, "sin_cambios");
   });
 
-  it("sin respuesta a una escritura: relee en vez de reenviar", async () => {
+  it("escritura sin confirmación: INDETERMINADA, relee y no reenvía (aunque la relectura muestre el valor nuevo)", async () => {
     const fake = loadedFake("max62");
     const client = new SystelClient(fake, { writes: { price: true, create: true }, address: 1 });
     const before = (await client.readPlu("max62", 1))!;
+    // La balanza aplica el cambio pero su ACK se pierde: solo se calla la respuesta a la 33.
+    const quiet = { exchange: async (frame: Uint8Array) => { const r = await fake.exchange(frame); return frame[1] === 33 ? null : r; } };
+    const out = await new SystelClient(quiet, { writes: { price: true }, address: 1 }).changePrice(before, 19000);
+    assert.equal(out.ok, false);
+    assert.equal(out.verdict, "indeterminado");
+    assert.match(out.detail, /relectura muestra el valor nuevo/);
+    assert.equal(fake.received.filter((r) => r.fn === 33).length, 1, "no reenvió");
+    assert.equal(fake.received.at(-1)!.fn, 62, "lo último fue releer");
+  });
+
+  it("sin respuesta y sin poder releer: indeterminada", async () => {
+    const fake = loadedFake("max62");
+    const client = new SystelClient(fake, { writes: { price: true }, address: 1 });
+    const before = (await client.readPlu("max62", 1))!;
     fake.silent = true;
     const out = await client.changePrice(before, 19000);
-    assert.equal(out.verdict, "sin_relectura");
+    assert.equal(out.verdict, "indeterminado");
+    assert.match(out.detail, /no se pudo releer/);
     assert.equal(fake.received.filter((r) => r.fn === 33).length, 1, "no reenvió");
   });
 });

@@ -3,7 +3,8 @@ import { describe, it } from "node:test";
 import { takeSystelBackup } from "./systel-backup";
 import { SystelClient, type SystelExchangeLog } from "./systel-client";
 import { discoverSystelLink } from "./systel-discovery";
-import { buildSystelFrame, findSystelReply, toHex, xorChecksum as xorOf } from "./systel-frame";
+import { buildSystelFrame, findSystelReplies, findSystelReply, toHex, xorChecksum as xorOf } from "./systel-frame";
+import { FakeCuora, fakeReadRecord } from "./systel-fake";
 import { SYSTEL_VERIFIED_WRITE_PROFILES, systelWriteVerified } from "./systel-models";
 import { hexToBytes, SESSION_OK_1608 } from "./systel-real-captures";
 import { SerialSystelLink } from "./systel-serial";
@@ -111,13 +112,40 @@ describe("guardas de recepción", () => {
     assert.equal(findSystelReply(bytes, 20, 0x27), null);
   });
 
-  it("[REAL] una respuesta completa VIEJA de la misma orden delante de la nueva: juntas verifican por XOR, igual se toma la última", () => {
-    const ping = hexToBytes("14 17 30 30 44 47"); // real
+  it("[REAL] respuesta ANTERIOR válida seguida de la actual: juntas verifican por XOR → AMBIGUO, no se usa ninguna", async () => {
+    const ping = hexToBytes("14 17 30 30 44 47"); // real (16:08)
     const e3 = hexToBytes("14 17 45 33 75"); // real (16:40)
     const both = Uint8Array.from([...e3, ...ping]);
     assert.equal(xorOf(both.subarray(0, -1)), both.at(-1), "las dos juntas pasan el control: el XOR solo no alcanza");
-    const r = findSystelReply(both, 20, 23);
-    assert.equal(r?.data, "00D");
+    assert.equal(findSystelReplies(both, 20, 23).length, 2);
+    assert.equal(findSystelReply(both, 20, 23), null);
+    // Por el cliente: la orden no se da por respondida y queda anotado como AMBIGUA.
+    const log: SystelExchangeLog[] = [];
+    const link = { exchange: async () => both };
+    const r = await new SystelClient(link, { address: 20, log, busyRetryMs: [] }).ping();
+    assert.equal(r, null);
+    assert.match(log[0].result, /AMBIGUA: 2 tramas/);
+  });
+
+  it("[REAL] restos que NO son una trama (final de la lista) delante de la respuesta: una sola candidata, se usa", () => {
+    const tail = hexToBytes(SESSION_OK_1608.find((x) => x.tx === "14 1f 0b")!.rx).slice(-13);
+    const ping = hexToBytes("14 17 30 30 44 47");
+    assert.equal(findSystelReply(Uint8Array.from([...tail, ...ping]), 20, 23)?.data, "00D");
+  });
+
+  it("[SINTÉTICO] ping general (0): una respuesta anterior pegada a la actual también es ambigua", () => {
+    const ping = hexToBytes("14 17 30 30 44 47");
+    assert.equal(findSystelReply(Uint8Array.from([...ping, ...ping]), null, 23), null);
+    assert.equal(findSystelReply(ping, null, 23)?.address, 20);
+  });
+
+  it("[SINTÉTICO] lectura de PLU: si la trama trae OTRO número de PLU, no se toma como respuesta", async () => {
+    const f = new FakeCuora("max60", { address: 20 });
+    f.plus.set(1, fakeReadRecord("max60", { number: 1, name: "NALGA", price: 18500, code: 1, type: "P" }));
+    f.plus.set(2, fakeReadRecord("max60", { number: 2, name: "VACIO", price: 9000, code: 2, type: "P" }));
+    // Pide el 2 y le llega la respuesta del 1 (por ejemplo, atrasada): el número no corresponde.
+    const link = { exchange: async (frame: Uint8Array) => f.exchange(frame[1] === 62 ? buildSystelFrame(20, 62, "0001") : frame) };
+    assert.equal(await new SystelClient(link, { address: 20 }).readPlu("max60", 2), null);
   });
 
   it("[SINTÉTICO] dos órdenes a la vez sobre la misma conexión: salen de a una y cada una recibe su respuesta", async () => {

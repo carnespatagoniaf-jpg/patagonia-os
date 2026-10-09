@@ -91,21 +91,29 @@ function latin1(bytes: Uint8Array): string {
 }
 
 /**
- * La respuesta a una orden concreta (dirección + función), aunque delante haya quedado el final
- * de una respuesta anterior que llegó tarde. null si no hay ninguna trama completa.
+ * Todas las tramas completas que podrían ser la respuesta a (dirección, función): cada una empieza
+ * con esa dirección (o cualquiera de 1 a 99 si se preguntó a la general, 0) y esa función, y termina
+ * al final de lo recibido con el byte de control correcto. La más corta primero.
+ *
+ * Por qué no alcanza con "la última": por cómo funciona el XOR, una respuesta anterior válida pegada
+ * a la actual verifica TAMBIÉN como una sola trama (comprobado con los bytes reales E3 + "00D"). En
+ * ese caso hay 2 candidatas y no se puede saber cuál corresponde a esta orden: es AMBIGUO.
  */
-export function findSystelReply(bytes: Uint8Array, address: number, fn: number): SystelReply | null {
-  // Se busca la ÚLTIMA trama completa (la más corta que termina al final de lo recibido), NO la entera:
-  // por cómo funciona el XOR, dos tramas válidas pegadas SIEMPRE verifican como si fueran una sola
-  // (comprobado con los bytes reales E3 + "00D"), así que una respuesta vieja que llegó tarde se
-  // mezclaría con la nueva. Si una coincidencia casual cayera dentro de los datos (solo posible con
-  // direcciones imprimibles, 32 a 99), quedan datos de largo equivocado y el que interpreta los rechaza.
+export function findSystelReplies(bytes: Uint8Array, address: number | null, fn: number): { start: number; reply: SystelReply }[] {
+  const out: { start: number; reply: SystelReply }[] = [];
   for (let i = bytes.length - 3; i >= 0; i--) {
-    if (bytes[i] !== address || bytes[i + 1] !== fn) continue;
+    const a = bytes[i];
+    if ((address === null ? a < 1 || a > 99 : a !== address) || bytes[i + 1] !== fn) continue;
     const r = parseSystelReply(bytes.subarray(i));
-    if (r && r.checksumOk) return r;
+    if (r && r.checksumOk) out.push({ start: i, reply: r });
   }
-  return null;
+  return out;
+}
+
+/** La respuesta a esta orden si hay UNA sola candidata; null si no hay ninguna o si es ambiguo. */
+export function findSystelReply(bytes: Uint8Array, address: number | null, fn: number): SystelReply | null {
+  const c = findSystelReplies(bytes, address, fn);
+  return c.length === 1 ? c[0].reply : null;
 }
 
 function classify(address: number, fn: number, data: string, checksumOk: boolean): SystelReply {

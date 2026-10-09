@@ -31,7 +31,7 @@ export interface LabProtocol {
   writeFn: number | null;
 }
 
-export type LabOutcome = "aprobado" | "detenido_antes_de_escribir" | "cancelado" | "fallo_al_escribir" | "fallo_al_restaurar" | "restaurar_a_mano";
+export type LabOutcome = "aprobado" | "detenido_antes_de_escribir" | "cancelado" | "indeterminado" | "fallo_al_escribir" | "fallo_al_restaurar" | "restaurar_a_mano";
 
 export interface LabReport {
   test: "cambio_de_precio" | "alta";
@@ -174,6 +174,7 @@ export async function runPriceChangeLab(link: SystelLink, o: PriceLabOptions): P
     return { ok: out.ok, detail: `${out.verdict}${out.detail ? `: ${out.detail}` : ""}${out.diff.length ? ` (distinto: ${out.diff.join(", ")})` : ""}`, value: out.readBack ?? undefined };
   });
   base.afterWrite = changed.value ?? null;
+  const indeterminate = ctx.rec.steps.at(-1)!.detail.startsWith("indeterminado");
   const reread = await ctx.rec.step("releer: solo cambió la lista 1", async () => {
     const p = await ctx.reader.readPlu(ctx.protocol.layout!, o.plu);
     if (!p) return { ok: false, detail: "no se pudo releer" };
@@ -185,7 +186,8 @@ export async function runPriceChangeLab(link: SystelLink, o: PriceLabOptions): P
     // Igual se intenta dejarlo como estaba, y se registra.
     const back = await restorePrice(ctx, writer, o.plu, initial);
     base.afterRestore = back;
-    return finish({ ...base, outcome: back && diffPlu(expectedAfterPriceChange(initial, initial.prices[0]), back).length === 0 ? "fallo_al_escribir" : "fallo_al_restaurar" }, ctx);
+    const restored = !!back && diffPlu(expectedAfterPriceChange(initial, initial.prices[0]), back).length === 0;
+    return finish({ ...base, outcome: !restored ? "fallo_al_restaurar" : indeterminate ? "indeterminado" : "fallo_al_escribir" }, ctx);
   }
   const back = await restorePrice(ctx, writer, o.plu, initial);
   base.afterRestore = back;
@@ -276,7 +278,7 @@ export async function runCreateLab(link: SystelLink, o: CreateLabOptions): Promi
   return finish(
     {
       ...base,
-      outcome: created.ok && listAgain.ok ? "restaurar_a_mano" : "fallo_al_escribir",
+      outcome: created.ok && listAgain.ok ? "restaurar_a_mano" : ctx.rec.steps.some((s) => s.detail.startsWith("indeterminado")) ? "indeterminado" : "fallo_al_escribir",
       manualAction: exists ? `Borrar a mano el PLU ${o.plu} desde el menú de la balanza y después tocar "Verificar restauración".` : null
     },
     ctx
