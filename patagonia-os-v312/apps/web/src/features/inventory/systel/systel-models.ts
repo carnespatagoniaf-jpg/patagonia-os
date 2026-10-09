@@ -60,3 +60,27 @@ export const SYSTEL_MODELS: SystelModel[] = [
 export function systelCanWriteProducts(model: SystelModel): boolean {
   return model.products === "cable" && model.evidence === "real";
 }
+
+/**
+ * Perfiles de escritura VALIDADOS en una balanza física: firma (versión de protocolo) + formato
+ * de producto leído en esa balanza + qué se validó. Vacío a propósito (2026-10-09):
+ * - La firma "S0060" no figura en ningún documento (los 4 protocolos dicen "0040" de ejemplo).
+ * - Que la lista traiga PLU de 4 dígitos solo descarta V6.2/V7; no elige entre V4.0 (escribe con la
+ *   función 4, tara de 6, letra N/M) y V6.0 (escribe con la 61, tara de 4, sin "gestión").
+ * - La 61 aparece sin byte de control en V6.0/V6.2/V7 y el ejemplo oficial lo agrega siempre.
+ * - "Versión del PLU" de la 33 no tiene valores documentados.
+ * Recién con la prueba de banco de docs/SYSTEL_DIAGNOSTICO_LOS_GRINGOS.md se agrega un perfil.
+ */
+export interface SystelWriteProfile {
+  protocolVersion: string;
+  layout: "cuora2" | "max60" | "max62" | "max7";
+  evidence: string;
+}
+
+export const SYSTEL_VERIFIED_WRITE_PROFILES: SystelWriteProfile[] = [];
+
+/** ¿Se puede escribir en una balanza con esta firma y este formato leído? Sin perfil validado: no. */
+export function systelWriteVerified(protocolVersion: string | null | undefined, layout: string | null | undefined): boolean {
+  if (!protocolVersion || !layout) return false;
+  return SYSTEL_VERIFIED_WRITE_PROFILES.some((p) => p.protocolVersion === protocolVersion && p.layout === layout);
+}

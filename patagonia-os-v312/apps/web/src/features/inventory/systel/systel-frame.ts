@@ -92,13 +92,15 @@ function latin1(bytes: Uint8Array): string {
 
 /**
  * La respuesta a una orden concreta (dirección + función), aunque delante haya quedado el final
- * de una respuesta anterior que llegó tarde. Si la trama entera no verifica, se busca desde dónde
- * empieza una que sí. null si no hay ninguna.
+ * de una respuesta anterior que llegó tarde. null si no hay ninguna trama completa.
  */
 export function findSystelReply(bytes: Uint8Array, address: number, fn: number): SystelReply | null {
-  const whole = parseSystelReply(bytes);
-  if (whole && whole.checksumOk && whole.address === address && whole.fn === fn) return whole;
-  for (let i = 1; i + 2 < bytes.length; i++) {
+  // Se busca la ÚLTIMA trama completa (la más corta que termina al final de lo recibido), NO la entera:
+  // por cómo funciona el XOR, dos tramas válidas pegadas SIEMPRE verifican como si fueran una sola
+  // (comprobado con los bytes reales E3 + "00D"), así que una respuesta vieja que llegó tarde se
+  // mezclaría con la nueva. Si una coincidencia casual cayera dentro de los datos (solo posible con
+  // direcciones imprimibles, 32 a 99), quedan datos de largo equivocado y el que interpreta los rechaza.
+  for (let i = bytes.length - 3; i >= 0; i--) {
     if (bytes[i] !== address || bytes[i + 1] !== fn) continue;
     const r = parseSystelReply(bytes.subarray(i));
     if (r && r.checksumOk) return r;

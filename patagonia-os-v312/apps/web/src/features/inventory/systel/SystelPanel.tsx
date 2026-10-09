@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { takeSystelBackup, backupToJson, saveBackupLocally, type SystelBackup } from "./systel-backup";
 import { SystelClient } from "./systel-client";
 import { buildCuoraNeoCsv, buildQendraCsv, type SystelCsvProduct } from "./systel-csv";
-import { SYSTEL_MODELS, systelCanWriteProducts, type SystelModelId } from "./systel-models";
+import { SYSTEL_MODELS, systelCanWriteProducts, systelWriteVerified, type SystelModelId } from "./systel-models";
 import { LAYOUT_INFO, rawToPesos } from "./systel-plu";
 import { CUORA_SERIAL, pickSystelPort, SerialSystelLink } from "./systel-serial";
 import { planSystelSync, runSystelSync, type SystelPlanItem, type SystelSyncResult } from "./systel-sync";
@@ -97,6 +97,24 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
     linkRef.current = null;
   }, []);
 
+  // Si se desenchufa el cable, la conexión vieja no sirve más: se suelta para que el próximo toque
+  // elija y abra el puerto de nuevo (el objeto SerialPort puede cambiar al volver a enchufar).
+  useEffect(() => {
+    if (!("serial" in navigator)) return;
+    const onDisconnect = (e: Event) => {
+      if ((e.target as unknown as SerialPort) !== portRef.current) return;
+      linkEventsRef.current.push({ t: -1, kind: "cerrar", detail: "se desenchufó el cable" });
+      void linkRef.current?.close();
+      linkRef.current = null;
+      portRef.current = null;
+    };
+    navigator.serial.addEventListener("disconnect", onDisconnect);
+    return () => navigator.serial.removeEventListener("disconnect", onDisconnect);
+  }, []);
+
+  /** Un solo intento a la vez (dos toques seguidos abrían dos conexiones al mismo puerto). */
+  const runningRef = useRef(false);
+
   /**
    * Cada paso (respaldo, prueba, envío o error) le llega solo a soporte, con todo lo que se
    * leyó y se mandó: así no hay que pedirle fotos al cliente (regla del dueño).
@@ -145,7 +163,8 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
         linkRef.current = new SerialSystelLink(port, CUORA_SERIAL);
         await linkRef.current.connect();
       }
-      return await fn(new SystelClient(linkRef.current, { address }));
+      // Escribe solo si la firma + el formato leído están en SYSTEL_VERIFIED_WRITE_PROFILES (hoy vacío).
+      return await fn(new SystelClient(linkRef.current, { address, allowWrites: systelWriteVerified(backup?.signature?.protocolVersion, backup?.layout) }));
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
@@ -202,6 +221,8 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
    * reporte con cada byte y su tiempo. No llama a runSystelSync.
    */
   async function handleOneClick() {
+    if (runningRef.current) return;
+    runningRef.current = true;
     setBusy(true);
     setError("");
     setReportNote("");
@@ -252,6 +273,7 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
       setError(message);
       void autoReport("error", message, { error: message, backup: backupTaken });
     } finally {
+      runningRef.current = false;
       setBusy(false);
       setProgress("");
     }

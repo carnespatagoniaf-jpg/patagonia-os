@@ -143,7 +143,16 @@ export class SerialSystelLink implements SystelLink {
     await this.connect();
   }
 
-  async exchange(frame: Uint8Array, options: SystelExchangeOptions): Promise<Uint8Array | null> {
+  /** Una orden por vez en el cable: si se piden dos juntas, la segunda espera a que termine la primera. */
+  private queue: Promise<unknown> = Promise.resolve();
+
+  exchange(frame: Uint8Array, options: SystelExchangeOptions): Promise<Uint8Array | null> {
+    const run = this.queue.then(() => this.exchangeNow(frame, options));
+    this.queue = run.catch(() => {});
+    return run;
+  }
+
+  private async exchangeNow(frame: Uint8Array, options: SystelExchangeOptions): Promise<Uint8Array | null> {
     if (!this.open || this.lost) {
       try {
         await this.reopen();
