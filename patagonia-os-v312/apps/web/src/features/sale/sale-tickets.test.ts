@@ -26,6 +26,7 @@ describe("buildReceiptTicket", () => {
   it("incluye sucursal, ítems, descuento, total, pago y vuelto", () => {
     const t = text(buildReceiptTicket(receipt, "Sucursal Centro"));
     assert.match(t, /COMPROBANTE INTERNO/);
+    assert.match(t, /NO VALIDO COMO FACTURA/);
     assert.match(t, /Sucursal Centro/);
     assert.match(t, /Asado/);
     assert.match(t, /2\.5 kg x/);

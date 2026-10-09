@@ -142,7 +142,7 @@ const PERMISSION_MIN_PLAN: Partial<Record<Permission, Plan>> = {
 /** Páginas que piden un plan más alto que su permiso (ej. Sucursales: el
  * permiso branches.manage también maneja el selector de sucursal, que
  * Estándar necesita, pero la pantalla de resumen es de Full). */
-const PAGE_MIN_PLAN: Partial<Record<string, Plan>> = { branches: "full", reconciliation: "full" };
+const PAGE_MIN_PLAN: Partial<Record<string, Plan>> = { branches: "full", reconciliation: "full", invoicing: "full" };
 
 /** Plan de la empresa del usuario. Sin dato (modo demo, o la base todavía
  * sin la migración 101) cuenta como Full: nunca se le saca algo a nadie por
@@ -178,6 +178,7 @@ export const PAGE_PERMISSIONS = {
   purchases: "purchases.manage",
   treasury: "treasury.manage",
   reconciliation: "treasury.manage",
+  invoicing: "treasury.manage",
   employees: "employees.manage",
   profitability: "profitability.view",
   carcass: "carcass.manage",

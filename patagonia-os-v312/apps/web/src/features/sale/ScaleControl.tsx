@@ -4,7 +4,7 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { parseAmount } from "../../lib/money";
 import { formatMoney } from "../shifts/format";
 import type { ScaleConfig } from "./scale-barcode";
-import { compareScaleControl, describeScaleTicket, type ScaleComparison, type ScannedScaleTicket } from "./scale-control";
+import { compareScaleControl, describeScaleTicket, type ScaleComparison, type ScannedScaleTicket, parseScaleAmount, parseScaleKg, suggestScaleCorrection } from "./scale-control";
 import { getScaleControl, listScaleVoids, saveScaleControl, voidScaleTicket, type ScaleControlState, type ScaleVoid } from "./scale-control-service";
 import type { PosShift } from "./pos-shift-service";
 import { quantityNumber } from "./quantity";
@@ -184,6 +184,8 @@ export function ScaleCloseControl({ shift, onStatusChange }: {
   const [kgInput, setKgInput] = useState("");
   const [ticketsInput, setTicketsInput] = useState("");
   const [cleared, setCleared] = useState(true);
+  /** "Guardar igual": la persona revisó la sugerencia y el número es ese. */
+  const [acceptOdd, setAcceptOdd] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -207,13 +209,24 @@ export function ScaleCloseControl({ shift, onStatusChange }: {
 
   if (!state) return null;
 
+  // La balanza suma también lo anulado: se compara contra lo cobrado + lo anulado.
+  const amountPreview = parseScaleAmount(amountInput);
+  const kgPreview = kgInput.trim() ? parseScaleKg(kgInput) : NaN;
+  const amountFix = suggestScaleCorrection(amountPreview, state.totals.systemAmount + state.totals.voidedAmount, 100);
+  const kgFix = suggestScaleCorrection(kgPreview, state.totals.systemKg + state.totals.voidedKg, 1000);
+  const money2 = (n: number) => n.toLocaleString("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
   async function save() {
-    const amount = parseAmount(amountInput);
+    if ((amountFix !== null || kgFix !== null) && !acceptOdd) {
+      setError("Revisá el número marcado: parece que al copiarlo se perdió el punto. Tocá \"Usar …\" o, si está bien, \"Guardar igual\".");
+      return;
+    }
+    const amount = parseScaleAmount(amountInput);
     if (!amountInput.trim() || !Number.isFinite(amount) || amount < 0) {
       setError("Cargá el TOTAL DE VENTAS que imprimió la balanza.");
       return;
     }
-    const kgValue = kgInput.trim() ? quantityNumber(kgInput) : null;
+    const kgValue = kgInput.trim() ? parseScaleKg(kgInput) : null;
     const ticketsValue = ticketsInput.trim() ? Number(ticketsInput) : null;
     if ((kgValue !== null && !Number.isFinite(kgValue)) || (ticketsValue !== null && !Number.isInteger(ticketsValue))) {
       setError("Revisá los kilos y la cantidad de tickets.");
@@ -252,22 +265,41 @@ export function ScaleCloseControl({ shift, onStatusChange }: {
         </>
       ) : (
         <>
-          <label className="muted" style={{ fontSize: 13 }}>Total de ventas $
-            <input type="text" inputMode="decimal" placeholder="0" value={amountInput} onChange={(e) => setAmountInput(e.target.value)} />
+          <label className="muted" style={{ fontSize: 13 }}>Total de ventas $ (copialo tal cual, con el punto: ej. 962812.52)
+            <input type="text" inputMode="decimal" placeholder="962812.52" value={amountInput} onChange={(e) => { setAmountInput(e.target.value); setAcceptOdd(false); }} />
           </label>
+          {Number.isFinite(amountPreview) && <span style={{ fontSize: 13, marginTop: -4 }}>Se guarda: <strong>{money2(amountPreview)}</strong></span>}
+          {amountFix !== null && (
+            <div className="message warning" style={{ margin: 0, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <span>¿No será <strong>{money2(amountFix)}</strong>? Es 100 veces más que lo cobrado en Mostrador: parece que se perdió el punto de los centavos.</span>
+              <button className="secondary" onClick={() => setAmountInput(String(amountFix))}>Usar {money2(amountFix)}</button>
+            </div>
+          )}
           <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
             <label className="muted" style={{ fontSize: 13 }}>Total de peso (kg)
-              <input type="text" inputMode="decimal" placeholder="opcional" value={kgInput} onChange={(e) => setKgInput(e.target.value)} />
+              <input type="text" inputMode="decimal" placeholder="opcional, ej. 85.112" value={kgInput} onChange={(e) => { setKgInput(e.target.value); setAcceptOdd(false); }} />
+              {Number.isFinite(kgPreview) && <span style={{ display: "block", color: "#1f2933" }}>Se guarda: <strong>{kgPreview.toLocaleString("es-AR", { maximumFractionDigits: 3 })} kg</strong></span>}
             </label>
             <label className="muted" style={{ fontSize: 13 }}>Tiques emitidos
               <input type="number" step="1" min="0" placeholder="opcional" value={ticketsInput} onChange={(e) => setTicketsInput(e.target.value)} />
             </label>
           </div>
+          {kgFix !== null && (
+            <div className="message warning" style={{ margin: 0, display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+              <span>¿No serán <strong>{kgFix.toLocaleString("es-AR", { maximumFractionDigits: 3 })} kg</strong>? Parece que se perdió el punto de los kilos.</span>
+              <button className="secondary" onClick={() => setKgInput(String(kgFix))}>Usar {kgFix.toLocaleString("es-AR", { maximumFractionDigits: 3 })} kg</button>
+            </div>
+          )}
           <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13 }}>
             <input type="checkbox" checked={cleared} onChange={(e) => setCleared(e.target.checked)} />
             Ya borré el total de la balanza
           </label>
-          <button disabled={busy} onClick={() => void save()}>{busy ? "Comparando…" : "Comparar"}</button>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button disabled={busy} onClick={() => void save()}>{busy ? "Comparando…" : "Comparar"}</button>
+            {(amountFix !== null || kgFix !== null) && (
+              <button className="secondary" disabled={busy} onClick={() => setAcceptOdd(true)}>{acceptOdd ? "Listo: tocá Comparar" : "Guardar igual"}</button>
+            )}
+          </div>
         </>
       )}
       {error && <p className="message warning" style={{ margin: 0 }}>{error}</p>}

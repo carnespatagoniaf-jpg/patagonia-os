@@ -2,6 +2,9 @@ import { useState, type ReactNode } from "react";
 import { BarChart3, Beef, Boxes, ChefHat, Download, FileText, HandCoins, Handshake, History, KeyRound, Landmark, MapPin, Menu, Upload, LogOut, PackagePlus, Receipt, Tag, TrendingUp, Users, Wallet } from "lucide-react";
 import { useAuth } from "../features/auth/AuthProvider";
 import { PLAN_LABELS, canAccessPage, planAllows, profilePlan, type Page } from "../features/auth/permissions";
+
+/** Facturas (ARCA) se ve en staging y con VITE_INVOICING=1; en producción recién cuando esté la conexión real con ARCA (parte 2). */
+const SHOW_INVOICING = import.meta.env.MODE === "staging" || import.meta.env.VITE_INVOICING === "1";
 import { useActiveBranch } from "../features/branches/BranchProvider";
 import { TrialBanner } from "./TrialBanner";
 import { HelpChat } from "../features/help/HelpChat";
@@ -51,6 +54,7 @@ const navGroups: Array<{ heading: string | null; items: NavItem[] }> = [
     items: [
       { page: "treasury", label: "Tesorería", icon: Wallet },
       { page: "reconciliation", label: "Conciliación", icon: Landmark },
+      { page: "invoicing", label: "Facturas", icon: FileText },
       { page: "creditors", label: "Deudas", icon: HandCoins },
       { page: "profitability", label: "Rentabilidad", icon: TrendingUp }
     ]
@@ -200,7 +204,7 @@ export function Layout({ page, onPageChange, children }: Props) {
   const { profile, signOut } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
   const visibleGroups = navGroups
-    .map((group) => ({ ...group, items: group.items.filter((item) => canAccessPage(profile, item.page)) }))
+    .map((group) => ({ ...group, items: group.items.filter((item) => canAccessPage(profile, item.page) && (item.page !== "invoicing" || SHOW_INVOICING)) }))
     .filter((group) => group.items.length > 0);
 
   const currentLabel = navGroups.flatMap((g) => g.items).find((i) => i.page === page)?.label ?? "Patagonia OS";

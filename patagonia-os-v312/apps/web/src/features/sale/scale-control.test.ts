@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Product } from "@patagonia/domain";
 import { DEFAULT_SCALE_CONFIG } from "./scale-barcode";
-import { compareScaleControl, describeScaleTicket, type ScaleControlTotals } from "./scale-control";
+import { compareScaleControl, describeScaleTicket, parseScaleAmount, parseScaleKg, suggestScaleCorrection, type ScaleControlTotals } from "./scale-control";
 
 function withCheckDigit(first12: string): string {
   const sum = first12.split("").reduce((acc, ch, i) => acc + Number(ch) * (i % 2 === 0 ? 1 : 3), 0);
@@ -51,5 +51,33 @@ describe("leer el ticket para anularlo", () => {
   it("código que no es de balanza", () => {
     assert.equal(describeScaleTicket("7790001234567", DEFAULT_SCALE_CONFIG, [nalga]), null);
     assert.equal(describeScaleTicket("", DEFAULT_SCALE_CONFIG, [nalga]), null);
+  });
+});
+
+describe("números copiados del TOTAL DEL DIA de la balanza", () => {
+  it("lee el importe con el punto decimal de la balanza (caso real 962812.52$)", () => {
+    assert.equal(parseScaleAmount("962812.52"), 962812.52);
+    assert.equal(parseScaleAmount("962812.52$"), 962812.52);
+    assert.equal(parseScaleAmount("962.812,52"), 962812.52);
+    assert.equal(parseScaleAmount("962.812"), 962812);
+    assert.equal(parseScaleAmount("962812"), 962812);
+    assert.equal(parseScaleAmount("1728.5"), 1728.5);
+    assert.ok(Number.isNaN(parseScaleAmount("")));
+  });
+
+  it("lee los kilos como los imprime la balanza", () => {
+    assert.equal(parseScaleKg("85.112kg"), 85.112);
+    assert.equal(parseScaleKg("85,112"), 85.112);
+  });
+
+  it("sugiere corregir cuando se perdió el punto (casos reales de Carnes Patagonia)", () => {
+    assert.equal(suggestScaleCorrection(96281252, 881218.52, 100), 962812.52);
+    assert.equal(suggestScaleCorrection(66406790, 645660.75, 100), 664067.9);
+    assert.equal(suggestScaleCorrection(85112, 82.924, 1000), 85.112);
+    // Números razonables: no se toca.
+    assert.equal(suggestScaleCorrection(962812.52, 881218.52, 100), null);
+    assert.equal(suggestScaleCorrection(1832735.24, 1053400.25, 100), null);
+    // Sin ventas en Mostrador no hay con qué comparar.
+    assert.equal(suggestScaleCorrection(96281252, 0, 100), null);
   });
 });

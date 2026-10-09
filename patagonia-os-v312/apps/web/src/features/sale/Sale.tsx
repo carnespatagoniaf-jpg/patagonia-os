@@ -15,6 +15,9 @@ import { useSuppliers } from "../purchases/useSuppliers";
 import { useEmployees } from "../employees/useEmployees";
 import { deletePosShiftOutflow, listPosShiftVales, type PosShiftVale } from "../employees/employees-service";
 import { createPosSale, type CreatePosSaleInput } from "./sale-service";
+import { getFiscalSettings, requestInvoice, type FiscalSettings } from "../invoicing/invoicing-service";
+import { emptyInvoiceDraft, invoiceDraftError, type InvoiceDraft } from "../invoicing/invoicing-view";
+import { InvoiceRequestFields } from "../invoicing/InvoiceRequestFields";
 import { addPendingSale, getPendingSales, isRetryableError, isShiftClosedError, markPendingSaleError, removePendingSale, resetPendingSaleErrors, updatePendingSale, type PendingSale } from "./offline-queue";
 import { closePosShift, deletePosShiftAdjustment, getOpenPosShift, listPosShiftAdjustments, listPosShiftSupplierPayments, type PosShiftSupplierPayment, listPosShiftSales, openPosShift, voidPosSale, type CloseShiftResult, type PosShift, type PosShiftAdjustment, type PosShiftSale } from "./pos-shift-service";
 import { formatMoney } from "../shifts/format";
@@ -113,6 +116,14 @@ export function Sale() {
   const [showSupplierForm, setShowSupplierForm] = useState(false);
 
   const [showValeForm, setShowValeForm] = useState(false);
+
+  // Factura electrónica (migración 113): solo si el negocio la tiene activa.
+  const [fiscal, setFiscal] = useState<FiscalSettings | null>(null);
+  const [invoiceDraft, setInvoiceDraft] = useState<InvoiceDraft>(emptyInvoiceDraft());
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    void getFiscalSettings().then(setFiscal);
+  }, []);
 
   const [thermalPrintBusy, setThermalPrintBusy] = useState(false);
   const [thermalConnectBusy, setThermalConnectBusy] = useState(false);
@@ -446,6 +457,17 @@ export function Sale() {
   async function checkout() {
     if (cart.length === 0 || !shift) return;
 
+    // Factura pedida: se valida antes de cobrar (CUIT para la A, etc.), así nunca
+    // queda una venta cobrada con una factura imposible de pedir.
+    const wantsInvoice = Boolean(fiscal?.enabled && invoiceDraft.wanted);
+    if (wantsInvoice && fiscal) {
+      const invoiceError = invoiceDraftError(fiscal.taxCondition, invoiceDraft, total);
+      if (invoiceError) {
+        setMessage(invoiceError);
+        return;
+      }
+    }
+
     if (!isSplit) {
       if (!payments[0]?.accountId) {
         setMessage("Elegí de qué cuenta cobrás.");
@@ -554,9 +576,12 @@ export function Sale() {
       // acá mismo ya que no hay respuesta del servidor todavía.
       let saleTotal = total;
       let queuedOffline = false;
+      let saleId: string | null = null;
+      const invoiceSnapshot = invoiceDraft;
       try {
         const result = await createPosSale(salePayload);
         saleTotal = result.total;
+        saleId = result.saleId;
       } catch (err) {
         if (!isRetryableError(err)) throw err;
         addPendingSale(salePayload, { companyId: profile?.company_id, total });
@@ -583,6 +608,7 @@ export function Sale() {
       // en producción).
       setMovementReceipt(null);
       clearTicket();
+      setInvoiceDraft(emptyInvoiceDraft());
       // El ticket tiene que salir sí o sí -- se imprime antes de refrescar
       // stock/turno, y esos dos refrescos van en su propio try/catch para
       // que un problema de red ahí (la venta ya está guardada, o ya quedó
@@ -590,9 +616,24 @@ export function Sale() {
       // se pudo registrar la venta" sobre una venta que en realidad sí se
       // cobró.
       await autoPrintReceipt(newReceipt);
+      // La factura se pide recién con la venta guardada (necesita su número de venta).
+      let invoiceText = "";
+      if (wantsInvoice) {
+        if (queuedOffline || !saleId) {
+          invoiceText = " La factura NO se pidió (sin conexión): cuando vuelva internet, pedila en Facturas → Ventas sin factura.";
+        } else {
+          try {
+            const inv = await requestInvoice(saleId, invoiceSnapshot);
+            invoiceText = ` Factura ${inv.letter} pedida a ARCA.`;
+          } catch (err) {
+            invoiceText = ` La venta se cobró, pero la factura no se pudo pedir (${err instanceof Error ? err.message : "error"}). Pedila en Facturas → Ventas sin factura.`;
+          }
+        }
+      }
       if (queuedOffline) {
-        setMessage("Sin conexión: la venta se guardó en este equipo y se sube sola apenas vuelva internet.");
+        setMessage("Sin conexión: la venta se guardó en este equipo y se sube sola apenas vuelva internet." + invoiceText);
       } else {
+        if (invoiceText) setMessage(invoiceText.trim());
         try {
           await reloadProducts();
           await reloadShift();
@@ -932,7 +973,17 @@ export function Sale() {
         </section>
       ) : (
         <div className="content-grid" style={{ alignItems: "start" }}>
-          <SaleTicketPanel ticket={ticket} accounts={accounts} busy={busy} onCheckout={checkout} />
+          <SaleTicketPanel
+            ticket={ticket}
+            accounts={accounts}
+            busy={busy}
+            onCheckout={checkout}
+            invoiceSlot={
+              fiscal?.enabled && cart.length > 0 ? (
+                <InvoiceRequestFields issuer={fiscal.taxCondition} draft={invoiceDraft} total={total} onChange={setInvoiceDraft} />
+              ) : null
+            }
+          />
 
           <ShiftPanel
             shift={shift}

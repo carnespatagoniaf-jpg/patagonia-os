@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, useState, type ReactNode } from "react";
 import type { Product, TreasuryAccount } from "@patagonia/domain";
 import { parseAmount } from "../../lib/money";
 import { formatMoney } from "../shifts/format";
@@ -10,11 +10,13 @@ import type { SaleTicket } from "./useSaleTicket";
 // medios de pago y barra de cobro. Es solo vista: el estado vive en
 // useSaleTicket y el cobro (checkout) en Sale.tsx.
 
-export function SaleTicketPanel({ ticket, accounts, busy, onCheckout }: {
+export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlot }: {
   ticket: SaleTicket;
   accounts: TreasuryAccount[];
   busy: boolean;
   onCheckout: () => void;
+  /** "El cliente pide factura" (solo si la factura electrónica está activa en el negocio). */
+  invoiceSlot?: ReactNode;
 }) {
   // Lo que se está tipeando en la cantidad de cada renglón. Sin esto, al borrar
   // la cantidad para escribir los kilos el campo volvía a mostrar "0" y se
@@ -408,6 +410,7 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout }: {
           </div>
         </div>
 
+        {invoiceSlot}
         {confirmCharge && (
           <p className="pos-confirm-banner">
             Vas a cobrar {formatMoney(total)} con{" "}

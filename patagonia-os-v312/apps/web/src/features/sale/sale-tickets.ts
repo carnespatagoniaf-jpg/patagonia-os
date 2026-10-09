@@ -14,6 +14,8 @@ export function buildReceiptTicket(receiptToPrint: ReceiptState, branchName?: st
   if (settings.font !== "auto") t.font(settings.font);
   t.bodySize(settings, true);
   t.align("center").bold(true).line("COMPROBANTE INTERNO").bold(false);
+  // Sin factura, el papel lo tiene que decir (es lo que se lleva el cliente).
+  t.line("NO VÁLIDO COMO FACTURA");
   if (branchName) t.line(branchName);
   t.align("left").separator("-", settings.lineWidth);
   t.line(new Date(receiptToPrint.soldAt).toLocaleString("es-AR"));
