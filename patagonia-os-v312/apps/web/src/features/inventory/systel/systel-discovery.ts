@@ -1,5 +1,5 @@
 import { SystelClient, type SystelExchangeLog } from "./systel-client";
-import { SerialSystelLink, type SystelSerialSettings } from "./systel-serial";
+import { SerialSystelLink, type SystelLinkEvent, type SystelSerialSettings } from "./systel-serial";
 import { parseSystelReply } from "./systel-frame";
 
 /**
@@ -75,7 +75,8 @@ export async function discoverSystelLink(
   log: SystelExchangeLog[],
   onProgress: (text: string) => void = () => {},
   preferred: SavedSystelLink | null = null,
-  pingTimeoutMs = 350
+  pingTimeoutMs = 350,
+  linkEvents: SystelLinkEvent[] = []
 ): Promise<SystelFoundLink | null> {
   const plan: { settings: SystelSerialSettings; addresses: number[] }[] = [];
   // Con lo guardado se repite la secuencia que anduvo en la balanza real (1, 0 y recién su número):
@@ -87,7 +88,7 @@ export async function discoverSystelLink(
 
   for (const [i, step] of plan.entries()) {
     onProgress(`Buscando la balanza (${i + 1} de ${plan.length}: ${label(step.settings)})… no desenchufes el cable.`);
-    const link = new SerialSystelLink(port, step.settings);
+    const link = new SerialSystelLink(port, step.settings, linkEvents);
     try {
       await link.connect();
     } catch (err) {

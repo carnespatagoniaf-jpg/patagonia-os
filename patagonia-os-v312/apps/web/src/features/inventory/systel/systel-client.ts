@@ -87,6 +87,11 @@ export interface SystelClientOptions {
   /** La función 61/4 se documenta SIN verificación; las demás con. HIPÓTESIS: se prueba "con" y, si contesta E5, "sin". */
   writeChecksum?: "con" | "sin";
   log?: SystelExchangeLog[];
+  /**
+   * Escrituras (33 cambio de precio, 61/4 alta). BLOQUEADAS por defecto (decisión del dueño
+   * 2026-10-09): hasta que Systel confirme el E3 y el formato de escritura, Patagonia solo lee.
+   */
+  allowWrites?: boolean;
 }
 
 export class SystelError extends Error {
@@ -102,12 +107,14 @@ export class SystelClient {
   private readonly timeoutMs: number;
   private readonly busyRetryMs: number[];
   writeChecksum: "con" | "sin";
+  private readonly allowWrites: boolean;
 
   constructor(private readonly link: SystelLink, options: SystelClientOptions) {
     this.address = options.address;
     this.timeoutMs = options.timeoutMs ?? 1500;
     this.writeChecksum = options.writeChecksum ?? "con";
     this.log = options.log ?? [];
+    this.allowWrites = options.allowWrites ?? false;
     this.busyRetryMs = options.busyRetryMs ?? [300, 800, 1500, 3000, 5000];
   }
 
@@ -232,6 +239,7 @@ export class SystelClient {
    * `current` tiene que ser una lectura reciente de ese PLU.
    */
   async changePrice(current: SystelPlu, newPriceRaw: number): Promise<WriteOutcome> {
+    if (!this.allowWrites) return BLOCKED;
     const data = buildPriceChangeData(current, newPriceRaw);
     const expected = expectedAfterPriceChange(current, newPriceRaw);
     const r = await this.call(`cambiar precio PLU ${current.number}`, 33, data, { token: WRITE_TOKEN });
@@ -243,6 +251,7 @@ export class SystelClient {
    * leída recién: si el número ya existe, no escribe.
    */
   async createPlu(layout: SystelLayout, input: NewPluInput, knownNumbers: Set<number>): Promise<WriteOutcome> {
+    if (!this.allowWrites) return BLOCKED;
     if (knownNumbers.has(input.number)) return { ok: false, verdict: "ocupado", detail: `el PLU ${input.number} ya existe en la balanza: no se escribe encima`, readBack: null, diff: [] };
     const fresh = await this.readPlu(layout, input.number);
     if (fresh) return { ok: false, verdict: "ocupado", detail: `el PLU ${input.number} ya existe en la balanza: no se escribe encima`, readBack: fresh, diff: [] };
@@ -276,8 +285,10 @@ export class SystelClient {
 
 export interface WriteOutcome {
   ok: boolean;
-  verdict: "confirmado" | "confirmado_sin_ack" | "rechazada" | "ocupado" | "sin_relectura" | "sin_cambios" | "diferencia";
+  verdict: "confirmado" | "confirmado_sin_ack" | "rechazada" | "ocupado" | "sin_relectura" | "sin_cambios" | "diferencia" | "bloqueado";
   detail: string;
   readBack: SystelPlu | null;
   diff: PluField[];
 }
+
+const BLOCKED: WriteOutcome = { ok: false, verdict: "bloqueado", detail: "el envío a la balanza está bloqueado en Patagonia: por ahora solo se lee", readBack: null, diff: [] };

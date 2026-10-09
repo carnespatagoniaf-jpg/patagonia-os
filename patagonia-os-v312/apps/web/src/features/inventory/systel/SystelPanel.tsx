@@ -9,6 +9,7 @@ import { planSystelSync, runSystelSync, type SystelPlanItem, type SystelSyncResu
 import { runSystelWriteTest, type SystelWriteTestResult } from "./systel-write-test";
 import { discoverSystelLink, loadSavedSystelLink, saveSystelLink } from "./systel-discovery";
 import type { SystelExchangeLog } from "./systel-client";
+import type { SystelLinkEvent } from "./systel-serial";
 import { submitScaleSupportReport } from "../../scales/support-service";
 import { logScaleActivity } from "../../scales/activity-log";
 import { useAuth } from "../../auth/AuthProvider";
@@ -72,6 +73,9 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
   const portRef = useRef<SerialPort | null>(null);
   /** Cada pedido y respuesta (bytes en hex), para el reporte a soporte. */
   const logRef = useRef<SystelExchangeLog[]>([]);
+  /** Lo que pasó en el cable (abrir, señales, cada byte con su tiempo, lo descartado). */
+  const linkEventsRef = useRef<SystelLinkEvent[]>([]);
+  const portsRef = useRef<{ authorized: number; picked: string } | null>(null);
 
   /**
    * Cada paso (respaldo, prueba, envío o error) le llega solo a soporte, con todo lo que se
@@ -96,7 +100,7 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
             connectedNow: Boolean(linkRef.current),
             pluScan: extra.backup ?? backup ?? undefined,
             auraWriteTest: extra.test ?? test ?? undefined,
-            diagnosticRecord: { sync: extra.sync ?? sync ?? null, error: extra.error ?? null, log: logRef.current.slice(-400), savedLink: loadSavedSystelLink() }
+            diagnosticRecord: { sync: extra.sync ?? sync ?? null, error: extra.error ?? null, log: logRef.current.slice(-400), linkEvents: linkEventsRef.current.slice(-1500), ports: portsRef.current, savedLink: loadSavedSystelLink() }
           }
         ],
         branchId: branchId ?? null
@@ -172,29 +176,42 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
 
   const decimals = backup?.signature?.priceDecimals ?? 0;
 
+  /**
+   * Botón del piloto: SOLO LEE (decisión del dueño 2026-10-09, envío de precios bloqueado hasta que
+   * Systel confirme el E3 y el formato de escritura). Busca la balanza, respalda todo y manda UN
+   * reporte con cada byte y su tiempo. No llama a runSystelSync.
+   */
   async function handleOneClick() {
     setBusy(true);
     setError("");
     setReportNote("");
     setSync(null);
     logRef.current = [];
+    linkEventsRef.current = [];
     let backupTaken: SystelBackup | null = null;
     try {
       if (!portRef.current) {
         try {
           portRef.current = await pickSystelPort();
         } catch {
-          setError("no se eligió el puerto de la balanza. Tocá de nuevo y elegí el que dice USB");
+          setError("no se eligió el puerto de la balanza");
           return;
         }
       }
+      try {
+        const all = await navigator.serial.getPorts();
+        const i = portRef.current.getInfo();
+        portsRef.current = { authorized: all.length, picked: `${(i.usbVendorId ?? 0).toString(16).padStart(4, "0")}:${(i.usbProductId ?? 0).toString(16).padStart(4, "0")}` };
+      } catch {
+        portsRef.current = null;
+      }
       let runAddress = address;
       if (!linkRef.current) {
-        const found = await discoverSystelLink(portRef.current, logRef.current, setProgress, loadSavedSystelLink());
+        const found = await discoverSystelLink(portRef.current, logRef.current, setProgress, loadSavedSystelLink(), 350, linkEventsRef.current);
         if (!found) {
           const msg = "la balanza no contestó en ninguna configuración";
           setError(msg);
-          void autoReport("buscar la balanza", msg, { error: msg });
+          void autoReport("leer la balanza", msg, { error: msg });
           portRef.current = null;
           return;
         }
@@ -209,18 +226,7 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
       backupTaken = b;
       setBackup(b);
       saveBackupLocally(b);
-      if (!b.complete || !b.layout) {
-        void autoReport("mandar productos (un botón)", `no se pudo leer la balanza completa: ${b.detail}`, { backup: b });
-        return;
-      }
-      const p = planSystelSync(b, csvProducts);
-      const r = await runSystelSync(client, b.layout, p, setProgress);
-      setSync(r);
-      const skipped = p.filter((x) => x.action === "revisar" || x.action === "omitir").length;
-      const detail = r.stoppedAt
-        ? `se frenó en el PLU ${r.stoppedAt.number}: ${r.stoppedAt.outcome.detail} (${r.done.length} ya mandados)`
-        : `${r.done.length} mandados, ${skipped} sin tocar, ${b.plus.length} productos leídos de la balanza`;
-      void autoReport("mandar productos (un botón)", detail, { backup: b, sync: r });
+      void autoReport("leer la balanza", b.complete && b.layout ? `${b.plus.length} productos leídos (no se mandó nada)` : `lectura incompleta: ${b.detail}`, { backup: b });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
@@ -243,15 +249,15 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
           <div className="panel" style={{ width: "100%", marginTop: 12, display: "grid", gap: 10 }}>
             <div>
               <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 16 }}>Balanza</p>
-              <p className="muted" style={{ margin: 0, fontSize: 13 }}>Con la balanza conectada por USB, manda tus productos y precios. No borra nada de la balanza.</p>
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>Con la balanza conectada por USB, Patagonia lee los productos que tiene. Por ahora no le cambia nada.</p>
             </div>
             <div>
-              <button disabled={busy} onClick={() => void handleOneClick()}>{busy ? "Mandando…" : "Mandar productos a la balanza"}</button>
+              <button disabled={busy} onClick={() => void handleOneClick()}>{busy ? "Leyendo…" : "Leer la balanza"}</button>
               <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>La primera vez, Chrome pregunta qué puerto usar: elegí el que dice USB y tocá Conectar.</p>
             </div>
             {progress && <p className="muted" style={{ margin: 0 }}>{progress}</p>}
             {error && <p className="message warning" style={{ margin: 0 }}>No se pudo: {error}. No se cambió nada en la balanza.</p>}
-            {backup && !sync && !busy && !error && <p className="message warning" style={{ margin: 0 }}>Se leyó la balanza pero no se mandó nada: {backup.detail}</p>}
+            {backup && !busy && !error && <p className={backup.complete ? "message" : "message warning"} style={{ margin: 0 }}>{backup.complete ? `Se leyeron ${backup.plus.length} productos de la balanza. No se cambió nada.` : `No se pudo leer todo: ${backup.detail}`}</p>}
             {sync && (
               <p className={sync.stoppedAt ? "message warning" : "message"} style={{ margin: 0 }}>
                 {sync.stoppedAt

@@ -169,3 +169,22 @@ describe("Patagonia contra la balanza real reproducida", () => {
     assert.ok(port.received.every((tx) => [2, 23].includes(parseInt(tx.split(" ")[1], 16))));
   });
 });
+
+describe("registro del cable (para no volver a quedarnos sin datos)", () => {
+  it("anota apertura, cada orden y respuesta con sus tiempos, y los bytes que llegan tarde y se descartan", async () => {
+    const port = new ReplayPort(300);
+    const link = new SerialSystelLink(port as unknown as SerialPort);
+    await link.connect();
+    // Como el código de las 16:08: cortar por 60 ms de silencio, sin esperar la trama completa.
+    await link.exchange(hexToBytes(LIST.tx), { timeoutMs: 300 });
+    await new Promise((r) => setTimeout(r, 400));
+    await link.exchange(hexToBytes("14 17 03"), { timeoutMs: 300 });
+    await link.close();
+    const kinds = link.events.map((e) => e.kind);
+    assert.deepEqual(kinds.slice(0, 3), ["abrir", "tx", "rx"]);
+    const late = link.events.find((e) => e.kind === "descartado");
+    assert.ok(late, "el cierre que llegó tarde queda anotado");
+    assert.match(late!.hex!, /^46 /, "empieza con la F");
+    assert.match(link.events.find((e) => e.kind === "rx")!.detail, /primer byte a los \d+ ms/);
+  });
+});
