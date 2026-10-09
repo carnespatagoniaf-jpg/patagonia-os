@@ -82,7 +82,9 @@ export async function discoverSystelLink(
   // Con lo guardado se repite la secuencia que anduvo en la balanza real (1, 0 y recién su número):
   // las 3 veces que se le habló directo a su número contestó E3 a todo.
   if (preferred) plan.push({ settings: preferred.settings, addresses: [...new Set([1, 0, preferred.address])] });
-  const firstAddresses = [1, 0, 2, 3, 4, 5, 6, 7, 8, 9, 10];
+  // 20 temprano: es el número que trae el programa de ejemplo oficial (Form1.Designer.vb, Text_IP = "20")
+  // y el del ejemplo del manual ("Id : 20"), y el que tiene la balanza de Los gringos.
+  const firstAddresses = [1, 0, 20, 2, 3, 4, 5, 6, 7, 8, 9, 10];
   for (const settings of SYSTEL_SERIAL_CANDIDATES) plan.push({ settings, addresses: firstAddresses });
   plan.push({ settings: SYSTEL_SERIAL_CANDIDATES[0], addresses: Array.from({ length: 89 }, (_, i) => i + 11) });
 
@@ -92,9 +94,11 @@ export async function discoverSystelLink(
     try {
       await link.connect();
     } catch (err) {
-      log.push({ step: `abrir puerto (${label(step.settings)})`, fn: 0, tx: "", rx: "", rxText: err instanceof Error ? err.message : String(err), ms: 0, result: "no se pudo abrir el puerto" });
-      // Si el puerto ni abre, no tiene sentido seguir probando velocidades.
-      return null;
+      const message = err instanceof Error ? err.message : String(err);
+      log.push({ step: `abrir puerto (${label(step.settings)})`, fn: 0, tx: "", rx: "", rxText: message, ms: 0, result: "no se pudo abrir el puerto" });
+      // Si el puerto ni abre, no tiene sentido seguir probando, y NO es "la balanza no contestó"
+      // (real 15:59:03: "The port is already open", otra pantalla o programa lo tenía tomado).
+      throw new Error(/already open/i.test(message) ? "el puerto de la balanza está abierto en otra pantalla o programa (por ejemplo Qendra)" : `no se pudo abrir el puerto de la balanza (${message})`);
     }
     await link.setSignals(true);
     for (const address of step.addresses) {

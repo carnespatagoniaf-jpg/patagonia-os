@@ -1,140 +1,140 @@
-# Diagnóstico Systel Cuora Max: Los gringos (2026-10-09, revisión 2)
+# Diagnóstico Systel Cuora Max: Los gringos (revisión 3, 2026-10-09)
 
-**Estado:** el envío de precios está BLOQUEADO en el código (`SystelClient.allowWrites`, por defecto `false`, con prueba). El botón del piloto solo lee. No se le pide nada al cliente.
+**Estado:**
+- El envío de precios y productos está **BLOQUEADO** en el código (`SystelClient.allowWrites = false` por defecto, con prueba).
+- El botón del piloto solo lee.
+- Los cambios de esta revisión **no están publicados** (falta autorización del dueño).
+- No se contactó a Systel ni se le pidió nada al cliente.
 
-**Fuentes:**
-- Los reportes automáticos a soporte (`scale_support_reports`, prod, empresa `a2660765…`), con cada byte.
-- Los documentos oficiales: Protocolo Cuora Max V6.0 Rev 06 (el que corresponde a esta balanza), V6.2, V7.0 y el programa de ejemplo VB de Systel, todos del zip oficial. También el Manual de Instalación de la Cuora Max.
+## 1. Documentación revisada
 
-**Etiquetas:**
-- **COMPROBADO:** sale de bytes reales.
-- **DOCUMENTADO:** lo dice Systel.
-- **HIPÓTESIS:** falta comprobar.
-- **NO REGISTRADO:** no lo guardábamos, así que no se puede saber.
+Fuente: `soporte.systel-global.com/instructivos/`, descargada el 2026-10-09. El zip del protocolo es idéntico al bajado el 2026-10-04 (SHA-256 `e33cf997…cf1ee`).
 
-## 1. Comparación de las conexiones
+| Archivo | Qué es |
+|---|---|
+| `Protocolo de comunicaciones CUORA 2 V4.0 Rev 00.pdf` | Rev 03/Dic/2010 |
+| `Protocolo de comunicaciones CUORA MAX V6.0 Rev 06.pdf` | 12/Jul/2016 |
+| `Protocolo de comunicaciones CUORA MAX V6.2 Rev 00.pdf` | 21/Oct/2021 |
+| `Protocolo de comunicaciones MAX CUORA V7.pdf` | Rev 00, 20/Jun/2022 |
+| `Prueba Protocolo Cuora W7 - VB/` | Programa de ejemplo oficial: `Form1.vb`, `Form1.Designer.vb`, proyecto |
+| `Protocolo de comunicación RS232 Systel.pdf` | Rev 10, solo peso (Croma, Clipse, etc.) |
+| Guía de redes Cuora Max Rev 6, Instalación manual de drivers, Instalación Qendra MAX | Instalación y conexión |
+| `QENDRA-Importacion-automatica-de-datos-ESP.zip` | PDF Rev 2 + 3 CSV de ejemplo |
+| Manual de Instalación y Guía de Usuario Cuora Max | Copia publicada por un distribuidor |
 
-`ms` = desde que Patagonia manda hasta que da la respuesta por terminada. Incluye los 60 ms de silencio que el código espera y hasta 10 ms de sondeo. La demora real de la balanza es aproximadamente `ms − 60 a 70`.
+**Búsqueda de otras revisiones:** no se encontró ningún otro protocolo público, ni implementaciones de terceros (GitHub ni foros).
+
+### Qué versión de protocolo usa la balanza (sin suponerlo)
+- Los 4 protocolos dicen en la firma digital "En este caso «0040»", siempre en la pág. 5. Ninguno documenta qué significa `S0060`. **No está documentado** a qué documento corresponde la firma `S0060`.
+- **Evidencia real:** la lista (función 31) llegó con números de PLU de **4 dígitos** (`N0001`). Eso coincide con V4.0 (pág. 13) y V6.0 (pág. 15). **No coincide** con V6.2 ni V7 (pág. 13: "Nro PLU 6 Nros").
+- V6.0 dice que la función 3 "No se utiliza en este equipo" (pág. 8). Así que, si es una Cuora Max, la lectura es la 62.
+- **Conclusión:** el formato de la balanza es "de 4 dígitos" (V4.0 o V6.0). Cuál de los dos se sabe recién leyendo un producto. El código prueba la 62 (V6.0) y, si recibe E4, la 3 (V4.0). Nunca escribe con un formato que no haya leído en esa balanza.
+
+## 2. Las dudas, una por una
+
+| Duda | Qué dice la documentación | Fuente | Conclusión |
+|---|---|---|---|
+| **Significado de E3** | "E3= Se desatendieron datos." Nada más. | V6.0 pág. 4; V4.0 pág. 4; V6.2 y V7 pág. 4 | **No documentado:** no dice cuándo ocurre. |
+| **Cómo salir del E3** | Nada. Solo "dará aviso al servidor para que este pueda re-procesar el mensaje". | V6.0 pág. 3 | **No documentado.** |
+| **Secuencia de inicio** | No existe ninguna. "Unicast"; la 0 es "Broadcast". Para V6.0: "El sistema soporta transmisiones solo de modo «Unicast»". | V6.0 págs. 2-3 | **No documentado.** Que la balanza contestara al 0 (16:08) **no está documentado** para la Cuora Max. |
+| **Tiempos** | Fin de trama por silencio, "aprox 5ms", sin pausas dentro de una trama. No hay plazos de respuesta. | V6.0 pág. 3; RS232 Rev 10 pág. 2 | Patagonia manda cada orden de una sola escritura y espera ≥60 ms entre órdenes: cumple. **No hay plazo documentado** para la respuesta ni para el cierre de la 31. |
+| **DTR/RTS** | Nada en los protocolos. El ejemplo oficial solo configura `BaudRate = 115200` (Designer, línea 76). Lo demás queda en los valores por defecto de .NET: DTR y RTS **apagadas**, sin control de flujo, 8N1. | `Form1.Designer.vb` | **Diferencia con lo nuestro:** Patagonia las enciende. Con ellas encendidas funcionó a las 16:08, así que no es una falla demostrada. Queda registrado. |
+| **Identificación** | El ejemplo trae `Text_IP.Text = "20"` (Designer, línea 164) y el manual muestra "Id : 20". | Ejemplo VB; manual, cap. 3 Conectividad | Ahora se prueba el 20 temprano en la búsqueda. |
+| **Cierre de la 31** | La lista termina con "F" y la verificación. Nada sobre pausas. | V6.0 págs. 14-15 | **No documentado** si hay pausa ni cuánto dura. |
+| **XOR en la 61** | V6.0 pág. 20, V6.2 y V7 pág. 18: "IP + Función + Datos", sin CRC. Para la función 87 Systel aclara: "Esta función no tiene en cuenta el CRC" (V6.0 pág. 30). Para la 61 no aclara nada. | Ver columna anterior | **Contradictorio:** la omisión podría ser un error del documento, porque cuando Systel quiere decir "sin CRC" lo dice. |
+| **XOR en la función 4** | V4.0 pág. 8 dice "+ CRC" y V6.0 pág. 9 lo omite. El ejemplo VB agrega XOR a todas las órdenes (`Form1.vb`, `TramaTX = IP & ORDEN & PARAMETROS & ChrW(CRC)`). | Ídem | Igual que la 61. |
+| **"Versión del PLU" en la 33** | "Versión del PLU 1 Letra", sin valores. | V6.0 pág. 10; V4.0 pág. 9; V6.2 y V7 págs. 8-9 | **No documentado.** |
+| **Valores de la versión** | En la 31: 0 = creado en la balanza, 1 = gestionado desde la PC, 2 = modificado en la balanza. En la 62, "Gestión": 0 balanza / 1 PC. El ejemplo VB de la función 4 manda `"2"`. | V6.0 págs. 15 y 19 | Usamos "1" (gestionado desde la PC). Su significado está documentado, pero **no que la 33 lo acepte**. |
+| **Caracteres del nombre** | `!"#$%&´()*+,-./0-9:;<=>?@A-Z[\]º_\`a-z{|}ñÑ` | Qendra Importar Rev 2, Nota 1 | Patagonia usa un subconjunto (sin ´ º ñ: la ñ pasa a n). No genera nada fuera de ese conjunto. |
+
+**Defectos del ejemplo oficial (no los copiamos):**
+- Manda la trama como texto (`SerialPort1.Write(TramaTX)`). En .NET eso convierte en "?" todo byte mayor a 127, así que una verificación ≥ 0x80 saldría mal.
+- En su función 4 el campo "Mantener totales" va con "S", cuando el documento pide N o M.
+
+## 3. Comparación de las conexiones
+
+Cada sesión se cruzó con la versión del código que estaba publicada en ese momento: 16:04:28 (`1ff060f`), 16:27:19 (`f03d3b7`), 16:37:32 (`751d036` + `c7e0c28`).
 
 | | 16:08 (anduvo) | 16:26 | 16:40 | 16:41 |
 |---|---|---|---|---|
-| Código | búsqueda automática, sin número guardado | igual que 16:08, con el número 20 guardado | + reintentos por E3 + lista hasta la F | misma conexión abierta que 16:40 |
-| Puerto | elegido en Chrome | elegido de nuevo (página nueva) | elegido de nuevo | el mismo objeto de 16:40 |
-| Velocidad / formato | 115200 8N1 | igual | igual | igual |
-| DTR/RTS | encendidas (código) | igual | igual | igual |
-| 1.ª orden después de abrir | `01 17 16` (ping al 1): sin respuesta, 356 ms | `14 17 03` (ping al 20): **E3** | `14 17 03`: **E3** | `14 02 16` (firma): **E3** |
-| 1.ª orden al 20 | ~450 ms después de abrir, tras el ping al 1 y el general | apenas abierto | apenas abierto | conexión abierta hace ~29 s |
-| Respuestas | `00 17 17` → 89 ms; firma 81; ping 78; configuración 113; lista 187 (982 bytes) | 96, 86, 79 ms | 71 a 93 ms (18 órdenes) | 71 a 91 ms (12 órdenes) |
-| Forma de la respuesta | completas con verificación bien, salvo la lista (sin F ni verificación) | 5 bytes `14 fn 45 33 xx`, verificación bien | igual | igual |
-| Bytes descartados antes de mandar | NO REGISTRADO | NO REGISTRADO | NO REGISTRADO | NO REGISTRADO |
-| Cierre de la página / puerto | NO REGISTRADO | NO REGISTRADO | NO REGISTRADO | NO REGISTRADO |
+| **Código publicado** | `1ff060f` | **el mismo `1ff060f`** | `c7e0c28` | `c7e0c28` |
+| Página / puerto | página con puerto elegido | página nueva, puerto elegido de nuevo | página nueva, puerto elegido de nuevo | misma conexión que 16:40 |
+| Órdenes antes de la 1.ª al 20 | `01 17 16` (sin respuesta, 356 ms) y `00 17 17` (respondió el 20) | **ninguna** (número guardado → directo al 20) | ninguna | ninguna (conexión ya abierta hace ~29 s) |
+| 1.ª respuesta del 20 | firma completa (81 ms) | E3 (96 ms) | E3 (93 ms) | E3 (79 ms) |
+| Respuestas | 6 de 6 con verificación bien, salvo la lista (sin F) | 3 E3 | 18 E3 (reintentos a lo largo de ~10 s) | 12 E3 |
+| Ms por respuesta | 78-113 (lista 187) | 79-96 | 71-93 | 71-91 |
+| Bytes por respuesta | completos | 5 justos | 5 justos | 5 justos |
+| Bytes descartados / apertura / cierre | NO REGISTRADO | NO REGISTRADO | NO REGISTRADO | NO REGISTRADO |
 
-**Lo que muestra la tabla (COMPROBADO):**
-1. La balanza contestó igual de rápido en las conexiones buenas y en las de E3 (unos 10 a 35 ms). No hay señal de que estuviera "procesando" otra cosa más lenta.
-2. Las respuestas E3 vinieron completas, con su número (20), la función que pedimos y la verificación bien, y sin bytes de más dentro de la respuesta. Nuestra forma de cortar las respuestas (60 ms de silencio) fue la misma en todas.
-3. El E3 se repitió durante unos 10 s de reintentos (16:40) y 29 s después **sobre la misma conexión abierta** (16:41). No fue algo pasajero apenas abierto el puerto.
+**16:08 contra 16:26: mismo código, misma balanza.** Lo único que cambió de nuestro lado fue:
+- **(a)** Con el número guardado, el código fue directo al 20, sin las órdenes previas al 1 y al 0. Esto lo introdujo nuestro cambio de "recordar la conexión", publicado a las 16:04.
+- **(b)** Lo que quedó de la sesión de las 16:08: la lista cortada, sin saber si llegaron más bytes ni cuándo se cerró la página.
+- **(c)** El puerto elegido de nuevo en Chrome. No se registraba cuál.
 
-**Diferencias de NUESTRO lado entre la que anduvo y las E3:**
-- **D1. Secuencia y tiempo hasta la primera orden al 20.** En la buena, antes de hablarle al 20 hubo una orden a otro número y una general, y ~450 ms de puerto abierto. En las E3 se le habló al 20 apenas abierto el puerto. Este cambio lo introdujo nuestro código, al recordar el número 20.
-- **D2. Lo que quedó pendiente de la sesión anterior.** La última vez que la balanza habló con nosotros antes del E3 fue la lista de las 16:08, que cortamos. No sabemos si llegaron más bytes ni si la página se cerró mientras la balanza transmitía. Además, el código **tiraba sin anotar** cualquier byte que hubiera en el buffer antes de cada orden.
-- **D3. Qué puerto se eligió.** No guardábamos el USB elegido ni cuántos puertos había. Que contestara un aparato Systel con número 20 hace probable que sea la misma balanza, pero **no se puede descartar** que fuera otro equipo o puerto.
+**Tiempos:** la balanza respondió con la misma demora en las buenas y en las E3 (`ms` − 60 a 70 ≈ 10-35 ms). La única respuesta larga (la lista) llegó de corrido y después hubo silencio de más de 60 ms.
 
-**No hay evidencia** de diferencias en la velocidad, el formato de las órdenes, los bytes enviados ni la forma de leer las respuestas.
+**Coherencia:** en **ninguna** sesión con E3 se mandó nada al 1 ni al 0. En la única sesión buena, sí. Los datos son compatibles con "el E3 se limpia con una orden a otro número", **y también** con "la balanza cambió de estado". No hay forma de distinguirlo con lo que se registró.
 
-## 2. La lista de productos (función 31)
+## 4. Fallas encontradas y correcciones
 
-- **COMPROBADO (falla nuestra):** lo que guardamos son 982 bytes: 140 PLU completos y sin la "F" ni la verificación. El código daba la respuesta por terminada tras 60 ms de silencio.
-- **NO COMPROBADO:** que la balanza haya mandado la "F" y la verificación después. Los bytes posteriores se tiraban sin anotar. La prueba que agrega un cierre "de mentira" demuestra que **el código** ahora espera; **no confirma** que la balanza lo mande ni cuánto tarda.
-- **Corrección:**
-  - Espera hasta 15 s a que la trama cierre con su verificación.
-  - Busca la respuesta aunque delante haya restos de otra.
-  - **Ahora anota** todo byte descartado, con su contenido y su momento. Una prueba lo demuestra: con el comportamiento de las 16:08, el cierre que llega tarde queda registrado.
+1. **Lista cortada antes del cierre (FALLA NUESTRA, demostrada con bytes reales).** Se dejaba de leer a los 60 ms de silencio y lo que llegaba después se tiraba.
+   - **Corrección:** se espera hasta el plazo de la orden (15 s en la lista) mientras la trama no cierre con su verificación.
+   - **Pendiente:** que la balanza efectivamente mande el cierre **no está comprobado**.
+2. **Bytes descartados sin registro (FALLA NUESTRA).** Ahora quedan anotados con su contenido. También se anotan la apertura, el USB elegido, las señales, el momento de cada byte, las pausas y cómo terminó cada respuesta (`SerialSystelLink.events`).
+3. **"The port is already open" (FALLA NUESTRA, real 15:59:03).**
+   - El panel no cerraba el puerto al salir de la pantalla: ahora lo cierra.
+   - Si el puerto está tomado, antes se informaba "la balanza no contestó"; ahora dice que está abierto en otra pantalla o programa.
+4. **Directo al número guardado (cambio nuestro, causa POSIBLE del E3, no demostrada).** Se volvió a la secuencia de las 16:08 (1 → 0 → número), solo con pings, también antes de cada reintento por E3.
+5. **Respuesta precedida por restos de otra:** ahora se busca la trama correcta dentro de lo recibido (`findSystelReply`).
+6. **Precio con centavos en una balanza sin decimales:** ya no se redondea; no se manda y se avisa.
+7. **Reporte demasiado grande:** se acota a ~700 KB, recortando primero los eventos del cable.
+8. **Identificación 20 temprano en la búsqueda:** es el valor del ejemplo oficial y del manual.
 
-## 3. E3: causa NO COMPROBADA
+## 5. Pruebas (`npm run test`: 394 pasan)
 
-- **Descartado (COMPROBADO):** que esté bloqueada esperando sincronización, porque `Sinc=0` y el ping dio `D`. También que el contenido de las órdenes sea inválido: son las mismas que funcionaron, y la balanza contestó con la función correcta.
-- **DOCUMENTADO:** solo "E3 = Se desatendieron datos". No dice cuándo pasa ni cómo se sale.
-- **Hipótesis:**
-  - **H1 (D1).** Hablarle a su número apenas abierto el puerto, sin la secuencia previa, la deja en error. Se corrigió repitiendo la secuencia comprobada (1 → 0 → número) solo con pings. Pero D5 hace dudar: el E3 siguió 29 s después sobre la misma conexión, así que habría que suponer un error que queda fijo.
-  - **H2 (D2).** La lista cortada de las 16:08 dejó a la balanza en un estado pendiente. Solo hay coincidencia en el tiempo.
-  - **H3 (D3).** Era otro puerto u otro equipo.
-  - **H4.** Algo en la balanza (un menú, una operación). No hay evidencia ni a favor ni en contra.
-- Ninguna se puede confirmar con los datos que tenemos. Las hipótesis H2 y H3 ahora quedarían registradas (bytes descartados, USB elegido y cantidad de puertos).
+**[REAL]** (12 pruebas, solo bytes de la balanza):
+- Las tramas verifican, y se interpretan la firma, el ping y la configuración.
+- La lista sin cierre no se acepta.
+- La configuración partida en cualquier byte se arma igual, y con una pausa de 200 ms no se corta.
+- La lista en paquetes USB queda "incompleta".
+- El final atrasado de otra respuesta se anota y no confunde.
+- Restos pegados adelante de la respuesta: se encuentra la trama correcta.
+- Con E3 persistente se mandan pocas órdenes, solo de lectura.
+- El respaldo con lo real se frena antes de pedir productos.
 
-## 4. Registro nuevo del cable (para no depender de suposiciones)
+**[SINTÉTICO]** (4 pruebas, agregan lo que NO vimos):
+- Una "F" final artificial con una pausa de 1,5 s.
+- El cierre que llega tarde queda anotado.
+- La hipótesis del E3 que se destraba.
+- El puerto tomado por otra pantalla.
 
-`SerialSystelLink.events` va en cada reporte (`diagnosticRecord.linkEvents`). Registra:
-- apertura (velocidad y USB vendedor:producto) y errores al abrir;
-- señales DTR/RTS;
-- cada orden, con sus bytes y su momento;
-- cada respuesta: cantidad de bytes, a los cuántos ms llegó el primero y el último, pausas y cómo terminó (silencio / incompleta / plazo);
-- bytes descartados (llegados sin pedir o al cerrar), con su contenido;
-- corte de lectura y cierre.
+**Otras:**
+- Envío bloqueado por defecto: no sale ninguna escritura.
+- Desconexión del cable.
+- Simulador según el documento: alta y cambio de precio con relectura y freno ante diferencias. Solo se usa con la escritura habilitada a mano en la prueba.
 
-El reporte también incluye cuántos puertos tiene autorizados Chrome y cuál se eligió.
+## 6. Lo que no se puede comprobar sin una balanza
 
-## 5. Revisión contra el documento V6.0
+Para **enviar productos y precios y verificar lo guardado** hace falta:
 
-- **Trama:** dirección + función + ASCII + XOR. Verificada con las 6 respuestas reales.
-- **Lectura 62:** el código respeta el documento campo por campo. NUNCA se leyó un producto real.
-- **Escritura 61:** el documento la muestra sin XOR y el ejemplo VB la manda con XOR (en la función 4). Va en la consulta.
-- **Cambio de precio 33:** el campo "versión" no tiene valores documentados. Va en la consulta.
-- **Precio:** con D0 son pesos enteros. Un precio con centavos ya no se redondea: no se manda.
-- **Funciones prohibidas** (5, 9, 26, 32, 42 y las de configuración): bloqueadas por una lista blanca, con prueba.
+1. **Leer un producto real (62 o 3).** Nunca llegamos a hacerlo. Sin eso no se sabe si el formato es el de V6.0 o el de V4.0, ni cómo quedan los campos (nombre, precio, código, tipo, tara y el resto). Tampoco hay contra qué comparar lo guardado.
+2. **El cierre de la lista:** si llega y cuánto tarda. Los bytes no se pueden deducir.
+3. **La 33:** si acepta "1" en "versión", y que la relectura quede idéntica salvo el precio.
+4. **La 61:** si lleva XOR o no (el documento y el ejemplo se contradicen), y si acepta la configuración EAN vacía.
+5. **El E3:** qué lo provoca y cómo se sale.
 
-## 6. Pruebas (`npm run test`: 388 pasan)
+Todo esto depende del firmware de la balanza, que no está en ningún documento público. Se resuelve con una Cuora Max de **banco** (prestada por un agente técnico o un distribuidor, o comprada), sin usar la del cliente:
+1. Leer la balanza con el nuevo registro del cable.
+2. Comparar 3 productos con lo que muestra su pantalla.
+3. Reproducir el E3: hablar apenas abierto el puerto, cortar una lista a la mitad, estar en un menú.
+4. Probar la 33 y la 61 en un PLU de prueba, releyendo.
 
-- **Con bytes REALES** (huella md5 igual a la de la base): firma, ping, configuración, lista cortada y E3.
-- **Sesión reproducida:** sin captura de la función 62, el respaldo frena sin inventar.
-- **Envío bloqueado por defecto:** no sale ninguna función de escritura.
-- **Registro del cable:** anota la apertura, los tiempos y los bytes tardíos.
-- **Casos de borde:** desconexión del cable, E3 permanente (pocas órdenes, solo lectura), precio con centavos y diferencias al releer.
-- Las pruebas que usan cierres o un E3 "modelado" están marcadas: prueban **nuestro código**, no a la balanza.
+Si en el banco está Qendra, un monitor de puerto serie mientras Qendra trabaja muestra cómo arma Systel la 33 y la 61.
 
-## 7. Lo que necesita una balanza física
+**Criterios para habilitar el envío:**
+- la lista cierra bien en 3 lecturas seguidas;
+- la 62 coincide con la pantalla en 3 productos;
+- la 33 y la 61 se releen idénticas;
+- el E3 está explicado.
 
-1. **Lectura completa:** que la lista llegue con su F y su verificación (y cuánto tarda), y el formato real de la función 62 en firmware 0060, comparado con lo que muestra la pantalla.
-2. **E3:** qué lo provoca y cómo se sale. Reproducirlo con cada hipótesis:
-   - hablar apenas abierto el puerto;
-   - cerrar la página a mitad de una lista;
-   - estar en un menú o con un ticket abierto.
-3. **Escritura (solo en una balanza de prueba):** la 33 sobre un PLU de prueba, la 61 en un número libre (con y sin XOR), y releer.
-
-**Cómo conseguirla sin el cliente** (de más a menos recomendable):
-- **a)** Un agente técnico autorizado Systel (ATAS) o un distribuidor que tenga una Cuora Max con firmware 0060 en mostrador. Nos prestan una hora de banco. Yo manejo la prueba con una compu ahí o por AnyDesk. Si además tienen Qendra, el software oficial de Systel, se puede **grabar con un monitor de puerto serie** cómo Qendra lee y escribe: eso es la verdad del fabricante para la 62, la 33 y la 61.
-- **b)** Soporte técnico de Systel: la consulta de abajo, con el pedido de que reproduzcan el E3 en su laboratorio.
-- **c)** Comprar o alquilar una Cuora Max usada para tenerla en la oficina. Es decisión del dueño, y el costo hay que averiguarlo.
-
-**Para dar algo por aprobado:**
-- lista completa con F y verificación en 3 lecturas seguidas;
-- 62 coincide con la pantalla en 3 productos (nombre, precio, código, tipo);
-- E3 reproducido y con una forma de salir confirmada;
-- 33 y 61 releídas idénticas en la balanza de prueba.
-
-Recién ahí `allowWrites` puede pasar a `true`, y solo para esa versión de firmware.
-
-## 8. Consulta para Systel (texto final)
-
-Está en el mensaje al dueño del 2026-10-09 y se repite acá:
-
-> **Asunto:** Integración Cuora Max por USB (protocolo V6.0, firma S0060): error E3 y dudas de formato
->
-> Hola. Somos Patagonia OS, un sistema de gestión para carnicerías. Integramos la Cuora Max por USB (FTDI, 115200 baudios, 8N1) según el "Protocolo de comunicación CUORA MAX V6.0 Rev 06" de su sitio. Por ahora solo leemos. Tenemos estas dudas sobre una balanza de un cliente:
->
-> **Equipo:** firma `F2000C030000S0060P08000A060D0`, identificación 20, configuración `Ton=2;Gris=0;Pap=0;APa=0;Vel=5;CPr=0;…;Sinc=0;…;PeP=3;SEt=S;ETi=N`.
->
-> **Qué pasó (bytes en hexadecimal, PC → balanza / balanza → PC):**
-> - 16:08: `00 17 17` → `14 17 30 30 44 47` ("00D"). `14 02 16` → firma completa. `14 17 03` → `14 17 30 30 44 47`. `14 27 33` → configuración completa. `14 1f 0b` → recibimos 982 bytes ("N0001V0…N0503V0", 140 PLU) y nuestro programa dejó de leer tras 60 ms de silencio, sin llegar a la "F".
-> - Desde las 16:26 (en otras conexiones), las mismas órdenes respondieron siempre `14 17 45 33 75` y `14 02 45 33 60` (E3), durante 30 intentos en 15 minutos, incluso sobre una misma conexión abierta.
->
-> **Preguntas:**
-> 1. ¿En qué situaciones devuelve E3 "Se desatendieron datos"? Por ejemplo: menú abierto, ticket abierto, impresión, error de recepción, o una respuesta anterior que la PC no terminó de leer.
-> 2. ¿Cómo se sale de ese estado sin apagar la balanza? ¿Hay una orden, una secuencia o un tiempo de espera?
-> 3. ¿La balanza necesita algo al abrir el puerto (tiempo de espera, señales DTR/RTS) antes de la primera orden?
-> 4. Función 31: ¿la balanza hace una pausa antes de la "F" final? ¿Cuánto puede durar como máximo? Si la PC deja de leer a mitad, ¿qué estado queda?
-> 5. Función 61 (V6.0): el documento indica "IP + Función + Datos" sin verificación, y el programa de ejemplo la agrega en la función 4. ¿La 61 lleva el byte XOR al final?
-> 6. Función 33: ¿qué valores acepta el campo "Versión del PLU"? ¿Es correcto "1" (gestionado desde PC)?
-> 7. ¿Hay un documento de protocolo más nuevo para el firmware 0060, o un registro de cambios?
-> 8. ¿Tienen un agente técnico (ATAS) en nuestra zona con una Cuora Max de prueba, para validar la integración en banco sin usar la balanza de un cliente?
->
-> Podemos mandar el registro completo de bytes. Gracias.
+Recién ahí `allowWrites = true`, y solo para ese firmware.

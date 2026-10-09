@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { takeSystelBackup, backupToJson, saveBackupLocally, type SystelBackup } from "./systel-backup";
 import { SystelClient } from "./systel-client";
 import { buildCuoraNeoCsv, buildQendraCsv, type SystelCsvProduct } from "./systel-csv";
@@ -55,6 +55,19 @@ const ACTION_LABEL: Record<SystelPlanItem["action"], string> = {
  * los nuevos, relee cada uno y frena ante cualquier diferencia → resultado a soporte). Pedido del
  * dueño 2026-10-09: al cliente se le pide UNA sola acción. Sin marcas a la vista.
  */
+/**
+ * El reporte tiene que llegar aunque la sesión sea larga: si pasa de ~700 KB se recortan primero los
+ * eventos del cable y después el registro de órdenes (se conservan los primeros y los últimos).
+ */
+function boundedDiagnostic<T extends { log: unknown[]; linkEvents: unknown[] }>(d: T): T & { trimmed?: string } {
+  const size = () => JSON.stringify(d).length;
+  if (size() <= 700_000) return d;
+  const keep = <X,>(a: X[], n: number) => (a.length > n ? [...a.slice(0, n / 2), ...a.slice(-n / 2)] : a);
+  let out = { ...d, linkEvents: keep(d.linkEvents, 400), trimmed: "eventos del cable recortados" };
+  if (JSON.stringify(out).length > 700_000) out = { ...out, log: keep(d.log, 120), trimmed: "eventos y registro recortados" };
+  return out;
+}
+
 export function SystelPanel({ products, pilot = false }: { products: SystelPanelProduct[]; pilot?: boolean }) {
   const [open, setOpen] = useState(false);
   const [modelId, setModelId] = useState<SystelModelId>("cuora_max");
@@ -76,6 +89,13 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
   /** Lo que pasó en el cable (abrir, señales, cada byte con su tiempo, lo descartado). */
   const linkEventsRef = useRef<SystelLinkEvent[]>([]);
   const portsRef = useRef<{ authorized: number; picked: string } | null>(null);
+
+  // Al salir de la pantalla se cierra el puerto. Antes quedaba abierto y el intento siguiente fallaba
+  // con "The port is already open" (real: Los gringos 2026-10-09 15:59:03).
+  useEffect(() => () => {
+    void linkRef.current?.close();
+    linkRef.current = null;
+  }, []);
 
   /**
    * Cada paso (respaldo, prueba, envío o error) le llega solo a soporte, con todo lo que se
@@ -100,7 +120,7 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
             connectedNow: Boolean(linkRef.current),
             pluScan: extra.backup ?? backup ?? undefined,
             auraWriteTest: extra.test ?? test ?? undefined,
-            diagnosticRecord: { sync: extra.sync ?? sync ?? null, error: extra.error ?? null, log: logRef.current.slice(-400), linkEvents: linkEventsRef.current.slice(-1500), ports: portsRef.current, savedLink: loadSavedSystelLink() }
+            diagnosticRecord: boundedDiagnostic({ sync: extra.sync ?? sync ?? null, error: extra.error ?? null, log: logRef.current.slice(-400), linkEvents: linkEventsRef.current.slice(-1500), ports: portsRef.current, savedLink: loadSavedSystelLink() })
           }
         ],
         branchId: branchId ?? null

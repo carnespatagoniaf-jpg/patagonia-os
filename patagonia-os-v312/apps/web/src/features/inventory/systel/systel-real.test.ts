@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { takeSystelBackup } from "./systel-backup";
-import { SystelClient, type SystelExchangeLog } from "./systel-client";
+import { replyIsComplete, SystelClient, type SystelExchangeLog } from "./systel-client";
 import { discoverSystelLink } from "./systel-discovery";
 import { findSystelReply, parseSystelReply, toHex, xorChecksum } from "./systel-frame";
 import { parseConfig, parsePing, parsePluList, parseSignature } from "./systel-plu";
@@ -9,105 +9,39 @@ import { E3_PING, E3_SIGNATURE, hexToBytes, SESSION_OK_1608 } from "./systel-rea
 import { SerialSystelLink } from "./systel-serial";
 
 /**
- * Pruebas con los bytes REALES de la Cuora Max de Los gringos (ver systel-real-captures.ts).
- * Lo que no salió de la balanza está marcado como DOCUMENTADO (lo dice el protocolo V6.0) o
- * HIPÓTESIS (modelo de lo que pudo pasar); esas pruebas comprueban lo que hace Patagonia, no la balanza.
+ * Dos grupos, separados a propósito:
+ * - [REAL]: solo bytes que mandó la Cuora Max de Los gringos (systel-real-captures.ts, huella md5
+ *   igual a la de la base). Partirlos, demorarlos o mezclarlos prueba cómo Patagonia los recibe,
+ *   sin agregar nada que la balanza no haya mandado.
+ * - [SINTÉTICO]: agrega algo que NO vimos (la "F" final de la lista, un E3 que se destraba). Prueba
+ *   el código de Patagonia; NO demuestra cómo responde la balanza.
  */
 
 const real = (tx: string) => SESSION_OK_1608.find((x) => x.tx === tx)!;
 const LIST = real("14 1f 0b");
+const CONFIG = real("14 27 33");
+const PING = real("14 17 03");
 
-describe("respuestas reales de la balanza de Los gringos", () => {
-  it("firma, ping, ping general y configuración llegan completas y con la verificación bien", () => {
-    for (const x of SESSION_OK_1608.filter((e) => e.rx && e.tx !== "14 1f 0b")) {
-      const r = parseSystelReply(hexToBytes(x.rx));
-      assert.ok(r?.checksumOk, `verificación de la respuesta a ${x.tx}`);
-      assert.equal(r!.address, 20);
-    }
-  });
-
-  it("la firma dice: protocolo 0060, 8.000 PLU, precio sin decimales", () => {
-    const sig = parseSignature(parseSystelReply(hexToBytes(real("14 02 16").rx))!.data);
-    assert.deepEqual(sig, { productType: "2000", capacityGrams: 30000, protocolVersion: "0060", pluCapacity: 8000, shortcuts: 60, priceDecimals: 0 });
-  });
-
-  it("ping 'D' (trabajando desactualizado) y la configuración con coma de precio 0 y sin espera de sincronización", () => {
-    assert.deepEqual(parsePing(parseSystelReply(hexToBytes(real("14 17 03").rx))!.data), { state: "D" });
-    const cfg = parseConfig(parseSystelReply(hexToBytes(real("14 27 33").rx))!.data);
-    assert.equal(cfg.CPr, "0");
-    assert.equal(cfg.Sinc, "0");
-  });
-
-  it("E3: tramas bien formadas y con la verificación bien (la balanza entendió dirección y función)", () => {
-    for (const x of [E3_PING, E3_SIGNATURE]) {
-      const r = parseSystelReply(hexToBytes(x.rx))!;
-      assert.ok(r.checksumOk);
-      assert.equal(r.kind, "error");
-      assert.equal(r.errorCode, "E3");
-      assert.equal(toHex(hexToBytes(x.tx)), x.tx, "es exactamente la misma orden que a las 16:08 tuvo respuesta");
-    }
-    assert.ok(SESSION_OK_1608.some((x) => x.tx === E3_PING.tx && x.rx.length > 0));
-    assert.ok(SESSION_OK_1608.some((x) => x.tx === E3_SIGNATURE.tx && x.rx.length > 0));
-  });
-
-  it("la lista real llegó cortada: 140 PLU enteros, sin la 'F' final ni la verificación (CAUSA del fallo de las 16:08)", () => {
-    const bytes = hexToBytes(LIST.rx);
-    assert.equal(bytes.length, 982);
-    const body = String.fromCharCode(...bytes.subarray(2));
-    assert.equal(body.length % 7, 0, "cortada justo al final de un PLU");
-    assert.equal(findSystelReply(bytes, 20, 31), null, "no es una trama completa");
-    assert.equal(parsePluList(body), null, "sin la F no se acepta (no se trabaja con una lista a medias)");
-    // DOCUMENTADO (protocolo V6.0, función 31): la lista termina con "F". Con ella son 140 PLU de 4 dígitos.
-    const list = parsePluList(body + "F")!;
-    assert.equal(list.entries.length, 140);
-    assert.equal(list.digits, 4);
-    assert.deepEqual(list.entries.slice(-4).map((e) => e.number), [500, 501, 502, 503]);
-  });
-});
-
-/**
- * Puerto que contesta con los bytes reales de las 16:08 según la orden recibida, partidos en
- * paquetes USB de 62 bytes (FTDI). La lista se manda como llegó y, después de una pausa, la "F"
- * y la verificación (DOCUMENTADO, no capturado: es lo que no llegamos a ver).
- */
-class ReplayPort {
+/** Puerto que entrega exactamente los trozos indicados, con las demoras indicadas, ante cada orden. */
+class ScriptPort {
   readable: ReadableStream<Uint8Array> | null = null;
   writable: WritableStream<Uint8Array> | null = null;
   received: string[] = [];
-  /** HIPÓTESIS E3: contesta E3 hasta que reciba una orden a otro número (1 o 0). */
-  e3UntilOtherAddress = false;
-  e3Forever = false;
-  constructor(private listTailPauseMs: number) {}
+  private controller!: ReadableStreamDefaultController<Uint8Array>;
+  constructor(private script: (tx: string, send: (bytes: Uint8Array, atMs: number) => void) => void) {}
   async open() {
-    let controller!: ReadableStreamDefaultController<Uint8Array>;
-    this.readable = new ReadableStream<Uint8Array>({ start: (c) => { controller = c; } });
-    const send = (bytes: Uint8Array, delay: number) => {
-      for (let i = 0; i < bytes.length; i += 62) setTimeout(() => controller.enqueue(bytes.slice(i, i + 62)), delay + i / 62);
-    };
+    this.readable = new ReadableStream<Uint8Array>({ start: (c) => { this.controller = c; } });
     this.writable = new WritableStream<Uint8Array>({
       write: (frame) => {
         const tx = toHex(frame);
         this.received.push(tx);
-        if (frame[0] !== 20 && frame[0] !== 0) {
-          this.e3UntilOtherAddress = false;
-          return; // otro número: la balanza no contesta (real: "01 17 16" sin respuesta)
-        }
-        if (frame[0] === 0) this.e3UntilOtherAddress = false;
-        if (frame[0] === 20 && (this.e3Forever || this.e3UntilOtherAddress)) {
-          const body = [20, frame[1], 0x45, 0x33];
-          send(Uint8Array.from([...body, xorChecksum(body)]), 5);
-          return;
-        }
-        const ex = SESSION_OK_1608.find((x) => x.tx === tx);
-        if (!ex || !ex.rx) return; // sin captura real de esa orden: no se inventa respuesta
-        const bytes = hexToBytes(ex.rx);
-        send(bytes, 5);
-        if (ex === LIST) {
-          const all = [...bytes, 0x46];
-          send(Uint8Array.from([0x46, xorChecksum(all)]), 5 + this.listTailPauseMs);
-        }
+        this.script(tx, (bytes, atMs) => setTimeout(() => this.controller.enqueue(bytes), atMs));
       }
     });
+  }
+  /** Bytes que llegan sin que se haya pedido nada (por ejemplo, el final atrasado de otra respuesta). */
+  push(bytes: Uint8Array) {
+    this.controller.enqueue(bytes);
   }
   async close() {
     this.readable = null;
@@ -116,75 +50,220 @@ class ReplayPort {
   async setSignals() {}
 }
 
-describe("Patagonia contra la balanza real reproducida", () => {
-  it("lee la lista entera aunque la balanza haga una pausa larga antes de la 'F' (antes: cortaba a los 60 ms)", async () => {
-    const port = new ReplayPort(1500);
-    const link = new SerialSystelLink(port as unknown as SerialPort);
-    await link.connect();
-    const client = new SystelClient(link, { address: 20 });
-    const list = await client.list();
+async function withLink(port: ScriptPort, fn: (link: SerialSystelLink) => Promise<void>) {
+  const link = new SerialSystelLink(port as unknown as SerialPort);
+  await link.connect();
+  try {
+    await fn(link);
+  } finally {
     await link.close();
-    assert.equal(list?.entries.length, 140);
+  }
+}
+
+describe("[REAL] respuestas de la balanza de Los gringos", () => {
+  it("firma, ping, ping general y configuración: completas y con la verificación bien", () => {
+    for (const x of SESSION_OK_1608.filter((e) => e.rx && e.tx !== LIST.tx)) {
+      const r = parseSystelReply(hexToBytes(x.rx));
+      assert.ok(r?.checksumOk, `verificación de la respuesta a ${x.tx}`);
+      assert.equal(r!.address, 20);
+    }
   });
 
-  it("respaldo: firma, ping, configuración y lista reales; frena en el formato de producto porque NO hay captura real de la función 62", async () => {
-    const port = new ReplayPort(300);
-    const link = new SerialSystelLink(port as unknown as SerialPort);
-    await link.connect();
-    const log: SystelExchangeLog[] = [];
-    const client = new SystelClient(link, { address: 20, log, timeoutMs: 300 });
-    const b = await takeSystelBackup(client);
-    await link.close();
-    assert.equal(b.signature?.priceDecimals, 0);
-    assert.equal(b.list.length, 140);
-    assert.equal(b.layout, null);
-    assert.match(b.detail, /no se reconoció el formato/);
-    assert.ok(port.received.every((tx) => [2, 23, 31, 39, 62, 3].includes(parseInt(tx.split(" ")[1], 16))), "solo lecturas");
-    assert.equal(b.plus.length, 0, "no escribió ni respaldó productos inventados");
+  it("la firma: protocolo 0060, 8.000 PLU, precio sin decimales", () => {
+    const sig = parseSignature(parseSystelReply(hexToBytes(real("14 02 16").rx))!.data);
+    assert.deepEqual(sig, { productType: "2000", capacityGrams: 30000, protocolVersion: "0060", pluCapacity: 8000, shortcuts: 60, priceDecimals: 0 });
   });
 
-  it("HIPÓTESIS E3 'se destraba con la secuencia de las 16:08': con lo guardado repite 1 → 0 → 20 y lee bien", async () => {
-    const port = new ReplayPort(100);
-    port.e3UntilOtherAddress = true;
-    const log: SystelExchangeLog[] = [];
-    const found = await discoverSystelLink(port as unknown as SerialPort, log, () => {}, { settings: { baudRate: 115200, stopBits: 1, parity: "none" }, address: 20 }, 350);
-    assert.equal(found?.address, 20);
-    assert.deepEqual(port.received.slice(0, 2), ["01 17 16", "00 17 17"], "misma secuencia que anduvo");
-    const client = new SystelClient(found!.link, { address: 20, log });
-    assert.ok(await client.signature());
-    await found!.link.close();
+  it("ping 'D' y configuración con coma de precio 0 y sin espera de sincronización", () => {
+    assert.deepEqual(parsePing(parseSystelReply(hexToBytes(PING.rx))!.data), { state: "D" });
+    const cfg = parseConfig(parseSystelReply(hexToBytes(CONFIG.rx))!.data);
+    assert.equal(cfg.CPr, "0");
+    assert.equal(cfg.Sinc, "0");
   });
 
-  it("si la balanza contesta E3 siempre: pocas órdenes, solo lecturas, nada escrito y un aviso claro", async () => {
-    const port = new ReplayPort(100);
-    port.e3Forever = true;
-    const link = new SerialSystelLink(port as unknown as SerialPort);
-    await link.connect();
-    const client = new SystelClient(link, { address: 20, busyRetryMs: [5, 5, 5, 5, 5] });
-    const b = await takeSystelBackup(client);
-    await link.close();
-    assert.equal(b.complete, false);
-    assert.match(b.detail, /E3/);
-    assert.ok(port.received.length <= 40, `mandó ${port.received.length} órdenes`);
-    assert.ok(port.received.every((tx) => [2, 23].includes(parseInt(tx.split(" ")[1], 16))));
+  it("E3: tramas bien formadas, verificación bien, misma orden que a las 16:08 tuvo respuesta", () => {
+    for (const x of [E3_PING, E3_SIGNATURE]) {
+      const r = parseSystelReply(hexToBytes(x.rx))!;
+      assert.ok(r.checksumOk);
+      assert.equal(r.errorCode, "E3");
+      assert.ok(SESSION_OK_1608.some((e) => e.tx === x.tx && e.rx.length > 0));
+    }
+  });
+
+  it("la lista llegó sin cierre: 140 PLU enteros, sin 'F' ni verificación; Patagonia no la acepta", () => {
+    const bytes = hexToBytes(LIST.rx);
+    assert.equal(bytes.length, 982);
+    const body = String.fromCharCode(...bytes.subarray(2));
+    assert.equal(body.length % 7, 0, "cortada justo al final de un PLU");
+    assert.equal(findSystelReply(bytes, 20, 31), null);
+    assert.equal(parsePluList(body), null);
+  });
+
+  it("la configuración partida en dos en CUALQUIER byte, con 30 ms entre trozos, se arma igual", async () => {
+    const bytes = hexToBytes(CONFIG.rx);
+    for (const cut of [1, 2, 3, 50, 121, 240, 241]) {
+      const port = new ScriptPort((tx, send) => {
+        if (tx === CONFIG.tx) {
+          send(bytes.slice(0, cut), 2);
+          send(bytes.slice(cut), 32);
+        }
+      });
+      await withLink(port, async (link) => {
+        const rx = await link.exchange(hexToBytes(CONFIG.tx), { timeoutMs: 300, isComplete: replyIsComplete });
+        assert.equal(toHex(rx!), CONFIG.rx, `corte en el byte ${cut}`);
+      });
+    }
+  });
+
+  it("la configuración con una pausa de 200 ms en el medio (más que los 60 ms de silencio): no se corta", async () => {
+    const bytes = hexToBytes(CONFIG.rx);
+    const port = new ScriptPort((tx, send) => {
+      if (tx === CONFIG.tx) {
+        send(bytes.slice(0, 100), 2);
+        send(bytes.slice(100), 202);
+      }
+    });
+    await withLink(port, async (link) => {
+      const client = new SystelClient(link, { address: 20 });
+      const cfg = await client.config();
+      assert.equal(cfg?.raw, parseSystelReply(bytes)!.data);
+      assert.match(link.events.filter((e) => e.kind === "rx").at(-1)!.detail, /1 pausas/);
+    });
+  });
+
+  it("la lista real SIN cierre, en paquetes USB de 62 bytes: queda 'incompleta' (no se inventa el final)", async () => {
+    const bytes = hexToBytes(LIST.rx);
+    const port = new ScriptPort((tx, send) => {
+      if (tx === LIST.tx) for (let i = 0; i < bytes.length; i += 62) send(bytes.slice(i, i + 62), 2 + i / 62);
+    });
+    await withLink(port, async (link) => {
+      const rx = await link.exchange(hexToBytes(LIST.tx), { timeoutMs: 300, isComplete: (b) => findSystelReply(b, 20, 31) !== null });
+      assert.equal(rx!.length, 982);
+      assert.equal(findSystelReply(rx!, 20, 31), null);
+      assert.match(link.events.filter((e) => e.kind === "rx").at(-1)!.detail, /incompleta/);
+    });
+  });
+
+  it("datos pendientes: el final atrasado de otra respuesta llega antes de la orden; se anota y no se confunde", async () => {
+    const port = new ScriptPort((tx, send) => {
+      if (tx === PING.tx) send(hexToBytes(PING.rx), 5);
+    });
+    await withLink(port, async (link) => {
+      port.push(hexToBytes(LIST.rx).slice(-40)); // 40 bytes reales de la lista, fuera de tiempo
+      await new Promise((r) => setTimeout(r, 30));
+      const client = new SystelClient(link, { address: 20 });
+      assert.deepEqual(await client.ping(), { state: "D" });
+      const discarded = link.events.find((e) => e.kind === "descartado");
+      assert.ok(discarded && /40 bytes/.test(discarded.detail));
+    });
+  });
+
+  it("datos pendientes mezclados: restos reales pegados ADELANTE de la respuesta en el mismo trozo; se encuentra la trama buena", async () => {
+    const tail = hexToBytes(LIST.rx).slice(-13);
+    const port = new ScriptPort((tx, send) => {
+      if (tx === PING.tx) send(Uint8Array.from([...tail, ...hexToBytes(PING.rx)]), 5);
+    });
+    await withLink(port, async (link) => {
+      const client = new SystelClient(link, { address: 20 });
+      assert.deepEqual(await client.ping(), { state: "D" });
+    });
+  });
+
+  it("E3 real persistente: pocas órdenes, solo pings y firma, nada escrito y aviso con el código", async () => {
+    const port = new ScriptPort((tx, send) => {
+      if (tx === E3_PING.tx) send(hexToBytes(E3_PING.rx), 5);
+      if (tx === E3_SIGNATURE.tx) send(hexToBytes(E3_SIGNATURE.rx), 5);
+    });
+    await withLink(port, async (link) => {
+      const client = new SystelClient(link, { address: 20, busyRetryMs: [5, 5, 5, 5, 5] });
+      const b = await takeSystelBackup(client);
+      assert.equal(b.complete, false);
+      assert.match(b.detail, /E3/);
+      assert.ok(port.received.length <= 40, `mandó ${port.received.length} órdenes`);
+      assert.ok(port.received.every((tx) => [2, 23].includes(parseInt(tx.split(" ")[1], 16))));
+    });
+  });
+
+  it("respaldo con lo real: firma, ping, configuración; sin cierre real de la lista se frena ahí y no lee productos", async () => {
+    const port = new ScriptPort((tx, send) => {
+      const ex = SESSION_OK_1608.find((x) => x.tx === tx);
+      if (ex?.rx) send(hexToBytes(ex.rx), 5);
+    });
+    await withLink(port, async (link) => {
+      const client = new SystelClient(link, { address: 20, timeoutMs: 300 });
+      const b = await takeSystelBackup(client);
+      assert.equal(b.signature?.priceDecimals, 0);
+      assert.match(b.detail, /lista de productos/);
+      assert.equal(b.plus.length, 0);
+      assert.ok(!port.received.some((tx) => tx.split(" ")[1] === "3e"), "no pidió productos (62)");
+    });
   });
 });
 
-describe("registro del cable (para no volver a quedarnos sin datos)", () => {
-  it("anota apertura, cada orden y respuesta con sus tiempos, y los bytes que llegan tarde y se descartan", async () => {
-    const port = new ReplayPort(300);
-    const link = new SerialSystelLink(port as unknown as SerialPort);
-    await link.connect();
-    // Como el código de las 16:08: cortar por 60 ms de silencio, sin esperar la trama completa.
-    await link.exchange(hexToBytes(LIST.tx), { timeoutMs: 300 });
-    await new Promise((r) => setTimeout(r, 400));
-    await link.exchange(hexToBytes("14 17 03"), { timeoutMs: 300 });
-    await link.close();
-    const kinds = link.events.map((e) => e.kind);
-    assert.deepEqual(kinds.slice(0, 3), ["abrir", "tx", "rx"]);
-    const late = link.events.find((e) => e.kind === "descartado");
-    assert.ok(late, "el cierre que llegó tarde queda anotado");
-    assert.match(late!.hex!, /^46 /, "empieza con la F");
-    assert.match(link.events.find((e) => e.kind === "rx")!.detail, /primer byte a los \d+ ms/);
+describe("[SINTÉTICO] código de Patagonia ante cosas que NO vimos en la balanza", () => {
+  /** La "F" y su XOR NO se capturaron: se agregan para probar que el código espera el cierre. */
+  const syntheticClose = () => {
+    const bytes = hexToBytes(LIST.rx);
+    return Uint8Array.from([0x46, xorChecksum([...bytes, 0x46])]);
+  };
+
+  it("con un cierre agregado después de 1,5 s, la lista se lee entera (140 PLU)", async () => {
+    const bytes = hexToBytes(LIST.rx);
+    const port = new ScriptPort((tx, send) => {
+      if (tx === LIST.tx) {
+        send(bytes, 5);
+        send(syntheticClose(), 1505);
+      }
+    });
+    await withLink(port, async (link) => {
+      const list = await new SystelClient(link, { address: 20 }).list();
+      assert.equal(list?.entries.length, 140);
+      assert.equal(list?.digits, 4);
+    });
+  });
+
+  it("si el cierre llega TARDE (después de que se dejó de esperar), queda anotado como descartado con su F", async () => {
+    const bytes = hexToBytes(LIST.rx);
+    const port = new ScriptPort((tx, send) => {
+      if (tx === LIST.tx) {
+        send(bytes, 5);
+        send(syntheticClose(), 300);
+      }
+      if (tx === PING.tx) send(hexToBytes(PING.rx), 5);
+    });
+    await withLink(port, async (link) => {
+      await link.exchange(hexToBytes(LIST.tx), { timeoutMs: 100 }); // como el código de las 16:08
+      await new Promise((r) => setTimeout(r, 400));
+      await link.exchange(hexToBytes(PING.tx), { timeoutMs: 300 });
+      const late = link.events.find((e) => e.kind === "descartado");
+      assert.match(late!.hex!, /^46 /);
+    });
+  });
+
+  it("HIPÓTESIS: E3 que se destraba al recibir una orden a otro número; con lo guardado se repite 1 → 0 → 20", async () => {
+    let latched = true;
+    const port = new ScriptPort((tx, send) => {
+      const b = hexToBytes(tx);
+      if (b[0] !== 20) latched = false;
+      if (b[0] === 1) return;
+      if (latched && b[0] === 20) {
+        const body = [20, b[1], 0x45, 0x33];
+        send(Uint8Array.from([...body, xorChecksum(body)]), 5);
+        return;
+      }
+      const ex = SESSION_OK_1608.find((x) => x.tx === tx);
+      if (ex?.rx) send(hexToBytes(ex.rx), 5);
+    });
+    const log: SystelExchangeLog[] = [];
+    const found = await discoverSystelLink(port as unknown as SerialPort, log, () => {}, { settings: { baudRate: 115200, stopBits: 1, parity: "none" }, address: 20 }, 350);
+    assert.equal(found?.address, 20);
+    assert.deepEqual(port.received.slice(0, 2), ["01 17 16", "00 17 17"]);
+    assert.ok(await new SystelClient(found!.link, { address: 20, log }).signature());
+    await found!.link.close();
+  });
+
+  it("puerto tomado por otra pantalla: se informa así, no como 'la balanza no contestó'", async () => {
+    const busy = { open: async () => { throw new Error("Failed to execute 'open' on 'SerialPort': The port is already open."); }, getInfo: () => ({}) };
+    await assert.rejects(discoverSystelLink(busy as unknown as SerialPort, []), /abierto en otra pantalla/);
   });
 });
