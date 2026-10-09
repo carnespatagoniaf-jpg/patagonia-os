@@ -1,9 +1,13 @@
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { useShifts } from "./useShifts";
 import { useTreasury } from "./useTreasury";
 import { addDaysIso, formatMoney, todayIso } from "./format";
 import type { ShiftRangeRow } from "./shifts-service";
-import { listPosSalesInRange, type MostradorSaleEntry } from "../sale/pos-shift-service";
+import { listPosSalesInRange, listSalesByProduct, type MostradorSaleEntry } from "../sale/pos-shift-service";
+import { groupSalesByCategory, type ProductSalesRow } from "./sales-by-category";
+
+const kgText = (n: number) => `${n.toLocaleString("es-AR", { maximumFractionDigits: 1 })} kg`;
+const unitsText = (n: number) => `${n.toLocaleString("es-AR", { maximumFractionDigits: 1 })} u.`;
 
 export function Reports() {
   const { branchId, loadRange } = useShifts();
@@ -13,6 +17,8 @@ export function Reports() {
   const [to, setTo] = useState(todayIso());
   const [rows, setRows] = useState<ShiftRangeRow[]>([]);
   const [mostradorSales, setMostradorSales] = useState<MostradorSaleEntry[]>([]);
+  const [productSales, setProductSales] = useState<ProductSalesRow[]>([]);
+  const [openCategory, setOpenCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [ranOnce, setRanOnce] = useState(false);
 
@@ -21,12 +27,16 @@ export function Reports() {
     setTo(nextTo);
     setLoading(true);
     try {
-      const [shiftRows, mostrador] = await Promise.all([
+      const [shiftRows, mostrador, byProduct] = await Promise.all([
         loadRange(nextFrom, nextTo),
-        branchId ? listPosSalesInRange(branchId, nextFrom, nextTo) : Promise.resolve([])
+        branchId ? listPosSalesInRange(branchId, nextFrom, nextTo) : Promise.resolve([]),
+        // Si la base todavía no tiene la migración 114, el resto del reporte sale igual.
+        branchId ? listSalesByProduct(branchId, nextFrom, nextTo).catch(() => [] as ProductSalesRow[]) : Promise.resolve([] as ProductSalesRow[])
       ]);
       setRows(shiftRows);
       setMostradorSales(mostrador);
+      setProductSales(byProduct);
+      setOpenCategory(null);
       setRanOnce(true);
     } finally {
       setLoading(false);
@@ -37,6 +47,8 @@ export function Reports() {
   const mostradorTotal = mostradorSales.reduce((sum, s) => sum + s.amount, 0);
   const salesTotal = turnosTotal + mostradorTotal;
   const outflowsTotal = rows.reduce((sum, row) => sum + row.outflows.reduce((s, r) => s + r.amount, 0), 0);
+
+  const byCategory = useMemo(() => groupSalesByCategory(productSales), [productSales]);
 
   const salesByDate = [...rows].sort((a, b) => a.shift.shiftDate.localeCompare(b.shift.shiftDate));
 
@@ -84,13 +96,13 @@ export function Reports() {
         <div>
           <p className="eyebrow">REPORTES</p>
           <h1>Reportes</h1>
-          <p className="muted">Ventas (Turnos + Mostrador) y salidas por rango de fechas. Con el tiempo se suman más reportes acá.</p>
+          <p className="muted">Ventas y salidas por rango de fechas: por categoría (carne, pollo…), por fecha y por cuenta.</p>
         </div>
       </header>
 
       <section className="panel">
         <div className="panel-title">
-          <h2>Ventas por turno</h2>
+          <h2>Ventas</h2>
         </div>
         <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 14 }}>
           <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
@@ -126,6 +138,68 @@ export function Reports() {
 
       {ranOnce && !loading && (
         <>
+          <section className="panel" style={{ marginTop: 18 }}>
+            <div className="panel-title">
+              <h2>Por categoría</h2>
+              <span className="muted" style={{ fontSize: 12 }}>Mostrador · tocá una categoría para ver sus productos</span>
+            </div>
+            {byCategory.categories.length === 0 ? (
+              <p className="muted">No hay ventas de Mostrador en ese rango.</p>
+            ) : (
+              <table className="data-table">
+                <thead>
+                  <tr>
+                    <th>Categoría</th>
+                    <th className="num">Vendido</th>
+                    <th className="num">Kilos</th>
+                    <th className="num">%</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {byCategory.categories.map((cat) => (
+                    <Fragment key={cat.key}>
+                      <tr style={{ cursor: "pointer" }} onClick={() => setOpenCategory(openCategory === cat.key ? null : cat.key)}>
+                        <td>
+                          <strong>{openCategory === cat.key ? "▾" : "▸"} {cat.name}</strong>
+                          {cat.unidentified && <div className="muted" style={{ fontSize: 12 }}>Tickets de total de la balanza o "Vender algo sin código": no se sabe qué producto era.</div>}
+                        </td>
+                        <td className="num">{formatMoney(cat.amount)}</td>
+                        <td className="num">
+                          {cat.kg > 0 ? kgText(cat.kg) : cat.unidentified ? "—" : ""}
+                          {cat.units > 0 && <div className="muted" style={{ fontSize: 12 }}>+ {unitsText(cat.units)}</div>}
+                        </td>
+                        <td className="num">
+                          {cat.pct.toLocaleString("es-AR", { maximumFractionDigits: 1 })}%
+                          <div style={{ height: 4, background: "#eef0f3", borderRadius: 2, marginTop: 4 }}>
+                            <div style={{ width: `${Math.min(cat.pct, 100)}%`, height: 4, borderRadius: 2, background: cat.unidentified ? "#c3cad5" : "#8b1e1e" }} />
+                          </div>
+                        </td>
+                      </tr>
+                      {openCategory === cat.key &&
+                        cat.products.map((p) => (
+                          <tr key={`${cat.key}-${p.productId ?? p.productName}`} style={{ background: "#fafafa" }}>
+                            <td style={{ paddingLeft: 28 }}>{p.productCode ? `${p.productCode} · ` : ""}{p.productName}</td>
+                            <td className="num">{formatMoney(p.amount)}</td>
+                            <td className="num">{p.unit === "kg" ? kgText(p.quantity) : p.unit ? unitsText(p.quantity) : `${p.lines} ${p.lines === 1 ? "línea" : "líneas"}`}</td>
+                            <td className="num muted">{byCategory.total > 0 ? `${((p.amount / byCategory.total) * 100).toLocaleString("es-AR", { maximumFractionDigits: 1 })}%` : ""}</td>
+                          </tr>
+                        ))}
+                    </Fragment>
+                  ))}
+                  <tr>
+                    <td><strong>Total</strong></td>
+                    <td className="num"><strong>{formatMoney(byCategory.total)}</strong></td>
+                    <td className="num"><strong>{kgText(byCategory.categories.reduce((sum, c) => sum + c.kg, 0))}</strong></td>
+                    <td className="num">100%</td>
+                  </tr>
+                </tbody>
+              </table>
+            )}
+            <p className="muted" style={{ fontSize: 12, margin: "8px 0 0" }}>
+              Importe de cada renglón; los descuentos o recargos generales de la venta no se reparten por producto.
+            </p>
+          </section>
+
           <section className="panel" style={{ marginTop: 18 }}>
             <div className="panel-title">
               <h2>Por fecha</h2>
@@ -181,6 +255,7 @@ export function Reports() {
             </table>
           </section>
 
+          {rows.length > 0 && (
           <section className="panel" style={{ marginTop: 18 }}>
             <div className="panel-title">
               <h2>Por turno</h2>
@@ -206,8 +281,8 @@ export function Reports() {
                 ))}
               </tbody>
             </table>
-            {rows.length === 0 && <p className="muted">No hay turnos cargados en ese rango.</p>}
           </section>
+          )}
         </>
       )}
     </>

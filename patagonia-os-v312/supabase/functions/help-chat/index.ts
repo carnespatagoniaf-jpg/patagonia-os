@@ -162,7 +162,7 @@ EMPLEADOS
 
 RENTABILIDAD, REPORTES Y EXPORTAR
 - Rentabilidad: costos fijos, conteo de stock y cierre del período con ganancia estimada.
-- Reportes: ventas por fecha, por cuenta y por turno.
+- Reportes: se elige el período (Hoy, Esta semana, Este mes o dos fechas y "Buscar"). Arriba, el total vendido. "Por categoría": cuánto se vendió de cada categoría (Carne, Pollo, Cerdo…) en plata, kilos y % del total; tocando una categoría se ven sus productos, del que más vendió al que menos. La fila "Sin producto" son los tickets de total de la balanza y lo vendido con "Vender algo sin código": no se sabe de qué categoría eran. Después: ventas por fecha y por cuenta (y por turno, si se usaron Turnos).
 - Exportar: descarga planillas (CSV) de ventas, productos y stock, y clientes.
 
 USUARIOS (dueño o administrador)

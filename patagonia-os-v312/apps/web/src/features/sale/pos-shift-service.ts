@@ -1,3 +1,4 @@
+import type { ProductSalesRow } from "../shifts/sales-by-category";
 import { supabase } from "../../lib/supabase";
 import { localDateIso } from "../shifts/format";
 
@@ -401,5 +402,28 @@ export async function listPosShiftSales(shiftId: string): Promise<PosShiftSale[]
       discountAmount: Number(item.discount_amount),
       lineTotal: Number(item.line_total)
     }))
+  }));
+}
+
+/** Reportes → "Por categoría": lo vendido en Mostrador sumado por producto (sales_by_product, migración 114).
+ * Mismos límites de día en hora local que listPosSalesInRange. */
+export async function listSalesByProduct(branchId: string, fromDate: string, toDate: string): Promise<ProductSalesRow[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase.rpc("sales_by_product", {
+    p_branch_id: branchId,
+    p_from: new Date(`${fromDate}T00:00:00`).toISOString(),
+    p_to: new Date(`${toDate}T23:59:59.999`).toISOString()
+  });
+  if (error) throw error;
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    productId: (r.product_id as string | null) ?? null,
+    productName: String(r.product_name ?? ""),
+    productCode: (r.product_code as string | null) ?? null,
+    unit: (r.unit as ProductSalesRow["unit"]) ?? null,
+    categoryId: (r.category_id as string | null) ?? null,
+    categoryName: (r.category_name as string | null) ?? null,
+    quantity: Number(r.quantity ?? 0),
+    amount: Number(r.amount ?? 0),
+    lines: Number(r.lines ?? 0)
   }));
 }
