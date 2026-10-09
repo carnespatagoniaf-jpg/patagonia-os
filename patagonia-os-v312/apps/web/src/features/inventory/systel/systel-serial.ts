@@ -1,4 +1,4 @@
-import type { SystelLink } from "./systel-client";
+import type { SystelExchangeOptions, SystelLink } from "./systel-client";
 
 /**
  * Conexión por cable con una Systel desde Chrome (Web Serial).
@@ -19,6 +19,9 @@ export interface SystelSerialSettings {
   stopBits: 1 | 2;
   parity: "none" | "even" | "odd";
 }
+
+/** Cuánto se espera en silencio cuando la respuesta todavía no cerró bien. */
+export const INCOMPLETE_QUIET_MS = 2000;
 
 export const CUORA_SERIAL: SystelSerialSettings = { baudRate: 115200, stopBits: 1, parity: "none" };
 
@@ -96,7 +99,7 @@ export class SerialSystelLink implements SystelLink {
     await this.connect();
   }
 
-  async exchange(frame: Uint8Array, options: { timeoutMs: number; quietMs?: number }): Promise<Uint8Array | null> {
+  async exchange(frame: Uint8Array, options: SystelExchangeOptions): Promise<Uint8Array | null> {
     if (!this.open || this.lost) {
       try {
         await this.reopen();
@@ -117,7 +120,7 @@ export class SerialSystelLink implements SystelLink {
     }
   }
 
-  private async once(frame: Uint8Array, options: { timeoutMs: number; quietMs?: number }): Promise<Uint8Array | null> {
+  private async once(frame: Uint8Array, options: SystelExchangeOptions): Promise<Uint8Array | null> {
     const quiet = options.quietMs ?? 60;
     this.buffer = []; // lo viejo que haya quedado no es respuesta a esta orden
     const writer = this.port.writable!.getWriter();
@@ -136,7 +139,11 @@ export class SerialSystelLink implements SystelLink {
         lastLen = this.buffer.length;
         lastChange = Date.now();
       }
-      if (lastLen > 0 && Date.now() - lastChange >= quiet) break;
+      if (lastLen > 0 && Date.now() - lastChange >= quiet) {
+        // Pausa a mitad de una respuesta larga: se espera hasta INCOMPLETE_QUIET_MS más antes de darla por terminada.
+        const incomplete = options.isComplete && !options.isComplete(Uint8Array.from(this.buffer));
+        if (!incomplete || Date.now() - lastChange >= INCOMPLETE_QUIET_MS) break;
+      }
       if (lastLen === 0 && Date.now() - start >= options.timeoutMs) return null;
       if (Date.now() - start >= options.timeoutMs + 60_000) break;
     }

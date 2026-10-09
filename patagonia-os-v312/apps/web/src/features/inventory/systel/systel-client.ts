@@ -33,7 +33,24 @@ import {
 
 export interface SystelLink {
   /** Manda una trama y devuelve lo que llegue hasta que la línea quede en silencio (null si no llegó nada). */
-  exchange(frame: Uint8Array, options: { timeoutMs: number; quietMs?: number }): Promise<Uint8Array | null>;
+  exchange(frame: Uint8Array, options: SystelExchangeOptions): Promise<Uint8Array | null>;
+}
+
+export interface SystelExchangeOptions {
+  timeoutMs: number;
+  quietMs?: number;
+  /**
+   * Si lo que llegó todavía no es una trama completa (verificación mal), se sigue esperando
+   * aunque la línea haga una pausa. Real 2026-10-09 (Los gringos): la lista de PLU llegó
+   * cortada en el 503 porque la balanza hizo una pausa de más de 60 ms a mitad de respuesta.
+   */
+  isComplete?: (rx: Uint8Array) => boolean;
+}
+
+/** La respuesta termina en un byte de verificación correcto: si no, es que falta algo. */
+export function replyIsComplete(rx: Uint8Array): boolean {
+  const r = parseSystelReply(rx);
+  return !!r && r.checksumOk;
 }
 
 export const SYSTEL_READ_FUNCTIONS = [1, 2, 3, 23, 28, 31, 39, 62] as const;
@@ -92,7 +109,7 @@ export class SystelClient {
     assertSystelFunctionAllowed(fn, opts.token);
     const frame = buildSystelFrame(this.address, fn, data, { checksum: opts.checksum });
     const t0 = Date.now();
-    const rx = await this.link.exchange(frame, { timeoutMs: opts.timeoutMs ?? this.timeoutMs });
+    const rx = await this.link.exchange(frame, { timeoutMs: opts.timeoutMs ?? this.timeoutMs, isComplete: replyIsComplete });
     const reply = rx ? parseSystelReply(rx) : null;
     const valid = !!reply && reply.checksumOk && reply.address === this.address && reply.fn === fn;
     this.log.push({
