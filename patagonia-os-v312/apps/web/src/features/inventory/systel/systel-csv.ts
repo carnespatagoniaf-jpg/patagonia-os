@@ -49,7 +49,13 @@ export function buildQendraCsv(products: SystelCsvProduct[]): SystelCsvResult {
       skipped.push({ code: p.code, name: p.name, reason: "el código tiene que ser un número de 1 a 8000" });
       continue;
     }
-    if (!(p.price >= 0) || p.price > 999999) {
+    // Sin precio no se manda: Qendra le pondría $0 a ese producto en la balanza
+    // (real: Los gringos tenía 102 de 103 productos en $0 en Patagonia, 2026-10-09).
+    if (!(p.price > 0)) {
+      skipped.push({ code: p.code, name: p.name, reason: "no tiene precio cargado en Patagonia" });
+      continue;
+    }
+    if (p.price > 999999) {
       skipped.push({ code: p.code, name: p.name, reason: "precio fuera de rango" });
       continue;
     }

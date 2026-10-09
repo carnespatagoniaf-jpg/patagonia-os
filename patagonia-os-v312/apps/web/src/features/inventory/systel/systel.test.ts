@@ -243,6 +243,15 @@ describe("archivos para Qendra y Cuora Neo", () => {
     assert.equal(skipped.length, 1);
   });
 
+  it("Qendra: un producto sin precio NO va al archivo (la balanza quedaría en $0)", () => {
+    const { csv, skipped } = buildQendraCsv([
+      { code: "1", name: "Pata muslo", byWeight: true, price: 0 },
+      { code: "2", name: "Suprema", byWeight: true, price: 7900 }
+    ]);
+    assert.equal(csv, "General;2;Suprema;2;7900,00;0,00;PESO;0;\r\n");
+    assert.deepEqual(skipped.map((s) => s.reason), ["no tiene precio cargado en Patagonia"]);
+  });
+
   it("Cuora Neo: formato 1 (9 campos), punto decimal", () => {
     const { csv } = buildCuoraNeoCsv([{ code: "12", name: "Vacío", byWeight: true, price: 16000 }]);
     assert.equal(csv, "General;12;Vacio;12;16000.00;0.00;PESO;0;\r\n");

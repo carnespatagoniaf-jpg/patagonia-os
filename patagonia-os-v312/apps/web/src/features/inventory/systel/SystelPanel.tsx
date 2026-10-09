@@ -7,6 +7,10 @@ import { LAYOUT_INFO, rawToPesos } from "./systel-plu";
 import { CUORA_SERIAL, pickSystelPort, SerialSystelLink } from "./systel-serial";
 import { planSystelSync, runSystelSync, type SystelPlanItem, type SystelSyncResult } from "./systel-sync";
 import { runSystelWriteTest, type SystelWriteTestResult } from "./systel-write-test";
+import { submitScaleSupportReport } from "../../scales/support-service";
+import { logScaleActivity } from "../../scales/activity-log";
+import { useAuth } from "../../auth/AuthProvider";
+import { useActiveBranch } from "../../branches/BranchProvider";
 
 /**
  * "Balanza Systel": módulo aparte del de Kretz. Conectar → respaldo (solo lectura)
@@ -55,6 +59,43 @@ export function SystelPanel({ products }: { products: SystelPanelProduct[] }) {
   const [sync, setSync] = useState<SystelSyncResult | null>(null);
   const linkRef = useRef<SerialSystelLink | null>(null);
   const model = SYSTEL_MODELS.find((m) => m.id === modelId)!;
+  const { profile } = useAuth();
+  const { branchId } = useActiveBranch();
+  const [reportNote, setReportNote] = useState("");
+
+  /**
+   * Cada paso (respaldo, prueba, envío o error) le llega solo a soporte, con todo lo que se
+   * leyó y se mandó: así no hay que pedirle fotos al cliente (regla del dueño).
+   * Solo dueño o administrador pueden mandar reportes (submit_scale_support_report, migración 100).
+   */
+  async function autoReport(step: string, detail: string, extra: { backup?: SystelBackup | null; test?: SystelWriteTestResult | null; sync?: SystelSyncResult | null; error?: string } = {}) {
+    logScaleActivity({ kind: extra.error ? "error" : "test", connectionLabel: `Systel ${modelId}`, message: `${step}: ${detail}` });
+    if (profile?.role !== "owner" && profile?.role !== "admin") return;
+    try {
+      await submitScaleSupportReport({
+        note: `Systel (${modelId}, dirección ${address}) · ${step}: ${detail}`,
+        logText: `${step}: ${detail}${extra.error ? `\nError: ${extra.error}` : ""}`,
+        connections: [
+          {
+            displayName: "Systel (panel)",
+            driverId: `systel-${modelId}`,
+            status: linkRef.current ? "conectada" : "sin conectar",
+            settings: { modelId, address },
+            confirmedCapabilities: [],
+            pairedAt: "",
+            connectedNow: Boolean(linkRef.current),
+            pluScan: extra.backup ?? backup ?? undefined,
+            auraWriteTest: extra.test ?? test ?? undefined,
+            diagnosticRecord: { sync: extra.sync ?? sync ?? null, error: extra.error ?? null }
+          }
+        ],
+        branchId: branchId ?? null
+      });
+      setReportNote("El resultado ya le llegó al equipo de Patagonia OS.");
+    } catch {
+      setReportNote("No se pudo mandar el resultado a soporte: sacale una foto a esta pantalla.");
+    }
+  }
 
   const active = useMemo(() => products.filter((p) => p.active ?? true), [products]);
   const csvProducts: SystelCsvProduct[] = useMemo(() => active.map((p) => ({ code: p.code, name: p.name, byWeight: p.unit === "kg", price: p.priceRetail })), [active]);
@@ -72,7 +113,9 @@ export function SystelPanel({ products }: { products: SystelPanelProduct[] }) {
       }
       return await fn(new SystelClient(linkRef.current, { address }));
     } catch (err) {
-      setError(err instanceof Error ? err.message : String(err));
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      void autoReport("error", message, { error: message });
       return null;
     } finally {
       setBusy(false);
@@ -91,6 +134,7 @@ export function SystelPanel({ products }: { products: SystelPanelProduct[] }) {
     if (b) {
       setBackup(b);
       saveBackupLocally(b);
+      void autoReport("respaldo (solo lectura)", `${b.detail} · ${b.plus.length} productos leídos`, { backup: b });
     }
   }
 
@@ -100,6 +144,7 @@ export function SystelPanel({ products }: { products: SystelPanelProduct[] }) {
     if (r) {
       setTest(r);
       if (r.backup) setBackup(r.backup);
+      void autoReport("prueba controlada", `${r.verdict}: ${r.detail}`, { test: r, backup: r.backup });
     }
   }
 
@@ -108,7 +153,10 @@ export function SystelPanel({ products }: { products: SystelPanelProduct[] }) {
     if (!window.confirm(`Se van a mandar ${toSend.length} productos a la balanza. No se borra nada. ¿Seguir?`)) return;
     const layout = backup.layout;
     const r = await withClient((c) => runSystelSync(c, layout, plan, setProgress));
-    if (r) setSync(r);
+    if (r) {
+      setSync(r);
+      void autoReport("envío de productos", r.stoppedAt ? "se frenó" : "terminó", { sync: r });
+    }
   }
 
   const decimals = backup?.signature?.priceDecimals ?? 0;
@@ -147,6 +195,7 @@ export function SystelPanel({ products }: { products: SystelPanelProduct[] }) {
               </div>
               {progress && <p className="muted">{progress}</p>}
               {error && <p className="error">{error}</p>}
+              {reportNote && <p className="muted" style={{ fontSize: 12 }}>{reportNote}</p>}
 
               {backup && (
                 <div style={{ marginTop: 12, fontSize: 14 }}>
