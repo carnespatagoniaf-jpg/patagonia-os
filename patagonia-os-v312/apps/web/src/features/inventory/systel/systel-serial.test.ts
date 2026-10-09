@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { SystelClient } from "./systel-client";
+import { FakeCuora } from "./systel-fake";
 import { SerialSystelLink } from "./systel-serial";
 
 /** Arma una respuesta Systel: dirección + función + datos + XOR de todo lo anterior. */
@@ -43,5 +44,24 @@ describe("respuesta larga con una pausa en el medio", () => {
     await link.close();
     assert.ok(list, "la lista se tiene que leer entera");
     assert.equal(list!.entries.length, 900);
+  });
+});
+
+describe("balanza ocupada (E3)", () => {
+  it("una lectura que recibe E3 se reintenta sola y sale bien", async () => {
+    const cuora = new FakeCuora("max62", { address: 20 });
+    cuora.busyReplies = 3;
+    const client = new SystelClient(cuora, { address: 20, busyRetryMs: [5, 5, 5, 5, 5] });
+    const sig = await client.signature();
+    assert.ok(sig, "después de los E3 tiene que leer la firma");
+  });
+
+  it("con un solo E3 la lectura se pide una vez más y listo", async () => {
+    const cuora = new FakeCuora("max62", { address: 20 });
+    const client = new SystelClient(cuora, { address: 20, busyRetryMs: [5, 5, 5] });
+    cuora.busyReplies = 1;
+    const before = cuora.received.length;
+    await client.ping();
+    assert.equal(cuora.received.length - before, 2, "la lectura se pidió dos veces (E3 y reintento)");
   });
 });

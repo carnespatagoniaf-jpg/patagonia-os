@@ -17,6 +17,8 @@ export class FakeCuora implements SystelLink {
   readonly plus = new Map<number, string>();
   readonly received: { fn: number; data: string }[] = [];
   silent = false;
+  /** Contesta E3 a las próximas N órdenes (balanza ocupada). */
+  busyReplies = 0;
   /** Rompe el registro del PLU indicado después de una escritura (para probar el freno). */
   corruptAfterWrite: number | null = null;
   /** No aplica los cambios de precio (contesta ACK igual). */
@@ -46,6 +48,10 @@ export class FakeCuora implements SystelLink {
     const data = String.fromCharCode(...frame.subarray(2, payloadEnd));
     this.received.push({ fn, data });
     if (this.silent) return null;
+    if (this.busyReplies > 0) {
+      this.busyReplies -= 1;
+      return this.reply(fn, "E3");
+    }
     if (addr !== this.address && addr !== 0) return null;
     if (expectsCheck && xorChecksum(frame.subarray(0, frame.length - 1)) !== frame[frame.length - 1]) {
       return isPluWrite ? this.reply(fn, "E5") : this.reply(fn, "E1");

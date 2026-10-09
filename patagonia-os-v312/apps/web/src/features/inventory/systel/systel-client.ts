@@ -53,6 +53,9 @@ export function replyIsComplete(rx: Uint8Array): boolean {
   return !!r && r.checksumOk;
 }
 
+/** Errores de transmisión: la balanza no hizo la orden, se puede volver a pedir. */
+const TRANSIENT_ERRORS = new Set(["E1", "E2", "E3"]);
+
 export const SYSTEL_READ_FUNCTIONS = [1, 2, 3, 23, 28, 31, 39, 62] as const;
 export const SYSTEL_WRITE_FUNCTIONS = [4, 33, 61] as const;
 export const SYSTEL_FORBIDDEN_FUNCTIONS = [5, 6, 7, 8, 9, 10, 12, 13, 15, 16, 17, 18, 22, 24, 25, 26, 32, 34, 35, 38, 40, 41, 42, 45, 46, 47, 64, 65, 68, 69, 70, 71, 74, 87];
@@ -79,6 +82,8 @@ export interface SystelClientOptions {
   /** Número de "Identificación" de la balanza (menú 11 → 3 → 1). */
   address: number;
   timeoutMs?: number;
+  /** Esperas entre reintentos de una lectura cuando la balanza contesta E1/E2/E3. */
+  busyRetryMs?: number[];
   /** La función 61/4 se documenta SIN verificación; las demás con. HIPÓTESIS: se prueba "con" y, si contesta E5, "sin". */
   writeChecksum?: "con" | "sin";
   log?: SystelExchangeLog[];
@@ -95,6 +100,7 @@ export class SystelClient {
   readonly address: number;
   readonly log: SystelExchangeLog[];
   private readonly timeoutMs: number;
+  private readonly busyRetryMs: number[];
   writeChecksum: "con" | "sin";
 
   constructor(private readonly link: SystelLink, options: SystelClientOptions) {
@@ -102,10 +108,28 @@ export class SystelClient {
     this.timeoutMs = options.timeoutMs ?? 1500;
     this.writeChecksum = options.writeChecksum ?? "con";
     this.log = options.log ?? [];
+    this.busyRetryMs = options.busyRetryMs ?? [300, 800, 1500, 3000, 5000];
   }
 
-  /** Manda una función y devuelve la respuesta validada (dirección, función y verificación). */
+  /**
+   * Manda una función y devuelve la respuesta validada (dirección, función y verificación).
+   * Real 2026-10-09 (Los gringos): la misma balanza que había contestado bien, 18 minutos
+   * después contestó E3 ("se desatendieron datos") a todo; la balanza estaba ocupada.
+   * En las LECTURAS, ante E1/E2/E3 (errores de transmisión, la orden no se hizo) se espera y
+   * se reintenta. Las escrituras no se reintentan acá: el cliente relee antes de volver a mandar.
+   */
   private async call(step: string, fn: number, data: string, opts: { token?: symbol; checksum?: boolean; timeoutMs?: number } = {}): Promise<SystelReply | null> {
+    const isRead = (SYSTEL_READ_FUNCTIONS as readonly number[]).includes(fn);
+    let reply = await this.callOnce(step, fn, data, opts);
+    for (const wait of isRead ? this.busyRetryMs : []) {
+      if (!(reply && reply.kind === "error" && TRANSIENT_ERRORS.has(reply.errorCode ?? ""))) break;
+      await new Promise((r) => setTimeout(r, wait));
+      reply = await this.callOnce(`${step} (reintento)`, fn, data, opts);
+    }
+    return reply;
+  }
+
+  private async callOnce(step: string, fn: number, data: string, opts: { token?: symbol; checksum?: boolean; timeoutMs?: number }): Promise<SystelReply | null> {
     assertSystelFunctionAllowed(fn, opts.token);
     const frame = buildSystelFrame(this.address, fn, data, { checksum: opts.checksum });
     const t0 = Date.now();
