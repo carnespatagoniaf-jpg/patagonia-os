@@ -424,6 +424,10 @@ export async function listSalesByProduct(branchId: string, fromDate: string, toD
     categoryName: (r.category_name as string | null) ?? null,
     quantity: Number(r.quantity ?? 0),
     amount: Number(r.amount ?? 0),
-    lines: Number(r.lines ?? 0)
+    lines: Number(r.lines ?? 0),
+    // Antes de la migración 115 la función no devolvía costo: queda en 0 (ganancia = vendido).
+    cost: Number(r.cost ?? 0),
+    estimatedCostLines: Number(r.estimated_cost_lines ?? 0),
+    missingCostLines: Number(r.missing_cost_lines ?? 0)
   }));
 }

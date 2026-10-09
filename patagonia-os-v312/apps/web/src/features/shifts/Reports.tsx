@@ -4,9 +4,22 @@ import { useTreasury } from "./useTreasury";
 import { addDaysIso, formatMoney, todayIso } from "./format";
 import type { ShiftRangeRow } from "./shifts-service";
 import { listPosSalesInRange, listSalesByProduct, type MostradorSaleEntry } from "../sale/pos-shift-service";
-import { groupSalesByCategory, type ProductSalesRow } from "./sales-by-category";
+import { changePct, groupSalesByCategory, marginOnCost, previousPeriod, type ProductSalesRow } from "./sales-by-category";
 
 const kgText = (n: number) => `${n.toLocaleString("es-AR", { maximumFractionDigits: 1 })} kg`;
+/** "↑ 18% vs. período anterior" en verde, "↓ 9%" en rojo. */
+function ChangeBadge({ pct }: { pct: number | null }) {
+  if (pct === null) return null;
+  const up = pct >= 0;
+  return (
+    <div style={{ fontSize: 12, fontWeight: 700, color: up ? "#176329" : "#8b1e1e" }} title="Comparado con el período anterior del mismo largo">
+      {up ? "↑" : "↓"} {Math.abs(pct).toLocaleString("es-AR", { maximumFractionDigits: 1 })}% vs. anterior
+    </div>
+  );
+}
+
+const pctText = (n: number) => `${n.toLocaleString("es-AR", { maximumFractionDigits: 1 })}%`;
+
 const unitsText = (n: number) => `${n.toLocaleString("es-AR", { maximumFractionDigits: 1 })} u.`;
 
 export function Reports() {
@@ -18,6 +31,7 @@ export function Reports() {
   const [rows, setRows] = useState<ShiftRangeRow[]>([]);
   const [mostradorSales, setMostradorSales] = useState<MostradorSaleEntry[]>([]);
   const [productSales, setProductSales] = useState<ProductSalesRow[]>([]);
+  const [previousSales, setPreviousSales] = useState<ProductSalesRow[]>([]);
   const [openCategory, setOpenCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [ranOnce, setRanOnce] = useState(false);
@@ -27,15 +41,18 @@ export function Reports() {
     setTo(nextTo);
     setLoading(true);
     try {
-      const [shiftRows, mostrador, byProduct] = await Promise.all([
+      const prev = previousPeriod(nextFrom, nextTo);
+      const [shiftRows, mostrador, byProduct, byProductBefore] = await Promise.all([
         loadRange(nextFrom, nextTo),
         branchId ? listPosSalesInRange(branchId, nextFrom, nextTo) : Promise.resolve([]),
         // Si la base todavía no tiene la migración 114, el resto del reporte sale igual.
-        branchId ? listSalesByProduct(branchId, nextFrom, nextTo).catch(() => [] as ProductSalesRow[]) : Promise.resolve([] as ProductSalesRow[])
+        branchId ? listSalesByProduct(branchId, nextFrom, nextTo).catch(() => [] as ProductSalesRow[]) : Promise.resolve([] as ProductSalesRow[]),
+        branchId ? listSalesByProduct(branchId, prev.from, prev.to).catch(() => [] as ProductSalesRow[]) : Promise.resolve([] as ProductSalesRow[])
       ]);
       setRows(shiftRows);
       setMostradorSales(mostrador);
       setProductSales(byProduct);
+      setPreviousSales(byProductBefore);
       setOpenCategory(null);
       setRanOnce(true);
     } finally {
@@ -49,6 +66,11 @@ export function Reports() {
   const outflowsTotal = rows.reduce((sum, row) => sum + row.outflows.reduce((s, r) => s + r.amount, 0), 0);
 
   const byCategory = useMemo(() => groupSalesByCategory(productSales), [productSales]);
+  const before = useMemo(() => {
+    const grouped = groupSalesByCategory(previousSales);
+    const productAmount = new Map(previousSales.map((p) => [p.productId ?? p.productName, p.amount]));
+    return { total: grouped.total, byCategory: new Map(grouped.categories.map((c) => [c.key, c.amount])), productAmount };
+  }, [previousSales]);
 
   const salesByDate = [...rows].sort((a, b) => a.shift.shiftDate.localeCompare(b.shift.shiftDate));
 
@@ -152,7 +174,8 @@ export function Reports() {
                     <th>Categoría</th>
                     <th className="num">Vendido</th>
                     <th className="num">Kilos</th>
-                    <th className="num">%</th>
+                    <th className="num">Ganancia</th>
+                    <th className="num">% de lo vendido</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -163,10 +186,17 @@ export function Reports() {
                           <strong>{openCategory === cat.key ? "▾" : "▸"} {cat.name}</strong>
                           {cat.unidentified && <div className="muted" style={{ fontSize: 12 }}>Tickets de total de la balanza o "Vender algo sin código": no se sabe qué producto era.</div>}
                         </td>
-                        <td className="num">{formatMoney(cat.amount)}</td>
+                        <td className="num">
+                          {formatMoney(cat.amount)}
+                          <ChangeBadge pct={changePct(cat.amount, before.byCategory.get(cat.key) ?? 0)} />
+                        </td>
                         <td className="num">
                           {cat.kg > 0 ? kgText(cat.kg) : cat.unidentified ? "—" : ""}
                           {cat.units > 0 && <div className="muted" style={{ fontSize: 12 }}>+ {unitsText(cat.units)}</div>}
+                        </td>
+                        <td className="num">
+                          {cat.profit === null ? "—" : formatMoney(cat.profit)}
+                          {cat.marginPct !== null && <div className="muted" style={{ fontSize: 12 }}>margen {pctText(cat.marginPct)}</div>}
                         </td>
                         <td className="num">
                           {cat.pct.toLocaleString("es-AR", { maximumFractionDigits: 1 })}%
@@ -179,8 +209,18 @@ export function Reports() {
                         cat.products.map((p) => (
                           <tr key={`${cat.key}-${p.productId ?? p.productName}`} style={{ background: "#fafafa" }}>
                             <td style={{ paddingLeft: 28 }}>{p.productCode ? `${p.productCode} · ` : ""}{p.productName}</td>
-                            <td className="num">{formatMoney(p.amount)}</td>
+                            <td className="num">
+                              {formatMoney(p.amount)}
+                              <ChangeBadge pct={changePct(p.amount, before.productAmount.get(p.productId ?? p.productName) ?? 0)} />
+                            </td>
                             <td className="num">{p.unit === "kg" ? kgText(p.quantity) : p.unit ? unitsText(p.quantity) : `${p.lines} ${p.lines === 1 ? "línea" : "líneas"}`}</td>
+                            <td className="num">
+                              {p.productId === null ? "—" : formatMoney(p.amount - p.cost)}
+                              {p.productId !== null && marginOnCost(p.amount, p.cost) !== null && (
+                                <div className="muted" style={{ fontSize: 12 }}>margen {pctText(marginOnCost(p.amount, p.cost)!)}</div>
+                              )}
+                              {p.missingCostLines > 0 && <div style={{ fontSize: 12, color: "#8a4b00" }}>sin costo cargado</div>}
+                            </td>
                             <td className="num muted">{byCategory.total > 0 ? `${((p.amount / byCategory.total) * 100).toLocaleString("es-AR", { maximumFractionDigits: 1 })}%` : ""}</td>
                           </tr>
                         ))}
@@ -188,16 +228,32 @@ export function Reports() {
                   ))}
                   <tr>
                     <td><strong>Total</strong></td>
-                    <td className="num"><strong>{formatMoney(byCategory.total)}</strong></td>
+                    <td className="num">
+                      <strong>{formatMoney(byCategory.total)}</strong>
+                      <ChangeBadge pct={changePct(byCategory.total, before.total)} />
+                    </td>
                     <td className="num"><strong>{kgText(byCategory.categories.reduce((sum, c) => sum + c.kg, 0))}</strong></td>
+                    <td className="num"><strong>{formatMoney(byCategory.profit)}</strong></td>
                     <td className="num">100%</td>
                   </tr>
                 </tbody>
               </table>
             )}
             <p className="muted" style={{ fontSize: 12, margin: "8px 0 0" }}>
-              Importe de cada renglón; los descuentos o recargos generales de la venta no se reparten por producto.
+              Importe de cada renglón; los descuentos o recargos generales de la venta no se reparten por producto. "vs. anterior" compara con el período anterior del mismo largo.
+              Ganancia = vendido − costo; el margen es sobre el costo, como en Stock.
             </p>
+            {byCategory.estimatedCostLines > 0 && (
+              <p className="muted" style={{ fontSize: 12, margin: "4px 0 0" }}>
+                Las ventas anteriores al 8/10/2026 no guardaban su costo: para esas, la ganancia usa el costo de hoy (es estimada).
+              </p>
+            )}
+            {byCategory.missingCostProducts.length > 0 && (
+              <p style={{ fontSize: 12, margin: "4px 0 0", color: "#8a4b00" }}>
+                {byCategory.missingCostProducts.length === 1 ? "1 producto vendido no tiene" : `${byCategory.missingCostProducts.length} productos vendidos no tienen`} costo cargado (su ganancia sale de más):{" "}
+                {byCategory.missingCostProducts.slice(0, 6).join(", ")}{byCategory.missingCostProducts.length > 6 ? "…" : ""}. Cargalo en Stock.
+              </p>
+            )}
           </section>
 
           <section className="panel" style={{ marginTop: 18 }}>
