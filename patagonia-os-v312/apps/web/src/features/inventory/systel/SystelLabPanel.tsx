@@ -11,9 +11,10 @@ import { pickSystelPort, type SerialSystelLink, type SystelLinkEvent } from "./s
  * protocolo usado, resultado de cada paso y los eventos del cable.
  */
 export default function SystelLabPanel() {
-  const [plu, setPlu] = useState("7999");
+  const [plu, setPlu] = useState("");
+  /** Nombre del producto de prueba tal cual está en la balanza (cambio de precio) o el que se crea (alta). */
   const [newPrice, setNewPrice] = useState("");
-  const [name, setName] = useState("PRUEBA LAB");
+  const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [report, setReport] = useState<LabReport | null>(null);
   const [note, setNote] = useState("");
@@ -48,6 +49,7 @@ export default function SystelLabPanel() {
               lab: true,
               address: addressRef.current,
               plu: n,
+              expectedName: name,
               newPriceRaw: Number(newPrice),
               log: logRef.current,
               confirm: async (initial) => window.confirm(`Balanza de BANCO. PLU ${initial.number} "${initial.name.trim()}": precio ${initial.prices[0]} → ${newPrice}, y después se restaura. ¿Seguir?`)
@@ -91,7 +93,7 @@ export default function SystelLabPanel() {
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
         <label>PLU <input value={plu} onChange={(e) => setPlu(e.target.value)} style={{ width: 80 }} disabled={busy} /></label>
         <label>Precio (crudo) <input value={newPrice} onChange={(e) => setNewPrice(e.target.value)} style={{ width: 90 }} disabled={busy} /></label>
-        <label>Nombre (alta) <input value={name} onChange={(e) => setName(e.target.value)} style={{ width: 160 }} disabled={busy} /></label>
+        <label>Nombre de prueba (empieza con PRUEBA) <input value={name} onChange={(e) => setName(e.target.value)} style={{ width: 160 }} disabled={busy} /></label>
       </div>
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
         <button disabled={busy} onClick={() => void run("precio")}>Probar cambio de precio</button>

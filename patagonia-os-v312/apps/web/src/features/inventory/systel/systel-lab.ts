@@ -130,10 +130,23 @@ function finish(base: Omit<LabReport, "finishedAt" | "steps" | "protocol">, ctx:
   return { ...base, protocol: ctx.protocol, steps: ctx.rec.steps, finishedAt: new Date().toISOString() };
 }
 
+/**
+ * Solo se escribe sobre productos DESTINADOS A PRUEBAS: el nombre que tiene en la balanza tiene que
+ * empezar con "PRUEBA" y ser exactamente el que la persona escribió. Ningún número (7999, 7998…) se
+ * da por libre ni por "de prueba" por sí solo: se comprueba en la balanza cada vez.
+ */
+export const TEST_NAME_PREFIX = "PRUEBA";
+
+export function isTestProductName(name: string): boolean {
+  return name.trim().toUpperCase().startsWith(TEST_NAME_PREFIX);
+}
+
 export interface PriceLabOptions {
   lab: true;
   address: number;
   plu: number;
+  /** Nombre del producto de prueba tal como se cargó a mano en la balanza (tiene que empezar con PRUEBA). */
+  expectedName: string;
   /** Precio nuevo, crudo (6 números, con los decimales de esa balanza). */
   newPriceRaw: number;
   /** Última confirmación de la persona antes de escribir (muestra el estado inicial). */
@@ -159,6 +172,17 @@ export async function runPriceChangeLab(link: SystelLink, o: PriceLabOptions): P
   const initial = await readTwice(ctx, o.plu);
   if (!initial) return finish({ ...base, outcome: "detenido_antes_de_escribir" }, ctx);
   base.initial = initial;
+  const onScale = initial.name.trim();
+  if (!isTestProductName(onScale) || onScale.toUpperCase() !== o.expectedName.trim().toUpperCase()) {
+    ctx.rec.steps.push({
+      name: "producto destinado a pruebas",
+      ok: false,
+      detail: `en la balanza el PLU ${o.plu} se llama "${onScale}"; tiene que llamarse exactamente "${o.expectedName.trim()}" y empezar con ${TEST_NAME_PREFIX}: no se toca`,
+      ms: 0,
+      commands: []
+    });
+    return finish({ ...base, outcome: "detenido_antes_de_escribir" }, ctx);
+  }
   if (!Number.isInteger(o.newPriceRaw) || o.newPriceRaw < 0 || o.newPriceRaw > 999999 || o.newPriceRaw === initial.prices[0]) {
     ctx.rec.steps.push({ name: "precio de prueba", ok: false, detail: "el precio nuevo tiene que ser distinto del actual y de 0 a 999999", ms: 0, commands: [] });
     return finish({ ...base, outcome: "detenido_antes_de_escribir" }, ctx);
@@ -250,6 +274,10 @@ export async function runCreateLab(link: SystelLink, o: CreateLabOptions): Promi
   const base = { test: "alta" as const, variant: o.variant, address: o.address, plu: o.plu, startedAt, initialList: ctx.list, initial: null as SystelPlu | null, afterWrite: null as SystelPlu | null, afterRestore: null as SystelPlu | null, manualAction: null as string | null };
   if (!ctx.ok) return finish({ ...base, outcome: "detenido_antes_de_escribir" }, ctx);
   const known = new Set(ctx.list!.map((e) => e.number));
+  if (!isTestProductName(o.name)) {
+    ctx.rec.steps.push({ name: "nombre de prueba", ok: false, detail: `el producto de prueba tiene que llamarse "${TEST_NAME_PREFIX}…"`, ms: 0, commands: [] });
+    return finish({ ...base, outcome: "detenido_antes_de_escribir" }, ctx);
+  }
   if (known.has(o.plu) || known.size === 0) {
     ctx.rec.steps.push({ name: "número libre", ok: false, detail: known.has(o.plu) ? `el PLU ${o.plu} ya existe: el alta se prueba en un número libre` : "balanza sin productos", ms: 0, commands: [] });
     return finish({ ...base, outcome: "detenido_antes_de_escribir" }, ctx);
@@ -257,6 +285,16 @@ export async function runCreateLab(link: SystelLink, o: CreateLabOptions): Promi
   // El formato se reconoce leyendo un producto que YA existe (el primero de la lista), dos veces.
   const sample = await readTwice(ctx, ctx.list![0].number);
   if (!sample) return finish({ ...base, outcome: "detenido_antes_de_escribir" }, ctx);
+  // No alcanza con que falte en la lista: se pide el número directamente y tiene que contestar
+  // "no existe" (E7). Cualquier otra cosa (un producto, sin respuesta, otro error) frena.
+  const free = await ctx.rec.step(`comprobar que el PLU ${o.plu} está libre (lectura directa: tiene que dar E7)`, async () => {
+    const before = ctx.reader.log.length;
+    const p = await ctx.reader.readPlu(ctx.protocol.layout!, o.plu);
+    if (p) return { ok: false, detail: `el PLU ${o.plu} existe ("${p.name.trim()}"): no se usa` };
+    const answers = ctx.reader.log.slice(before).map((l) => l.rxText);
+    return answers.includes("E7") ? { ok: true, detail: "la balanza contestó E7 (no existe)" } : { ok: false, detail: `la balanza no confirmó que esté libre (${answers.join(", ") || "sin respuesta"})` };
+  });
+  if (!free.ok) return finish({ ...base, outcome: "detenido_antes_de_escribir" }, ctx);
   if (!(await o.confirm())) {
     ctx.rec.steps.push({ name: "confirmación", ok: false, detail: "cancelado por la persona", ms: 0, commands: [] });
     return finish({ ...base, outcome: "cancelado" }, ctx);

@@ -1,0 +1,83 @@
+LABORATORIO SYSTEL - Patagonia OS
+Version: ver VERSION.txt (no es la version de produccion)
+SOLO PARA UNA BALANZA DE PRUEBA. NUNCA con la balanza de un cliente.
+
+Esta version:
+- No usa la base de datos de Patagonia: funciona en modo demostracion, sin
+  usuario ni clave, y no manda nada a internet.
+- Solo puede escribir en la balanza desde el panel "LABORATORIO Systel",
+  siempre pide confirmacion antes y solo toca productos cuyo nombre empieza
+  con PRUEBA.
+
+QUE HACE FALTA
+- Balanza Systel Cuora Max con puerto USB.
+- Cable USB 2.0 tipo A/B (el de impresora).
+- PC con Windows 10 u 11 y Google Chrome o Microsoft Edge actualizado.
+- Driver del chip FTDI FT232: Windows suele instalarlo solo. Si en el
+  Administrador de dispositivos aparece "FT232" con un signo amarillo,
+  instalar Qendra (soporte.systel-global.com) o seguir el instructivo
+  "CUORA Instalacion manual drivers".
+- Cerrar Qendra u otro programa que use la balanza.
+
+COMO ABRIRLO
+1. Descomprimir todo el ZIP en una carpeta de la PC.
+2. Doble clic en INICIAR-LABORATORIO.bat. Se abre una ventana negra (no
+   cerrarla mientras se prueba) y el navegador en http://127.0.0.1:8137/
+3. En el menu de la izquierda: Stock. Abajo de "Balanza por cable" aparece el
+   recuadro "LABORATORIO Systel".
+
+PASO 0 - PREPARAR LA BALANZA
+- Anotar el modelo y la version que muestra la balanza, y su numero de
+  identificacion (menu 11 > 3 > 1).
+- Cargar A MANO un producto destinado a pruebas, con nombre PRUEBA LAB, en un
+  numero que NO use el negocio (por ejemplo el 7999), con precio y codigo
+  conocidos. Si ese numero ya tiene un producto real, elegir otro numero.
+- Sacarle una foto a la pantalla.
+- La herramienta NO da ningun numero por "de prueba": lee el producto y se
+  detiene si su nombre no empieza con PRUEBA o no es exactamente el que se
+  escribio.
+
+PASO 1 - LECTURA Y CAMBIO DE PRECIO CON RESTAURACION
+1. Completar:
+   - PLU: el numero del paso 0.
+   - Nombre de prueba: PRUEBA LAB (igual que en la balanza).
+   - Precio (crudo): el precio actual + 1, en numeros, sin puntos ni comas,
+     con los decimales que use la balanza.
+2. Tocar "Probar cambio de precio". Chrome pide elegir el puerto: elegir el
+   USB de la balanza.
+3. La prueba lee la balanza, lee el producto dos veces y comprueba que es el
+   de prueba. Muestra el estado inicial y pide confirmacion. Despues cambia
+   solo el precio, relee, vuelve al precio original, relee y compara.
+4. Resultado esperado: "aprobado". Mirar en la pantalla de la balanza que el
+   producto quedo como al principio.
+5. Tocar "Descargar informe".
+6. Repetir 3 veces. Son 3 informes.
+
+Si dice "detenido_antes_de_escribir": no se escribio nada. Igual descargar el
+informe.
+
+Si dice "indeterminado": la balanza no confirmo la escritura. No reintentar.
+Descargar el informe y mirar el producto en la pantalla.
+
+Si dice "fallo_al_restaurar": corregir el producto a mano y descargar el
+informe.
+
+PASO 2 - ALTA (OTRA SESION, SOLO SI EL PASO 1 DIO "aprobado" 3 VECES)
+1. Completar:
+   - PLU: un numero que el negocio no use (por ejemplo 7998).
+   - Nombre de prueba: PRUEBA ALTA.
+   - Precio (crudo): uno cualquiera.
+2. Tocar "Probar alta (con control)". Antes de escribir, la herramienta
+   comprueba en la balanza que ese numero este libre: la balanza tiene que
+   contestar "no existe" (E7). Si no lo confirma, se detiene.
+3. Resultado esperado: "restaurar_a_mano".
+4. Borrar el producto A MANO desde el menu de la balanza. Despues tocar
+   "Verificar restauracion": tiene que dar OK.
+5. Descargar el informe.
+- NO usar "Alta SIN control (experimental)" salvo que lo pida Patagonia
+  despues de revisar el informe.
+
+QUE MANDAR A PATAGONIA
+Los informes .json descargados, mas las fotos de la pantalla del paso 0 y del
+final. Cada informe trae cada orden, la respuesta, los tiempos, el protocolo
+detectado y el resultado de cada paso.

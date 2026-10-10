@@ -332,3 +332,23 @@ La secuencia de recuperación del E3 (1 → 0 → número) es una **HIPÓTESIS**
    - "Alta SIN control" se intenta solo después de ese análisis, como prueba aparte, con su propio informe.
 4. **E3**, en una corrida aparte y solo lectura: intentar reproducirlo (hablarle apenas abierto el puerto, cortar una lista a la mitad, un menú abierto) con el registro del cable. Anotar qué lo provoca y qué lo destraba.
 5. **Con los informes aprobados**, una persona agrega a `SYSTEL_VERIFIED_WRITE_PROFILES` **un perfil por operación aprobada**, con la firma y el formato **exactos** de esa balanza y la referencia a los informes. Otra firma u otro formato siguen bloqueados.
+
+---
+
+# Revisión 6: cierre de etapa (2026-10-10, en pausa hasta tener una Cuora Max de prueba)
+
+## K. Correcciones finales
+
+- **Respuesta que corresponde a la orden.** Se acepta solo si hay UNA trama posible (misma dirección, misma función, control correcto), y el contenido corresponde a lo pedido. En la lectura de un producto, el número de PLU tiene que ser el pedido. Una respuesta anterior válida pegada a la actual es AMBIGUA y no se usa. Hay una prueba con los bytes reales.
+- **Escritura sin ACK.** Queda INDETERMINADA aunque la relectura muestre el valor nuevo. Se relee siempre y nunca se reintenta sola.
+- **Solo productos destinados a pruebas.**
+  - Cambio de precio: el producto tiene que existir y su nombre en la balanza tiene que empezar con `PRUEBA` y ser exactamente el que escribió la persona. Si no, se frena.
+  - Alta: además de no figurar en la lista, la lectura directa de ese número tiene que contestar E7 ("no existe"), y el nombre a crear tiene que empezar con `PRUEBA`.
+  - Ningún número (7999, 7998) se da por libre ni por "de prueba".
+- **Compatibilidad (corrección).** Que otra balanza también use números de PLU de 4 dígitos NO confirma el formato de sus órdenes. Una prueba aprobada valida solo las operaciones y los campos que se ejercitaron, en esa firma y ese formato exactos. Con una firma distinta de S0060, lo de Los gringos sigue bloqueado.
+
+## L. Para retomar
+
+- **Producción:** Netlify `6ac937fb0dec4c31d6693851` = `294d9d9`, con la escritura Systel bloqueada.
+- **Paquete:** `laboratorio-systel-<commit>.zip`, junto al repositorio. Las fuentes del lanzador y las instrucciones están en `tools/laboratorio-systel/`.
+- **Próximo paso:** Cuora Max de prueba → pasos 0 y 1 del `LEEME.txt` (3 informes) → analizar → si salen "aprobado", agregar el perfil "precio" para esa firma y ese formato exactos. El alta se valida aparte.
