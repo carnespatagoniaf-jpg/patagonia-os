@@ -6,10 +6,12 @@ import type { ProductCategory } from "../inventory/product-categories-service";
 import { parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, type ScaleConfig } from "./scale-config-service";
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
 import { resolveScan } from "./scan-resolve";
-import { readSystelTicketFromScale, systelTicketReadConfigured } from "../inventory/systel/systel-ticket-from-scale";
+import { closeSystelTicketSession, readSystelTicketFromScale, systelTicketReadConfigured } from "../inventory/systel/systel-ticket-from-scale";
+import type { TicketCandidate } from "../inventory/systel/systel-ticket-detail";
+import { chargedScaleTickets } from "./sale-service";
 import { submitScaleSupportReport } from "../scales/support-service";
 import type { PosShift } from "./pos-shift-service";
-import type { PaymentRow, TicketLine } from "./sale-model";
+import { lineGross, type PaymentRow, type TicketLine } from "./sale-model";
 import { parseQuantity } from "./quantity";
 
 // Estado y acciones del ticket que se está armando en Mostrador: búsqueda,
@@ -34,8 +36,8 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [showProductTable, setShowProductTable] = useState(false);
   const [cart, setCart] = useState<TicketLine[]>([]);
-  /** Tickets de una Systel leídos de la balanza y cargados en ESTA venta (se marcan cobrados al cobrar). */
-  const systelTicketsRef = useRef<string[]>([]);
+  /** Varios tickets de la balanza con el mismo total: la persona elige cuál (nunca a ciegas). */
+  const [scaleTicketChoices, setScaleTicketChoices] = useState<{ amount: number; candidates: TicketCandidate[] } | null>(null);
   const [readingScaleTicket, setReadingScaleTicket] = useState(false);
   const [itemDiscounts, setItemDiscounts] = useState<Record<string, string>>({});
   const [saleDiscount, setSaleDiscount] = useState("");
@@ -81,7 +83,10 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     setFocusRowIndex(null);
   }, [focusRowIndex]);
 
-  const grossTotal = cart.reduce((sum, line) => sum + line.quantity * line.unitPrice, 0);
+  const grossTotal = cart.reduce((sum, line) => sum + lineGross(line), 0);
+
+  // La conexión con la balanza Systel queda abierta mientras se está en Mostrador; se cierra al salir.
+  useEffect(() => () => void closeSystelTicketSession(), []);
   const itemDiscountTotal = cart.reduce((sum, line) => sum + (parseAmount(itemDiscounts[line.key] || "0") || 0), 0);
   const saleSurchargeRaw = parseAmount(saleSurcharge || "0") || 0;
   const saleSurchargeValue = saleSurchargeMode === "percent" ? Math.round((grossTotal * saleSurchargeRaw) / 100) : saleSurchargeRaw;
@@ -255,7 +260,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
         setMessage(resolved.message);
         return;
       }
-      void loadSystelTicket(resolved.amount);
+      void loadSystelTicket(raw, resolved.amount);
       return;
     }
     if (resolved.type === "ticket_without_amount") {
@@ -327,6 +332,8 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     setCart((current) =>
       current.map((l) => {
         if (l.key !== key) return l;
+        // Cantidad e importe de un ticket leído de la balanza: no se cambian a mano (sacá la línea si no va).
+        if (l.scaleTicket) return l;
         // Los productos por kg se cargan con precisión de gramos (0.001); los
         // que son por unidad o caja no tienen sentido en fracciones.
         const quantity = l.unit === "kg" ? parsed : Math.round(parsed);
@@ -340,46 +347,81 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
    * (función 72, solo lectura) y se carga cada artículo con los gramos o unidades que ella registró.
    * Si no se puede leer o algo no coincide, NO se carga nada (ni el total sin stock).
    */
-  async function loadSystelTicket(amount: number) {
+  async function loadSystelTicket(code: string, amount: number) {
     if (readingScaleTicket) return;
     setReadingScaleTicket(true);
+    setScaleTicketChoices(null);
     setMessage(`Leyendo en la balanza el detalle del ticket de ${formatMoney(amount)}… no desenchufes el cable.`);
-    const usedKeys = [...loadChargedSystelTickets(), ...systelTicketsRef.current];
-    const r = await readSystelTicketFromScale({ amount, products, usedKeys });
+    // Tickets ya cargados en esta venta (por identidad) + cobrados en una venta NO anulada (base, cualquier PC).
+    // Sin conexión con la base vale lo cobrado en esta computadora.
+    const usedKeys = cart.flatMap((l) => (l.scaleTicket ? [l.scaleTicket] : []));
+    const charged = async (keys: string[]) => (await chargedScaleTickets(keys)) ?? new Set(loadChargedSystelTickets().filter((k) => keys.includes(k)));
+    const read = await readSystelTicketFromScale({ code, amount, products, usedKeys, charged });
     setReadingScaleTicket(false);
-    if (r.ok) {
-      systelTicketsRef.current = [...systelTicketsRef.current, r.key];
-      for (const l of r.lines) quickAdd(l.product, l.quantity, "scale");
-      const detail = r.lines.map((l) => `${l.product.name} ${l.product.unit === "kg" ? `${l.quantity.toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg` : `${l.quantity} u.`}`).join(" + ");
-      setMessage(
-        `Ticket N.º ${Number(r.ticket.ticketId)} de la balanza (${r.ticket.time}): ${detail}.` +
-          (r.otherCandidates > 0 ? ` Ojo: hoy hay ${r.otherCandidates + 1} tickets de ${formatMoney(amount)}; se tomó el más reciente.` : "")
-      );
-    } else {
+    const r = read.result;
+    if (!r.ok) {
       setMessage(
         r.stage === "lectura"
           ? `No se cargó nada: no se pudo leer el ticket en la balanza (${r.reason}). Escaneá el TOTAL de nuevo en unos segundos.`
           : `No se cargó nada: ${r.reason}.`
       );
+    } else if (r.candidates.length === 1) {
+      addScaleTicket(r.candidates[0]);
+    } else {
+      // Mismo total (y misma cantidad de artículos): NO se elige a ciegas.
+      setScaleTicketChoices({ amount, candidates: r.candidates });
+      setMessage(`Hoy hay ${r.candidates.length} tickets de ${formatMoney(amount)} sin cobrar en la balanza. Elegí cuál es mirando la hora y el N.º de operación impresos en el ticket.`);
     }
     // Todo lo que fue y vino por el cable le llega a soporte (sin pedirle nada al cliente).
     void submitScaleSupportReport({
-      note: `Systel · Mostrador: detalle del ticket de ${amount} · ${r.ok ? `OK: ${r.lines.length} artículos` : `${r.stage}: ${r.reason}`}`,
-      logText: JSON.stringify(r.ok ? { ticket: r.ticket } : { stage: r.stage, reason: r.reason }),
-      connections: [{ displayName: "Systel (Mostrador)", driverId: "systel-cuora_max", status: "lectura", settings: {}, confirmedCapabilities: [], pairedAt: "", connectedNow: false, diagnosticRecord: { log: r.log.slice(-200), linkEvents: r.events.slice(-600) } } as never],
+      note: `Systel · Mostrador: detalle del ticket ${code} ($${amount}) · ${r.ok ? `OK: ${r.candidates.length} ticket(s) posible(s)` : `${r.stage}: ${r.reason}`}`,
+      logText: JSON.stringify({ context: read.context, result: r.ok ? r.candidates.map((c) => ({ key: c.key, lines: c.ticket.lines, problem: c.problem })) : r }),
+      connections: [{ displayName: "Systel (Mostrador)", driverId: "systel-cuora_max", status: "lectura", settings: {}, confirmedCapabilities: [], pairedAt: "", connectedNow: true, diagnosticRecord: { log: read.log.slice(-200), linkEvents: read.events.slice(-600) } } as never],
       branchId: null
     }).catch(() => {});
   }
 
+  /** Carga los artículos de UN ticket de la balanza: cantidad e importe de la balanza, una línea por artículo. */
+  function addScaleTicket(c: TicketCandidate) {
+    setScaleTicketChoices(null);
+    if (!c.lines) {
+      setMessage(`No se cargó nada: ${c.problem}.`);
+      return;
+    }
+    if (cart.some((l) => l.scaleTicket === c.key)) {
+      setMessage("Ese ticket de la balanza ya está cargado en esta venta.");
+      return;
+    }
+    const lines = c.lines;
+    setCart((current) => [
+      ...current,
+      ...lines.map((l, i) => ({
+        key: `${l.product.id}|${c.key}|${i}`,
+        kind: "product" as const,
+        productId: l.product.id,
+        name: l.product.name,
+        unit: l.product.unit,
+        quantity: l.quantity,
+        unitPrice: l.amount / l.quantity,
+        source: "scale" as const,
+        scaleTickets: 1,
+        scaleAmount: l.amount,
+        scaleTicket: c.key
+      }))
+    ]);
+    const detail = lines.map((l) => `${l.product.name} ${l.product.unit === "kg" ? `${l.quantity.toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg` : `${l.quantity} u.`} ${formatMoney(l.amount)}`).join(" + ");
+    setMessage(`Ticket N.º ${Number(c.ticket.ticketId)} de la balanza (${c.ticket.firstTime}): ${detail}.`);
+    searchInputRef.current?.focus();
+  }
+
   /** Después de cobrar (o encolar) la venta: esos tickets de la balanza ya no se pueden volver a cargar. */
   function commitScaleTickets() {
-    if (!systelTicketsRef.current.length) return;
-    saveChargedSystelTickets([...loadChargedSystelTickets(), ...systelTicketsRef.current]);
-    systelTicketsRef.current = [];
+    const keys = cart.flatMap((l) => (l.scaleTicket ? [l.scaleTicket] : []));
+    if (keys.length) saveChargedSystelTickets([...loadChargedSystelTickets(), ...new Set(keys)]);
   }
 
   function clearTicket() {
-    systelTicketsRef.current = [];
+    setScaleTicketChoices(null);
     setCart([]);
     setItemDiscounts({});
     setSaleDiscount("");
@@ -466,7 +508,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSplit, busy, cart.length, shift, accounts, confirmCharge]);
 
-  return { search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, commitScaleTickets, readingScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
+  return { search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, commitScaleTickets, readingScaleTicket, scaleTicketChoices, setScaleTicketChoices, addScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
 }
 
 export type SaleTicket = ReturnType<typeof useSaleTicket>;

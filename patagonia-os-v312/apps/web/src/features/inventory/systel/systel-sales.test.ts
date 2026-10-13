@@ -2,136 +2,175 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import type { Product } from "@patagonia/domain";
 import { SystelClient } from "./systel-client";
-import { FakeCuora, fakeSaleLine } from "./systel-fake";
-import { findTicketForTotal, groupTickets, parseSalesReport, salesReportRequest, ticketToCart } from "./systel-sales";
+import { FakeCuora, fakeReadRecord, fakeSaleLine } from "./systel-fake";
+import { decodeSumCode, findTicketsForTotal, groupTickets, linkTicketLines, parseSalesReport, salesReportRequest, ticketKey, type ScalePluInfo } from "./systel-sales";
 import { readTicketDetail } from "./systel-ticket-detail";
 
-const product = (code: string, name: string, unit: "kg" | "unit", priceRetail: number) =>
+const product = (code: string, name: string, unit: "kg" | "unit" | "box", priceRetail: number) =>
   ({ id: `id-${code}`, code, name, unit, priceRetail, cost: 0, stock: 0, minStock: 0, active: true }) as unknown as Product;
 
-// Los 4 productos con precio de Los gringos en Patagonia (13/10).
-const GRINGOS = [product("10", "PECHUGAC/H x1x5", "kg", 6480), product("5", "TROZADITOx1x2", "kg", 5200), product("2", "GRINGO CAJON DE POLLO", "unit", 72000), product("13", "PECHUGA S/H x1x3", "kg", 9000)];
+// Productos de Los gringos en Patagonia (13/10): el cajón y el trozadito con su precio; el 17 SIN precio
+// (como 99 de sus 103 productos).
+const GRINGOS = [product("2", "GRINGO CAJON DE POLLO", "unit", 72000), product("5", "TROZADITOx1x2", "kg", 5200), product("17", "ALITAS", "kg", 0)];
 
-// [SIMULADO con los datos del ticket REAL] Los gringos 13/10/2026 12:55:34, operación 20-3095:
-// (2) GRINGO CAJON DE 1un × 72000 = 72000 · (5) TROZADITOx1x2 0.215kg × 5200 = 1118 · TOTAL $73118.
-// Los artículos y los importes son los del ticket; el número de ticket (3095), el vendedor (1) y el
-// sector (1) en el reporte son SUPUESTOS: el formato real de la respuesta 72 nunca se leyó.
-const REAL_TICKET = [
+// Configuración REAL de la balanza de Los gringos (función 39, 09/10), con el formato de sumas que se
+// ve en la pantalla de la balanza el 13/10 ("22AAIIIIIIII").
+const REAL_CONFIG_AA = "Ton=2;Gris=0;Pap=0;APa=0;Vel=5;CPr=0;CAdm=01234;CCon=01234;Sinc=0;E_P=20PPPPCCCCCC;E_U=21PPPPCCCCCC;E_S=22AAIIIIIIII;CImp=2;Pub=LOS GRINGOS                    ;Enc1=NOMBRE DEL NEGOCIO;Enc2=Direccion - Telefono            ;PeP=3;SEt=S;ETi=S";
+const REAL_CONFIG_BB = REAL_CONFIG_AA.replace("E_S=22AAIIIIIIII", "E_S=22BBIIIIIIII");
+
+// [SIMULADO con los datos del ticket REAL] 13/10/2026 12:55:34, op. 20-3095: (2) GRINGO CAJON 1un $72.000
+// + (5) TROZADITO 0,215 kg $1.118 = $73.118. El N.º de ticket (3095), vendedor (01) y sector en el
+// reporte, y el número = código de cada PLU en la balanza, son SUPUESTOS: nunca se leyó una 72 ni una 62 reales.
+const t3095 = [
   fakeSaleLine({ ticket: 3095, date: "13/10/26", time: "12:55:34", plu: 2, units: 1, amount: 72000 }),
   fakeSaleLine({ ticket: 3095, date: "13/10/26", time: "12:55:34", plu: 5, grams: 215, amount: 1118 })
 ];
-const DAY = new Date(2026, 9, 13, 12, 56);
+// Otro ticket DISTINTO con el mismo total y la misma cantidad de artículos.
+const t3101 = [
+  fakeSaleLine({ ticket: 3101, date: "13/10/26", time: "13:20:10", plu: 2, units: 1, amount: 72000 }),
+  fakeSaleLine({ ticket: 3101, date: "13/10/26", time: "13:20:11", plu: 5, grams: 215, amount: 1118 })
+];
+const DAY = new Date(2026, 9, 13, 13, 30);
+const TOTAL_CODE = "2202000731184"; // REAL
 
-function scale() {
+function scale(sales = t3095, config = REAL_CONFIG_AA) {
   const fake = new FakeCuora("max60", { address: 20 });
-  fake.sales = [
-    fakeSaleLine({ ticket: 3094, date: "13/10/26", time: "12:50:02", plu: 5, grams: 235, amount: 1222 }),
-    ...REAL_TICKET,
-    fakeSaleLine({ ticket: 3080, date: "12/10/26", time: "18:00:00", plu: 2, units: 1, amount: 72000 })
-  ];
+  fake.config = config;
+  fake.plus.set(2, fakeReadRecord("max60", { number: 2, name: "GRINGO CAJON DE", price: 72000, code: 2, type: "U" }));
+  fake.plus.set(5, fakeReadRecord("max60", { number: 5, name: "TROZADITOx1x2", price: 5200, code: 5, type: "P" }));
+  fake.plus.set(17, fakeReadRecord("max60", { number: 17, name: "ALITAS", price: 4500, code: 17, type: "P" }));
+  fake.sales = sales;
   return fake;
 }
+const read = (fake: FakeCuora, extra: Partial<Parameters<typeof readTicketDetail>[1]> = {}) =>
+  readTicketDetail(new SystelClient(fake, { address: 20, busyRetryMs: [1, 1, 1] }), { code: TOTAL_CODE, amount: 73118, products: GRINGOS, usedKeys: [], now: DAY, ...extra });
 
-describe("reporte de ventas de la Systel (función 72, solo lectura)", () => {
-  it("pedido: día, mes y año de inicio y de fin, 2 números cada uno", () => {
+describe("reporte de ventas de la Systel (función 72, solo lectura): formato", () => {
+  it("pedido: día, mes y año de inicio y de fin", () => {
     assert.equal(salesReportRequest(DAY), "131026131026");
   });
-
-  it("interpreta los artículos con los anchos del documento, con o sin \"^\" entre artículos", () => {
-    for (const sep of ["^", ""]) {
-      const r = parseSalesReport(REAL_TICKET.map((l) => l.text).join(sep) + "F");
-      assert.equal(r.ok, true, sep);
-      assert.deepEqual(r.lines.map((l) => [l.ticketId, l.plu, l.units, l.grams, l.amount]), [["000003095", 2, 1, 0, 72000], ["000003095", 5, 0, 215, 1118]]);
-    }
-  });
-
-  it("si no termina en F, o algo no coincide con el formato: no se usa nada", () => {
-    assert.equal(parseSalesReport(REAL_TICKET[0].text).ok, false);
-    assert.equal(parseSalesReport(REAL_TICKET[0].text.replace("^000002^", "^2^") + "F").ok, false);
-    const cut = parseSalesReport(REAL_TICKET[0].text + "^" + REAL_TICKET[1].text.slice(0, 30) + "F");
-    assert.equal(cut.ok, false);
-    assert.match(cut.problem!, /no coincide/);
-  });
-
-  it("[ticket REAL de 2 artículos] $73.118 → CAJON 1 u. ($72.000) + TROZADITO 0,215 kg ($1.118)", () => {
-    const tickets = groupTickets(parseSalesReport(REAL_TICKET.map((l) => l.text).join("^") + "F").lines);
-    const m = findTicketForTotal(tickets, 73118);
-    assert.ok(m.ok);
-    const cart = ticketToCart(m.ticket, GRINGOS);
-    assert.ok(cart.ok);
-    assert.deepEqual(cart.lines.map((l) => [l.product.code, l.product.name, l.quantity, l.amount]), [["2", "GRINGO CAJON DE POLLO", 1, 72000], ["5", "TROZADITOx1x2", 0.215, 1118]]);
-  });
-
-  it("el precio de Patagonia distinto al de la balanza: no carga nada y dice cuál", () => {
-    const tickets = groupTickets(parseSalesReport(REAL_TICKET.map((l) => l.text).join("^") + "F").lines);
-    const m = findTicketForTotal(tickets, 73118);
-    assert.ok(m.ok);
-    const r = ticketToCart(m.ticket, GRINGOS.map((p) => (p.code === "5" ? { ...p, priceRetail: 5300 } : p)));
-    assert.equal(r.ok, false);
-    assert.match((r as { reason: string }).reason, /TROZADITO.*\$1\.118.*\$5\.300/);
-  });
-
-  it("artículo que no existe en Patagonia, o kg/unidad cruzados: no carga nada", () => {
-    const tickets = groupTickets(parseSalesReport(REAL_TICKET.map((l) => l.text).join("^") + "F").lines);
-    const m = findTicketForTotal(tickets, 73118);
-    assert.ok(m.ok);
-    assert.equal(ticketToCart(m.ticket, GRINGOS.filter((p) => p.code !== "2")).ok, false);
-    assert.equal(ticketToCart(m.ticket, GRINGOS.map((p) => (p.code === "2" ? { ...p, unit: "kg" as const } : p))).ok, false);
-  });
-
-  it("ticket ya cobrado, ningún ticket con ese importe, y dos iguales (toma el más reciente y avisa)", () => {
-    const lines = parseSalesReport([...REAL_TICKET, fakeSaleLine({ ticket: 3099, date: "13/10/26", time: "13:10:00", plu: 2, units: 1, amount: 72000 }), fakeSaleLine({ ticket: 3099, date: "13/10/26", time: "13:10:00", plu: 5, grams: 215, amount: 1118 })].map((l) => l.text).join("^") + "F").lines;
-    const tickets = groupTickets(lines);
-    const m = findTicketForTotal(tickets, 73118);
-    assert.ok(m.ok);
-    assert.equal(m.ticket.ticketId, "000003099");
-    assert.equal(m.otherCandidates, 1);
-    const used = findTicketForTotal(tickets, 73118, { usedKeys: ["systel-ticket-13/10/26-000003099", "systel-ticket-13/10/26-000003095"] });
-    assert.equal(used.ok, false);
-    assert.equal(findTicketForTotal(tickets, 5000).ok, false);
+  it("con o sin \"^\" entre artículos; lo que no coincide con el documento se rechaza entero", () => {
+    for (const sep of ["^", ""]) assert.equal(parseSalesReport(t3095.map((l) => l.text).join(sep) + "F").lines.length, 2);
+    assert.equal(parseSalesReport(t3095[0].text).ok, false);
+    assert.equal(parseSalesReport(t3095[0].text.replace("^000002^", "^2^") + "F").ok, false);
   });
 });
 
-describe("[SIMULADO] del TOTAL escaneado al detalle, contra una Cuora simulada según el documento", () => {
-  it("lee el ticket de HOY y carga cada artículo con su cantidad; solo manda 23 (ping) y 72 (lectura)", async () => {
-    const fake = scale();
-    const client = new SystelClient(fake, { address: 20, busyRetryMs: [] });
-    const r = await readTicketDetail(client, { amount: 73118, products: GRINGOS, usedKeys: [], now: DAY });
-    assert.ok(r.ok, JSON.stringify(r));
-    assert.deepEqual(r.lines.map((l) => [l.product.code, l.quantity]), [["2", 1], ["5", 0.215]]);
-    assert.equal(r.key, "systel-ticket-13/10/26-000003095");
-    assert.deepEqual([...new Set(fake.received.map((x) => x.fn))].sort((a, b) => a - b), [23, 72]);
-    assert.deepEqual(fake.received.filter((x) => x.fn === 72).map((x) => x.data), ["131026131026"]);
+describe("el código del TOTAL según el formato de sumas de la balanza (configuración real)", () => {
+  it("[REAL] 2202000731184 con 22AAIIIIIIII = 2 artículos, $73.118", () => {
+    assert.deepEqual(decodeSumCode(TOTAL_CODE, "22AAIIIIIIII"), { ok: true, amount: 73118, articles: 2, scale: null });
   });
-
-  it("la balanza contesta E3 (ocupada) dos veces: reintenta y lo lee", async () => {
-    const fake = scale();
-    fake.busyReplies = 3; // las 2 órdenes del arranque + la primera 72
-    const client = new SystelClient(fake, { address: 20, busyRetryMs: [1, 1, 1] });
-    const r = await readTicketDetail(client, { amount: 73118, products: GRINGOS, usedKeys: [], now: DAY });
-    assert.ok(r.ok, JSON.stringify(r));
+  it("[REAL] 2220000012225 con 22BBIIIIIIII (09/10) = balanza 20, $1.222", () => {
+    assert.deepEqual(decodeSumCode("2220000012225", "22BBIIIIIIII"), { ok: true, amount: 1222, articles: null, scale: 20 });
   });
+});
 
-  it("la balanza sigue con E3: no carga nada y dice que no pudo leer", async () => {
-    const fake = scale();
-    fake.busyReplies = 1000;
-    const client = new SystelClient(fake, { address: 20, busyRetryMs: [1, 1] });
-    const r = await readTicketDetail(client, { amount: 73118, products: GRINGOS, usedKeys: [], now: DAY });
-    assert.equal(r.ok, false);
-    assert.equal((r as { stage: string }).stage, "lectura");
-    assert.match((r as { reason: string }).reason, /E3/);
+describe("1 y 2: identidad del ticket, no su importe", () => {
+  const tickets = groupTickets(parseSalesReport([...t3095, ...t3101].map((l) => l.text).join("^") + "F").lines);
+  it("dos tickets distintos con el mismo total y la misma cantidad de artículos: devuelve LOS DOS (no elige)", () => {
+    const m = findTicketsForTotal(tickets, 73118, { scale: 20, articles: 2 });
+    assert.ok(m.ok);
+    assert.deepEqual(m.candidates.map((t) => Number(t.ticketId)), [3101, 3095]);
+    assert.notEqual(ticketKey(20, m.candidates[0]), ticketKey(20, m.candidates[1]));
   });
-
-  it("sin \"^\" entre artículos (la otra lectura posible del documento) también funciona", async () => {
-    const fake = scale();
-    fake.salesSeparator = "";
-    const r = await readTicketDetail(new SystelClient(fake, { address: 20, busyRetryMs: [] }), { amount: 73118, products: GRINGOS, usedKeys: [], now: DAY });
-    assert.ok(r.ok, JSON.stringify(r));
+  it("cobrado uno (por identidad), el otro con el mismo total se puede cobrar", () => {
+    const k3095 = ticketKey(20, tickets.find((t) => Number(t.ticketId) === 3095)!);
+    const m = findTicketsForTotal(tickets, 73118, { scale: 20, articles: 2, usedKeys: [k3095] });
+    assert.ok(m.ok);
+    assert.deepEqual(m.candidates.map((t) => Number(t.ticketId)), [3101]);
   });
+  it("la identidad es balanza + fecha + N.º + vendedor + hora", () => {
+    assert.equal(ticketKey(20, tickets.find((t) => Number(t.ticketId) === 3095)!), "systel:20:13/10/26:3095:01:12:55:34");
+  });
+});
 
-  it("$1.222 del mismo día (1 artículo real: TROZADITO 0,235 kg)", async () => {
-    const r = await readTicketDetail(new SystelClient(scale(), { address: 20, busyRetryMs: [] }), { amount: 1222, products: GRINGOS, usedKeys: [], now: DAY });
+describe("3 y 4: vínculo por código y unidad de venta; importe de la balanza", () => {
+  const plus = new Map<number, ScalePluInfo>([
+    [2, { number: 2, code: 2, name: "GRINGO CAJON DE", saleType: "U" }],
+    [5, { number: 5, code: 5, name: "TROZADITOx1x2", saleType: "P" }]
+  ]);
+  const [ticket] = groupTickets(parseSalesReport(t3095.map((l) => l.text).join("^") + "F").lines);
+
+  it("[ticket REAL] CAJON 1 u. $72.000 + TROZADITO 0,215 kg $1.118, con el importe de la balanza", () => {
+    const r = linkTicketLines(ticket, plus, GRINGOS);
     assert.ok(r.ok);
-    assert.deepEqual(r.lines.map((l) => [l.product.code, l.quantity]), [["5", 0.235]]);
+    assert.deepEqual(r.lines.map((l) => [l.product.code, l.quantity, l.amount]), [["2", 1, 72000], ["5", 0.215, 1118]]);
+  });
+  it("el precio de Patagonia NO interviene (distinto o en 0): mismo resultado", () => {
+    const r = linkTicketLines(ticket, plus, GRINGOS.map((p) => ({ ...p, priceRetail: p.code === "5" ? 0 : 99999 })));
+    assert.ok(r.ok);
+    assert.deepEqual(r.lines.map((l) => l.amount), [72000, 1118]);
+  });
+  it("se vincula por el CÓDIGO que tiene el PLU en la balanza, no por su número", () => {
+    const moved = new Map(plus);
+    moved.set(5, { number: 5, code: 17, name: "ALITAS", saleType: "P" });
+    const r = linkTicketLines(ticket, moved, GRINGOS);
+    assert.ok(r.ok);
+    assert.equal(r.lines[1].product.name, "ALITAS");
+  });
+  it("código sin producto en Patagonia: no carga nada", () => {
+    const r = linkTicketLines(ticket, plus, GRINGOS.filter((p) => p.code !== "2"));
+    assert.equal(r.ok, false);
+    assert.match((r as { reason: string }).reason, /código 2/);
+  });
+  it("unidad de venta distinta (balanza por peso, Patagonia por unidad): no carga nada", () => {
+    const r = linkTicketLines(ticket, plus, GRINGOS.map((p) => (p.code === "5" ? { ...p, unit: "unit" as const } : p)));
+    assert.equal(r.ok, false);
+    assert.match((r as { reason: string }).reason, /por peso.*por unidad/);
+  });
+  it("el reporte trae gramos para un producto unitario: no carga nada", () => {
+    const wrong = new Map(plus);
+    wrong.set(2, { number: 2, code: 2, name: "GRINGO CAJON DE", saleType: "P" });
+    assert.equal(linkTicketLines(ticket, wrong, GRINGOS).ok, false);
+  });
+  it("producto que no se pudo leer de la balanza: no carga nada", () => {
+    assert.equal(linkTicketLines(ticket, new Map([[2, plus.get(2)!]]), GRINGOS).ok, false);
+  });
+});
+
+describe("[SIMULADO] todo el camino contra una Cuora simulada según el documento", () => {
+  it("un ticket: lo carga; solo manda lecturas (23, 39, 72, 62)", async () => {
+    const fake = scale();
+    const r = await read(fake);
+    assert.ok(r.ok, JSON.stringify(r));
+    assert.equal(r.candidates.length, 1);
+    assert.deepEqual(r.candidates[0].lines!.map((l) => [l.product.code, l.quantity, l.amount]), [["2", 1, 72000], ["5", 0.215, 1118]]);
+    assert.deepEqual([...new Set(fake.received.map((x) => x.fn))].sort((a, b) => a - b), [39, 62, 72]);
+  });
+  it("dos tickets iguales: devuelve los dos, cada uno con su detalle, para que elija la persona", async () => {
+    const r = await read(scale([...t3095, ...t3101]));
+    assert.ok(r.ok);
+    assert.deepEqual(r.candidates.map((c) => [Number(c.ticket.ticketId), c.ticket.firstTime]), [[3101, "13:20:10"], [3095, "12:55:34"]]);
+  });
+  it("ya cobrado en la base (por identidad): queda el otro", async () => {
+    const r = await read(scale([...t3095, ...t3101]), { charged: async (keys) => new Set(keys.filter((k) => k.includes(":3101:"))) });
+    assert.ok(r.ok);
+    assert.deepEqual(r.candidates.map((c) => Number(c.ticket.ticketId)), [3095]);
+  });
+  it("producto sin precio en Patagonia vendido en la balanza: se carga con el importe de la balanza", async () => {
+    const r = await readTicketDetail(new SystelClient(scale([fakeSaleLine({ ticket: 3200, date: "13/10/26", time: "13:00:00", plu: 17, grams: 1250, amount: 5625 })], REAL_CONFIG_AA), { address: 20, busyRetryMs: [] }), {
+      code: "2201000056259",
+      amount: 5625,
+      products: GRINGOS,
+      usedKeys: [],
+      now: DAY
+    });
+    assert.ok(r.ok, JSON.stringify(r));
+    assert.deepEqual(r.candidates[0].lines!.map((l) => [l.product.name, l.quantity, l.amount]), [["ALITAS", 1.25, 5625]]);
+  });
+  it("código con N.º de balanza de OTRA balanza (formato 22BB…): no carga nada", async () => {
+    const r = await readTicketDetail(new SystelClient(scale(t3095, REAL_CONFIG_BB), { address: 20, busyRetryMs: [] }), { code: "2221000731185", amount: 73118, products: GRINGOS, usedKeys: [], now: DAY });
+    assert.equal(r.ok, false);
+    assert.match((r as { reason: string }).reason, /balanza N\.º 21/);
+  });
+  it("E3 al principio: reintenta; E3 que no se va: no carga nada", async () => {
+    const f1 = scale();
+    f1.busyReplies = 2;
+    assert.ok((await read(f1)).ok);
+    const f2 = scale();
+    f2.busyReplies = 1000;
+    const r = await read(f2);
+    assert.equal(r.ok, false);
+    assert.match((r as { reason: string }).reason, /E3/);
   });
 });

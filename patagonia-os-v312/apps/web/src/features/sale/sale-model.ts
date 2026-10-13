@@ -18,6 +18,15 @@ export interface TicketLine {
   source?: "scale" | "scale_total";
   /** Cuántos tickets de balanza escaneados representa (dos etiquetas del mismo producto van juntas). */
   scaleTickets?: number;
+  /** Importe que cobró la balanza por este artículo (ticket leído de una Systel, migración 118). */
+  scaleAmount?: number;
+  /** Identidad del ticket de la balanza del que salió este artículo. */
+  scaleTicket?: string;
+}
+
+/** Importe de una línea antes de descuentos: el de la balanza si vino de un ticket leído de ella. */
+export function lineGross(l: Pick<TicketLine, "quantity" | "unitPrice" | "scaleAmount">): number {
+  return l.scaleAmount ?? l.quantity * l.unitPrice;
 }
 
 export interface PaymentRow {

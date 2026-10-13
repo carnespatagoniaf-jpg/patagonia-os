@@ -9,6 +9,7 @@ import { planSystelSync, runSystelSync, type SystelPlanItem, type SystelSyncResu
 import { runSystelWriteTest, type SystelWriteTestResult } from "./systel-write-test";
 import { discoverSystelLink, loadSavedSystelLink, saveSystelLink } from "./systel-discovery";
 import { enableTicketBarcodes, type TicketBarcodeResult } from "./systel-ticket-barcode";
+import { readTodaySalesDiagnostic } from "./systel-ticket-detail";
 import type { SystelExchangeLog } from "./systel-client";
 import type { SystelLinkEvent } from "./systel-serial";
 import { submitScaleSupportReport } from "../../scales/support-service";
@@ -80,6 +81,7 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
   const [test, setTest] = useState<SystelWriteTestResult | null>(null);
   const [sync, setSync] = useState<SystelSyncResult | null>(null);
   const [ticketResult, setTicketResult] = useState<TicketBarcodeResult | null>(null);
+  const [salesDiag, setSalesDiag] = useState<string | null>(null);
   const linkRef = useRef<SerialSystelLink | null>(null);
   const model = SYSTEL_MODELS.find((m) => m.id === modelId)!;
   const { profile } = useAuth();
@@ -287,6 +289,35 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
     }
   }
 
+  /** Diagnóstico de solo lectura: el reporte de ventas de hoy y los productos vendidos, directo a soporte. */
+  async function handleSalesDiagnostic() {
+    if (runningRef.current) return;
+    runningRef.current = true;
+    setBusy(true);
+    setError("");
+    setReportNote("");
+    setSalesDiag(null);
+    logRef.current = [];
+    linkEventsRef.current = [];
+    try {
+      const runAddress = await connectScale("leer ventas de hoy");
+      if (runAddress === null || !linkRef.current) return;
+      setProgress("Leyendo las ventas de hoy en la balanza (solo lectura)…");
+      const client = new SystelClient(linkRef.current, { address: runAddress, log: logRef.current });
+      const r = await readTodaySalesDiagnostic(client);
+      setSalesDiag(r.summary);
+      void autoReport("leer ventas de hoy (solo lectura)", r.summary, { error: r.ok ? undefined : r.summary });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      void autoReport("error", message, { error: message });
+    } finally {
+      runningRef.current = false;
+      setBusy(false);
+      setProgress("");
+    }
+  }
+
   async function handleOneClick() {
     if (runningRef.current) return;
     runningRef.current = true;
@@ -338,8 +369,10 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
             </div>
             <div>
               <button className="secondary" disabled={busy} onClick={() => void handleTicketBarcodes()}>Activar código por producto en la balanza</button>
+              <button className="secondary" disabled={busy} onClick={() => void handleSalesDiagnostic()}>Leer las ventas de hoy (solo lectura)</button>
               <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>Para que el ticket traiga el código de barras de cada producto y el Mostrador cargue el producto con sus kilos y descuente el stock. Cambia solo esa opción de la balanza y lo comprueba.</p>
             </div>
+            {salesDiag && <p className="message" style={{ margin: 0 }}>{salesDiag}</p>}
             {ticketResult && (
               <p className={ticketResult.ok ? "message" : "message warning"} style={{ margin: 0 }}>
                 {ticketResult.ok ? `✅ ${ticketResult.detail[0].toUpperCase()}${ticketResult.detail.slice(1)}.` : `No quedó activado: ${ticketResult.detail}. Ya nos llegó el aviso.`}

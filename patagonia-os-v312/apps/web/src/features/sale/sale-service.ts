@@ -8,6 +8,9 @@ export interface CreatePosSaleItemInput {
   discountAmount: number;
   source?: "scale" | "scale_total";
   scaleTickets?: number;
+  /** Importe de la balanza (ticket leído de una Systel): el servidor lo usa en vez del precio del catálogo. */
+  scaleAmount?: number;
+  scaleTicket?: string;
 }
 
 export interface CreatePosSalePaymentInput {
@@ -46,7 +49,8 @@ export async function createPosSale(input: CreatePosSaleInput): Promise<CreatePo
       ...(item.productId
         ? { product_id: item.productId, quantity: item.quantity, discount_amount: item.discountAmount }
         : { description: item.description, unit_price: item.unitPrice, quantity: item.quantity, discount_amount: item.discountAmount }),
-      ...(item.source ? { source: item.source, scale_tickets: item.scaleTickets ?? 1 } : {})
+      ...(item.source ? { source: item.source, scale_tickets: item.scaleTickets ?? 1 } : {}),
+      ...(item.scaleAmount !== undefined && item.scaleTicket ? { scale_amount: item.scaleAmount, scale_ticket: item.scaleTicket } : {})
     })),
     p_payments: input.payments.map((p) => ({ account_id: p.accountId, amount: p.amount, reference: p.reference ?? null })),
     p_pos_shift_id: input.posShiftId,
@@ -56,4 +60,16 @@ export async function createPosSale(input: CreatePosSaleInput): Promise<CreatePo
   });
   if (error) throw error;
   return { saleId: data.sale_id, total: Number(data.total) };
+}
+
+/**
+ * Cuáles de estos tickets de la balanza ya están en una venta NO anulada (cualquier computadora).
+ * Devuelve null si no se pudo consultar (sin conexión): entonces vale el control local de esa computadora.
+ */
+export async function chargedScaleTickets(keys: string[]): Promise<Set<string> | null> {
+  if (!supabase) return null;
+  if (keys.length === 0) return new Set();
+  const { data, error } = await supabase.from("pos_sale_items").select("scale_ticket, pos_sales!inner(voided_at)").in("scale_ticket", keys).is("pos_sales.voided_at", null);
+  if (error) return null;
+  return new Set((data ?? []).map((r: { scale_ticket: string | null }) => r.scale_ticket).filter((k): k is string => !!k));
 }

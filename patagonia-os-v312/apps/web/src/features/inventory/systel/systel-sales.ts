@@ -85,90 +85,126 @@ export function parseSalesReport(data: string): SystelSalesReport {
 export interface SystelTicket {
   ticketId: string;
   date: string;
+  /** Hora del primer artículo (con la fecha y el N.º, identifica el ticket). */
+  firstTime: string;
   time: string;
+  seller: string;
   lines: SystelSaleLine[];
   total: number;
 }
 
+/** Artículos de un mismo ticket: misma fecha, mismo N.º de ticket y mismo vendedor. */
 export function groupTickets(lines: SystelSaleLine[]): SystelTicket[] {
   const map = new Map<string, SystelTicket>();
   for (const l of lines) {
-    const key = `${l.date}|${l.ticketId}`;
-    const t = map.get(key) ?? { ticketId: l.ticketId, date: l.date, time: l.time, lines: [], total: 0 };
+    const key = `${l.date}|${l.ticketId}|${l.seller}`;
+    const t = map.get(key) ?? { ticketId: l.ticketId, date: l.date, firstTime: l.time, time: l.time, seller: l.seller, lines: [], total: 0 };
     t.lines.push(l);
     t.total = Math.round((t.total + l.amount) * 100) / 100;
     if (l.time > t.time) t.time = l.time;
+    if (l.time < t.firstTime) t.firstTime = l.time;
     map.set(key, t);
   }
   return [...map.values()];
 }
 
-const stamp = (t: SystelTicket) => {
-  const [d, m, y] = t.date.split("/");
-  return `${y}${m}${d}${t.time.replace(/:/g, "")}`;
-};
+/**
+ * Identidad del ticket (NO su importe ni el código del TOTAL: dos ventas legítimas pueden dar lo mismo):
+ * N.º de balanza + fecha + N.º de ticket + vendedor + hora del primer artículo. La hora queda por si
+ * la balanza reinicia la numeración el mismo día (cierre de ventas).
+ */
+export const ticketKey = (scale: number, t: SystelTicket) => `systel:${scale}:${t.date}:${Number(t.ticketId)}:${t.seller}:${t.firstTime}`;
+
+/**
+ * Lo que dice el código del TOTAL según el formato de "sumas" que tiene ESA balanza (configuración 39,
+ * campo E_S; real Los gringos 09/10 "22BBIIIIIIII", 13/10 en pantalla "22AAIIIIIIII"):
+ * I = importe, A = cantidad de artículos, B = N.º de balanza, números = fijos.
+ */
+export function decodeSumCode(code: string, template: string | null): { ok: true; amount: number | null; articles: number | null; scale: number | null } | { ok: false; reason: string } {
+  if (!template || !/^[0-9IAB]{12}$/.test(template)) return { ok: true, amount: null, articles: null, scale: null };
+  if (!/^\d{13}$/.test(code)) return { ok: false, reason: "el código del TOTAL no tiene 13 números" };
+  let i = "";
+  let a = "";
+  let b = "";
+  for (let k = 0; k < 12; k++) {
+    const t = template[k];
+    const d = code[k];
+    if (t === "I") i += d;
+    else if (t === "A") a += d;
+    else if (t === "B") b += d;
+    else if (t !== d) return { ok: false, reason: `el código del TOTAL no coincide con el formato de sumas de la balanza (${template})` };
+  }
+  return { ok: true, amount: i ? Number(i) : null, articles: a ? Number(a) : null, scale: b ? Number(b) : null };
+}
 
 export type TicketMatch =
-  | { ok: true; ticket: SystelTicket; otherCandidates: number }
+  | { ok: true; candidates: SystelTicket[] }
   | { ok: false; reason: string };
 
 /**
- * El ticket cuyo total es EXACTAMENTE el importe del código escaneado (y, si se sabe, con esa cantidad
- * de artículos), que no se haya cobrado ya en Patagonia. Si hay varios, el más reciente, y se avisa.
+ * Tickets que pueden ser el del código escaneado: total EXACTO y, si el código lo dice, la misma
+ * cantidad de artículos; sin los que ya se cobraron (por identidad). Puede devolver más de uno:
+ * entonces NO se elige a ciegas (lo elige la persona con la hora y el N.º de operación impresos).
  */
-export function findTicketForTotal(tickets: SystelTicket[], amount: number, opts: { articles?: number | null; usedKeys?: string[] } = {}): TicketMatch {
+export function findTicketsForTotal(tickets: SystelTicket[], amount: number, opts: { scale: number; articles?: number | null; usedKeys?: Iterable<string> }): TicketMatch {
   const used = new Set(opts.usedKeys ?? []);
+  const money = (n: number) => `$${n.toLocaleString("es-AR")}`;
   const same = tickets.filter((t) => Math.round(t.total * 100) === Math.round(amount * 100));
-  if (same.length === 0) return { ok: false, reason: `la balanza no tiene hoy ningún ticket de $${amount.toLocaleString("es-AR")}` };
+  if (same.length === 0) return { ok: false, reason: `la balanza no tiene hoy ningún ticket de ${money(amount)}` };
   const withCount = opts.articles ? same.filter((t) => t.lines.length === opts.articles) : same;
-  if (withCount.length === 0) return { ok: false, reason: `la balanza tiene tickets de $${amount.toLocaleString("es-AR")}, pero ninguno con ${opts.articles} artículos` };
-  const free = withCount.filter((t) => !used.has(ticketKey(t)));
-  if (free.length === 0) return { ok: false, reason: `el ticket de $${amount.toLocaleString("es-AR")} ya está cargado en esta venta o ya se cobró en Patagonia` };
-  const sorted = [...free].sort((a, b) => stamp(b).localeCompare(stamp(a)));
-  return { ok: true, ticket: sorted[0], otherCandidates: sorted.length - 1 };
+  if (withCount.length === 0) return { ok: false, reason: `la balanza tiene tickets de ${money(amount)}, pero ninguno con ${opts.articles} artículos` };
+  const free = withCount.filter((t) => !used.has(ticketKey(opts.scale, t)));
+  if (free.length === 0) return { ok: false, reason: withCount.length === 1 ? `ese ticket de ${money(amount)} ya está cargado en esta venta o ya se cobró` : `los ${withCount.length} tickets de ${money(amount)} de hoy ya se cobraron` };
+  return { ok: true, candidates: [...free].sort((x, y) => `${y.date}${y.time}`.localeCompare(`${x.date}${x.time}`)) };
 }
 
-export const ticketKey = (t: SystelTicket) => `systel-ticket-${t.date}-${t.ticketId}`;
+/** Lo que dice la balanza de un PLU (función 62): su CÓDIGO y su tipo de venta. */
+export interface ScalePluInfo {
+  number: number;
+  code: number;
+  name: string;
+  saleType: "P" | "U" | "E" | "C";
+}
 
 export interface TicketCartLine {
   product: Product;
   quantity: number;
+  /** Importe que cobró la balanza por este artículo. */
   amount: number;
   plu: number;
+  scaleName: string;
 }
 
 export type TicketToCart = { ok: true; lines: TicketCartLine[] } | { ok: false; reason: string };
 
 /**
- * Cada artículo del ticket → producto de Patagonia con la cantidad que registró la balanza.
- * El N.º de PLU de la balanza se busca como código de producto (en Los gringos son iguales: el ticket
- * imprime "(C.PLU) 2" y en Patagonia el cajón es el código 2). Como el reporte da el N.º y no el código,
- * se comprueba cada artículo: cantidad × precio de Patagonia tiene que dar el importe que cobró la
- * balanza (±$1 por redondeo). Si no da, NO se carga nada: el producto o el precio no coinciden.
+ * Cada artículo → producto de Patagonia, con la cantidad y el importe de la BALANZA:
+ * - vínculo por CÓDIGO: el reporte da el N.º de PLU; su código se lee de la balanza (62) y se busca
+ *   el producto de Patagonia con ese código;
+ * - unidad de venta: pesable/congelado en la balanza ↔ por kg en Patagonia; unitario ↔ por unidad o caja;
+ *   y el artículo del reporte tiene que traer gramos (pesable) o unidades (unitario), no lo otro;
+ * - el importe es el de la balanza (no depende del precio de Patagonia, que no se toca).
+ * Si un artículo no cumple todo, no se carga NINGUNO.
  */
-export function ticketToCart(ticket: SystelTicket, products: Product[]): TicketToCart {
+export function linkTicketLines(ticket: SystelTicket, plus: Map<number, ScalePluInfo>, products: Product[]): TicketToCart {
   const active = products.filter((p) => p.active ?? true);
   const out: TicketCartLine[] = [];
   for (const l of ticket.lines) {
-    const p = active.find((x) => x.code === String(l.plu));
-    if (!p) return { ok: false, reason: `el artículo N.º ${l.plu} de la balanza ($${l.amount.toLocaleString("es-AR")}) no existe como producto activo en Patagonia (código ${l.plu})` };
-    if (l.drained > 0) return { ok: false, reason: `${p.name} es un producto escurrido en la balanza: Patagonia todavía no lo interpreta` };
-    let quantity: number;
-    if (p.unit === "kg") {
-      if (!(l.grams > 0)) return { ok: false, reason: `${p.name} se vende por kg en Patagonia, pero la balanza lo vendió por unidad (${l.units} u.)` };
-      quantity = l.grams / 1000;
-    } else {
-      if (!(l.units > 0)) return { ok: false, reason: `${p.name} se vende por unidad en Patagonia, pero la balanza lo pesó (${l.grams} g)` };
-      quantity = l.units;
+    const info = plus.get(l.plu);
+    if (!info) return { ok: false, reason: `no se pudo leer en la balanza el producto N.º ${l.plu}` };
+    const label = `"${info.name.trim()}" (N.º ${l.plu} de la balanza, código ${info.code})`;
+    const p = active.find((x) => x.code === String(info.code));
+    if (!p) return { ok: false, reason: `${label} no tiene un producto activo con el código ${info.code} en Patagonia` };
+    if (info.saleType === "E" || l.drained > 0) return { ok: false, reason: `${label} es un producto escurrido: Patagonia todavía no lo interpreta` };
+    const weighed = info.saleType === "P" || info.saleType === "C";
+    if (weighed !== (p.unit === "kg")) {
+      return { ok: false, reason: `${label} en la balanza se vende ${weighed ? "por peso" : "por unidad"} y en Patagonia "${p.name}" se vende ${p.unit === "kg" ? "por kg" : "por unidad"}` };
     }
-    const expected = Math.round(quantity * p.priceRetail * 100) / 100;
-    if (Math.abs(expected - l.amount) > 1) {
-      return {
-        ok: false,
-        reason: `${p.name}: la balanza cobró $${l.amount.toLocaleString("es-AR")} por ${p.unit === "kg" ? `${quantity.toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg` : `${quantity} u.`}, y con el precio de Patagonia ($${p.priceRetail.toLocaleString("es-AR")}) da $${expected.toLocaleString("es-AR")}. No se cargó nada: el precio de la balanza y el de Patagonia tienen que ser iguales`
-      };
+    if (weighed ? !(l.grams > 0 && l.units === 0) : !(l.units > 0 && l.grams === 0)) {
+      return { ok: false, reason: `${label}: el reporte de la balanza trae ${l.units} unidades y ${l.grams} g, que no corresponde a un producto ${weighed ? "pesable" : "por unidad"}` };
     }
-    out.push({ product: p, quantity, amount: l.amount, plu: l.plu });
+    if (!(l.amount > 0)) return { ok: false, reason: `${label}: la balanza registró importe $0` };
+    out.push({ product: p, quantity: weighed ? l.grams / 1000 : l.units, amount: l.amount, plu: l.plu, scaleName: info.name.trim() });
   }
   return { ok: true, lines: out };
 }

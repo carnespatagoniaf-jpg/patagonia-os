@@ -593,7 +593,9 @@ export function Sale() {
         quantity: l.quantity,
         discountAmount: itemDiscountsSnapshot[l.key],
         source: l.source,
-        scaleTickets: l.scaleTickets
+        scaleTickets: l.scaleTickets,
+        scaleAmount: l.scaleAmount,
+        scaleTicket: l.scaleTicket
       }));
       const paymentsPayload = isSplit
         ? payments.map((p) => ({ accountId: p.accountId, amount: parseAmount(p.amount || "0") || 0, reference: p.reference.trim() || undefined }))

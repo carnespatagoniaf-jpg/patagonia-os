@@ -375,3 +375,21 @@ La secuencia de recuperación del E3 (1 → 0 → número) es una **HIPÓTESIS**
 - La secuencia enviada fue idéntica en las sesiones buenas y en las malas, así que el estado viene de la balanza, no de esa sesión.
 - Esto contradice la hipótesis "queda trabada hasta apagarla después de la primera sesión".
 - Hipótesis compatible con todo: la balanza está ocupada (operando o con un ticket abierto) en ese momento. **No comprobada.** La 72 reintenta 5 veces (~10 s) y si sigue E3 no carga nada.
+
+### M.2 Controles agregados (mismo día, pedido del dueño)
+
+1. **Ticket por identidad, no por importe.** La identidad es `systel:<balanza>:<fecha>:<N.º>:<vendedor>:<hora del 1.er artículo>`.
+   - Con dos tickets sin cobrar del mismo total (y la misma cantidad de artículos, que da el código si el formato de sumas de la balanza tiene "AA"; se lee de la 39), Mostrador muestra los dos y la persona elige con la hora y el N.º de operación impresos. Nunca elige solo.
+2. **Duplicados por identidad.** `pos_sale_items.scale_ticket` (migración 118) guarda el ticket. Se consultan las ventas NO anuladas desde cualquier PC; lo guardado en la PC sirve solo sin conexión. Si se anula la venta, el ticket se puede volver a cargar.
+3. **Importe de la balanza.** `create_pos_sale` acepta `scale_amount` (con `source='scale'` y `scale_ticket`) y guarda line_total = importe de la balanza. El catálogo no se toca y sirve también para productos sin precio en Patagonia.
+4. **Vínculo por código y unidad.** Se lee cada producto del ticket en la balanza (62/3) y se usan su CÓDIGO y su tipo de venta (P/C ↔ kg, U ↔ unidad/caja). El reporte tiene que traer gramos para los pesables y unidades para los unitarios.
+5. **E3, sin descartar nuestra integración.** Cada racha de E3 empezó después de una sesión nuestra que anduvo bien y se cerró: 09/10 bien 13:08 → E3 13:26-13:41; 13/10 bien 11:52 → E3 11:53-12:15 → bien 12:16.
+   - Nuestra forma de trabajar era abrir, subir DTR/RTS, ping a 1 y a 0, y cerrar (DTR/RTS bajan) en cada operación.
+   - Ahora Mostrador abre una vez y deja la conexión abierta mientras está en pantalla, como el programa de ejemplo oficial.
+   - Cada intento manda a soporte si la conexión era nueva y cuánto pasó desde la última lectura buena, para distinguir la causa con datos reales.
+   - No probado.
+   - Diagnóstico sin venta: Stock → Balanza → "Leer las ventas de hoy (solo lectura)".
+
+**Pruebas.**
+- Simuladas: 20 automáticas (`systel-sales.test.ts`) y la pantalla real de staging (`tests/e2e/ui-ticket-detalle-balanza.mts`): dos tickets iguales → elegir; el otro se carga solo; tercera vez bloqueado; anulada → se puede volver a cargar. Se cobró el importe de la balanza con el precio de Patagonia en $9.999, y el stock bajó por la cantidad de la balanza.
+- Real: ninguna respuesta 72/62 de la balanza de Los gringos todavía.

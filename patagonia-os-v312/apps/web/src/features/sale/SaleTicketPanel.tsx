@@ -3,7 +3,7 @@ import type { Product, TreasuryAccount } from "@patagonia/domain";
 import { parseAmount } from "../../lib/money";
 import { formatMoney } from "../shifts/format";
 import { parseQuantity } from "./quantity";
-import { UNIT_LABELS } from "./sale-model";
+import { lineGross, UNIT_LABELS } from "./sale-model";
 import type { SaleTicket } from "./useSaleTicket";
 
 // Columna izquierda de Mostrador: buscador, ticket armándose, descuentos,
@@ -118,6 +118,8 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
       )}
     </div>
 
+    {ticket.scaleTicketChoices && <ScaleTicketChoices ticket={ticket} />}
+
     <div className="pos-toolbar">
       <button className={`pos-toolbar-btn${showManualForm ? " active" : ""}`} onClick={() => setShowManualForm((v) => !v)}>
         + Vender algo sin código
@@ -209,13 +211,15 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
             <div className="name">
               {line.name}
               <small>
-                {line.kind === "manual" ? "Manual · " : ""}{formatMoney(line.unitPrice)}{line.unit === "kg" ? " /kg" : ` /${UNIT_LABELS[line.unit]}`}
+                {line.kind === "manual" ? "Manual · " : ""}{line.scaleTicket ? "Ticket de la balanza · " : ""}{formatMoney(line.unitPrice)}{line.unit === "kg" ? " /kg" : ` /${UNIT_LABELS[line.unit]}`}
               </small>
             </div>
             <input
               type="text"
               inputMode="decimal"
               className="pos-qty-input"
+              readOnly={Boolean(line.scaleTicket)}
+              title={line.scaleTicket ? "Cantidad que pesó la balanza (no se cambia a mano)" : undefined}
               value={qtyDrafts[line.key] ?? String(line.quantity).replace(".", ",")}
               onFocus={(e) => e.target.select()}
               onChange={(e) => {
@@ -235,7 +239,7 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
               onChange={(e) => setItemDiscounts({ ...itemDiscounts, [line.key]: e.target.value })}
             />
             <span className="pos-line-total">
-              {formatMoney(line.quantity * line.unitPrice - (parseAmount(itemDiscounts[line.key] || "0") || 0))}
+              {formatMoney(lineGross(line) - (parseAmount(itemDiscounts[line.key] || "0") || 0))}
             </span>
             <button className="pos-remove-btn" onClick={() => removeFromCart(line.key)} aria-label="Quitar" title="Quitar">×</button>
           </div>
@@ -438,5 +442,29 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
       </>
     )}
   </section>
+  );
+}
+
+/**
+ * Hay más de un ticket de la balanza con el total escaneado (y la misma cantidad de artículos): la
+ * persona elige el que tiene en la mano mirando la hora y el N.º de operación impresos. Nunca a ciegas.
+ */
+function ScaleTicketChoices({ ticket }: { ticket: SaleTicket }) {
+  const choices = ticket.scaleTicketChoices!;
+  const qty = (unit: Product["unit"], q: number) => (unit === "kg" ? `${q.toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg` : `${q} u.`);
+  return (
+    <div className="pos-manual-card" style={{ display: "grid", gap: 8, border: "2px solid #b45309" }}>
+      <strong>¿Cuál es el ticket de {formatMoney(choices.amount)}? Fijate la hora y el N.º de operación impresos.</strong>
+      {choices.candidates.map((c) => (
+        <button key={c.key} className="secondary" style={{ textAlign: "left" }} disabled={!c.lines} onClick={() => ticket.addScaleTicket(c)}>
+          <b>
+            Operación N.º {Number(c.ticket.ticketId)} · {c.ticket.firstTime} · vendedor {c.ticket.seller}
+          </b>
+          <br />
+          {c.lines ? c.lines.map((l) => `${l.product.name} ${qty(l.product.unit, l.quantity)} ${formatMoney(l.amount)}`).join(" + ") : c.problem}
+        </button>
+      ))}
+      <button className="secondary" onClick={() => ticket.setScaleTicketChoices(null)}>Ninguno: cancelar</button>
+    </div>
   );
 }
