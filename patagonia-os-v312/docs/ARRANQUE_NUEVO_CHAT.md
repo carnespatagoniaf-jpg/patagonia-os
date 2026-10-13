@@ -28,7 +28,7 @@ Hola. Respondeme siempre en castellano. Lo que quedó pendiente está en docs/AR
    - Antes de tocar nada falta tu OK y tres decisiones: la sucursal en las liquidaciones de sueldo, las 8 funciones que no validan la sucursal, y los listados que mezclan sucursales.
    - Se trabaja en staging, con la empresa ficticia "Carnicería Don Julio". Nunca sobre datos de clientes.
 3. **Balanzas Systel (en pausa desde el 2026-10-10, esperando una Cuora Max DE PRUEBA).**
-   - **Producción:** despliegue Netlify `6ac937fb0dec4c31d6693851` = commit `294d9d9`. La escritura Systel está BLOQUEADA. A Los gringos el botón le dice "Leer la balanza" y solo lee.
+   - **Producción (2026-10-13):** despliegue Netlify `6ace3103aecbfb59bab15b5c` = `294d9d9` + solo el arreglo del ticket de total Systel en Mostrador (rama `publicado-2026-10-13`, commit `c7c59cf`; en main es `bddc306`). Antes: `6ac937fb…` = `294d9d9`. La escritura Systel está BLOQUEADA. A Los gringos el botón le dice "Leer la balanza" y solo lee.
    - **Guardado y sin publicar:** commits `45e2214` a `8e67e64` y el de este cierre. No publicar sin OK del dueño.
    - **Diagnóstico completo:** `docs/SYSTEL_DIAGNOSTICO_LOS_GRINGOS.md`. Los pasos para la balanza de prueba están en la sección J y en `tools/laboratorio-systel/LEEME.txt`.
    - **Paquete del laboratorio:** `laboratorio-systel-<commit>.zip`, en la carpeta de arriba del repo (fuera de git). Cómo rearmarlo: `tools/laboratorio-systel/ARMAR-PAQUETE.md`.
