@@ -23,6 +23,12 @@ export class FakeCuora implements SystelLink {
   corruptAfterWrite: number | null = null;
   /** No aplica los cambios de precio (contesta ACK igual). */
   ignorePriceChange = false;
+  /** Configuración (función 39) tal cual la devuelve la balanza; null = la de ejemplo. */
+  config: string | null = null;
+  /** Contesta ACK a la 7 pero no cambia nada. */
+  ignoreConfig = false;
+  /** Además de lo pedido, cambia otro parámetro (para probar el freno). */
+  alsoTouch: [string, string] | null = null;
 
   constructor(
     readonly layout: SystelLayout,
@@ -65,7 +71,21 @@ export class FakeCuora implements SystelLink {
       case 23:
         return this.reply(fn, "00T");
       case 39:
-        return this.reply(fn, `Ton=2;Gris=0;Pap=0;Apa=1;Vel=5;Cpr=${this.options.decimals ?? 0};Sinc=0;E_P=20PPPPIIIIII;E_U=21PPPPIIIIII;Cim=1`);
+        return this.reply(fn, this.config ?? `Ton=2;Gris=0;Pap=0;Apa=1;Vel=5;Cpr=${this.options.decimals ?? 0};Sinc=0;E_P=20PPPPIIIIII;E_U=21PPPPIIIIII;Cim=1`);
+      case 7: {
+        // DOCUMENTADO (función 7, igual en V4.0/V6.0/V6.2/V7): 2 letras, S/N u otro valor = sin cambio.
+        // En la configuración (39) real son "SEt" (sumas) y "ETi" (código en tickets).
+        if (data.length !== 2) return this.reply(fn, "E5");
+        if (this.config !== null && !this.ignoreConfig) {
+          const set = (k: string, v: string) => {
+            this.config = this.config!.replace(new RegExp(`(^|;)${k}=[^;]*`), `$1${k}=${v}`);
+          };
+          if (data[0] === "S" || data[0] === "N") set("SEt", data[0]);
+          if (data[1] === "S" || data[1] === "N") set("ETi", data[1]);
+          if (this.alsoTouch) set(this.alsoTouch[0], this.alsoTouch[1]);
+        }
+        return this.reply(fn, "ACK");
+      }
       case 31: {
         const nums = [...this.plus.keys()].sort((a, b) => a - b);
         return this.reply(fn, nums.map((n) => `N${String(n).padStart(pd, "0")}V${this.plus.get(n)![pd]}`).join("") + "F");

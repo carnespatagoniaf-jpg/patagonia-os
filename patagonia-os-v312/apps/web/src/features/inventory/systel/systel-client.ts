@@ -57,8 +57,13 @@ export function replyIsComplete(rx: Uint8Array): boolean {
 const TRANSIENT_ERRORS = new Set(["E1", "E2", "E3"]);
 
 export const SYSTEL_READ_FUNCTIONS = [1, 2, 3, 23, 28, 31, 39, 62] as const;
-export const SYSTEL_WRITE_FUNCTIONS = [4, 33, 61] as const;
-export const SYSTEL_FORBIDDEN_FUNCTIONS = [5, 6, 7, 8, 9, 10, 12, 13, 15, 16, 17, 18, 22, 24, 25, 26, 32, 34, 35, 38, 40, 41, 42, 45, 46, 47, 64, 65, 68, 69, 70, 71, 74, 87];
+/**
+ * Escrituras posibles, cada una solo a través de su método (que relee y compara):
+ * 33 cambio de precio, 61/4 alta, 7 SOLO para "imprimir el código de barras en los tickets"
+ * (setTicketBarcodes: el otro parámetro de la 7 va con "X" = "el parámetro permanece sin cambio").
+ */
+export const SYSTEL_WRITE_FUNCTIONS = [4, 7, 33, 61] as const;
+export const SYSTEL_FORBIDDEN_FUNCTIONS = [5, 6, 8, 9, 10, 12, 13, 15, 16, 17, 18, 22, 24, 25, 26, 32, 34, 35, 38, 40, 41, 42, 45, 46, 47, 64, 65, 68, 69, 70, 71, 74, 87];
 
 const WRITE_TOKEN = Symbol("systel-write");
 
@@ -99,7 +104,7 @@ export interface SystelClientOptions {
    * Que una funcione no habilita la otra: en producción salen de SYSTEL_VERIFIED_WRITE_PROFILES
    * (por firma + formato + operación), hoy vacío.
    */
-  writes?: { price?: boolean; create?: boolean };
+  writes?: { price?: boolean; create?: boolean; ticketBarcodes?: boolean };
 }
 
 export class SystelError extends Error {
@@ -115,14 +120,14 @@ export class SystelClient {
   private readonly timeoutMs: number;
   private readonly busyRetryMs: number[];
   private readonly createChecksum: "con" | "sin_experimental";
-  private readonly writes: { price: boolean; create: boolean };
+  private readonly writes: { price: boolean; create: boolean; ticketBarcodes: boolean };
 
   constructor(private readonly link: SystelLink, options: SystelClientOptions) {
     this.address = options.address;
     this.timeoutMs = options.timeoutMs ?? 1500;
     this.createChecksum = options.createChecksum ?? "con";
     this.log = options.log ?? [];
-    this.writes = { price: options.writes?.price === true, create: options.writes?.create === true };
+    this.writes = { price: options.writes?.price === true, create: options.writes?.create === true, ticketBarcodes: options.writes?.ticketBarcodes === true };
     this.busyRetryMs = options.busyRetryMs ?? [300, 800, 1500, 3000, 5000];
   }
 
@@ -247,6 +252,18 @@ export class SystelClient {
     const r = await this.call(`leer PLU ${number}`, info.readFn, readPluRequest(layout, number));
     if (!r || r.kind !== "data") return null;
     return detectPluLayouts(r.data, number, [layout])[0] ?? null;
+  }
+
+  /**
+   * Función 7, "Configuraciones generales del equipo": 2 letras, "Permitir sumas en modo etiqueta"
+   * y "Imprimir el código de barras en los tickets", cada una S/N u "otro valor = el parámetro
+   * permanece sin cambio". Igual en los 4 protocolos (V4.0 págs. 16-17, V6.0 17-18, V6.2 y V7 15).
+   * Se manda "X" en la primera (no se toca) y S/N en la segunda. Devuelve la respuesta tal cual
+   * (ACK, En o null): esto solo no confirma nada, quien llama relee la configuración (39) y compara.
+   */
+  async setTicketBarcodes(on: boolean): Promise<SystelReply | null | "bloqueado"> {
+    if (!this.writes.ticketBarcodes) return "bloqueado";
+    return this.call(`imprimir código por producto en tickets = ${on ? "SI" : "NO"} (función 7)`, 7, `X${on ? "S" : "N"}`, { token: WRITE_TOKEN });
   }
 
   /**

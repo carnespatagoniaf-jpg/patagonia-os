@@ -8,6 +8,7 @@ import { CUORA_SERIAL, pickSystelPort, SerialSystelLink } from "./systel-serial"
 import { planSystelSync, runSystelSync, type SystelPlanItem, type SystelSyncResult } from "./systel-sync";
 import { runSystelWriteTest, type SystelWriteTestResult } from "./systel-write-test";
 import { discoverSystelLink, loadSavedSystelLink, saveSystelLink } from "./systel-discovery";
+import { enableTicketBarcodes, type TicketBarcodeResult } from "./systel-ticket-barcode";
 import type { SystelExchangeLog } from "./systel-client";
 import type { SystelLinkEvent } from "./systel-serial";
 import { submitScaleSupportReport } from "../../scales/support-service";
@@ -78,6 +79,7 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
   const [backup, setBackup] = useState<SystelBackup | null>(null);
   const [test, setTest] = useState<SystelWriteTestResult | null>(null);
   const [sync, setSync] = useState<SystelSyncResult | null>(null);
+  const [ticketResult, setTicketResult] = useState<TicketBarcodeResult | null>(null);
   const linkRef = useRef<SerialSystelLink | null>(null);
   const model = SYSTEL_MODELS.find((m) => m.id === modelId)!;
   const { profile } = useAuth();
@@ -220,6 +222,71 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
    * Systel confirme el E3 y el formato de escritura). Busca la balanza, respalda todo y manda UN
    * reporte con cada byte y su tiempo. No llama a runSystelSync.
    */
+  /** Elige el puerto (si hace falta) y busca la balanza. Devuelve su número, o null (ya avisado). */
+  async function connectScale(step: string): Promise<number | null> {
+    if (!portRef.current) {
+      try {
+        portRef.current = await pickSystelPort();
+      } catch {
+        setError("no se eligió el puerto de la balanza");
+        return null;
+      }
+    }
+    try {
+      const all = await navigator.serial.getPorts();
+      const i = portRef.current.getInfo();
+      portsRef.current = { authorized: all.length, picked: `${(i.usbVendorId ?? 0).toString(16).padStart(4, "0")}:${(i.usbProductId ?? 0).toString(16).padStart(4, "0")}` };
+    } catch {
+      portsRef.current = null;
+    }
+    if (linkRef.current) return address;
+    const found = await discoverSystelLink(portRef.current, logRef.current, setProgress, loadSavedSystelLink(), 350, linkEventsRef.current);
+    if (!found) {
+      const msg = "la balanza no contestó en ninguna configuración";
+      setError(msg);
+      void autoReport(step, msg, { error: msg });
+      portRef.current = null;
+      return null;
+    }
+    linkRef.current = found.link;
+    setAddress(found.address);
+    saveSystelLink({ settings: found.settings, address: found.address });
+    return found.address;
+  }
+
+  /**
+   * "Activar código por producto en la balanza" (systel-ticket-barcode.ts): una sola orden (función 7),
+   * comprobada releyendo la configuración. Sirve para cualquier Systel. El resultado le llega a soporte.
+   */
+  async function handleTicketBarcodes() {
+    if (runningRef.current) return;
+    if (!window.confirm("Esto le cambia UNA opción a la balanza: que imprima el código de barras de cada producto en el ticket. No toca productos ni precios. ¿Seguir?")) return;
+    runningRef.current = true;
+    setBusy(true);
+    setError("");
+    setReportNote("");
+    setTicketResult(null);
+    logRef.current = [];
+    linkEventsRef.current = [];
+    try {
+      const runAddress = await connectScale("activar código por producto");
+      if (runAddress === null || !linkRef.current) return;
+      setProgress("Activando el código por producto en la balanza…");
+      const client = new SystelClient(linkRef.current, { address: runAddress, log: logRef.current, writes: { ticketBarcodes: true } });
+      const r = await enableTicketBarcodes(client);
+      setTicketResult(r);
+      void autoReport("activar código por producto", `${r.outcome}: ${r.detail}`, { error: r.ok ? undefined : r.detail });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      void autoReport("error", message, { error: message });
+    } finally {
+      runningRef.current = false;
+      setBusy(false);
+      setProgress("");
+    }
+  }
+
   async function handleOneClick() {
     if (runningRef.current) return;
     runningRef.current = true;
@@ -231,36 +298,8 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
     linkEventsRef.current = [];
     let backupTaken: SystelBackup | null = null;
     try {
-      if (!portRef.current) {
-        try {
-          portRef.current = await pickSystelPort();
-        } catch {
-          setError("no se eligió el puerto de la balanza");
-          return;
-        }
-      }
-      try {
-        const all = await navigator.serial.getPorts();
-        const i = portRef.current.getInfo();
-        portsRef.current = { authorized: all.length, picked: `${(i.usbVendorId ?? 0).toString(16).padStart(4, "0")}:${(i.usbProductId ?? 0).toString(16).padStart(4, "0")}` };
-      } catch {
-        portsRef.current = null;
-      }
-      let runAddress = address;
-      if (!linkRef.current) {
-        const found = await discoverSystelLink(portRef.current, logRef.current, setProgress, loadSavedSystelLink(), 350, linkEventsRef.current);
-        if (!found) {
-          const msg = "la balanza no contestó en ninguna configuración";
-          setError(msg);
-          void autoReport("leer la balanza", msg, { error: msg });
-          portRef.current = null;
-          return;
-        }
-        linkRef.current = found.link;
-        runAddress = found.address;
-        setAddress(found.address);
-        saveSystelLink({ settings: found.settings, address: found.address });
-      }
+      const runAddress = await connectScale("leer la balanza");
+      if (runAddress === null || !linkRef.current) return;
       const client = new SystelClient(linkRef.current, { address: runAddress, log: logRef.current });
       setProgress("Leyendo lo que tiene la balanza (no cambia nada)…");
       const b = await takeSystelBackup(client, setProgress);
@@ -291,12 +330,21 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
           <div className="panel" style={{ width: "100%", marginTop: 12, display: "grid", gap: 10 }}>
             <div>
               <p style={{ margin: "0 0 2px", fontWeight: 700, fontSize: 16 }}>Balanza</p>
-              <p className="muted" style={{ margin: 0, fontSize: 13 }}>Con la balanza conectada por USB, Patagonia lee los productos que tiene. Por ahora no le cambia nada.</p>
+              <p className="muted" style={{ margin: 0, fontSize: 13 }}>Con la balanza conectada por USB, Patagonia lee los productos que tiene. Los precios no se mandan desde acá.</p>
             </div>
             <div>
-              <button disabled={busy} onClick={() => void handleOneClick()}>{busy ? "Leyendo…" : "Leer la balanza"}</button>
+              <button disabled={busy} onClick={() => void handleOneClick()}>{busy ? "Un momento…" : "Leer la balanza"}</button>
               <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>La primera vez, Chrome pregunta qué puerto usar: elegí el que dice USB y tocá Conectar.</p>
             </div>
+            <div>
+              <button className="secondary" disabled={busy} onClick={() => void handleTicketBarcodes()}>Activar código por producto en la balanza</button>
+              <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>Para que el ticket traiga el código de barras de cada producto y el Mostrador cargue el producto con sus kilos y descuente el stock. Cambia solo esa opción de la balanza y lo comprueba.</p>
+            </div>
+            {ticketResult && (
+              <p className={ticketResult.ok ? "message" : "message warning"} style={{ margin: 0 }}>
+                {ticketResult.ok ? `✅ ${ticketResult.detail[0].toUpperCase()}${ticketResult.detail.slice(1)}.` : `No quedó activado: ${ticketResult.detail}. Ya nos llegó el aviso.`}
+              </p>
+            )}
             {progress && <p className="muted" style={{ margin: 0 }}>{progress}</p>}
             {error && <p className="message warning" style={{ margin: 0 }}>No se pudo: {error}. No se cambió nada en la balanza.</p>}
             {backup && !busy && !error && <p className={backup.complete ? "message" : "message warning"} style={{ margin: 0 }}>{backup.complete ? `Se leyeron ${backup.plus.length} productos de la balanza. No se cambió nada.` : `No se pudo leer todo: ${backup.detail}`}</p>}
