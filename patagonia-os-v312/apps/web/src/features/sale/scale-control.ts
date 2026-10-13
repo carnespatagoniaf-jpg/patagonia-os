@@ -1,5 +1,5 @@
 import type { Product } from "@patagonia/domain";
-import { parseTicketTotalBarcode, parseWeightBarcode, type ScaleConfig } from "./scale-barcode";
+import { parseSystelSumTicket, parseTicketTotalBarcode, parseWeightBarcode, type ScaleConfig } from "./scale-barcode";
 
 /**
  * Control de balanza en el cierre (migración 104). Lógica pura, testeada.
@@ -71,9 +71,13 @@ export function describeScaleTicket(raw: string, config: ScaleConfig, products: 
   if (total !== null && !products.some((p) => p.code === code)) return { kind: "total", amount: total };
 
   const scanned = parseWeightBarcode(code, config);
-  if (!scanned) return null;
-  const product = products.find((p) => p.code === scanned.plu);
-  if (!product) return null;
+  const product = scanned ? products.find((p) => p.code === scanned.plu) : undefined;
+  // Ticket de total de una Systel: solo si no es la etiqueta de un producto que existe.
+  if (!product && !products.some((p) => p.code === code)) {
+    const systel = parseSystelSumTicket(code);
+    if (systel !== null) return { kind: "total", amount: systel };
+  }
+  if (!scanned || !product) return null;
   if (scanned.kind === "weight") {
     return { kind: "label", plu: scanned.plu, product, weightKg: scanned.weightKg, amount: round2(scanned.weightKg * product.priceRetail) };
   }

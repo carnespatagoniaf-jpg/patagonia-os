@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { detectScaleConfig, parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, parseAuraSumTicket } from "./scale-barcode";
+import { detectScaleConfig, parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, parseAuraSumTicket, parseSystelSumTicket } from "./scale-barcode";
 
 /** Dígito verificador EAN-13 para los primeros 12 dígitos. */
 function withCheckDigit(first12: string): string {
@@ -121,5 +121,21 @@ describe("ticket de suma de la Kretz Aura (parseAuraSumTicket)", () => {
     assert.equal(parseAuraSumTicket(withCheck("200001201234")), null);
     assert.equal(parseAuraSumTicket("2099998000009"), null);
     assert.equal(parseAuraSumTicket("7790001234567"), null);
+  });
+});
+
+describe("ticket de total de Systel (22 + balanza + importe en pesos)", () => {
+  it("REAL Los gringos: 2220000007801 = $780 (ticket impreso: TOTAL $780)", () => {
+    assert.equal(parseSystelSumTicket("2220000007801"), 780);
+    assert.equal(parseSystelSumTicket(" 2220000007801 "), 780);
+  });
+  it("con el verificador mal, o sin empezar con 22, no es un total de Systel", () => {
+    assert.equal(parseSystelSumTicket("2220000007802"), null);
+    assert.equal(parseSystelSumTicket("2120000007801"), null);
+    assert.equal(parseSystelSumTicket("222000000780"), null);
+  });
+  it("importe en cero: no es un total", () => {
+    // 22 00 00000000 + verificador
+    assert.equal(parseSystelSumTicket("2200000000002"), null); // verificador correcto, importe 0
   });
 });

@@ -5,7 +5,7 @@ import { formatMoney } from "../shifts/format";
 import type { ProductCategory } from "../inventory/product-categories-service";
 import { parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, type ScaleConfig } from "./scale-config-service";
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
-import { parseAuraSumTicket } from "./scale-barcode";
+import { parseAuraSumTicket, parseSystelSumTicket } from "./scale-barcode";
 import type { PosShift } from "./pos-shift-service";
 import type { PaymentRow, TicketLine } from "./sale-model";
 import { parseQuantity } from "./quantity";
@@ -242,7 +242,12 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       setHighlightedIndex(-1);
       return;
     }
-    const ticketTotal = auraSum?.amount ?? parseTicketTotalBarcode(raw);
+    // Ticket de total de una Systel (22 + balanza + importe): solo si NO es la etiqueta de un
+    // producto que existe (una etiqueta con PLU que empieza en 2 también puede empezar con "22").
+    const asLabel = parseWeightBarcode(raw, scaleConfig);
+    const isKnownLabel = !!asLabel && products.some((p) => (p.active ?? true) && p.code === asLabel.plu);
+    const systelSum = isKnownLabel || products.some((p) => p.code === raw) ? null : parseSystelSumTicket(raw);
+    const ticketTotal = auraSum?.amount ?? systelSum ?? parseTicketTotalBarcode(raw);
     if (ticketTotal !== null && !products.some((p) => p.code === raw)) {
       const key = `ticket-${raw.padStart(13, "0")}`;
       if (cart.some((l) => l.key === key)) {

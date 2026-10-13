@@ -44,6 +44,16 @@ describe("leer el ticket para anularlo", () => {
     assert.deepEqual(t, { kind: "label", plu: "12", product: nalga, weightKg: 1.25, amount: 12500 });
   });
 
+  it("ticket de total de una Systel (REAL, Los gringos 2026-10-13: TOTAL $780)", () => {
+    assert.deepEqual(describeScaleTicket("2220000007801", DEFAULT_SCALE_CONFIG, [nalga]), { kind: "total", amount: 780 });
+  });
+
+  it("una etiqueta de un producto que existe con PLU 2xxxx NO se toma como total de Systel", () => {
+    const pollo = { id: "p2", code: "20000", name: "Pollo", unit: "kg", priceRetail: 4000 } as unknown as Product;
+    const code = withCheckDigit("220000015000"); // 2 + PLU 20000 + 1,500 kg + reservado
+    assert.equal(describeScaleTicket(code, DEFAULT_SCALE_CONFIG, [pollo])?.kind, "label");
+  });
+
   it("ticket de total de la balanza", () => {
     assert.deepEqual(describeScaleTicket("0000014550003", DEFAULT_SCALE_CONFIG, [nalga]), { kind: "total", amount: 14550 });
   });

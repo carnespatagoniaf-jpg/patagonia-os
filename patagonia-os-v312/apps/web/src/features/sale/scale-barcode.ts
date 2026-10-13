@@ -105,6 +105,25 @@ export function parseAuraSumTicket(rawCode: string): { amount: number | null; fo
   return null;
 }
 
+/**
+ * Ticket de SUMA (total) de una Systel Cuora. REAL, Los gringos, 2026-10-13: su balanza tiene
+ * configurado "E_S=22BBIIIIIIII" (leído de la balanza el 2026-10-09). Eso es 22 + número de
+ * balanza (2) + importe (8) + verificador. El ticket "TOTAL $780" trae 2220000007801: balanza 00,
+ * importe 00000780, en PESOS ENTEROS (esa balanza trabaja sin decimales: firma D0).
+ * Ojo: una etiqueta de PLU que empiece con 2 también puede empezar con "22". Por eso quien llama
+ * lo prueba DESPUÉS de ver que no es la etiqueta de un producto que existe.
+ * Devuelve el importe, o null si no tiene esta forma.
+ */
+export function parseSystelSumTicket(rawCode: string): number | null {
+  const code = rawCode.trim();
+  if (!/^22[0-9]{11}$/.test(code)) return null;
+  const digits = code.split("").map(Number);
+  const sum = digits.slice(0, 12).reduce((acc, d, i) => acc + d * (i % 2 === 0 ? 1 : 3), 0);
+  if ((10 - (sum % 10)) % 10 !== digits[12]) return null;
+  const pesos = parseInt(code.slice(4, 12), 10);
+  return pesos > 0 ? pesos : null;
+}
+
 export function parseTicketTotalBarcode(rawCode: string): number | null {
   // Muchos lectores devuelven un EAN-13 que empieza en 0 como UPC-A de 12
   // dígitos (sin ese primer cero) -- pasó con un cliente real. Se repone.
