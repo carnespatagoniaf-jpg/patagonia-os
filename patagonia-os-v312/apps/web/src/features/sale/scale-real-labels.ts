@@ -24,6 +24,23 @@ export const CARNES_PATAGONIA_LABELS: [string, string, number][] = [
 export const LOS_GRINGOS_TOTAL_TICKET: [string, number] = ["2220000007801", 780];
 
 /**
+ * REAL, Los gringos 13/10 12:55 (foto del ticket, operación 20-3095, "ARTICULOS: 2"):
+ * GRINGO CAJON DE (PLU 2) 1 un × $72.000 + TROZADITOx1x2 (PLU 5) 0,215 kg × $5.200 = $1.118,
+ * TOTAL $73.118. Código del total "2 202000 731184" con el formato de sumas que se ve en la
+ * pantalla de la balanza, "22AAIIIIIIII": 22 + 02 artículos + 00073118 + verificador.
+ * Debajo de cada artículo la balanza imprimió "0 000000 000000" (en blanco).
+ */
+export const LOS_GRINGOS_TWO_ITEM_TICKET = {
+  totalCode: "2202000731184",
+  total: 73118,
+  items: [
+    { plu: "2", name: "GRINGO CAJON DE POLLO", unit: "unit", quantity: 1, unitPrice: 72000, amount: 72000 },
+    { plu: "5", name: "TROZADITOx1x2", unit: "kg", quantity: 0.215, unitPrice: 5200, amount: 1118 }
+  ],
+  blankItemCode: "0000000000000"
+} as const;
+
+/**
  * Formato de etiqueta por producto que tiene configurado la Systel de Los gringos (leído de la
  * balanza el 2026-10-09): "E_P=20PPPPCCCCCC" (por kilo) y "E_U=21PPPPCCCCCC" (por unidad):
  * 2 dígitos fijos + N.º de producto (4) + cantidad (6) + verificador. Hoy la balanza NO imprime

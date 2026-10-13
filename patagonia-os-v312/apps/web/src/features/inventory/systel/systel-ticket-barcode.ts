@@ -53,7 +53,7 @@ export async function enableTicketBarcodes(client: SystelClient): Promise<Ticket
     return { ...base, before: first.raw, outcome: "no_soportado", ok: false, detail: "la balanza no informa la opción \"imprimir código en tickets\": no se puede comprobar el cambio, así que no se mandó nada" };
   }
   if (before[key].toUpperCase() === "S") {
-    return { ...base, key, before: first.raw, after: first.raw, outcome: "ya_activado", ok: true, detail: "la opción \"imprimir código en tickets\" ya estaba activada en la balanza; no se mandó nada. Si igual sale en blanco (0 000000 000000), el código lo define cada producto de la balanza: en el Mostrador escaneá el código del TOTAL y elegí el producto" };
+    return { ...base, key, before: first.raw, after: first.raw, outcome: "ya_activado", ok: true, detail: "la opción \"imprimir código en tickets\" ya estaba activada en la balanza; no se mandó nada. Si igual sale en blanco (0 000000 000000), es la configuración de cada producto en la balanza: en Artículos → editar el PLU, en el paso del código de barras, elegí \"1. USAR EAN GRAL.\"" };
   }
 
   const reply = await client.setTicketBarcodes(true);

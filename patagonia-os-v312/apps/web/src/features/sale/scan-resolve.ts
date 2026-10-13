@@ -7,8 +7,11 @@ import { parseAuraSumTicket, parseSystelSumTicket, parseTicketTotalBarcode, pars
  *
  * Orden:
  * 1. Código idéntico al de un producto: ese producto (gana sobre cualquier lectura de balanza).
- * 2. Ticket de TOTAL de balanza (Kretz Aura, Systel "22…", Kretz "0000…"): una línea de plata,
- *    sin producto ni stock (el código no dice qué productos son).
+ * 2. Ticket de TOTAL de balanza (Kretz Aura, Kretz "0000…"): una línea de plata, sin producto
+ *    ni stock (el código no dice qué productos son). El TOTAL de una Systel ("22…") NO se carga:
+ *    trae solo el importe y la cantidad de artículos ("22AAIIIIIIII"), y se cobra escaneando el
+ *    código de cada artículo (real Los gringos 13/10: $73.118 = cajón + trozadito; convertir el
+ *    total en kilos de un producto daba "TROZADITO 14,061 kg").
  * 3. Etiqueta de balanza (formato de la sucursal): producto por su N.º de PLU + kilos o unidades.
  *    Solo si el código tiene forma de etiqueta: empieza con 2 (rango de códigos "de comercio"
  *    20-29 que usan las balanzas) y, con 13 dígitos, el dígito verificador EAN-13 es correcto.
@@ -44,37 +47,6 @@ export function looksLikeScaleLabel(code: string, config: ScaleConfig): boolean 
 
 const fmtQty = (q: number, unit: string) => (unit === "kg" ? `${q.toLocaleString("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg` : `${q} u.`);
 
-/**
- * Ticket de TOTAL de UN solo producto (real: Los gringos, la balanza imprime el código del producto en
- * blanco pero el del total trae el importe): la persona dice qué producto es y la cantidad sale del
- * importe y del precio de Patagonia. $1.222 ÷ $5.200/kg = 0,235 kg (ticket real: "0.235kg").
- */
-export function quantityForTotal(amount: number, p: Product): { ok: true; quantity: number; exact: boolean } | { ok: false; message: string } {
-  if (!(p.priceRetail > 0)) return { ok: false, message: `${p.name} no tiene precio cargado en Patagonia: no se puede saber cuánto es. Cargale el precio en Stock.` };
-  if (p.unit === "kg") {
-    const quantity = round3(amount / p.priceRetail);
-    if (!(quantity > 0)) return { ok: false, message: "El importe del ticket es 0." };
-    return { ok: true, quantity, exact: Math.abs(Math.round(quantity * p.priceRetail) - amount) <= 1 };
-  }
-  const raw = amount / p.priceRetail;
-  const units = Math.round(raw);
-  if (units < 1 || Math.abs(raw - units) > 0.005) {
-    return { ok: false, message: `${p.name} se vende por unidad a $${p.priceRetail} y el ticket es de $${amount}: no da una cantidad entera. Elegí otro producto o cobralo sin producto.` };
-  }
-  return { ok: true, quantity: units, exact: true };
-}
-
-/** Productos cuyo precio de Patagonia explica el importe exacto (al gramo o en unidades enteras). */
-export function productsMatchingTotal(amount: number, products: Product[], max = 8): { product: Product; quantity: number }[] {
-  const out: { product: Product; quantity: number }[] = [];
-  for (const p of products) {
-    if (!(p.active ?? true)) continue;
-    const q = quantityForTotal(amount, p);
-    if (q.ok && q.exact) out.push({ product: p, quantity: q.quantity });
-  }
-  return out.sort((a, b) => a.product.name.localeCompare(b.product.name)).slice(0, max);
-}
-
 export function resolveScan(rawInput: string, products: Product[], config: ScaleConfig): ScanResolution {
   const raw = rawInput.trim();
   if (!raw) return { type: "search" };
@@ -101,7 +73,13 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
     };
   }
   const systel = labelProduct ? null : parseSystelSumTicket(raw);
-  const total = aura?.amount ?? systel ?? parseTicketTotalBarcode(raw);
+  if (systel !== null) {
+    return {
+      type: "error",
+      message: `Ese es el código del TOTAL del ticket ($${systel.toLocaleString("es-AR")}): no dice qué productos son ni cuántos kilos, así que no se cargó. Escaneá el código que está debajo de CADA producto del ticket. Si debajo de un producto el código sale en ceros (0 000000 000000), buscá ese producto y escribí los kilos o unidades que dice el ticket.`
+    };
+  }
+  const total = aura?.amount ?? parseTicketTotalBarcode(raw);
   if (total !== null) return { type: "ticket_total", amount: total, key: `ticket-${raw.padStart(13, "0")}` };
 
   // 3. Etiqueta de balanza.
@@ -125,6 +103,13 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
     } else {
       // La balanza grabó el importe: la cantidad sale del precio de Patagonia (al gramo).
       quantity = p.unit === "kg" ? round3(label.amount / p.priceRetail) : label.amount / p.priceRetail;
+    }
+    if (p.unit !== "kg" && label.kind === "weight" && config.prefixLength === 2 && raw.startsWith("21")) {
+      // Systel venta por UNIDAD ("21PPPPCCCCCC", C = "cantidad (kg o unidades)" según el manual).
+      // No hay todavía una etiqueta real por unidad: se aceptan las dos formas posibles, unidades
+      // en milésimas (000002000 → 2, como los kilos) o enteras (000002 → 2). Otra cosa: error.
+      const n = Math.round(label.weightKg * config.weightDivisor);
+      quantity = n % 1000 === 0 ? n / 1000 : n < 1000 ? n : n / 1000;
     }
     if (p.unit !== "kg") {
       // Por unidad: tiene que dar un número entero de unidades. Si no, el formato no se entendió.

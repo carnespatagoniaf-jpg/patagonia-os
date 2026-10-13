@@ -118,8 +118,6 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
       )}
     </div>
 
-    {ticket.pendingTotal && <PendingTotalBox ticket={ticket} />}
-
     <div className="pos-toolbar">
       <button className={`pos-toolbar-btn${showManualForm ? " active" : ""}`} onClick={() => setShowManualForm((v) => !v)}>
         + Vender algo sin código
@@ -440,51 +438,5 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
       </>
     )}
   </section>
-  );
-}
-
-/**
- * Ticket de TOTAL de la balanza escaneado: ¿de qué producto es? Arriba, los productos cuyo precio
- * explica el importe justo (al gramo); con el buscador, cualquiera. Elegido el producto, se carga con
- * los kilos que da el importe y al cobrar descuenta el stock. Si el ticket tiene varios productos,
- * se cobra el total sin producto (como antes, sin stock).
- */
-function PendingTotalBox({ ticket }: { ticket: SaleTicket }) {
-  const [filter, setFilter] = useState("");
-  const pending = ticket.pendingTotal!;
-  const f = filter.trim().toLowerCase();
-  const found = f
-    ? ticket.allProducts.filter((p) => (p.active ?? true) && (p.name.toLowerCase().includes(f) || p.code.toLowerCase() === f)).slice(0, 8)
-    : [];
-  const qtyLabel = (p: Product, q: number) => (p.unit === "kg" ? `${q.toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg` : `${q} u.`);
-  return (
-    <div className="pos-manual-card" style={{ display: "grid", gap: 8, border: "2px solid #b45309" }}>
-      <strong>Ticket de balanza de {formatMoney(pending.amount)}: ¿de qué producto es?</strong>
-      {ticket.pendingTotalCandidates.length > 0 ? (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {ticket.pendingTotalCandidates.map(({ product, quantity }) => (
-            <button key={product.id} onClick={() => ticket.assignPendingTotal(product)}>
-              {product.name} · {qtyLabel(product, quantity)}
-            </button>
-          ))}
-        </div>
-      ) : (
-        <span className="muted" style={{ fontSize: 13 }}>Ningún producto con precio da justo ese importe. Buscalo abajo (o revisá que el precio en Patagonia sea el mismo que en la balanza).</span>
-      )}
-      <input placeholder="Buscar otro producto por nombre o código…" value={filter} onChange={(e) => setFilter(e.target.value)} />
-      {found.length > 0 && (
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          {found.map((p) => (
-            <button key={p.id} className="secondary" onClick={() => ticket.assignPendingTotal(p)}>
-              {p.code} · {p.name}{p.priceRetail > 0 ? "" : " (sin precio)"}
-            </button>
-          ))}
-        </div>
-      )}
-      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button className="secondary" onClick={ticket.chargePendingTotalWithoutProduct}>Tiene varios productos: cobrar el total sin descontar stock</button>
-        <button className="secondary" onClick={ticket.cancelPendingTotal}>Cancelar</button>
-      </div>
-    </div>
   );
 }
