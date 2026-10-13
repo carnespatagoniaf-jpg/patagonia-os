@@ -455,6 +455,12 @@ function ScaleTicketChoices({ ticket }: { ticket: SaleTicket }) {
   return (
     <div className="pos-manual-card" style={{ display: "grid", gap: 8, border: "2px solid #b45309" }}>
       <strong>¿Cuál es el ticket de {formatMoney(choices.amount)}? Fijate la hora y el N.º de operación impresos.</strong>
+      {choices.charged.length > 0 && (
+        <span className="muted" style={{ fontSize: 13 }}>
+          Ya cobrado{choices.charged.length === 1 ? "" : "s"} (si tu papel es este, NO lo cargues de nuevo):{" "}
+          {choices.charged.map((t) => `Operación N.º ${Number(t.ticketId)} · ${t.firstTime}`).join(" · ")}
+        </span>
+      )}
       {choices.candidates.map((c) => (
         <button key={c.key} className="secondary" style={{ textAlign: "left" }} disabled={!c.lines} onClick={() => ticket.addScaleTicket(c)}>
           <b>
@@ -464,7 +470,7 @@ function ScaleTicketChoices({ ticket }: { ticket: SaleTicket }) {
           {c.lines ? c.lines.map((l) => `${l.product.name} ${qty(l.product.unit, l.quantity)} ${formatMoney(l.amount)}`).join(" + ") : c.problem}
         </button>
       ))}
-      <button className="secondary" onClick={() => ticket.setScaleTicketChoices(null)}>Ninguno: cancelar</button>
+      <button className="secondary" onClick={() => ticket.setScaleTicketChoices(null)}>{choices.charged.length > 0 ? "Es uno ya cobrado / ninguno: cancelar" : "Ninguno: cancelar"}</button>
     </div>
   );
 }

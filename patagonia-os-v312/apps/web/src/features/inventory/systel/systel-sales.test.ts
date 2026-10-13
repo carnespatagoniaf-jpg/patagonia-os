@@ -78,6 +78,7 @@ describe("1 y 2: identidad del ticket, no su importe", () => {
     const m = findTicketsForTotal(tickets, 73118, { scale: 20, articles: 2, usedKeys: [k3095] });
     assert.ok(m.ok);
     assert.deepEqual(m.candidates.map((t) => Number(t.ticketId)), [3101]);
+    assert.deepEqual(m.charged.map((t) => Number(t.ticketId)), [3095]);
   });
   it("la identidad es balanza + fecha + N.º + vendedor + hora", () => {
     assert.equal(ticketKey(20, tickets.find((t) => Number(t.ticketId) === 3095)!), "systel:20:13/10/26:3095:01:12:55:34");
@@ -146,6 +147,8 @@ describe("[SIMULADO] todo el camino contra una Cuora simulada según el document
     const r = await read(scale([...t3095, ...t3101]), { charged: async (keys) => new Set(keys.filter((k) => k.includes(":3101:"))) });
     assert.ok(r.ok);
     assert.deepEqual(r.candidates.map((c) => Number(c.ticket.ticketId)), [3095]);
+    // Y avisa que hay uno igual ya cobrado: el papel podría ser ese (reescaneo), así que se confirma.
+    assert.deepEqual(r.charged.map((t) => Number(t.ticketId)), [3101]);
   });
   it("producto sin precio en Patagonia vendido en la balanza: se carga con el importe de la balanza", async () => {
     const r = await readTicketDetail(new SystelClient(scale([fakeSaleLine({ ticket: 3200, date: "13/10/26", time: "13:00:00", plu: 17, grams: 1250, amount: 5625 })], REAL_CONFIG_AA), { address: 20, busyRetryMs: [] }), {

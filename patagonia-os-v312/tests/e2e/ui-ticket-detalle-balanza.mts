@@ -123,8 +123,14 @@ await p.screenshot({ path: "tests/e2e/ui-ticket-detalle-balanza.png" });
 await charge();
 const { data: sale1 } = await sb.from("pos_sales").select("id, total, branch_id").eq("branch_id", branchId).order("created_at", { ascending: false }).limit(1).single();
 
-// 2. Mismo TOTAL otra vez: el 3095 ya está cobrado (por identidad); queda el 3101 y lo carga sin preguntar.
+// 2. Mismo TOTAL otra vez: el 3095 ya está cobrado; queda el 3101, pero el papel podría ser el 3095
+//    (reescaneo): pide confirmar. La persona confirma que es el 3101.
 await scanTotal("mismo TOTAL, otra venta");
+console.log("Recuadro:", (await p.locator(".pos-manual-card").first().innerText()).split(/\n+/).join(" | "));
+console.log("Líneas antes de confirmar:", JSON.stringify(await lines()));
+await p.getByRole("button", { name: /Operación N.º 3101/ }).click();
+await p.waitForTimeout(500);
+console.log("Confirmado 3101 →", await msg());
 console.log("Líneas:", JSON.stringify(await lines()));
 await charge();
 const { data: sale2 } = await sb.from("pos_sales").select("id, total, branch_id").eq("branch_id", branchId).order("created_at", { ascending: false }).limit(1).single();
@@ -137,6 +143,9 @@ console.log("Líneas:", JSON.stringify(await lines()));
 const { error: voidErr } = await sb.rpc("void_pos_sale", { p_sale_id: (sale1 as any).id });
 console.log("\nAnulada la venta del 3095:", voidErr ? voidErr.message : "ok");
 await scanTotal("mismo TOTAL después de anular la venta del 3095");
+console.log("Recuadro:", (await p.locator(".pos-manual-card").first().innerText()).split(/\n+/).join(" | "));
+await p.getByRole("button", { name: /Operación N.º 3095/ }).click();
+await p.waitForTimeout(500);
 console.log("Líneas:", JSON.stringify(await lines()));
 await p.getByRole("button", { name: /Cancelar ticket/ }).first().click();
 await p.waitForTimeout(500);

@@ -19,13 +19,12 @@ import { parseAmount } from "../../lib/money";
 import { downloadScaleExportCsv } from "./scale-export";
 import { ScaleSyncPanel } from "./ScaleSyncPanel";
 import { SystelPanel } from "./systel/SystelPanel";
+import { SYSTEL_PILOT_COMPANIES } from "./systel/systel-pilot";
 
 /** Balanzas Systel: módulo nuevo, oculto hasta que el dueño autorice publicarlo. */
 const SHOW_SYSTEL_PANEL = false;
 /** Laboratorio Systel (balanza de banco): solo en una compilación con VITE_SYSTEL_LAB=1; la de producción no lo trae. */
 const SystelLabPanel = import.meta.env.VITE_SYSTEL_LAB === "1" ? lazy(() => import("./systel/SystelLabPanel")) : null;
-/** Prueba piloto (2026-10-09, autorizada por el dueño): Los gringos tiene una Cuora Max. Solo esa empresa ve el panel. */
-const SYSTEL_PILOT_COMPANIES = new Set(["a2660765-99a4-4945-84a1-803b8913a71f"]);
 import { PriceTools } from "./PriceTools";
 import { quantityNumber } from "../sale/quantity";
 

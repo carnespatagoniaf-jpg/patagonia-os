@@ -19,7 +19,11 @@ export interface TicketCandidate {
 }
 
 export type TicketDetailResult =
-  | { ok: true; candidates: TicketCandidate[]; articles: number | null }
+  /**
+   * `charged`: tickets iguales (mismo total y artículos) ya cobrados. Si hay alguno, el escaneo puede ser
+   * un reescaneo de ese mismo papel: Mostrador pide confirmar aunque quede un solo candidato.
+   */
+  | { ok: true; candidates: TicketCandidate[]; charged: SystelTicket[]; articles: number | null }
   | { ok: false; stage: "lectura" | "formato" | "ticket" | "productos"; reason: string };
 
 export interface PluCache {
@@ -85,7 +89,7 @@ export async function readTicketDetail(
     return { key: ticketKey(client.address, t), ticket: t, lines: linked.ok ? linked.lines : null, problem: linked.ok ? null : linked.reason };
   });
   if (candidates.length === 1 && !candidates[0].lines) return { ok: false, stage: "productos", reason: candidates[0].problem ?? "no se pudo vincular" };
-  return { ok: true, candidates, articles: decoded.articles };
+  return { ok: true, candidates, charged: match.charged, articles: decoded.articles };
 }
 
 async function readPluInfo(client: SystelClient, cache: PluCache, n: number): Promise<ScalePluInfo | null> {

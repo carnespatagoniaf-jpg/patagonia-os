@@ -8,6 +8,7 @@ import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
 import { resolveScan } from "./scan-resolve";
 import { closeSystelTicketSession, readSystelTicketFromScale, systelTicketReadConfigured } from "../inventory/systel/systel-ticket-from-scale";
 import type { TicketCandidate } from "../inventory/systel/systel-ticket-detail";
+import type { SystelTicket } from "../inventory/systel/systel-sales";
 import { chargedScaleTickets } from "./sale-service";
 import { submitScaleSupportReport } from "../scales/support-service";
 import type { PosShift } from "./pos-shift-service";
@@ -28,16 +29,18 @@ export interface SaleTicketDeps {
   busy: boolean;
   setMessage: (message: string) => void;
   setShowShiftTotals: (show: boolean) => void;
+  /** Leer el detalle del TOTAL de una Systel desde la balanza: solo empresas de la prueba piloto. */
+  systelTicketPilot?: boolean;
 }
 
-export function useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals }: SaleTicketDeps) {
+export function useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false }: SaleTicketDeps) {
   const [search, setSearch] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [showProductTable, setShowProductTable] = useState(false);
   const [cart, setCart] = useState<TicketLine[]>([]);
   /** Varios tickets de la balanza con el mismo total: la persona elige cuál (nunca a ciegas). */
-  const [scaleTicketChoices, setScaleTicketChoices] = useState<{ amount: number; candidates: TicketCandidate[] } | null>(null);
+  const [scaleTicketChoices, setScaleTicketChoices] = useState<{ amount: number; candidates: TicketCandidate[]; charged: SystelTicket[] } | null>(null);
   const [readingScaleTicket, setReadingScaleTicket] = useState(false);
   const [itemDiscounts, setItemDiscounts] = useState<Record<string, string>>({});
   const [saleDiscount, setSaleDiscount] = useState("");
@@ -256,7 +259,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     }
     if (resolved.type === "systel_total") {
       done();
-      if (!systelTicketReadConfigured()) {
+      if (!systelTicketPilot || !systelTicketReadConfigured()) {
         setMessage(resolved.message);
         return;
       }
@@ -365,12 +368,17 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
           ? `No se cargó nada: no se pudo leer el ticket en la balanza (${r.reason}). Escaneá el TOTAL de nuevo en unos segundos.`
           : `No se cargó nada: ${r.reason}.`
       );
-    } else if (r.candidates.length === 1) {
+    } else if (r.candidates.length === 1 && r.charged.length === 0) {
       addScaleTicket(r.candidates[0]);
     } else {
-      // Mismo total (y misma cantidad de artículos): NO se elige a ciegas.
-      setScaleTicketChoices({ amount, candidates: r.candidates });
-      setMessage(`Hoy hay ${r.candidates.length} tickets de ${formatMoney(amount)} sin cobrar en la balanza. Elegí cuál es mirando la hora y el N.º de operación impresos en el ticket.`);
+      // Mismo total (y misma cantidad de artículos): NO se elige a ciegas. Y si hay uno igual ya cobrado,
+      // el papel escaneado puede ser ese mismo (reescaneo): se pide confirmar aunque quede uno solo.
+      setScaleTicketChoices({ amount, candidates: r.candidates, charged: r.charged });
+      setMessage(
+        r.charged.length > 0
+          ? `Hay ${r.charged.length === 1 ? "otro ticket" : `${r.charged.length} tickets`} de ${formatMoney(amount)} igual${r.charged.length === 1 ? "" : "es"} ya cobrado${r.charged.length === 1 ? "" : "s"}. Confirmá con la hora y el N.º de operación impresos si el papel que tenés es uno sin cobrar.`
+          : `Hoy hay ${r.candidates.length} tickets de ${formatMoney(amount)} sin cobrar en la balanza. Elegí cuál es mirando la hora y el N.º de operación impresos en el ticket.`
+      );
     }
     // Todo lo que fue y vino por el cable le llega a soporte (sin pedirle nada al cliente).
     void submitScaleSupportReport({

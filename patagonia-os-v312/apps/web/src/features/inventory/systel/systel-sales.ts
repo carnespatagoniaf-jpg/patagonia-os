@@ -138,7 +138,8 @@ export function decodeSumCode(code: string, template: string | null): { ok: true
 }
 
 export type TicketMatch =
-  | { ok: true; candidates: SystelTicket[] }
+  /** `charged`: tickets con el mismo total y artículos que YA se cobraron (el papel escaneado podría ser uno de esos). */
+  | { ok: true; candidates: SystelTicket[]; charged: SystelTicket[] }
   | { ok: false; reason: string };
 
 /**
@@ -155,7 +156,8 @@ export function findTicketsForTotal(tickets: SystelTicket[], amount: number, opt
   if (withCount.length === 0) return { ok: false, reason: `la balanza tiene tickets de ${money(amount)}, pero ninguno con ${opts.articles} artículos` };
   const free = withCount.filter((t) => !used.has(ticketKey(opts.scale, t)));
   if (free.length === 0) return { ok: false, reason: withCount.length === 1 ? `ese ticket de ${money(amount)} ya está cargado en esta venta o ya se cobró` : `los ${withCount.length} tickets de ${money(amount)} de hoy ya se cobraron` };
-  return { ok: true, candidates: [...free].sort((x, y) => `${y.date}${y.time}`.localeCompare(`${x.date}${x.time}`)) };
+  const newest = (x: SystelTicket, y: SystelTicket) => `${y.date}${y.time}`.localeCompare(`${x.date}${x.time}`);
+  return { ok: true, candidates: [...free].sort(newest), charged: withCount.filter((t) => used.has(ticketKey(opts.scale, t))).sort(newest) };
 }
 
 /** Lo que dice la balanza de un PLU (función 62): su CÓDIGO y su tipo de venta. */

@@ -6,6 +6,7 @@ import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured, supabase } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { useAuth } from "../auth/AuthProvider";
+import { SYSTEL_PILOT_COMPANIES } from "../inventory/systel/systel-pilot";
 import { can, planAllows } from "../auth/permissions";
 import { getScaleControl, type ScaleControlState } from "./scale-control-service";
 import { listProductsForBranch } from "../inventory/inventory-service";
@@ -153,7 +154,7 @@ export function Sale() {
   const [scaleConfigCalibrated, setScaleConfigCalibrated] = useState(false);
 
 
-  const ticket = useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals });
+  const ticket = useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot: SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? "") });
   const {
     cart,
     itemDiscounts,
