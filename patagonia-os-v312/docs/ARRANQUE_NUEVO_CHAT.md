@@ -28,7 +28,7 @@ Hola. Respondeme siempre en castellano. Lo que quedó pendiente está en docs/AR
    - Antes de tocar nada falta tu OK y tres decisiones: la sucursal en las liquidaciones de sueldo, las 8 funciones que no validan la sucursal, y los listados que mezclan sucursales.
    - Se trabaja en staging, con la empresa ficticia "Carnicería Don Julio". Nunca sobre datos de clientes.
 3. **Balanzas Systel (en pausa desde el 2026-10-10, esperando una Cuora Max DE PRUEBA).**
-   - **Producción (2026-10-13, 14:33 UTC):** Netlify `6ace414a417479d74c290fde` = main `2250a5f` (todo lo de Systel publicado: conexión mejorada + botón "Activar código por producto en la balanza", función 7). Siguen BLOQUEADOS el envío de precios y el alta a la balanza; el laboratorio no sale en producción.
+   - **Producción (2026-10-13, 15:03 UTC):** Netlify `6ace484bb4684a9c84ef198e` = main `7bedaf5` (todo lo de Systel publicado: conexión mejorada + botón "Activar código por producto en la balanza", función 7). Siguen BLOQUEADOS el envío de precios y el alta a la balanza; el laboratorio no sale en producción.
    - **Diagnóstico completo:** `docs/SYSTEL_DIAGNOSTICO_LOS_GRINGOS.md`. Los pasos para la balanza de prueba están en la sección J y en `tools/laboratorio-systel/LEEME.txt`.
    - **Paquete del laboratorio:** `laboratorio-systel-<commit>.zip`, en la carpeta de arriba del repo (fuera de git). Cómo rearmarlo: `tools/laboratorio-systel/ARMAR-PAQUETE.md`.
    - **Para retomar:** conseguir una Cuora Max de prueba y hacer los pasos 0 y 1 (lectura + cambio de precio con restauración, 3 veces). Analizar los informes `.json` y, si dan "aprobado", agregar UN perfil "precio" con esa firma y ese formato exactos a `SYSTEL_VERIFIED_WRITE_PROFILES`. El alta se valida aparte.
