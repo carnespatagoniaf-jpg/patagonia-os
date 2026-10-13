@@ -5,7 +5,7 @@ import { formatMoney } from "../shifts/format";
 import type { ProductCategory } from "../inventory/product-categories-service";
 import { parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, type ScaleConfig } from "./scale-config-service";
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
-import { parseAuraSumTicket, parseSystelSumTicket } from "./scale-barcode";
+import { resolveScan } from "./scan-resolve";
 import type { PosShift } from "./pos-shift-service";
 import type { PaymentRow, TicketLine } from "./sale-model";
 import { parseQuantity } from "./quantity";
@@ -231,29 +231,30 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     const raw = search.trim();
     if (!raw) return;
 
-    // Ticket de total de una balanza tipo caja (Kretz Aura): trae solo el
-    // importe, no los productos -- va como línea manual, sin descontar stock.
-    // Se evalúa antes que la etiqueta por PLU (los 5 ceros iniciales la
-    // confundirían con el PLU 1) y solo si no hay un producto con ese código.
-    const auraSum = products.some((p) => p.code === raw) ? null : parseAuraSumTicket(raw);
-    if (auraSum && auraSum.amount === null) {
-      setMessage("Este ticket de la balanza no trae el importe en el código de barras (con el formato actual de la balanza solo entran tickets de hasta $999,99). Cargá el TOTAL impreso con \"Vender algo sin código\" y avisale al encargado: en Productos → \"Balanza por cable\" → \"Mandar productos a la balanza\", Patagonia le ajusta el código de barras a la balanza.");
+    // Qué es el código (producto, ticket de total, etiqueta de balanza o error): scan-resolve.ts,
+    // lógica pura y probada con etiquetas reales. Acá solo quedan los avisos y el carrito.
+    const resolved = resolveScan(raw, products, scaleConfig);
+    const done = () => {
       setSearch("");
       setHighlightedIndex(-1);
+    };
+
+    if (resolved.type === "error") {
+      setMessage(resolved.message);
+      done();
       return;
     }
-    // Ticket de total de una Systel (22 + balanza + importe): solo si NO es la etiqueta de un
-    // producto que existe (una etiqueta con PLU que empieza en 2 también puede empezar con "22").
-    const asLabel = parseWeightBarcode(raw, scaleConfig);
-    const isKnownLabel = !!asLabel && products.some((p) => (p.active ?? true) && p.code === asLabel.plu);
-    const systelSum = isKnownLabel || products.some((p) => p.code === raw) ? null : parseSystelSumTicket(raw);
-    const ticketTotal = auraSum?.amount ?? systelSum ?? parseTicketTotalBarcode(raw);
-    if (ticketTotal !== null && !products.some((p) => p.code === raw)) {
-      const key = `ticket-${raw.padStart(13, "0")}`;
-      if (cart.some((l) => l.key === key)) {
+    if (resolved.type === "ticket_without_amount") {
+      setMessage("Este ticket de la balanza no trae el importe en el código de barras (con el formato actual de la balanza solo entran tickets de hasta $999,99). Cargá el TOTAL impreso con \"Vender algo sin código\" y avisale al encargado: en Productos → \"Balanza por cable\" → \"Mandar productos a la balanza\", Patagonia le ajusta el código de barras a la balanza.");
+      done();
+      return;
+    }
+    if (resolved.type === "ticket_total") {
+      const ticketTotal = resolved.amount;
+      if (cart.some((l) => l.key === resolved.key)) {
         setMessage("Ese ticket de la balanza ya está cargado en esta venta.");
       } else if (
-        // Con la Aura imprimiendo un código por producto, el ticket trae también el del total:
+        // Con la balanza imprimiendo un código por producto, el ticket trae también el del total:
         // si ya se escanearon los productos, cargar el total los cobraría dos veces.
         cart.some((l) => l.source === "scale") &&
         !window.confirm("Ya escaneaste productos de la balanza en esta venta. Si son de este mismo ticket, NO cargues también el total (se cobraría dos veces). ¿Cargar el total igual?")
@@ -265,45 +266,27 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       ) {
         setMessage("Ticket de la balanza no cargado. Revisá el importe o cargá los productos a mano.");
       } else {
-        setCart((current) => [...current, { key, kind: "manual", name: "Ticket de balanza", unit: "unit", quantity: 1, unitPrice: ticketTotal, source: "scale_total", scaleTickets: 1 }]);
-        setMessage(`Ticket de balanza cargado: ${formatMoney(ticketTotal)}.`);
+        setCart((current) => [...current, { key: resolved.key, kind: "manual", name: "Ticket de balanza", unit: "unit", quantity: 1, unitPrice: ticketTotal, source: "scale_total", scaleTickets: 1 }]);
+        setMessage(`Ticket de balanza cargado: ${formatMoney(ticketTotal)}. Ojo: el total no dice qué productos son, así que no descuenta stock.`);
       }
-      setSearch("");
-      setHighlightedIndex(-1);
+      done();
       return;
     }
-
-    const scanned = parseWeightBarcode(raw, scaleConfig);
-    if (scanned) {
-      const match = products.find((p) => (p.active ?? true) && p.code === scanned.plu);
-      if (match) {
-        if (
-          cart.some((l) => l.source === "scale_total") &&
-          !window.confirm("En esta venta ya está cargado el TOTAL de un ticket de la balanza. Si este producto es de ese mismo ticket, se cobraría dos veces. ¿Agregarlo igual?")
-        ) {
-          setMessage("No se agregó el producto.");
-          setSearch("");
-          setHighlightedIndex(-1);
-          return;
-        }
-        if (scanned.kind === "weight") {
-          quickAdd(match, scanned.weightKg, "scale");
-        } else {
-          // La balanza grabó el importe final, no el peso -- se recalcula
-          // la cantidad al precio actual del producto (mismo criterio que
-          // el peso: el precio no se lee del código, siempre se usa el
-          // precio vigente en el sistema).
-          // Al gramo (o milésima de unidad): la venta guarda 3 decimales y el total se calcula con eso.
-          const quantity = match.priceRetail > 0 ? Math.round((scanned.amount / match.priceRetail) * 1000) / 1000 : 0;
-          if (quantity > 0) quickAdd(match, quantity, "scale");
-        }
+    if (resolved.type === "label") {
+      if (
+        cart.some((l) => l.source === "scale_total") &&
+        !window.confirm("En esta venta ya está cargado el TOTAL de un ticket de la balanza. Si este producto es de ese mismo ticket, se cobraría dos veces. ¿Agregarlo igual?")
+      ) {
+        setMessage("No se agregó el producto.");
+        done();
         return;
       }
+      quickAdd(resolved.product, resolved.quantity, "scale");
+      setMessage(`Agregado: ${resolved.detail}.`);
+      return;
     }
-
-    const exactCode = products.find((p) => (p.active ?? true) && p.code.toLowerCase() === raw.toLowerCase());
-    if (exactCode) {
-      void addProductFromSearch(exactCode);
+    if (resolved.type === "product") {
+      void addProductFromSearch(resolved.product);
       return;
     }
 

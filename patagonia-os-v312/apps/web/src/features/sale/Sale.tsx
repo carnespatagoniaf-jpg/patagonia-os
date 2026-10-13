@@ -133,6 +133,13 @@ export function Sale() {
   const [pendingSales, setPendingSales] = useState<PendingSale[]>(() => getPendingSales());
   const [syncingOffline, setSyncingOffline] = useState(false);
   const syncingRef = useRef(false);
+  /**
+   * Clave de la venta que se está confirmando, atada a su contenido. Si el cobro falla y el cajero
+   * vuelve a tocar "Cobrar" con la MISMA venta, se reusa la clave: si la primera vez el servidor sí
+   * la había guardado (y se perdió la respuesta), devuelve esa misma venta y el stock no se descuenta
+   * dos veces. Si la venta cambió, es otra clave.
+   */
+  const saleKeyRef = useRef<{ fingerprint: string; key: string } | null>(null);
   const profileRef = useRef(profile);
   profileRef.current = profile;
 
@@ -566,8 +573,11 @@ export function Sale() {
         // clave), así el servidor puede reconocer un reintento y nunca
         // duplicar la venta aunque la confirmación se haya perdido en el
         // camino de vuelta.
-        idempotencyKey: crypto.randomUUID()
+        idempotencyKey: ""
       };
+      const fingerprint = JSON.stringify([salePayload.branchId, salePayload.posShiftId, salePayload.items, salePayload.payments, salePayload.discountAmount, salePayload.surchargeAmount]);
+      if (saleKeyRef.current?.fingerprint !== fingerprint) saleKeyRef.current = { fingerprint, key: crypto.randomUUID() };
+      salePayload.idempotencyKey = saleKeyRef.current.key;
 
       // Si no hay conexión, createPosSale rechaza por una falla de red (no
       // un rechazo real del servidor) -- en vez de cortar la venta, queda
@@ -600,6 +610,8 @@ export function Sale() {
         change,
         pending: queuedOffline
       };
+      // Venta guardada (o en la cola con su clave): la próxima es otra venta, con otra clave.
+      saleKeyRef.current = null;
       setReceipt(newReceipt);
       // Si quedó un comprobante de caja/proveedor/vale de antes en pantalla,
       // sacarlo -- las dos secciones son .print-area, y si las dos quedan

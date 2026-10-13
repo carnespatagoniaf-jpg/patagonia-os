@@ -8,3 +8,4 @@ dist/
 coverage/
 .netlify/
 *.tsbuildinfo
+tests/e2e/*.png
