@@ -25,6 +25,8 @@ export type ScanResolution =
   | { type: "label"; product: Product; quantity: number; plu: string; detail: string }
   | { type: "ticket_total"; amount: number; key: string }
   | { type: "ticket_without_amount"; message: string }
+  /** TOTAL de una Systel: el detalle se lee de la balanza por cable (si está conectada); si no, `message`. */
+  | { type: "systel_total"; amount: number; key: string; message: string }
   | { type: "error"; message: string }
   | { type: "search" };
 
@@ -75,7 +77,9 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
   const systel = labelProduct ? null : parseSystelSumTicket(raw);
   if (systel !== null) {
     return {
-      type: "error",
+      type: "systel_total",
+      amount: systel,
+      key: `ticket-${raw}`,
       message: `Ese es el código del TOTAL del ticket ($${systel.toLocaleString("es-AR")}): no dice qué productos son ni cuántos kilos, así que no se cargó. Escaneá el código que está debajo de CADA producto del ticket. Si debajo de un producto el código sale en ceros (0 000000 000000), buscá ese producto y escribí los kilos o unidades que dice el ticket.`
     };
   }

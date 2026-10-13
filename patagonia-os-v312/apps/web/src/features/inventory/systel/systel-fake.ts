@@ -29,6 +29,10 @@ export class FakeCuora implements SystelLink {
   ignoreConfig = false;
   /** Además de lo pedido, cambia otro parámetro (para probar el freno). */
   alsoTouch: [string, string] | null = null;
+  /** Reporte de ventas (función 72): artículos con la fecha "dd/mm/aa" que pide la PC. */
+  sales: { date: string; text: string }[] = [];
+  /** Separador entre un artículo y el siguiente en el reporte ("^" o nada: el documento no lo dice). */
+  salesSeparator: "^" | "" = "^";
 
   constructor(
     readonly layout: SystelLayout,
@@ -134,6 +138,20 @@ export class FakeCuora implements SystelLink {
         if (this.corruptAfterWrite === n) this.plus.set(n, rec.slice(0, pd + 1) + "X" + rec.slice(pd + 2));
         return this.reply(fn, "ACK");
       }
+      case 72: {
+        // DOCUMENTADO (V6.0 pág. 33, V7 págs. 30-31): pedido ddmmaa inicio + ddmmaa fin; respuesta con los
+        // artículos separados por "^" y una "F" al final.
+        if (!/^\d{12}$/.test(data)) return this.reply(fn, "E5");
+        const toIso = (x: string) => `20${x.slice(4, 6)}${x.slice(2, 4)}${x.slice(0, 2)}`;
+        const from = toIso(data.slice(0, 6));
+        const to = toIso(data.slice(6, 12));
+        const inRange = this.sales.filter((l) => {
+          const [d, m, y] = l.date.split("/");
+          const iso = `20${y}${m}${d}`;
+          return iso >= from && iso <= to;
+        });
+        return this.reply(fn, inRange.map((l) => l.text).join(this.salesSeparator) + "F");
+      }
       default:
         return this.reply(fn, "E4");
     }
@@ -148,4 +166,11 @@ export function fakeReadRecord(layout: SystelLayout, p: { number: number; name: 
   const nutrition = layout === "max7" ? "N" + " ".repeat(30) + "0000".repeat(12) : "N" + " ".repeat(30) + "0000".repeat(8);
   const tail = layout === "cuora2" ? "N" : "0000" + nutrition + "0001" + "0000" + "0000" + "000000000123" + "1" + "20PPPPIIIIII" + "N";
   return `${pad(p.number, info.pluDigits)}${p.managedBy ?? "0"}${p.name.padEnd(18).slice(0, 18)}${prices}${pad(p.code, info.codeDigits)}01${pad(5, 4)}${p.type}${pad(p.tare ?? 0, info.tareDigits)}${tail}`;
+}
+
+/** Un artículo del reporte de ventas (función 72) con los anchos del documento. */
+export function fakeSaleLine(l: { ticket: number; date: string; time: string; seller?: number; plu: number; sector?: number; units?: number; grams?: number; amount: number }): { date: string; text: string } {
+  const pad = (n: number, w: number) => String(n).padStart(w, "0");
+  const text = [pad(l.ticket, 9), l.date, l.time, pad(l.seller ?? 1, 2), pad(l.plu, 6), pad(l.sector ?? 1, 2), pad(l.units ?? 0, 4), pad(l.grams ?? 0, 5), pad(0, 5), pad(Math.round(l.amount * 100), 12)].join("^");
+  return { date: l.date, text };
 }

@@ -19,6 +19,7 @@ import {
   type SystelPlu,
   type SystelSignature
 } from "./systel-plu";
+import { salesReportRequest } from "./systel-sales";
 
 /**
  * Cliente Systel (Cuora 2 / Cuora Max). Seguridad primero:
@@ -56,7 +57,8 @@ export function replyIsComplete(rx: Uint8Array): boolean {
 /** Errores de transmisión: la balanza no hizo la orden, se puede volver a pedir. */
 const TRANSIENT_ERRORS = new Set(["E1", "E2", "E3"]);
 
-export const SYSTEL_READ_FUNCTIONS = [1, 2, 3, 23, 28, 31, 39, 62] as const;
+/** 72 = "Reporte de ventas" (V6.0/V6.2/V7): solo consulta, no cambia nada en la balanza. */
+export const SYSTEL_READ_FUNCTIONS = [1, 2, 3, 23, 28, 31, 39, 62, 72] as const;
 /**
  * Escrituras posibles, cada una solo a través de su método (que relee y compara):
  * 33 cambio de precio, 61/4 alta, 7 SOLO para "imprimir el código de barras en los tickets"
@@ -178,7 +180,10 @@ export class SystelClient {
     // misma función, control correcto y UNA sola trama posible. El contenido lo verifica después quien
     // lo interpreta (el número de PLU en la 62, el formato en 2/23/31/39, ACK o En en las escrituras).
     const want = address === 0 ? null : address;
-    const rx = await this.link.exchange(frame, { timeoutMs, isComplete: (b) => findSystelReplies(b, want, fn).length > 0 });
+    // Respuestas largas que terminan en "F" (lista 31, reporte 72): un tramo cortado puede dar el XOR
+    // bien por casualidad (1 en 256), así que además tiene que terminar en "F" (o ser un error/ACK corto).
+    const endsWithF = (bytes: Uint8Array) => bytes.length >= 2 && (bytes[bytes.length - 2] === 0x46 || bytes.length <= 6);
+    const rx = await this.link.exchange(frame, { timeoutMs, isComplete: (b) => findSystelReplies(b, want, fn).length > 0 && (fn !== 72 || endsWithF(b)) });
     const candidates = rx ? findSystelReplies(rx, want, fn) : [];
     const reply = candidates.length === 1 ? candidates[0].reply : null;
     const loose = rx ? parseSystelReply(rx) : null;
@@ -214,6 +219,19 @@ export class SystelClient {
   async config(): Promise<{ raw: string; values: Record<string, string> } | null> {
     const r = await this.call("configuración completa", 39, "");
     return r && r.kind === "data" ? { raw: r.data, values: parseConfig(r.data) } : null;
+  }
+
+  /**
+   * Reporte de ventas de un día (función 72, solo lectura): devuelve los datos tal cual (sin
+   * interpretar) para que `parseSalesReport` decida si coinciden con el documento. La respuesta
+   * tiene que terminar en "F" y con la verificación correcta; si no, se sigue esperando.
+   */
+  async salesReport(from: Date, to: Date = from): Promise<{ data: string } | { error: string }> {
+    const r = await this.call("reporte de ventas", 72, salesReportRequest(from, to), { timeoutMs: Math.max(this.timeoutMs, 20000) });
+    if (!r) return { error: "la balanza no contestó el reporte de ventas" };
+    if (r.kind === "error") return { error: `la balanza contestó ${r.errorCode} (${describeSystelError(r.errorCode)})` };
+    if (r.kind !== "data") return { error: `respuesta inesperada al reporte de ventas: "${r.data.slice(0, 40)}"` };
+    return { data: r.data };
   }
 
   async list(): Promise<{ entries: PluListEntry[]; digits: 4 | 6 | null } | null> {

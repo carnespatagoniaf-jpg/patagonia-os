@@ -657,6 +657,8 @@ export function Sale() {
       // el papel viejo en vez del ticket de esta venta (bug real reportado
       // en producción).
       setMovementReceipt(null);
+      // Los tickets de la balanza Systel de esta venta ya no se pueden volver a cargar en otra.
+      ticket.commitScaleTickets();
       clearTicket();
       setInvoiceDraft(emptyInvoiceDraft());
       // El ticket tiene que salir sí o sí -- se imprime antes de refrescar

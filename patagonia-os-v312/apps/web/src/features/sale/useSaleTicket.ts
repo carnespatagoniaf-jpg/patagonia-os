@@ -6,6 +6,8 @@ import type { ProductCategory } from "../inventory/product-categories-service";
 import { parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, type ScaleConfig } from "./scale-config-service";
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
 import { resolveScan } from "./scan-resolve";
+import { readSystelTicketFromScale, systelTicketReadConfigured } from "../inventory/systel/systel-ticket-from-scale";
+import { submitScaleSupportReport } from "../scales/support-service";
 import type { PosShift } from "./pos-shift-service";
 import type { PaymentRow, TicketLine } from "./sale-model";
 import { parseQuantity } from "./quantity";
@@ -32,6 +34,9 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [showProductTable, setShowProductTable] = useState(false);
   const [cart, setCart] = useState<TicketLine[]>([]);
+  /** Tickets de una Systel leídos de la balanza y cargados en ESTA venta (se marcan cobrados al cobrar). */
+  const systelTicketsRef = useRef<string[]>([]);
+  const [readingScaleTicket, setReadingScaleTicket] = useState(false);
   const [itemDiscounts, setItemDiscounts] = useState<Record<string, string>>({});
   const [saleDiscount, setSaleDiscount] = useState("");
   const [saleDiscountMode, setSaleDiscountMode] = useState<"amount" | "percent" | "final">("amount");
@@ -244,6 +249,15 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       done();
       return;
     }
+    if (resolved.type === "systel_total") {
+      done();
+      if (!systelTicketReadConfigured()) {
+        setMessage(resolved.message);
+        return;
+      }
+      void loadSystelTicket(resolved.amount);
+      return;
+    }
     if (resolved.type === "ticket_without_amount") {
       setMessage(resolved.message);
       done();
@@ -321,7 +335,51 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     );
   }
 
+  /**
+   * TOTAL de una Systel con la balanza conectada por cable: se lee el detalle del ticket de la balanza
+   * (función 72, solo lectura) y se carga cada artículo con los gramos o unidades que ella registró.
+   * Si no se puede leer o algo no coincide, NO se carga nada (ni el total sin stock).
+   */
+  async function loadSystelTicket(amount: number) {
+    if (readingScaleTicket) return;
+    setReadingScaleTicket(true);
+    setMessage(`Leyendo en la balanza el detalle del ticket de ${formatMoney(amount)}… no desenchufes el cable.`);
+    const usedKeys = [...loadChargedSystelTickets(), ...systelTicketsRef.current];
+    const r = await readSystelTicketFromScale({ amount, products, usedKeys });
+    setReadingScaleTicket(false);
+    if (r.ok) {
+      systelTicketsRef.current = [...systelTicketsRef.current, r.key];
+      for (const l of r.lines) quickAdd(l.product, l.quantity, "scale");
+      const detail = r.lines.map((l) => `${l.product.name} ${l.product.unit === "kg" ? `${l.quantity.toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg` : `${l.quantity} u.`}`).join(" + ");
+      setMessage(
+        `Ticket N.º ${Number(r.ticket.ticketId)} de la balanza (${r.ticket.time}): ${detail}.` +
+          (r.otherCandidates > 0 ? ` Ojo: hoy hay ${r.otherCandidates + 1} tickets de ${formatMoney(amount)}; se tomó el más reciente.` : "")
+      );
+    } else {
+      setMessage(
+        r.stage === "lectura"
+          ? `No se cargó nada: no se pudo leer el ticket en la balanza (${r.reason}). Escaneá el TOTAL de nuevo en unos segundos.`
+          : `No se cargó nada: ${r.reason}.`
+      );
+    }
+    // Todo lo que fue y vino por el cable le llega a soporte (sin pedirle nada al cliente).
+    void submitScaleSupportReport({
+      note: `Systel · Mostrador: detalle del ticket de ${amount} · ${r.ok ? `OK: ${r.lines.length} artículos` : `${r.stage}: ${r.reason}`}`,
+      logText: JSON.stringify(r.ok ? { ticket: r.ticket } : { stage: r.stage, reason: r.reason }),
+      connections: [{ displayName: "Systel (Mostrador)", driverId: "systel-cuora_max", status: "lectura", settings: {}, confirmedCapabilities: [], pairedAt: "", connectedNow: false, diagnosticRecord: { log: r.log.slice(-200), linkEvents: r.events.slice(-600) } } as never],
+      branchId: null
+    }).catch(() => {});
+  }
+
+  /** Después de cobrar (o encolar) la venta: esos tickets de la balanza ya no se pueden volver a cargar. */
+  function commitScaleTickets() {
+    if (!systelTicketsRef.current.length) return;
+    saveChargedSystelTickets([...loadChargedSystelTickets(), ...systelTicketsRef.current]);
+    systelTicketsRef.current = [];
+  }
+
   function clearTicket() {
+    systelTicketsRef.current = [];
     setCart([]);
     setItemDiscounts({});
     setSaleDiscount("");
@@ -408,7 +466,26 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSplit, busy, cart.length, shift, accounts, confirmCharge]);
 
-  return { search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
+  return { search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, commitScaleTickets, readingScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
 }
 
 export type SaleTicket = ReturnType<typeof useSaleTicket>;
+
+const CHARGED_SYSTEL_TICKETS_KEY = "patagonia-systel-charged-tickets";
+
+function loadChargedSystelTickets(): string[] {
+  try {
+    const raw = localStorage.getItem(CHARGED_SYSTEL_TICKETS_KEY);
+    return raw ? (JSON.parse(raw) as string[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveChargedSystelTickets(keys: string[]): void {
+  try {
+    localStorage.setItem(CHARGED_SYSTEL_TICKETS_KEY, JSON.stringify(keys.slice(-1000)));
+  } catch {
+    // sin localStorage: el control queda solo dentro de la venta
+  }
+}

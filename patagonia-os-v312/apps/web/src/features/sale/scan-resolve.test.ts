@@ -55,7 +55,7 @@ describe("[REAL] etiquetas de la balanza de Carnes Patagonia", () => {
 describe("[REAL] ticket de total de la Systel de Los gringos", () => {
   it("2220000007801 = $780: el TOTAL no se carga (no dice qué productos son); pide escanear cada producto", () => {
     const r = resolveScan(LOS_GRINGOS_TOTAL_TICKET[0], [product("5", "TROZADITOx1x2", "kg", 5200)], LOS_GRINGOS_LABEL_CONFIG);
-    assert.equal(r.type, "error");
+    assert.equal(r.type, "systel_total");
     assert.match((r as { message: string }).message, /TOTAL del ticket \(\$780\).*CADA producto/);
   });
 
@@ -64,7 +64,9 @@ describe("[REAL] ticket de total de la Systel de Los gringos", () => {
     const gringos = t.items.map((i) => product(i.plu, i.name, i.unit, i.unitPrice));
     assert.ok(validEan13(t.totalCode));
     const r = resolveScan(t.totalCode, gringos, LOS_GRINGOS_LABEL_CONFIG);
-    assert.equal(r.type, "error");
+    // Nunca kilos calculados: o se lee el detalle de la balanza (systel_total), o no se carga nada.
+    assert.equal(r.type, "systel_total");
+    assert.equal((r as { amount: number }).amount, 73118);
     assert.match((r as { message: string }).message, /\$73\.118/);
     // El código impreso debajo de cada artículo (todo ceros) no es de ningún producto.
     assert.equal(resolveScan(t.blankItemCode, gringos, LOS_GRINGOS_LABEL_CONFIG).type, "search");

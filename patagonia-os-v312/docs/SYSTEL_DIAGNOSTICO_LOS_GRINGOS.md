@@ -352,3 +352,26 @@ La secuencia de recuperación del E3 (1 → 0 → número) es una **HIPÓTESIS**
 - **Producción:** Netlify `6ac937fb0dec4c31d6693851` = `294d9d9`, con la escritura Systel bloqueada.
 - **Paquete:** `laboratorio-systel-<commit>.zip`, junto al repositorio. Las fuentes del lanzador y las instrucciones están en `tools/laboratorio-systel/`.
 - **Próximo paso:** Cuora Max de prueba → pasos 0 y 1 del `LEEME.txt` (3 informes) → analizar → si salen "aprobado", agregar el perfil "precio" para esa firma y ese formato exactos. El alta se valida aparte.
+
+## M. 2026-10-13 — Detalle del ticket desde la balanza (función 72) y revisión del E3
+
+**Problema real.** Ticket de 2 artículos (op. 20-3095): TOTAL `2202000731184` = 22 + 02 artículos + $73.118; debajo de cada artículo `0 000000 000000`. El código no trae productos ni cantidades.
+
+**Vía elegida: leer el ticket de la balanza (solo lectura).** Función 72 "Reporte de ventas", documentada igual en V6.0 (pág. 33), V6.2 y V7 (págs. 30-31): pedido `ddmmaa` inicio + `ddmmaa` fin; respuesta por artículo `Ticket Id(9)^fecha^hora^vendedor(2)^PLU(6)^sector(2)^unidades(4)^gramos(5)^drenado(5)^importe(12, ×100)` y `F` al final. Implementado en `systel-sales.ts` / `systel-ticket-detail.ts` / `systel-ticket-from-scale.ts`; Mostrador la usa al escanear el TOTAL si la PC tiene la Systel guardada por cable. Busca el ticket de HOY con ese total exacto, y cada artículo se carga con los gramos/unidades de la balanza. Se comprueba que cantidad × precio de Patagonia = importe de la balanza (±$1); si no, no carga nada. Nunca cobra el total sin detalle.
+- **Nunca leída en una balanza real.** El formato sale del documento, y si no coincide exactamente se rechaza y el registro llega a soporte.
+- Supuesto: N.º de PLU = código del producto (en Los gringos el ticket imprime "(C.PLU) 2" para el cajón y es el código 2). Lo protege la comprobación de importe.
+
+**E3 = "Se desatendieron datos" (documento, pág. 4).** Revisión de los 6 registros del 13/10 (hora AR):
+
+| Hora | Resultado |
+|---|---|
+| 11:52:31 | anduvo (ping + configuración) |
+| 11:53:58 | E3 a todo |
+| 11:54:26 | E3 a todo |
+| 12:15:44 | E3 a todo |
+| 12:16:22 | anduvo de nuevo, misma secuencia, **sin que conste ningún reinicio** |
+
+- En las sesiones con E3 la balanza contesta cada orden, con su número y la verificación bien: la línea funciona y es la balanza la que no atiende.
+- La secuencia enviada fue idéntica en las sesiones buenas y en las malas, así que el estado viene de la balanza, no de esa sesión.
+- Esto contradice la hipótesis "queda trabada hasta apagarla después de la primera sesión".
+- Hipótesis compatible con todo: la balanza está ocupada (operando o con un ticket abierto) en ese momento. **No comprobada.** La 72 reintenta 5 veces (~10 s) y si sigue E3 no carga nada.
