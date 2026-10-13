@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Settings } from "lucide-react";
 import * as Sentry from "@sentry/react";
 import type { Product } from "@patagonia/domain";
@@ -19,7 +19,8 @@ import { getFiscalSettings, requestInvoice, type FiscalSettings } from "../invoi
 import { emptyInvoiceDraft, invoiceDraftError, type InvoiceDraft } from "../invoicing/invoicing-view";
 import { InvoiceRequestFields } from "../invoicing/InvoiceRequestFields";
 import { addPendingSale, getPendingSales, isRetryableError, isShiftClosedError, markPendingSaleError, removePendingSale, resetPendingSaleErrors, updatePendingSale, type PendingSale } from "./offline-queue";
-import { closePosShift, deletePosShiftAdjustment, getOpenPosShift, listPosShiftAdjustments, listPosShiftSupplierPayments, type PosShiftSupplierPayment, listPosShiftSales, openPosShift, voidPosSale, type CloseShiftResult, type PosShift, type PosShiftAdjustment, type PosShiftSale } from "./pos-shift-service";
+import { closePosShift, deletePosShiftAdjustment, getOpenPosShift, listPosCashiers, listPosShiftAdjustments, listPosShiftSupplierPayments, type PosShiftSupplierPayment, listPosShiftSales, openPosShift, voidPosSale, type CloseShiftResult, type PosCashier, type PosShift, type PosShiftAdjustment, type PosShiftSale, type SafeDepositResult } from "./pos-shift-service";
+import { CashControlPanel } from "./CashControlPanel";
 import { formatMoney } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
 import { buildTestTicket, getThermalPrintSettings, isThermalPrinterPaired, printBytes } from "./thermal-printer";
@@ -37,7 +38,13 @@ import { type ReceiptLine, type ReceiptState, type MovementReceiptState, STALE_S
 export function Sale() {
   const { branchId, branches } = useActiveBranch();
   const { profile } = useAuth();
-  const { accounts, adjust } = useTreasury();
+  const { accounts: allAccounts, adjust } = useTreasury();
+  // La caja fuerte (migración 117) no es un medio de cobro: recibe los
+  // retiros desde "Guardar en caja fuerte".
+  const accounts = useMemo(() => allAccounts.filter((a) => !a.isSafe), [allAccounts]);
+  const [cashiers, setCashiers] = useState<PosCashier[]>([]);
+  const [openCashierId, setOpenCashierId] = useState("");
+  const [openCashierPin, setOpenCashierPin] = useState("");
   const { suppliers } = useSuppliers();
   const { employees } = useEmployees();
   // "treasury.manage" (dueño/admin) da acceso a la pantalla completa de
@@ -76,7 +83,6 @@ export function Sale() {
   const [showShiftTotals, setShowShiftTotals] = useState(false);
   const [openingCashInput, setOpeningCashInput] = useState("");
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
-  const [closingCountedCashInput, setClosingCountedCashInput] = useState("");
   const [closeSummary, setCloseSummary] = useState<CloseShiftResult | null>(null);
   const [closeDetail, setCloseDetail] = useState<PosShiftSale[]>([]);
   /** Foto de los "Movimiento de caja" (egresos a la caja fuerte, ingresos,
@@ -244,6 +250,13 @@ export function Sale() {
     void getMostradorPin().then(setMostradorPinValue);
   }, []);
 
+  useEffect(() => {
+    if (!isSupabaseConfigured || !branchId) return;
+    setOpenCashierId("");
+    setOpenCashierPin("");
+    void listPosCashiers(branchId).then(setCashiers).catch(() => setCashiers([]));
+  }, [branchId]);
+
 
   useEffect(() => {
     saveStoredReceipt(receipt);
@@ -388,6 +401,25 @@ export function Sale() {
     await autoPrintMovementReceipt(data);
   }
 
+  /** Papelito del retiro a caja fuerte: se imprime SIEMPRE (aunque "Imprimir
+   * automáticamente" esté apagado), porque va adentro de la caja fuerte con
+   * la plata y es lo que el dueño compara al contarla. */
+  async function publishSafeDeposit(deposit: SafeDepositResult) {
+    const data: MovementReceiptState = {
+      title: `RETIRO A CAJA FUERTE N.º ${deposit.number}`,
+      date: deposit.createdAt,
+      amount: deposit.amount,
+      accountName: `${deposit.fromAccountName} -> ${deposit.safeAccountName}`,
+      detail: "Guardar este papel adentro de la caja fuerte junto con la plata.",
+      counterpartLabel: "Cajera",
+      counterpartName: deposit.employeeName ?? profile?.full_name ?? "-"
+    };
+    setReceipt(null);
+    setMovementReceipt(data);
+    setMessage(`Retiro N.º ${deposit.number} anotado: ${formatMoney(deposit.amount)} a la caja fuerte. Guardá el papelito con la plata.`);
+    await autoPrintMovementReceipt(data, true);
+  }
+
   function handlePinSuccess() {
     setPinUnlocked(true);
     if (pinPromptFor === "movements") setShowShiftMovements(true);
@@ -449,11 +481,17 @@ export function Sale() {
       return;
     }
     if (!branchId) return;
+    const cashier = cashiers.find((c) => c.employeeId === openCashierId) ?? null;
+    if (cashiers.length > 0 && (!cashier || !openCashierPin.trim())) {
+      setMessage("Elegí quién atiende la caja y poné su PIN.");
+      return;
+    }
     setBusy(true);
     try {
-      setShift(await openPosShift(branchId, openingCash));
+      setShift(await openPosShift(branchId, openingCash, cashier ? { employeeId: cashier.employeeId, pin: openCashierPin.trim(), fullName: cashier.fullName } : null));
       setShiftSales([]);
       setOpeningCashInput("");
+      setOpenCashierPin("");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo abrir el turno.");
     } finally {
@@ -687,12 +725,11 @@ export function Sale() {
     }
   }
 
-  async function handleCloseShift() {
+  async function handleCloseShift(countedCash: number, declaredAccounts: Record<string, string>) {
     if (!shift) return;
     setBusy(true);
     setMessage("");
     try {
-      const countedCash = closingCountedCashInput ? parseAmount(closingCountedCashInput) : undefined;
       if (!isSupabaseConfigured) {
         const cashSalesDemo = activeShiftSales.reduce((sum, s) => sum + s.total, 0);
         const expectedCash = shift.openingCash + cashSalesDemo;
@@ -700,8 +737,8 @@ export function Sale() {
           total: shiftTotal,
           byAccount: [],
           expectedCash,
-          countedCash: countedCash ?? null,
-          difference: countedCash !== undefined ? countedCash - expectedCash : null,
+          countedCash,
+          difference: countedCash - expectedCash,
           breakdown: null
         });
         setCloseDetail(activeShiftSales);
@@ -712,7 +749,6 @@ export function Sale() {
         setShift(null);
         setShiftSales([]);
         setShowCloseConfirm(false);
-        setClosingCountedCashInput("");
         return;
       }
       const detailSnapshot = activeShiftSales;
@@ -736,9 +772,9 @@ export function Sale() {
       setCloseDetail(detailSnapshot);
       setCloseAdjustments(adjustmentsSnapshot);
       setCloseVales(valesSnapshot);
-      setAccountReconcileInput({});
+      // Lo que la cajera declaró por cada posnet/transferencia queda en la tabla del cierre.
+      setAccountReconcileInput(declaredAccounts);
       setShowCloseConfirm(false);
-      setClosingCountedCashInput("");
       await reloadShift();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo cerrar el turno.");
@@ -864,8 +900,8 @@ export function Sale() {
 
   /** Mismo criterio que autoPrintReceipt, para el comprobante de caja/pago
    * a proveedor/vale a empleado. */
-  async function autoPrintMovementReceipt(mov: MovementReceiptState) {
-    if (!autoPrintEnabled) return;
+  async function autoPrintMovementReceipt(mov: MovementReceiptState, force = false) {
+    if (!autoPrintEnabled && !force) return;
     if (await isThermalPrinterPaired()) {
       try {
         await printBytes(buildMovementTicket(mov));
@@ -971,6 +1007,25 @@ export function Sale() {
             Abrí un turno para empezar a cobrar. Las ventas se van sumando y recién se cargan a Tesorería cuando cerrás el turno.
           </p>
           <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
+            {cashiers.length > 0 && (
+              <>
+                <select value={openCashierId} onChange={(e) => setOpenCashierId(e.target.value)}>
+                  <option value="">¿Quién atiende la caja?</option>
+                  {cashiers.map((c) => (
+                    <option key={c.employeeId} value={c.employeeId}>{c.fullName}</option>
+                  ))}
+                </select>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder="PIN"
+                  value={openCashierPin}
+                  onChange={(e) => setOpenCashierPin(e.target.value.replace(/\D/g, ""))}
+                  style={{ width: 80 }}
+                />
+              </>
+            )}
             <label className="muted">Fondo inicial de caja $</label>
             <input
               type="text"
@@ -1042,14 +1097,21 @@ export function Sale() {
               }
               setShowCloseConfirm(true);
             }}
-            closingCountedCashInput={closingCountedCashInput}
-            onCountedCashChange={setClosingCountedCashInput}
-            onConfirmClose={handleCloseShift}
+            cashiers={cashiers}
+            onConfirmClose={(countedCash, declared) => void handleCloseShift(countedCash, declared)}
             onCancelClose={() => setShowCloseConfirm(false)}
+            onSalesChanged={async () => {
+              if (shift && isSupabaseConfigured) setShiftSales(await listPosShiftSales(shift.id));
+            }}
+            onSafeDeposit={publishSafeDeposit}
             onMessage={setMessage}
             publishReceipt={publishMovementReceipt}
           />
         </div>
+      )}
+
+      {canSeeShiftTotals && isSupabaseConfigured && branchId && (
+        <CashControlPanel branchId={branchId} onMessage={setMessage} adjust={adjust} />
       )}
 
       {receipt && (

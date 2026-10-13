@@ -208,6 +208,9 @@ export interface TreasuryAccount {
    * (el comportamiento de siempre). */
   branchId?: string;
   branchName?: string;
+  /** Caja fuerte (migración 117): recibe los retiros de Mostrador y no se
+   * ofrece como medio de cobro. */
+  isSafe?: boolean;
 }
 
 export type TreasuryMovementDirection = "in" | "out";

@@ -6,6 +6,8 @@ import { addDaysIso, formatMoney, todayIso } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { listPayrollLiquidationDetail, type PayrollLiquidationLineItem } from "./employees-service";
+import { listPosCashiers } from "../sale/pos-shift-service";
+import { setEmployeePosPin } from "../sale/cash-control-service";
 
 const ADJUSTMENT_TYPE_LABELS: Record<PayrollAdjustmentType, string> = {
   bonus: "Premio",
@@ -88,6 +90,45 @@ export function Employees() {
 
   const [periodStart, setPeriodStart] = useState(addDaysIso(todayIso(), -6));
   const [periodEnd, setPeriodEnd] = useState(todayIso());
+
+  // PIN de caja (migración 117): quién atiende Mostrador. Solo se sabe quién
+  // tiene PIN, nunca el PIN.
+  const [pinHolders, setPinHolders] = useState<Set<string>>(new Set());
+  const [pinInput, setPinInput] = useState("");
+  const [pinBusy, setPinBusy] = useState(false);
+
+  async function reloadPinHolders() {
+    if (!isSupabaseConfigured) return;
+    try {
+      const cashiers = await listPosCashiers(null);
+      setPinHolders(new Set(cashiers.map((c) => c.employeeId)));
+    } catch {
+      setPinHolders(new Set());
+    }
+  }
+
+  useEffect(() => {
+    void reloadPinHolders();
+  }, []);
+
+  async function handleSavePin(employeeId: string, pin: string | null) {
+    setMessage("");
+    if (pin !== null && !/^[0-9]{4,6}$/.test(pin.trim())) {
+      setMessage("El PIN de caja tiene que ser de 4 a 6 números.");
+      return;
+    }
+    setPinBusy(true);
+    try {
+      await setEmployeePosPin(employeeId, pin === null ? null : pin.trim());
+      setPinInput("");
+      await reloadPinHolders();
+      setMessage(pin === null ? "PIN de caja quitado." : "PIN de caja guardado. Desde ahora, para abrir y cerrar la caja en Mostrador se elige quién atiende y se pone su PIN.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo guardar el PIN.");
+    } finally {
+      setPinBusy(false);
+    }
+  }
 
   const [receipt, setReceipt] = useState<{ liquidation: PayrollLiquidation; items: PayrollLiquidationLineItem[] } | null>(null);
   const [receiptLoading, setReceiptLoading] = useState(false);
@@ -395,6 +436,33 @@ export function Employees() {
               )}
               <span>Estado <b>{selectedEmployee.active ? "Activo" : "Inactivo"}</b></span>
               <button className="secondary" style={{ marginTop: 10 }} onClick={() => setEditingEmployee(true)}>Editar</button>
+            </div>
+          )}
+          {selectedEmployee && !editingEmployee && isSupabaseConfigured && (
+            <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid #e6e8ee" }}>
+              <p style={{ margin: "0 0 6px", fontWeight: 700 }}>
+                PIN de caja {pinHolders.has(selectedEmployee.id) ? <span className="num-positive">· tiene PIN</span> : <span className="muted">· sin PIN</span>}
+              </p>
+              <p className="muted" style={{ margin: "0 0 8px", fontSize: 13 }}>
+                Si atiende la caja, ponele un PIN de 4 a 6 números. Al abrir y cerrar la caja en Mostrador elige su nombre y pone el PIN, así cada cierre y cada retiro queda con su nombre.
+              </p>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <input
+                  type="password"
+                  inputMode="numeric"
+                  maxLength={6}
+                  placeholder={pinHolders.has(selectedEmployee.id) ? "PIN nuevo" : "PIN"}
+                  value={pinInput}
+                  onChange={(e) => setPinInput(e.target.value.replace(/D/g, ""))}
+                  style={{ width: 120 }}
+                />
+                <button disabled={pinBusy || !pinInput} onClick={() => handleSavePin(selectedEmployee.id, pinInput)}>
+                  {pinHolders.has(selectedEmployee.id) ? "Cambiar PIN" : "Guardar PIN"}
+                </button>
+                {pinHolders.has(selectedEmployee.id) && (
+                  <button className="secondary" disabled={pinBusy} onClick={() => handleSavePin(selectedEmployee.id, null)}>Quitar PIN</button>
+                )}
+              </div>
             </div>
           )}
           {selectedEmployee && editingEmployee && (

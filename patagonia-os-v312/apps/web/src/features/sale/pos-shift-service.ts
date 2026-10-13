@@ -1,11 +1,15 @@
 import type { ProductSalesRow } from "../shifts/sales-by-category";
 import { supabase } from "../../lib/supabase";
 import { localDateIso } from "../shifts/format";
+import { parseCountResult, type CountResult, type DeclaredPayload } from "./cash-close";
 
 export interface PosShift {
   id: string;
   openedAt: string;
   openingCash: number;
+  /** Quién atiende la caja (elegida con PIN al abrir, migración 117). */
+  cashierEmployeeId?: string | null;
+  cashierName?: string | null;
 }
 
 export async function getOpenPosShift(branchId: string): Promise<PosShift | null> {
@@ -13,22 +17,115 @@ export async function getOpenPosShift(branchId: string): Promise<PosShift | null
 
   const { data, error } = await supabase
     .from("pos_shifts")
-    .select("id,opened_at,opening_cash")
+    .select("id,opened_at,opening_cash,cashier_employee_id")
     .eq("branch_id", branchId)
     .eq("status", "open")
     .maybeSingle();
 
   if (error) throw error;
   if (!data) return null;
-  return { id: data.id, openedAt: data.opened_at, openingCash: Number(data.opening_cash ?? 0) };
+  const cashierEmployeeId = (data as { cashier_employee_id?: string | null }).cashier_employee_id ?? null;
+  let cashierName: string | null = null;
+  if (cashierEmployeeId) {
+    // Por RPC y no por embed: un plan sin Empleados lee la tabla vacía.
+    const cashiers = await listPosCashiers(branchId).catch(() => []);
+    cashierName = cashiers.find((c) => c.employeeId === cashierEmployeeId)?.fullName ?? null;
+  }
+  return { id: data.id, openedAt: data.opened_at, openingCash: Number(data.opening_cash ?? 0), cashierEmployeeId, cashierName };
 }
 
-export async function openPosShift(branchId: string, openingCash = 0): Promise<PosShift> {
+export interface PosCashier {
+  employeeId: string;
+  fullName: string;
+}
+
+/** Empleadas con PIN de caja para esta sucursal. Lista vacía = no se pide
+ * cajera al abrir (como siempre). */
+export async function listPosCashiers(branchId: string | null): Promise<PosCashier[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase.rpc("list_pos_cashiers", { p_branch_id: branchId });
+  if (error) {
+    // Base sin la migración 117: sin cajeras, como antes.
+    if (error.code === "PGRST202" || error.code === "42883") return [];
+    throw error;
+  }
+  return ((data ?? []) as { employee_id: string; full_name: string }[]).map((r) => ({ employeeId: r.employee_id, fullName: r.full_name }));
+}
+
+export async function openPosShift(
+  branchId: string,
+  openingCash = 0,
+  cashier?: { employeeId: string; pin: string; fullName: string } | null
+): Promise<PosShift> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
-  const { data, error } = await supabase.rpc("open_pos_shift", { p_branch_id: branchId, p_opening_cash: openingCash });
+  const params: Record<string, unknown> = { p_branch_id: branchId, p_opening_cash: openingCash };
+  if (cashier) {
+    params.p_cashier_employee_id = cashier.employeeId;
+    params.p_cashier_pin = cashier.pin;
+  }
+  const { data, error } = await supabase.rpc("open_pos_shift", params);
   if (error) throw error;
-  return { id: data.id, openedAt: new Date().toISOString(), openingCash };
+  return {
+    id: data.id,
+    openedAt: new Date().toISOString(),
+    openingCash,
+    cashierEmployeeId: cashier?.employeeId ?? null,
+    cashierName: cashier?.fullName ?? null
+  };
+}
+
+export interface SafeDepositResult {
+  id: string;
+  number: number;
+  amount: number;
+  createdAt: string;
+  employeeName: string | null;
+  safeAccountName: string;
+  fromAccountName: string;
+}
+
+/** "Guardar en caja fuerte": traspaso Efectivo -> Caja fuerte con número
+ * correlativo para el papelito que va adentro con la plata. */
+export async function registerPosSafeDeposit(posShiftId: string, amount: number, fromAccountId?: string | null): Promise<SafeDepositResult> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { data, error } = await supabase.rpc("register_pos_safe_deposit", {
+    p_pos_shift_id: posShiftId,
+    p_amount: amount,
+    p_from_account_id: fromAccountId ?? null
+  });
+  if (error) throw error;
+  return {
+    id: data.id,
+    number: Number(data.number),
+    amount: Number(data.amount),
+    createdAt: data.created_at,
+    employeeName: data.employee_name ?? null,
+    safeAccountName: data.safe_account_name ?? "Caja fuerte",
+    fromAccountName: data.from_account_name ?? "Efectivo"
+  };
+}
+
+export async function checkPosShiftCount(
+  posShiftId: string,
+  declared: DeclaredPayload,
+  cashier?: { employeeId: string; pin: string } | null
+): Promise<CountResult> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { data, error } = await supabase.rpc("check_pos_shift_count", {
+    p_pos_shift_id: posShiftId,
+    p_declared: declared,
+    p_employee_id: cashier?.employeeId ?? null,
+    p_pin: cashier?.pin ?? null
+  });
+  if (error) throw error;
+  return parseCountResult(data as Record<string, unknown>);
+}
+
+export async function changePosSalePaymentAccount(paymentId: string, accountId: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("change_pos_sale_payment_account", { p_payment_id: paymentId, p_account_id: accountId });
+  if (error) throw error;
 }
 
 export interface CloseShiftAccountSummary {
@@ -240,6 +337,8 @@ export interface PosShiftSaleItem {
 }
 
 export interface PosShiftSalePayment {
+  id?: string;
+  accountId?: string;
   accountName: string;
   amount: number;
   reference: string | null;
@@ -263,7 +362,7 @@ interface PosShiftSaleRow {
   surcharge_amount: number;
   total: number;
   voided_at: string | null;
-  pos_sale_payments: { amount: number; reference: string | null; treasury_accounts: { name: string } | null }[];
+  pos_sale_payments: { id: string; account_id: string; amount: number; reference: string | null; treasury_accounts: { name: string } | null }[];
   pos_sale_items: {
     quantity: number;
     unit_price: number;
@@ -359,7 +458,7 @@ export async function listPosShiftSales(shiftId: string): Promise<PosShiftSale[]
     .from("pos_sales")
     .select(
       "id,created_at,discount_amount,surcharge_amount,total,voided_at," +
-        "pos_sale_payments(amount,reference,treasury_accounts(name))," +
+        "pos_sale_payments(id,account_id,amount,reference,treasury_accounts(name))," +
         "pos_sale_items(quantity,unit_price,discount_amount,line_total,description,product_id)"
     )
     .eq("pos_shift_id", shiftId)
@@ -389,7 +488,7 @@ export async function listPosShiftSales(shiftId: string): Promise<PosShiftSale[]
   return rows.map((row) => ({
     id: row.id,
     createdAt: row.created_at,
-    payments: row.pos_sale_payments.map((p) => ({ accountName: p.treasury_accounts?.name ?? "-", amount: Number(p.amount), reference: p.reference })),
+    payments: row.pos_sale_payments.map((p) => ({ id: p.id, accountId: p.account_id, accountName: p.treasury_accounts?.name ?? "-", amount: Number(p.amount), reference: p.reference })),
     discountAmount: Number(row.discount_amount),
     surchargeAmount: Number(row.surcharge_amount ?? 0),
     total: Number(row.total),

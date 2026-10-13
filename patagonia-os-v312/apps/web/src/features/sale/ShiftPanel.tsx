@@ -8,7 +8,8 @@ import type { useSuppliers } from "../purchases/useSuppliers";
 import type { useEmployees } from "../employees/useEmployees";
 import type { useTreasury } from "../shifts/useTreasury";
 import { registerEmployeeValeFromPosShift, type PosShiftVale } from "../employees/employees-service";
-import { registerPosShiftTransfer, type PosShift, type PosShiftAdjustment, type PosShiftSale } from "./pos-shift-service";
+import { registerPosSafeDeposit, registerPosShiftTransfer, type PosCashier, type PosShift, type PosShiftAdjustment, type PosShiftSale, type SafeDepositResult } from "./pos-shift-service";
+import { BlindCloseForm } from "./BlindCloseForm";
 import { formatShiftStart, type MovementReceiptState } from "./sale-model";
 import type { Product } from "@patagonia/domain";
 import type { ScaleConfig } from "./scale-barcode";
@@ -336,6 +337,70 @@ function EmployeeValeForm({ visible, shift, accounts, employees, onMessage, publ
   );
 }
 
+/** "Guardar en caja fuerte": solo el monto. Imprime el papelito con número
+ * que va adentro de la caja fuerte junto con la plata (migración 117). */
+function SafeDepositForm({ visible, shift, accounts, onMessage, onDone, onMovementsChanged, onClose }: {
+  visible: boolean;
+  shift: PosShift;
+  accounts: TreasuryAccount[];
+  onMessage: (message: string) => void;
+  onDone: (deposit: SafeDepositResult) => Promise<void>;
+  onMovementsChanged: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const cashAccounts = accounts.filter((a) => a.paymentMethod === "cash");
+  const [amountInput, setAmountInput] = useState("");
+  const [fromAccountId, setFromAccountId] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  async function handleSave() {
+    onMessage("");
+    const amount = parseAmount(amountInput || "0") || 0;
+    if (!(amount > 0)) { onMessage("Poné cuánta plata guardás en la caja fuerte."); return; }
+    if (cashAccounts.length > 1 && !fromAccountId) { onMessage("Elegí de qué caja sale la plata."); return; }
+    setBusy(true);
+    try {
+      const deposit = await registerPosSafeDeposit(shift.id, amount, cashAccounts.length > 1 ? fromAccountId : cashAccounts[0]?.id ?? null);
+      await onMovementsChanged();
+      await onDone(deposit);
+      setAmountInput("");
+      onClose();
+    } catch (err) {
+      onMessage(`No se pudo anotar el retiro a la caja fuerte. ${errorDetail(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!visible) return null;
+  return (
+    <div className="panel" style={{ padding: 12, display: "grid", gap: 8 }}>
+      <p style={{ margin: 0, fontWeight: 700 }}>¿Cuánto guardás en la caja fuerte?</p>
+      {cashAccounts.length > 1 && (
+        <select value={fromAccountId} onChange={(e) => setFromAccountId(e.target.value)}>
+          <option value="">Sale de…</option>
+          {cashAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+      )}
+      <input
+        type="text"
+        inputMode="decimal"
+        placeholder="Monto"
+        autoFocus
+        value={amountInput}
+        onChange={(e) => setAmountInput(e.target.value)}
+        onKeyDown={(e) => { if (e.key === "Enter") void handleSave(); }}
+        style={{ fontSize: 18 }}
+      />
+      <p className="muted" style={{ margin: 0, fontSize: 12 }}>Sale un papelito con número: va adentro de la caja fuerte junto con la plata.</p>
+      <div style={{ display: "flex", gap: 8 }}>
+        <button disabled={busy} onClick={handleSave}>{busy ? "Guardando…" : "Listo, guardado"}</button>
+        <button className="secondary" onClick={onClose}>Cancelar</button>
+      </div>
+    </div>
+  );
+}
+
 /* ------------------------------ panel ------------------------------ */
 
 export interface ShiftPanelProps {
@@ -384,10 +449,13 @@ export interface ShiftPanelProps {
 
   showCloseConfirm: boolean;
   onRequestClose: () => void;
-  closingCountedCashInput: string;
-  onCountedCashChange: (value: string) => void;
-  onConfirmClose: () => void;
+  /** Cajeras con PIN (vacío = no se pide quién cierra). */
+  cashiers: PosCashier[];
+  onConfirmClose: (countedCash: number, declaredAccounts: Record<string, string>) => void;
   onCancelClose: () => void;
+  onSalesChanged: () => Promise<void>;
+  /** Papelito del retiro a caja fuerte: se muestra e imprime siempre. */
+  onSafeDeposit: (deposit: SafeDepositResult) => Promise<void>;
 
   onMessage: (message: string) => void;
   publishReceipt: (data: MovementReceiptState) => Promise<void>;
@@ -397,9 +465,10 @@ export function ShiftPanel(p: ShiftPanelProps) {
   const { shift, canSeeShiftTotals, canManageTreasury } = p;
   const form = { shift, accounts: p.accounts, onMessage: p.onMessage, publishReceipt: p.publishReceipt };
   const [showScaleVoid, setShowScaleVoid] = useState(false);
+  const [showSafeForm, setShowSafeForm] = useState(false);
   const [scaleControlStatus, setScaleControlStatus] = useState({ needed: false, saved: false });
 
-  function confirmCloseWithScaleCheck() {
+  function confirmCloseWithScaleCheck(countedCash: number, declaredAccounts: Record<string, string>) {
     if (
       scaleControlStatus.needed &&
       !scaleControlStatus.saved &&
@@ -407,7 +476,7 @@ export function ShiftPanel(p: ShiftPanelProps) {
     ) {
       return;
     }
-    p.onConfirmClose();
+    p.onConfirmClose(countedCash, declaredAccounts);
   }
 
   return (
@@ -416,6 +485,9 @@ export function ShiftPanel(p: ShiftPanelProps) {
         <h2>Turno</h2>
         <span className="muted" style={{ fontSize: 12 }}>desde {formatShiftStart(shift.openedAt)}</span>
       </div>
+      {shift.cashierName && (
+        <p style={{ margin: "-6px 0 12px", fontSize: 13 }}>Atiende: <strong>{shift.cashierName}</strong></p>
+      )}
 
       {canSeeShiftTotals && p.showShiftTotals && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>
@@ -431,6 +503,26 @@ export function ShiftPanel(p: ShiftPanelProps) {
       )}
 
       <div style={{ display: "grid", gap: 8 }}>
+        {canManageTreasury && (
+          <button
+            className="pos-toolbar-btn"
+            style={{ border: "2px solid #2563eb", color: "#1d4ed8", fontWeight: 700 }}
+            onClick={() => setShowSafeForm((v) => !v)}
+          >
+            {showSafeForm ? "Cancelar caja fuerte" : "Guardar en caja fuerte"}
+          </button>
+        )}
+        {canManageTreasury && (
+          <SafeDepositForm
+            visible={showSafeForm}
+            shift={shift}
+            accounts={p.accounts}
+            onMessage={p.onMessage}
+            onDone={p.onSafeDeposit}
+            onMovementsChanged={p.onMovementsChanged}
+            onClose={() => setShowSafeForm(false)}
+          />
+        )}
         {canSeeShiftTotals && (
           <button className="pos-toolbar-btn" onClick={p.onToggleShiftTotals}>
             {p.showShiftTotals ? "Ocultar total del turno" : "Ver total del turno"}
@@ -584,21 +676,17 @@ export function ShiftPanel(p: ShiftPanelProps) {
       {p.showCloseConfirm && (
         <div style={{ marginTop: 14 }}>
           <ScaleCloseControl shift={shift} onStatusChange={setScaleControlStatus} />
-          <p className="muted">¿Cerrar el turno y cargar {formatMoney(p.shiftTotal)} a Tesorería? No se puede deshacer.</p>
-          <div style={{ display: "grid", gap: 8, marginBottom: 10 }}>
-            <label className="muted" style={{ fontSize: 13 }}>Efectivo contado (arqueo) $</label>
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="0"
-              value={p.closingCountedCashInput}
-              onChange={(e) => p.onCountedCashChange(e.target.value)}
-            />
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <button disabled={p.busy} onClick={confirmCloseWithScaleCheck}>{p.busy ? "Cerrando…" : "Confirmar cierre"}</button>
-            <button className="secondary" onClick={p.onCancelClose}>Cancelar</button>
-          </div>
+          <BlindCloseForm
+            shift={shift}
+            accounts={p.accounts}
+            cashiers={p.cashiers}
+            shiftSales={p.shiftSales}
+            busy={p.busy}
+            onSalesChanged={p.onSalesChanged}
+            onRequestSafeDeposit={() => setShowSafeForm(true)}
+            onConfirmClose={confirmCloseWithScaleCheck}
+            onCancel={p.onCancelClose}
+          />
         </div>
       )}
     </aside>

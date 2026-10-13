@@ -9,6 +9,7 @@ interface TreasuryAccountRow {
   active: boolean;
   branch_id: string | null;
   branches: { name: string } | null;
+  is_safe?: boolean | null;
 }
 
 function mapAccount(row: TreasuryAccountRow): TreasuryAccount {
@@ -19,7 +20,8 @@ function mapAccount(row: TreasuryAccountRow): TreasuryAccount {
     initialBalance: Number(row.initial_balance),
     active: row.active,
     branchId: row.branch_id ?? undefined,
-    branchName: row.branches?.name ?? undefined
+    branchName: row.branches?.name ?? undefined,
+    isSafe: row.is_safe === true
   };
 }
 
@@ -32,7 +34,7 @@ export async function listTreasuryAccounts(branchId?: string): Promise<TreasuryA
 
   let query = supabase
     .from("treasury_accounts")
-    .select("id,name,payment_method,initial_balance,active,branch_id,branches(name)")
+    .select("id,name,payment_method,initial_balance,active,branch_id,is_safe,branches(name)")
     .eq("active", true)
     .order("name");
   if (branchId) query = query.or(`branch_id.is.null,branch_id.eq.${branchId}`);
@@ -49,7 +51,7 @@ export async function listAllTreasuryAccounts(): Promise<TreasuryAccount[]> {
 
   const { data, error } = await supabase
     .from("treasury_accounts")
-    .select("id,name,payment_method,initial_balance,active,branch_id,branches(name)")
+    .select("id,name,payment_method,initial_balance,active,branch_id,is_safe,branches(name)")
     .order("name");
 
   if (error) throw error;
