@@ -5,7 +5,7 @@ import { formatMoney } from "../shifts/format";
 import type { ProductCategory } from "../inventory/product-categories-service";
 import { parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, type ScaleConfig } from "./scale-config-service";
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
-import { resolveScan } from "./scan-resolve";
+import { productsMatchingTotal, quantityForTotal, resolveScan } from "./scan-resolve";
 import type { PosShift } from "./pos-shift-service";
 import type { PaymentRow, TicketLine } from "./sale-model";
 import { parseQuantity } from "./quantity";
@@ -32,6 +32,10 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [showProductTable, setShowProductTable] = useState(false);
   const [cart, setCart] = useState<TicketLine[]>([]);
+  /** Ticket de TOTAL escaneado que espera que se diga de qué producto es. */
+  const [pendingTotal, setPendingTotal] = useState<{ key: string; amount: number } | null>(null);
+  /** Tickets de total ya usados en esta venta (para no cargarlos dos veces aunque se hayan pasado a un producto). */
+  const [usedTicketKeys, setUsedTicketKeys] = useState<string[]>([]);
   const [itemDiscounts, setItemDiscounts] = useState<Record<string, string>>({});
   const [saleDiscount, setSaleDiscount] = useState("");
   const [saleDiscountMode, setSaleDiscountMode] = useState<"amount" | "percent" | "final">("amount");
@@ -251,7 +255,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     }
     if (resolved.type === "ticket_total") {
       const ticketTotal = resolved.amount;
-      if (cart.some((l) => l.key === resolved.key)) {
+      if (cart.some((l) => l.key === resolved.key) || usedTicketKeys.includes(resolved.key)) {
         setMessage("Ese ticket de la balanza ya está cargado en esta venta.");
       } else if (
         // Con la balanza imprimiendo un código por producto, el ticket trae también el del total:
@@ -266,8 +270,10 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       ) {
         setMessage("Ticket de la balanza no cargado. Revisá el importe o cargá los productos a mano.");
       } else {
-        setCart((current) => [...current, { key: resolved.key, kind: "manual", name: "Ticket de balanza", unit: "unit", quantity: 1, unitPrice: ticketTotal, source: "scale_total", scaleTickets: 1 }]);
-        setMessage(`Ticket de balanza cargado: ${formatMoney(ticketTotal)}. Ojo: el total no dice qué productos son, así que no descuenta stock.`);
+        // Se pregunta de qué producto es (abajo del buscador): así se descuenta el stock. Si el
+        // ticket tiene varios productos, "Cobrar el total sin producto" hace lo de antes.
+        setPendingTotal({ key: resolved.key, amount: ticketTotal });
+        setMessage(`Ticket de balanza de ${formatMoney(ticketTotal)}: elegí de qué producto es, abajo, para descontar el stock.`);
       }
       done();
       return;
@@ -321,7 +327,48 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     );
   }
 
+  /** El ticket de total era de este producto: se carga con la cantidad que da el importe. */
+  function assignPendingTotal(product: Product) {
+    if (!pendingTotal) return;
+    const q = quantityForTotal(pendingTotal.amount, product);
+    if (!q.ok) {
+      setMessage(q.message);
+      return;
+    }
+    const key = pendingTotal.key;
+    setUsedTicketKeys((k) => [...k, key]);
+    setPendingTotal(null);
+    quickAdd(product, q.quantity, "scale");
+    const qty = product.unit === "kg" ? `${q.quantity.toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg` : `${q.quantity} u.`;
+    setMessage(
+      q.exact
+        ? `Agregado: ${product.name} ${qty} (del ticket de ${formatMoney(pendingTotal.amount)}).`
+        : `Agregado: ${product.name} ${qty}. Ojo: con el precio de Patagonia (${formatMoney(product.priceRetail)}) no da justo ${formatMoney(pendingTotal.amount)}; revisá que el precio sea el mismo que en la balanza.`
+    );
+  }
+
+  /** El ticket tiene varios productos: se cobra el total como antes, sin descontar stock. */
+  function chargePendingTotalWithoutProduct() {
+    if (!pendingTotal) return;
+    const { key, amount } = pendingTotal;
+    setUsedTicketKeys((k) => [...k, key]);
+    setPendingTotal(null);
+    setCart((current) => [...current, { key, kind: "manual", name: "Ticket de balanza", unit: "unit", quantity: 1, unitPrice: amount, source: "scale_total", scaleTickets: 1 }]);
+    setMessage(`Ticket de balanza cargado: ${formatMoney(amount)}, sin producto (no descuenta stock).`);
+    searchInputRef.current?.focus();
+  }
+
+  function cancelPendingTotal() {
+    setPendingTotal(null);
+    setMessage("");
+    searchInputRef.current?.focus();
+  }
+
+  const pendingTotalCandidates = pendingTotal ? productsMatchingTotal(pendingTotal.amount, products) : [];
+
   function clearTicket() {
+    setPendingTotal(null);
+    setUsedTicketKeys([]);
     setCart([]);
     setItemDiscounts({});
     setSaleDiscount("");
@@ -408,7 +455,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSplit, busy, cart.length, shift, accounts, confirmCharge]);
 
-  return { search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
+  return { search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount, pendingTotal, pendingTotalCandidates, allProducts: products, assignPendingTotal, chargePendingTotalWithoutProduct, cancelPendingTotal };
 }
 
 export type SaleTicket = ReturnType<typeof useSaleTicket>;

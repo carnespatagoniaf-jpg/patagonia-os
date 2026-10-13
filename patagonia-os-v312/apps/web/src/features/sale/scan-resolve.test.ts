@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import type { Product } from "@patagonia/domain";
 import { DEFAULT_SCALE_CONFIG } from "./scale-barcode";
 import { CARNES_PATAGONIA_CONFIG, CARNES_PATAGONIA_LABELS, LOS_GRINGOS_LABEL_CONFIG, LOS_GRINGOS_TOTAL_TICKET, SYSTEL_LABEL_CONFIG, TRIPLES_LABELS, TRIPLES_TOTAL_WITHOUT_AMOUNT } from "./scale-real-labels";
-import { resolveScan, validEan13 } from "./scan-resolve";
+import { productsMatchingTotal, quantityForTotal, resolveScan, validEan13 } from "./scan-resolve";
 
 const product = (code: string, name: string, unit: "kg" | "unit", priceRetail: number, active = true) =>
   ({ id: `id-${code}`, code, name, unit, priceRetail, active }) as unknown as Product;
@@ -119,5 +119,33 @@ describe("[REAL] ticket de la balanza Systel de TripleS (un código por producto
     const r = resolveScan(TRIPLES_TOTAL_WITHOUT_AMOUNT, products, SYSTEL_LABEL_CONFIG);
     assert.equal(r.type, "ticket_without_amount");
     assert.match((r as { message: string }).message, /cada producto/);
+  });
+});
+
+describe("[REAL] ticket de TOTAL de Los gringos con UN producto: se elige el producto y se descuentan los kilos", () => {
+  // Los 4 productos con precio que tiene Los gringos en Patagonia (13/10).
+  const gringos = [product("10", "PECHUGAC/H x1x5", "kg", 6480), product("5", "TROZADITOx1x2", "kg", 5200), product("2", "GRINGO CAJON DE POLLO", "unit", 72000), product("13", "PECHUGA S/H x1x3", "kg", 9000)];
+
+  it("2220000012225 = $1.222 (ticket: TROZADITO 0.235 kg x 5200 = 1222) → TROZADITO 0,235 kg, el único que da justo", () => {
+    const r = resolveScan("2220000012225", gringos, SYSTEL_LABEL_CONFIG);
+    assert.equal(r.type, "ticket_total");
+    const c = productsMatchingTotal(1222, gringos);
+    assert.deepEqual(c.map((x) => [x.product.code, x.quantity]), [["5", 0.235]]);
+    assert.deepEqual(quantityForTotal(1222, gringos[1]), { ok: true, quantity: 0.235, exact: true });
+  });
+
+  it("2220000007801 = $780 (ticket: TROZADITO 0.150 kg) → TROZADITO 0,150 kg", () => {
+    assert.deepEqual(productsMatchingTotal(780, gringos).map((x) => [x.product.code, x.quantity]), [["5", 0.15]]);
+  });
+
+  it("producto sin precio o por unidad que no da entero: error claro", () => {
+    assert.equal(quantityForTotal(1222, product("7", "SIN PRECIO", "kg", 0)).ok, false);
+    assert.equal(quantityForTotal(1222, gringos[2]).ok, false);
+    assert.deepEqual(quantityForTotal(144000, gringos[2]), { ok: true, quantity: 2, exact: true });
+  });
+
+  it("si el precio de Patagonia no es el de la balanza, se carga igual pero avisa que no da justo", () => {
+    const r = quantityForTotal(1222, product("5", "TROZADITO", "kg", 5300));
+    assert.deepEqual(r, { ok: true, quantity: 0.231, exact: false });
   });
 });

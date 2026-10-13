@@ -44,6 +44,37 @@ export function looksLikeScaleLabel(code: string, config: ScaleConfig): boolean 
 
 const fmtQty = (q: number, unit: string) => (unit === "kg" ? `${q.toLocaleString("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg` : `${q} u.`);
 
+/**
+ * Ticket de TOTAL de UN solo producto (real: Los gringos, la balanza imprime el código del producto en
+ * blanco pero el del total trae el importe): la persona dice qué producto es y la cantidad sale del
+ * importe y del precio de Patagonia. $1.222 ÷ $5.200/kg = 0,235 kg (ticket real: "0.235kg").
+ */
+export function quantityForTotal(amount: number, p: Product): { ok: true; quantity: number; exact: boolean } | { ok: false; message: string } {
+  if (!(p.priceRetail > 0)) return { ok: false, message: `${p.name} no tiene precio cargado en Patagonia: no se puede saber cuánto es. Cargale el precio en Stock.` };
+  if (p.unit === "kg") {
+    const quantity = round3(amount / p.priceRetail);
+    if (!(quantity > 0)) return { ok: false, message: "El importe del ticket es 0." };
+    return { ok: true, quantity, exact: Math.abs(Math.round(quantity * p.priceRetail) - amount) <= 1 };
+  }
+  const raw = amount / p.priceRetail;
+  const units = Math.round(raw);
+  if (units < 1 || Math.abs(raw - units) > 0.005) {
+    return { ok: false, message: `${p.name} se vende por unidad a $${p.priceRetail} y el ticket es de $${amount}: no da una cantidad entera. Elegí otro producto o cobralo sin producto.` };
+  }
+  return { ok: true, quantity: units, exact: true };
+}
+
+/** Productos cuyo precio de Patagonia explica el importe exacto (al gramo o en unidades enteras). */
+export function productsMatchingTotal(amount: number, products: Product[], max = 8): { product: Product; quantity: number }[] {
+  const out: { product: Product; quantity: number }[] = [];
+  for (const p of products) {
+    if (!(p.active ?? true)) continue;
+    const q = quantityForTotal(amount, p);
+    if (q.ok && q.exact) out.push({ product: p, quantity: q.quantity });
+  }
+  return out.sort((a, b) => a.product.name.localeCompare(b.product.name)).slice(0, max);
+}
+
 export function resolveScan(rawInput: string, products: Product[], config: ScaleConfig): ScanResolution {
   const raw = rawInput.trim();
   if (!raw) return { type: "search" };
