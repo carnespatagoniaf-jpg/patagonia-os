@@ -30,3 +30,20 @@ export const LOS_GRINGOS_TOTAL_TICKET: [string, number] = ["2220000007801", 780]
  * esa etiqueta en el ticket ("ETi=N"): no hay ninguna real todavía.
  */
 export const LOS_GRINGOS_LABEL_CONFIG: ScaleConfig = { prefixLength: 2, pluLength: 4, weightLength: 6, weightDivisor: 1000, totalLength: 13, payloadType: "weight" };
+
+/** El mismo formato de Systel ("20" + producto de 4 + cantidad de 6), confirmado con etiquetas reales de TripleS. */
+export const SYSTEL_LABEL_CONFIG: ScaleConfig = LOS_GRINGOS_LABEL_CONFIG;
+
+/**
+ * Ticket REAL de la balanza Systel de la cliente TripleS (foto del 2026-10-13), con un código por
+ * producto. [código, N.º de producto, kilos, nombre impreso]. Los 4 tienen el verificador EAN-13 bien.
+ */
+export const TRIPLES_LABELS: [string, string, number, string][] = [
+  ["2001230001759", "123", 0.175, "MUZARELLA PUNTA DA"],
+  ["2001210001458", "121", 0.145, "CREMOSO PUNTA D AG"],
+  ["2001470001205", "147", 0.12, "PALETA JAM GRASSET"],
+  ["2000520003503", "52", 0.35, "NUGGETS POLLO GTA"]
+];
+
+/** El código del TOTAL de ese mismo ticket (TOTAL $12.810): NO trae el importe (22 + 11 + 99999999). */
+export const TRIPLES_TOTAL_WITHOUT_AMOUNT = "2211999999994";

@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Product } from "@patagonia/domain";
 import { DEFAULT_SCALE_CONFIG } from "./scale-barcode";
-import { CARNES_PATAGONIA_CONFIG, CARNES_PATAGONIA_LABELS, LOS_GRINGOS_LABEL_CONFIG, LOS_GRINGOS_TOTAL_TICKET } from "./scale-real-labels";
+import { CARNES_PATAGONIA_CONFIG, CARNES_PATAGONIA_LABELS, LOS_GRINGOS_LABEL_CONFIG, LOS_GRINGOS_TOTAL_TICKET, SYSTEL_LABEL_CONFIG, TRIPLES_LABELS, TRIPLES_TOTAL_WITHOUT_AMOUNT } from "./scale-real-labels";
 import { resolveScan, validEan13 } from "./scan-resolve";
 
 const product = (code: string, name: string, unit: "kg" | "unit", priceRetail: number, active = true) =>
@@ -94,5 +94,30 @@ describe("prioridades y códigos que no son de balanza", () => {
   });
   it("código cualquiera que no existe: búsqueda (el hook dice 'No se encontró…')", () => {
     assert.equal(resolveScan("ABC123", [product("1", "X", "kg", 1)], DEFAULT_SCALE_CONFIG).type, "search");
+  });
+});
+
+describe("[REAL] ticket de la balanza Systel de TripleS (un código por producto)", () => {
+  const products = TRIPLES_LABELS.map(([, code, , name]) => product(code, name, "kg", 10000));
+
+  it("las 4 etiquetas reales, con el formato Systel: producto correcto y kilos exactos", () => {
+    for (const [code, plu, kg] of TRIPLES_LABELS) {
+      assert.ok(validEan13(code), code);
+      const r = resolveScan(code, products, SYSTEL_LABEL_CONFIG);
+      assert.equal(r.type, "label", code);
+      assert.equal((r as { product: Product }).product.code, plu, code);
+      assert.equal((r as { quantity: number }).quantity, kg, code);
+    }
+  });
+
+  it("con el formato de fábrica Kretz (sin configurar) leería 10 veces menos: por eso hay que configurar la sucursal", () => {
+    const r = resolveScan("2001230001759", products, DEFAULT_SCALE_CONFIG);
+    assert.equal((r as { quantity: number }).quantity, 0.017);
+  });
+
+  it("el código del TOTAL (22 11 99999999) NO se lee como $99.999.999: avisa que escanee cada producto", () => {
+    const r = resolveScan(TRIPLES_TOTAL_WITHOUT_AMOUNT, products, SYSTEL_LABEL_CONFIG);
+    assert.equal(r.type, "ticket_without_amount");
+    assert.match((r as { message: string }).message, /cada producto/);
   });
 });

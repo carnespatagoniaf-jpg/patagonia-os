@@ -1,5 +1,5 @@
 import type { Product } from "@patagonia/domain";
-import { parseAuraSumTicket, parseSystelSumTicket, parseTicketTotalBarcode, parseWeightBarcode, type ScaleConfig } from "./scale-barcode";
+import { parseAuraSumTicket, parseSystelSumTicket, parseTicketTotalBarcode, parseWeightBarcode, systelSumWithoutAmount, type ScaleConfig } from "./scale-barcode";
 
 /**
  * Qué hacer con un código escaneado (o tipeado + Enter) en Mostrador. Lógica pura, testeada
@@ -21,7 +21,7 @@ export type ScanResolution =
   | { type: "product"; product: Product }
   | { type: "label"; product: Product; quantity: number; plu: string; detail: string }
   | { type: "ticket_total"; amount: number; key: string }
-  | { type: "ticket_without_amount" }
+  | { type: "ticket_without_amount"; message: string }
   | { type: "error"; message: string }
   | { type: "search" };
 
@@ -55,9 +55,20 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
 
   // 2. Ticket de total.
   const aura = parseAuraSumTicket(raw);
-  if (aura && aura.amount === null) return { type: "ticket_without_amount" };
+  if (aura && aura.amount === null) {
+    return {
+      type: "ticket_without_amount",
+      message: "Este ticket de la balanza no trae el importe en el código de barras (con el formato actual de la balanza solo entran tickets de hasta $999,99). Cargá el TOTAL impreso con \"Vender algo sin código\" y avisale al encargado: en Productos → \"Balanza por cable\" → \"Mandar productos a la balanza\", Patagonia le ajusta el código de barras a la balanza."
+    };
+  }
   const label = looksLikeScaleLabel(raw, config) ? parseWeightBarcode(raw, config) : null;
   const labelProduct = label ? active.find((p) => p.code === label.plu) : undefined;
+  if (!labelProduct && systelSumWithoutAmount(raw)) {
+    return {
+      type: "ticket_without_amount",
+      message: "Ese es el código del TOTAL del ticket, y en esta balanza no trae el importe. Escaneá el código de cada producto (el que está debajo de cada uno): así se cargan los productos con sus kilos y se descuenta el stock. No se agregó nada."
+    };
+  }
   const systel = labelProduct ? null : parseSystelSumTicket(raw);
   const total = aura?.amount ?? systel ?? parseTicketTotalBarcode(raw);
   if (total !== null) return { type: "ticket_total", amount: total, key: `ticket-${raw.padStart(13, "0")}` };

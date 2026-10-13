@@ -245,7 +245,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       return;
     }
     if (resolved.type === "ticket_without_amount") {
-      setMessage("Este ticket de la balanza no trae el importe en el código de barras (con el formato actual de la balanza solo entran tickets de hasta $999,99). Cargá el TOTAL impreso con \"Vender algo sin código\" y avisale al encargado: en Productos → \"Balanza por cable\" → \"Mandar productos a la balanza\", Patagonia le ajusta el código de barras a la balanza.");
+      setMessage(resolved.message);
       done();
       return;
     }

@@ -116,12 +116,27 @@ export function parseAuraSumTicket(rawCode: string): { amount: number | null; fo
  */
 export function parseSystelSumTicket(rawCode: string): number | null {
   const code = rawCode.trim();
-  if (!/^22[0-9]{11}$/.test(code)) return null;
-  const digits = code.split("").map(Number);
-  const sum = digits.slice(0, 12).reduce((acc, d, i) => acc + d * (i % 2 === 0 ? 1 : 3), 0);
-  if ((10 - (sum % 10)) % 10 !== digits[12]) return null;
+  if (!isSystelSumShape(code)) return null;
+  if (systelSumWithoutAmount(code)) return null;
   const pesos = parseInt(code.slice(4, 12), 10);
   return pesos > 0 ? pesos : null;
+}
+
+function isSystelSumShape(code: string): boolean {
+  if (!/^22[0-9]{11}$/.test(code)) return false;
+  const digits = code.split("").map(Number);
+  const sum = digits.slice(0, 12).reduce((acc, d, i) => acc + d * (i % 2 === 0 ? 1 : 3), 0);
+  return (10 - (sum % 10)) % 10 === digits[12];
+}
+
+/**
+ * Ticket de total de Systel cuyo código NO trae el importe. REAL (cliente TripleS, 2026-10-13):
+ * un ticket de TOTAL $12.810 con el código 2211999999994, o sea 22 + "11" + 99999999. Leído como
+ * importe daría $99.999.999. Si el campo del importe son todos 9, no es un importe.
+ */
+export function systelSumWithoutAmount(rawCode: string): boolean {
+  const code = rawCode.trim();
+  return isSystelSumShape(code) && /^9{8}$/.test(code.slice(4, 12));
 }
 
 export function parseTicketTotalBarcode(rawCode: string): number | null {
