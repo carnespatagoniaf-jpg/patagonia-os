@@ -75,6 +75,16 @@ describe("[SIMULADO con registros REALES] código de barras de cada producto, ca
     assert.equal(onlyBarcodeChanged(before, before.slice(0, name) + "\u0000" + before.slice(name + 1), "max60"), false);
   });
 
+  it("REAL (producto 97, segundo intento): el lote ya tiene 0x00 → se manda como espacio (la trama no admite 0x00) y se confirma", async () => {
+    const f = scale();
+    const end = TYPE0.length - 1;
+    const withNul = TYPE0.slice(0, end - 14) + "\u0000" + TYPE0.slice(end - 13);
+    f.plus.set(97, withNul.replace(/^0013/, "0097"));
+    const r = await rewriteProductBarcode(client(f), "max60", 97, "P", "ascii");
+    assert.equal(r.verdict, "confirmado", r.detail);
+    assert.deepEqual(pluEanSetting(f.plus.get(97)!), { type: 1, config: "20PPPPCCCCCC" });
+  });
+
   it("si la balanza cambia OTRA cosa: se detecta, se intenta restaurar y se frena", async () => {
     const f = scale();
     f.corruptAfterWrite = 2;

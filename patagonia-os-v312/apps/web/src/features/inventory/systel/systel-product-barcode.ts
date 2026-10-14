@@ -52,7 +52,8 @@ export function targetCodeFor(saleType: string): string | null {
  */
 export type TypeByteMode = "binario" | "ascii";
 
-export function buildBarcodeRewrite(readRaw: string, layout: SystelLayout, newConfig: string, mode: TypeByteMode = "binario"): string | null {
+export function buildBarcodeRewrite(rawRead: string, layout: SystelLayout, newConfig: string, mode: TypeByteMode = "binario"): string | null {
+  const readRaw = loteNulToSpace(rawRead);
   if (!/^[0-9PCIBS]{12}$/.test(newConfig)) return null;
   if (layout === "cuora2") return null;
   const pd = LAYOUT_INFO[layout].pluDigits;
@@ -69,7 +70,8 @@ export function buildBarcodeRewrite(readRaw: string, layout: SystelLayout, newCo
  * Datos de escritura (sin gestión) de un registro leído, con el tipo de código en la forma que acepta la balanza.
  * Lo usa la restauración: si la balanza solo acepta el dígito, el respaldo (que tiene el byte) se manda con el dígito.
  */
-export function writeDataFromRead(readRaw: string, layout: SystelLayout, mode: TypeByteMode): string {
+export function writeDataFromRead(rawRead: string, layout: SystelLayout, mode: TypeByteMode): string {
+  const readRaw = loteNulToSpace(rawRead);
   const pd = LAYOUT_INFO[layout].pluDigits;
   const end = readRaw[readRaw.length - 1] === "N" ? readRaw.length - 1 : readRaw.length - 101;
   const typeAt = end - 13;
@@ -95,6 +97,14 @@ export function onlyBarcodeChanged(before: string, after: string, layout: Systel
  * REAL (Los gringos 14/10, producto 97): al escribir, la balanza guarda 0x00 donde el campo lote (12 caracteres
  * antes del tipo) tenía un espacio de relleno. No es un cambio de datos: ahí espacio y 0x00 valen lo mismo.
  */
+/** Para escribir: el 0x00 que la balanza puso en el lote vuelve a ser espacio (la trama no admite 0x00 ahí). */
+export function loteNulToSpace(raw: string): string {
+  const end = raw[raw.length - 1] === "N" ? raw.length - 1 : raw.length - 101;
+  let out = raw;
+  for (let i = Math.max(0, end - 25); i < end - 13; i++) if (out.charCodeAt(i) === 0) out = out.slice(0, i) + " " + out.slice(i + 1);
+  return out;
+}
+
 export function sameIgnoringLotePadding(a: string, b: string, i: number, end: number): boolean {
   if (a === b) return true;
   const pad = (c: string) => c === " " || c === "\u0000";
