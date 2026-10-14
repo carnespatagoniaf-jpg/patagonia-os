@@ -229,5 +229,11 @@ export class SerialSystelLink implements SystelLink {
 /** Abre el selector de puertos de Chrome (sugiere FTDI, pero deja elegir cualquiera). */
 export async function pickSystelPort(): Promise<SerialPort> {
   if (!("serial" in navigator)) throw new Error("Este navegador no permite conectar balanzas por cable. Usá Google Chrome o Microsoft Edge en una computadora.");
+  // REAL (Los gringos 14/10): después de un cuadro de confirmación Chrome ya no muestra la lista de puertos (requestPort
+  // necesita un clic directo). Si ya hay un solo puerto autorizado de la balanza (FTDI), se usa ése sin preguntar.
+  const granted = await navigator.serial.getPorts();
+  const ftdi = granted.filter((p) => p.getInfo().usbVendorId === 0x0403);
+  if (ftdi.length === 1) return ftdi[0];
+  if (granted.length === 1) return granted[0];
   return navigator.serial.requestPort();
 }

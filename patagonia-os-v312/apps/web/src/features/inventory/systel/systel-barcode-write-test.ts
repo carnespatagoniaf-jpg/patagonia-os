@@ -231,7 +231,15 @@ export async function runTestProductRewrite(client: SystelClient, layout: Systel
   }
   const back = await client.readPluStatus(layout, opts.number);
   const same = "plu" in back && onlyBarcodeChanged(cur.plu.raw, back.plu.raw, layout) && pluEanSetting(back.plu.raw).config === config;
-  if (!step("Reescrito y releído", !!reply && reply.kind === "ack" && same, same ? "igual" : "distinto o sin confirmar")) return report;
+  const typeByte = (raw: string) => {
+    const e = raw[raw.length - 1] === "N" ? raw.length - 1 : raw.length - 101;
+    return "0x" + raw.charCodeAt(e - 13).toString(16).padStart(2, "0").toUpperCase();
+  };
+  const sent = typeByte(data!.slice(0, LAYOUT_INFO[layout].pluDigits) + "1" + data!.slice(LAYOUT_INFO[layout].pluDigits));
+  const stored = "plu" in back ? typeByte(back.plu.raw) : "?";
+  report.written = data;
+  report.readBack = "plu" in back ? back.plu.raw : null;
+  if (!step("Reescrito y releído", !!reply && reply.kind === "ack" && same, `${reply && reply.kind === "error" ? `la balanza contestó ${reply.errorCode}` : same ? "igual" : "distinto o sin confirmar"} · tipo mandado ${sent}, guardado ${stored}`)) return report;
   const changed = (await compareWithBackup(client, backup)).filter((s) => s.state !== "igual");
   if (!step("Productos del cliente sin cambios", changed.length === 0, changed.length ? `CAMBIARON: ${changed.map((s) => s.number).join(", ")}` : "iguales")) return report;
   report.verdict = "confirmado";

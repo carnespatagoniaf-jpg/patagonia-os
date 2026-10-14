@@ -177,6 +177,27 @@ export function SystelProductBarcodePanel(p: ProductBarcodePanelProps) {
     if (r) finish(r, `Prueba 1b (reescritura del N.º ${n})`, { stage1b: { at: new Date().toISOString(), number: n } });
   }
 
+  /**
+   * REAL (Los gringos 14/10): con el tipo mandado como byte (0x01) la balanza lo guardó como 0xD1 y NO imprimió el
+   * código debajo del producto. Se reescriben SOLO los productos de prueba con el tipo como dígito ("1", lo que dice el
+   * documento) para imprimir otro ticket y comparar. Si queda bien, las pruebas 2 y 3 usan esa forma.
+   */
+  async function handleStage1c() {
+    if (!state?.stage1) return;
+    const nums = [state.stage1.number, ...(state.stage1.unitNumber ? [state.stage1.unitNumber] : [])];
+    if (!confirmWrite(`Prueba 1c: reescribir los productos de prueba N.º ${nums.join(" y ")} con el tipo de código como dígito. No toca productos del cliente.`)) return;
+    const reports: WriteTestReport[] = [];
+    for (const n of nums) {
+      const r = await p.withReadClient((client, layout) => runTestProductRewrite(client, layout, { number: n, mode: "ascii", protect: p.numbers }), { write: true });
+      if (!r) return;
+      reports.push(r);
+      if (r.verdict !== "confirmado") break;
+    }
+    const ok = reports.length === nums.length && reports.every((r) => r.verdict === "confirmado");
+    const merged: WriteTestReport = { ...reports[reports.length - 1], steps: reports.flatMap((r) => r.steps) };
+    finish(merged, "Prueba 1c (productos de prueba, tipo como dígito)", ok && state.stage1 ? { stage1: { ...state.stage1, mode: "ascii" } } : {});
+  }
+
   async function handleStage2() {
     const n = Number(testPlu);
     if (!state?.stage1) {
@@ -258,6 +279,7 @@ export function SystelProductBarcodePanel(p: ProductBarcodePanelProps) {
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             <button className="secondary" disabled={p.busy || !state?.stage1} onClick={() => void handleStage1b()}>1b. Reescribir el producto de prueba</button>
+            <button className="secondary" disabled={p.busy || !state?.stage1} onClick={() => void handleStage1c()}>1c. Productos de prueba con el tipo como dígito</button>
             <span className="muted" style={{ fontSize: 12 }}>{state?.stage1b ? "✓ hecha: compará el total del producto de prueba en la balanza antes y después" : "Para saber si la balanza borra los acumulados al escribir, sin tocar productos reales."}</span>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
