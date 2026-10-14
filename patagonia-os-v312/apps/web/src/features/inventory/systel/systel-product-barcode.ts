@@ -74,7 +74,9 @@ export function writeDataFromRead(readRaw: string, layout: SystelLayout, mode: T
   const end = readRaw[readRaw.length - 1] === "N" ? readRaw.length - 1 : readRaw.length - 101;
   const typeAt = end - 13;
   const t = readRaw.charCodeAt(typeAt);
-  const typed = mode === "ascii" && t <= 3 ? readRaw.slice(0, typeAt) + String(t) + readRaw.slice(typeAt + 1) : readRaw;
+  // Se manda solo el tipo (parte baja): nunca los bits que agrega la balanza (real: 0xD1), que no van en una escritura.
+  const low = t >= 0x80 ? t & 0x0f : t;
+  const typed = t >= 0x80 || (mode === "ascii" && t <= 3) ? readRaw.slice(0, typeAt) + (mode === "ascii" ? String(low) : String.fromCharCode(low)) + readRaw.slice(typeAt + 1) : readRaw;
   return typed.slice(0, pd) + typed.slice(pd + 1);
 }
 

@@ -42,7 +42,7 @@ export class FakeCuora implements SystelLink {
 
   constructor(
     readonly layout: SystelLayout,
-    readonly options: { address?: number; decimals?: number; capacity?: number; writeChecksum?: boolean; typeByteAccepted?: "binario" | "ascii" } = {}
+    readonly options: { address?: number; decimals?: number; capacity?: number; writeChecksum?: boolean; typeByteAccepted?: "binario" | "ascii"; typeHighBits?: number } = {}
   ) {}
 
   get address(): number {
@@ -145,6 +145,13 @@ export class FakeCuora implements SystelLink {
           if ((this.options.typeByteAccepted === "binario" && t > 3) || (this.options.typeByteAccepted === "ascii" && t <= 3)) return this.reply(fn, "E8");
           // Guarda (y devuelve) el tipo como byte, como la real.
           if (t > 3) rec = rec.slice(0, end0 - 13) + String.fromCharCode(t - 48) + rec.slice(end0 - 12);
+        }
+        // Como la Cuora real de Los gringos: al escribir desde la PC guarda el tipo con bits altos (0x01 → 0xD1).
+        if (this.layout !== "cuora2" && this.options.typeHighBits) {
+          const end1 = rec[rec.length - 1] === "N" ? rec.length - 1 : rec.length - 101;
+          const t1 = rec.charCodeAt(end1 - 13);
+          const low1 = t1 >= 48 ? t1 - 48 : t1;
+          rec = rec.slice(0, end1 - 13) + String.fromCharCode(this.options.typeHighBits | low1) + rec.slice(end1 - 12);
         }
         const fixed = info.pluDigits + 1 + 18 + info.priceLists * (this.layout === "max7" ? 12 : 6) + info.codeDigits + 2 + 4 + 1 + info.tareDigits;
         const tail = rec.slice(fixed);

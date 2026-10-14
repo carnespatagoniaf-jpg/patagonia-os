@@ -165,3 +165,26 @@ describe("[SIMULADO] sesión única: dos productos de prueba y reescritura de pr
     assert.equal(f.received.filter((x) => x.fn === 61).length, n61);
   });
 });
+
+describe("[REAL 14/10] la Cuora de Los gringos guarda el tipo con bits altos (0x01 → 0xD1)", () => {
+  it("prueba 1, 1b, 2, todos y restaurar funcionan igual con una balanza que devuelve 0xD1", async () => {
+    const f = new FakeCuora("max60", { address: 20, typeByteAccepted: "binario", typeHighBits: 0xd0 });
+    f.plus.set(2, REAL_PLU_2_GRINGO_CAJON);
+    f.plus.set(13, REAL_PLU_13_PECHUGA_SH);
+    f.plus.set(6, REAL_PLU_13_PECHUGA_SH.replace(/^0013/, "0006").replace("PECHUGA S/H x1x3  ", "TROZADITOx5       ").replace("\u000120PPPPCCCCCC", "\u0001000000000000"));
+    f.sales.push({ date: "13/10/26", text: "000003095^13/10/26^12:55:34^02^0005^01^0000^00215^00000^000000111800" });
+    const c = client(f);
+    const s1 = await runStage1FreeSlot(c, "max60", { templateNumber: 13, unitTemplateNumber: 2, protect, today });
+    assert.equal(s1.verdict, "confirmado", JSON.stringify(s1.steps));
+    assert.equal(f.plus.get(7999)!.charCodeAt(f.plus.get(7999)!.length - 14), 0xd1);
+    assert.deepEqual(pluEanSetting(f.plus.get(7999)!), { type: 1, config: "20PPPPCCCCCC" });
+    assert.equal((await runTestProductRewrite(c, "max60", { number: 7999, mode: "binario", protect })).verdict, "confirmado");
+    const { backup } = await takeProductBackup(c, "max60", [2, 6, 13]);
+    assert.equal((await runStage2OneProduct(c, "max60", { number: 6, saleType: "P", mode: "binario", protect, today })).verdict, "confirmado");
+    assert.deepEqual(pluEanSetting(f.plus.get(6)!), { type: 1, config: "20PPPPCCCCCC" });
+    // Restaurar un producto que la balanza guardó con 0xD1: se manda 0x01 (nunca 0xD1) y vuelve a como estaba.
+    const r = await restoreFromBackup(c, backup, [6], "binario");
+    assert.deepEqual(r.map((x) => x.verdict), ["restaurado"]);
+    assert.deepEqual(pluEanSetting(f.plus.get(6)!), { type: 1, config: "000000000000" });
+  });
+});

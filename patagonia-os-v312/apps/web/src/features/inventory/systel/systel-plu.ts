@@ -305,6 +305,9 @@ export function pluEanSetting(raw: string): PluEan {
   if (end < 13) return { type: null, config: null };
   const config = raw.slice(end - 12, end);
   const t = raw.charCodeAt(end - 13);
-  const type = t <= 3 ? t : t >= 48 && t <= 51 ? t - 48 : null;
+  // REAL (Los gringos, 14/10, escritura del producto de prueba 7999): se mandó 0x01 y la balanza devolvió 0xD1. Los
+  // productos hechos en la balanza tienen 0x01. La parte baja es el tipo; la alta la agrega la balanza cuando el
+  // producto se escribe desde una PC.
+  const type = t <= 3 ? t : t >= 48 && t <= 51 ? t - 48 : t >= 0x80 && (t & 0x0f) <= 3 ? t & 0x0f : null;
   return { type: type as PluEan["type"], config: /^[0-9PCIBS]{12}$/.test(config) ? config : null };
 }

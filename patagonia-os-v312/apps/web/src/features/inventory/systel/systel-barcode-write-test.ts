@@ -118,7 +118,10 @@ async function writeTestProduct(
     }
     const pd = LAYOUT_INFO[layout].pluDigits;
     const expected = data.slice(0, pd) + back.plu.raw[pd] + data.slice(pd);
-    const sameExceptType = expected.length === back.plu.raw.length && [...expected].every((ch, i) => ch === back.plu.raw[i] || ((expected.charCodeAt(i) <= 3 || ch === "1") && back.plu.raw.charCodeAt(i) <= 3));
+    // Todo igual salvo el byte del tipo, donde basta que coincida el tipo (la balanza real agrega bits altos: 0x01 → 0xD1).
+    const endAt = expected[expected.length - 1] === "N" ? expected.length - 1 : expected.length - 101;
+    const typeAt = endAt - 13;
+    const sameExceptType = expected.length === back.plu.raw.length && [...expected].every((ch, i) => (i === typeAt ? true : ch === back.plu.raw[i])) && pluEanSetting(back.plu.raw).type === pluEanSetting(expected).type;
     const ean = pluEanSetting(back.plu.raw);
     if (!step(`Escritura del N.º ${number} (tipo ${mode}) y relectura`, sameExceptType && ean.type === 1 && ean.config === target, sameExceptType ? `quedó igual a lo escrito; código ${ean.config}` : "lo releído no es igual a lo escrito")) return null;
     return { mode, written: data, readBack: back.plu.raw };
