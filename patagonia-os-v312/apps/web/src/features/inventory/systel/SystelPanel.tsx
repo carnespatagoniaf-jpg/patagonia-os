@@ -1,3 +1,4 @@
+import type { Product } from "@patagonia/domain";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { takeSystelBackup, backupToJson, saveBackupLocally, type SystelBackup } from "./systel-backup";
 import { SystelClient } from "./systel-client";
@@ -9,7 +10,8 @@ import { planSystelSync, runSystelSync, type SystelPlanItem, type SystelSyncResu
 import { runSystelWriteTest, type SystelWriteTestResult } from "./systel-write-test";
 import { discoverSystelLink, loadSavedSystelLink, saveSystelLink } from "./systel-discovery";
 import { enableTicketBarcodes, type TicketBarcodeResult } from "./systel-ticket-barcode";
-import { readTodaySalesDiagnostic } from "./systel-ticket-detail";
+import { runSystelDiagnostic, type SystelDiagnostic } from "./systel-full-diagnostic";
+import { getBranchScaleConfig } from "../../sale/scale-config-service";
 import { saveSystelLabelTemplates } from "../../sale/systel-label-format";
 import type { SystelExchangeLog } from "./systel-client";
 import type { SystelLinkEvent } from "./systel-serial";
@@ -82,7 +84,7 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
   const [test, setTest] = useState<SystelWriteTestResult | null>(null);
   const [sync, setSync] = useState<SystelSyncResult | null>(null);
   const [ticketResult, setTicketResult] = useState<TicketBarcodeResult | null>(null);
-  const [salesDiag, setSalesDiag] = useState<string | null>(null);
+  const [salesDiag, setSalesDiag] = useState<SystelDiagnostic | null>(null);
   const linkRef = useRef<SerialSystelLink | null>(null);
   const model = SYSTEL_MODELS.find((m) => m.id === modelId)!;
   const { profile } = useAuth();
@@ -290,7 +292,10 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
     }
   }
 
-  /** Diagnóstico de solo lectura: el reporte de ventas de hoy y los productos vendidos, directo a soporte. */
+  /**
+   * Diagnóstico completo, SOLO LECTURA (systel-full-diagnostic.ts): contesta, modelo, reloj, formatos,
+   * productos, ventas guardadas, detalle e interpretación. El resultado completo le llega a soporte.
+   */
   async function handleSalesDiagnostic() {
     if (runningRef.current) return;
     runningRef.current = true;
@@ -301,13 +306,16 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
     logRef.current = [];
     linkEventsRef.current = [];
     try {
-      const runAddress = await connectScale("leer ventas de hoy");
+      const runAddress = await connectScale("diagnóstico completo");
       if (runAddress === null || !linkRef.current) return;
-      setProgress("Leyendo las ventas de hoy en la balanza (solo lectura)…");
       const client = new SystelClient(linkRef.current, { address: runAddress, log: logRef.current });
-      const r = await readTodaySalesDiagnostic(client, new Date(), saveSystelLabelTemplates);
-      setSalesDiag(r.summary);
-      void autoReport("leer ventas de hoy (solo lectura)", r.summary, { error: r.ok ? undefined : r.summary });
+      const branchConfig = branchId ? await getBranchScaleConfig(branchId).catch(() => null) : null;
+      // Inventory pasa los productos completos; si alguno no trae id, se usa su código (solo para comparar).
+      const asProducts = products.map((p) => ({ ...p, id: (p as { id?: string }).id ?? `codigo-${p.code}` })) as unknown as Product[];
+      const r = await runSystelDiagnostic(client, { products: asProducts, branchConfig, onProgress: (t) => setProgress(`${t}… (solo lectura, no cambia nada)`), onConfig: saveSystelLabelTemplates });
+      setSalesDiag(r);
+      void autoReport("diagnóstico completo (solo lectura)", `${r.verdict}
+${JSON.stringify({ pasos: r.steps, datos: r.data })}`, { error: r.steps.some((s) => s.status === "falla") ? r.verdict : undefined });
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       setError(message);
@@ -370,10 +378,23 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
             </div>
             <div>
               <button className="secondary" disabled={busy} onClick={() => void handleTicketBarcodes()}>Activar código por producto en la balanza</button>
-              <button className="secondary" disabled={busy} onClick={() => void handleSalesDiagnostic()}>Leer las ventas de hoy (solo lectura)</button>
+              <button className="secondary" disabled={busy} onClick={() => void handleSalesDiagnostic()}>Diagnóstico completo (solo lectura)</button>
               <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>Para que el ticket traiga el código de barras de cada producto y el Mostrador cargue el producto con sus kilos y descuente el stock. Cambia solo esa opción de la balanza y lo comprueba.</p>
             </div>
-            {salesDiag && <p className="message" style={{ margin: 0 }}>{salesDiag}</p>}
+            {salesDiag && (
+              <div className="panel" style={{ padding: 12, display: "grid", gap: 6 }}>
+                <strong>{salesDiag.verdict}</strong>
+                {salesDiag.steps.map((s) => (
+                  <div key={s.id} style={{ fontSize: 13 }}>
+                    <span style={{ fontWeight: 700, color: s.status === "ok" ? "#15803d" : s.status === "falla" ? "#b91c1c" : s.status === "aviso" ? "#b45309" : "#6b7280" }}>
+                      {s.status === "ok" ? "✓" : s.status === "falla" ? "✗" : s.status === "aviso" ? "!" : "–"} {s.label}:
+                    </span>{" "}
+                    {s.detail}
+                  </div>
+                ))}
+                <span className="muted" style={{ fontSize: 12 }}>Solo lectura: no se cambió nada en la balanza ni en Patagonia.</span>
+              </div>
+            )}
             {ticketResult && (
               <p className={ticketResult.ok ? "message" : "message warning"} style={{ margin: 0 }}>
                 {ticketResult.ok ? `✅ ${ticketResult.detail[0].toUpperCase()}${ticketResult.detail.slice(1)}.` : `No quedó activado: ${ticketResult.detail}. Ya nos llegó el aviso.`}
