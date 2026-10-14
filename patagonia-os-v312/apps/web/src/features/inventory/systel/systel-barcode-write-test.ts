@@ -1,7 +1,7 @@
 import type { SystelClient } from "./systel-client";
 import { LAYOUT_INFO, pluEanSetting, type SystelLayout } from "./systel-plu";
 import { backupDigest, buildBarcodeRewrite, compareWithBackup, rewriteProductBarcode, takeProductBackup, verifyBackup, type BarcodeRewriteResult, type ProductBackup, type TypeByteMode } from "./systel-product-barcode";
-import { salesReportRequest } from "./systel-sales";
+import { parseSalesReport, salesReportRequest } from "./systel-sales";
 
 /**
  * Prueba de escritura del código de barras de cada producto, en dos etapas. Bloqueada salvo `writes.productBarcode`.
@@ -48,14 +48,16 @@ export interface WriteTestReport {
 export const TEST_PRODUCT_NAME = "PRUEBA PATAGONIA  ";
 const pad = (s: string, n: number) => s.slice(0, n).padEnd(n, " ");
 
-/** Huella del reporte de ventas de los últimos 40 días (solo lectura). null si no se pudo leer. */
-async function salesFingerprint(client: SystelClient, today: Date): Promise<string | null> {
+/** Reporte de ventas de los últimos 40 días (solo lectura): su huella y los productos vendidos. null si no se pudo leer. */
+async function salesSnapshot(client: SystelClient, today: Date): Promise<{ hash: string; soldPlus: Set<number> } | null> {
   const from = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 40);
   const to = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1);
   const r = await client.salesReportRaw(salesReportRequest(from, to));
   if ("error" in r) return null;
-  return backupDigest([{ number: 0, raw: r.data }]);
+  const parsed = parseSalesReport(r.data);
+  return { hash: backupDigest([{ number: 0, raw: r.data }]), soldPlus: new Set(parsed.ok ? parsed.lines.map((l) => l.plu) : []) };
 }
+const salesFingerprint = async (client: SystelClient, today: Date) => (await salesSnapshot(client, today))?.hash ?? null;
 
 /** Registro de prueba a partir de uno real (misma forma): otro número, nombre de prueba, sin precios, código = número. */
 export function testRecordFrom(templateRaw: string, layout: SystelLayout, number: number): string | null {
@@ -167,8 +169,11 @@ export async function runStage2OneProduct(
     opts.onProgress?.(`${ok ? "✓" : "✗"} ${label}: ${detail}`);
     return ok;
   };
-  report.salesBefore = await salesFingerprint(client, opts.today);
-  if (!step("Reporte de ventas (solo lectura)", !!report.salesBefore, report.salesBefore ? "leído" : "no se pudo leer: no se sigue")) return report;
+  const snap = await salesSnapshot(client, opts.today);
+  report.salesBefore = snap?.hash ?? null;
+  if (!step("Reporte de ventas (solo lectura)", !!snap, snap ? "leído" : "no se pudo leer: no se sigue")) return report;
+  // Los totales acumulados de la balanza no se pueden leer: el producto de la prueba no puede tener ventas recientes.
+  if (!step(`Producto ${opts.number} sin ventas en 40 días`, !snap!.soldPlus.has(opts.number), snap!.soldPlus.has(opts.number) ? "tiene ventas: elegí otro (sus acumulados en la balanza no se pueden leer ni recuperar)" : "sin ventas")) return report;
   const numbers = [...new Set([...opts.protect, opts.number])];
   const { backup, missing } = await takeProductBackup(client, layout, numbers, opts.onProgress);
   report.backup = backup;

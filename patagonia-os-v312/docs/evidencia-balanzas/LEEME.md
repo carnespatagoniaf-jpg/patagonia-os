@@ -13,3 +13,12 @@ Todo corrió contra **staging** (loquhcwsvsbqpinefxcc), en la empresa aislada "P
 Consultas para verificarlo en staging vos mismo (SQL):
 - `select count(*) from pos_scale_paper_claims c join pos_sales s on s.id = c.sale_id where s.company_id = '8299b743-beb0-48a5-bf9d-5e8300d5c67b';`
 - `select action, created_at from audit_log where company_id = '8299b743-beb0-48a5-bf9d-5e8300d5c67b' and action like 'scale%' order by created_at desc limit 10;`
+
+## Fase 0 (15/10/2026)
+
+| Archivo | Qué prueba |
+|---|---|
+| `6-reversion-base-staging.txt` | La reversión de la base (`119_scale_sale_papers.rollback.sql`) aplicada de verdad en staging: ventas, plata, stock y tesorería iguales antes y después; venta normal y Mostrador sin la 119; reinstalación y prueba completa de los 945 tickets otra vez en verde |
+| `7-herramienta-escritura.txt` | La herramienta de escritura en la pantalla real con una Cuora simulada (una que acepta el byte y otra que acepta el dígito): 36 de 36 comprobaciones |
+| `8-control-stock-interruptor.txt` | "Probar un código impreso" (no vende ni mueve stock), stock que baja solo al cobrar, e interruptor apagar/encender sin borrar nada y sin perder ventas guardadas sin conexión |
+| `9-despliegue-web.txt` | La versión de producción no contiene los botones de escritura; versiones anteriores de la web listas para volver a publicarse |

@@ -11,6 +11,8 @@ export interface ScaleSetup {
   links: ScaleLink[];
   readAt: string | null;
   repeatWindowMinutes: number;
+  /** Interruptor de la sucursal: apagado, Mostrador funciona como antes (no se borra nada). */
+  active: boolean;
 }
 
 interface ProfileRow {
@@ -23,6 +25,7 @@ interface ProfileRow {
   generic_codes: number[];
   read_at: string | null;
   repeat_window_minutes: number;
+  active: boolean;
 }
 interface ItemRow {
   code: number;
@@ -41,10 +44,10 @@ const CACHE = (branchId: string) => `patagonia-scale-setup-${branchId}`;
  * La balanza de venta de la sucursal, o null si no tiene (o la base todavía no tiene la migración 119).
  * Si no hay conexión, usa la última copia guardada en esta computadora (para seguir cobrando).
  */
-export async function loadScaleSetup(branchId: string): Promise<ScaleSetup | null> {
+export async function loadScaleSetup(branchId: string, opts: { includeInactive?: boolean } = {}): Promise<ScaleSetup | null> {
   if (!supabase) return null;
   try {
-    const { data: profiles, error } = await supabase.from("scale_profiles").select("scale_key, brand, weighed_format, unit_format, total_format, amount_decimals, generic_codes, read_at, repeat_window_minutes").eq("branch_id", branchId).limit(2);
+    const { data: profiles, error } = await supabase.from("scale_profiles").select("scale_key, brand, weighed_format, unit_format, total_format, amount_decimals, generic_codes, read_at, repeat_window_minutes, active").eq("branch_id", branchId).limit(2);
     if (error) throw error;
     if (!profiles || profiles.length === 0) {
       saveCache(branchId, null);
@@ -53,6 +56,11 @@ export async function loadScaleSetup(branchId: string): Promise<ScaleSetup | nul
     // Una sola balanza de venta por sucursal en esta versión: con dos, no se adivina cuál es.
     if (profiles.length > 1) return null;
     const p = profiles[0] as ProfileRow;
+    // Apagada: Mostrador no la usa (la pantalla de Stock sí la ve, para volver a encenderla).
+    if (p.active === false && !opts.includeInactive) {
+      saveCache(branchId, null);
+      return null;
+    }
     const { data: items, error: e2 } = await supabase.from("scale_catalog_items").select("code, name, sale_type, prices, ean_type, ean_config, link_kind, product_id").eq("branch_id", branchId).eq("scale_key", p.scale_key);
     if (e2) throw e2;
     const rows = (items ?? []) as ItemRow[];
@@ -69,9 +77,10 @@ export async function loadScaleSetup(branchId: string): Promise<ScaleSetup | nul
       },
       links: rows.map((r) => ({ code: r.code, kind: r.link_kind, productId: r.product_id })),
       readAt: p.read_at,
-      repeatWindowMinutes: p.repeat_window_minutes
+      repeatWindowMinutes: p.repeat_window_minutes,
+      active: p.active !== false
     };
-    saveCache(branchId, setup);
+    if (setup.active) saveCache(branchId, setup);
     return setup;
   } catch (err) {
     // Sin la tabla (42P01) = esta base no tiene la función todavía.
@@ -108,6 +117,12 @@ export async function saveScaleCatalog(branchId: string, profile: Omit<ScaleSale
   });
   if (error) throw error;
   return data as { items: number; removed: number };
+}
+
+export async function setScaleProfileActive(branchId: string, scaleKey: string, active: boolean): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("set_scale_profile_active", { p_branch_id: branchId, p_scale_key: scaleKey, p_active: active });
+  if (error) throw error;
 }
 
 export async function setScaleLinks(branchId: string, scaleKey: string, links: ScaleLink[]): Promise<void> {

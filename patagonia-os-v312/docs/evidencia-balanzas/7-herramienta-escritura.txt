@@ -1,0 +1,41 @@
+Corrida: 2026-10-14 15:22
+Herramienta de escritura del código de cada producto, pantalla real (staging) + Cuora simulada en el navegador
+=== Balanza simulada que acepta el tipo de código como BYTE ===
+OK   sin respaldo del día, la prueba 1 está deshabilitada
+OK   respaldo: Respaldo completo y verificado: respaldo 104 de 104 productos · 104 productos, huella a78ee747.
+OK   la 2 y la 3 están deshabilitadas antes de la 1
+OK   sin marcar la autorización no escribe
+OK   prueba 1: Prueba 1 (número libre): CONFIRMADO.
+OK   la prueba 1 escribió solo en el N.º 7999 (1 escritura(s): byte aceptado)
+OK   producto de prueba en la balanza: "PRUEBA PATAGONIA  ", precios 000000000000
+OK   después de la prueba 1, los 104 productos del cliente están byte a byte iguales
+OK   prueba 2 con un producto CON ventas: Prueba 2 (producto 2): FRENADO. · ✗ Producto 2 sin ventas en 40 días: tiene ventas: elegí otro (sus acumulados en la balanza no se pueden leer ni recuperar)
+OK   el producto 2 (con ventas) no se tocó
+OK   prueba 2 con el producto 6 (sin ventas): Prueba 2 (producto 6): CONFIRMADO.
+OK   producto 6: solo cambió el código de barras (20PPPPCCCCCC); precios y nombre iguales
+OK   todos: Listo: 104 productos confirmados (incluye los que ya estaban).
+OK   los 104 productos: código propio configurado y ningún otro dato cambió
+OK   funciones que recibió la balanza: 2, 23, 61, 62, 72 (ninguna de precio, borrado, cierre ni configuración)
+OK   restaurar: Restauración: 0 ya iguales · 104 restaurados · 0 NO restaurados · 0 bloqueados.
+OK   restaurados: los 104 productos iguales al original salvo la marca "gestionado por PC" (no se puede volver a "balanza")
+OK   el producto de prueba 7999 sigue en la balanza (no se usa ninguna función de borrado; el cliente lo borra a mano o se reusa)
+=== Balanza simulada que acepta el tipo de código como DÍGITO ===
+OK   sin respaldo del día, la prueba 1 está deshabilitada
+OK   respaldo: Respaldo completo y verificado: respaldo 104 de 104 productos · 104 productos, huella a78ee747.
+OK   la 2 y la 3 están deshabilitadas antes de la 1
+OK   sin marcar la autorización no escribe
+OK   prueba 1: Prueba 1 (número libre): CONFIRMADO.
+OK   la prueba 1 escribió solo en el N.º 7999 (2 escritura(s): byte rechazado, dígito aceptado)
+OK   producto de prueba en la balanza: "PRUEBA PATAGONIA  ", precios 000000000000
+OK   después de la prueba 1, los 104 productos del cliente están byte a byte iguales
+OK   prueba 2 con un producto CON ventas: Prueba 2 (producto 2): FRENADO. · ✗ Producto 2 sin ventas en 40 días: tiene ventas: elegí otro (sus acumulados en la balanza no se pueden leer ni recuperar)
+OK   el producto 2 (con ventas) no se tocó
+OK   prueba 2 con el producto 6 (sin ventas): Prueba 2 (producto 6): CONFIRMADO.
+OK   producto 6: solo cambió el código de barras (20PPPPCCCCCC); precios y nombre iguales
+OK   todos: Listo: 104 productos confirmados (incluye los que ya estaban).
+OK   los 104 productos: código propio configurado y ningún otro dato cambió
+OK   funciones que recibió la balanza: 2, 23, 61, 62, 72 (ninguna de precio, borrado, cierre ni configuración)
+OK   restaurar: Restauración: 0 ya iguales · 104 restaurados · 0 NO restaurados · 0 bloqueados.
+OK   restaurados: los 104 productos iguales al original salvo la marca "gestionado por PC" (no se puede volver a "balanza")
+OK   el producto de prueba 7999 sigue en la balanza (no se usa ninguna función de borrado; el cliente lo borra a mano o se reusa)
+TODO OK

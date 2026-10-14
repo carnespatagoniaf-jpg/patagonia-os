@@ -81,6 +81,10 @@ create table if not exists public.pos_scale_paper_claims (
 
 -- Bases donde la 119 ya se había aplicado con la ventana de todo el día.
 alter table public.scale_profiles alter column repeat_window_minutes set default 3;
+-- Interruptor: con active = false, Mostrador deja de usar la venta "artículos + TOTAL" en esa sucursal y vuelve a
+-- funcionar como antes. NO se borra nada. Las ventas que ya están en la cola sin conexión se siguen aceptando
+-- (create_pos_scale_sale no mira este dato): apagarlo nunca hace perder una venta ya cobrada.
+alter table public.scale_profiles add column if not exists active boolean not null default true;
 
 create index if not exists pos_scale_paper_claims_sale_idx on public.pos_scale_paper_claims (sale_id);
 
@@ -334,6 +338,33 @@ begin
   return v_sale;
 end;
 $$;
+
+-- Encender / apagar la venta con balanza en una sucursal (dueño o administrador). Queda en auditoría.
+create or replace function public.set_scale_profile_active(p_branch_id uuid, p_scale_key text, p_active boolean)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user uuid := auth.uid();
+  v_company uuid;
+  v_role text;
+begin
+  select company_id, role into v_company, v_role from public.profiles where id = v_user and active = true;
+  if v_company is null then raise exception 'Perfil inválido'; end if;
+  if v_role not in ('owner', 'admin') then raise exception 'Solo el dueño o un administrador puede cambiar esto'; end if;
+  if p_active is null then raise exception 'Valor inválido'; end if;
+  update public.scale_profiles set active = p_active, updated_by = v_user, updated_at = now()
+  where company_id = v_company and branch_id = p_branch_id and scale_key = p_scale_key;
+  if not found then raise exception 'La balanza no está configurada en esa sucursal'; end if;
+  insert into public.audit_log (company_id, branch_id, user_id, action, entity_type, entity_id, new_data)
+  values (v_company, p_branch_id, v_user, 'scale_profile.active', 'scale_profile', p_scale_key, jsonb_build_object('active', p_active));
+end;
+$$;
+
+revoke all on function public.set_scale_profile_active(uuid, text, boolean) from public, anon;
+grant execute on function public.set_scale_profile_active(uuid, text, boolean) to authenticated;
 
 -- Ventana del aviso de papel repetido (dueño o administrador).
 create or replace function public.set_scale_repeat_window(p_branch_id uuid, p_scale_key text, p_minutes int)

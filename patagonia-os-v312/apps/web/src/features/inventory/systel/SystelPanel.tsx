@@ -11,7 +11,7 @@ import { runSystelWriteTest, type SystelWriteTestResult } from "./systel-write-t
 import { discoverSystelLink, loadSavedSystelLink, saveSystelLink } from "./systel-discovery";
 import { enableTicketBarcodes, type TicketBarcodeResult } from "./systel-ticket-barcode";
 import { runSystelDiagnostic, type SystelDiagnostic } from "./systel-full-diagnostic";
-import { SystelProductBarcodePanel } from "./SystelProductBarcodePanel";
+import { SYSTEL_PRODUCT_BARCODE_WRITE_ENABLED, SystelProductBarcodePanel } from "./SystelProductBarcodePanel";
 import type { SystelLayout } from "./systel-plu";
 import { getBranchScaleConfig } from "../../sale/scale-config-service";
 import { saveSystelLabelTemplates, saveSystelPluBarcodes } from "../../sale/systel-label-format";
@@ -299,7 +299,7 @@ export function SystelPanel({ products, pilot = false, extra }: { products: Syst
    * productos, ventas guardadas, detalle e interpretación. El resultado completo le llega a soporte.
    */
   /** Para el recuadro "Código de barras de cada producto": conexión de SOLO LECTURA + formato de producto. */
-  async function withReadClient<T>(fn: (client: SystelClient, layout: SystelLayout) => Promise<T>): Promise<T | null> {
+  async function withReadClient<T>(fn: (client: SystelClient, layout: SystelLayout) => Promise<T>, opts: { write?: boolean } = {}): Promise<T | null> {
     if (runningRef.current) return null;
     runningRef.current = true;
     setBusy(true);
@@ -310,7 +310,10 @@ export function SystelPanel({ products, pilot = false, extra }: { products: Syst
       const runAddress = await connectScale("código de barras de cada producto");
       if (runAddress === null || !linkRef.current) return null;
       setProgress("Leyendo los productos de la balanza (solo lectura)…");
-      const client = new SystelClient(linkRef.current, { address: runAddress, log: logRef.current });
+      // Escritura del código de barras de cada producto: SOLO si la web se armó con VITE_SYSTEL_BARCODE_WRITES=1
+      // (producción no la tiene) y la pide el recuadro de la prueba. Nunca habilita precios, altas ni configuración.
+      const write = opts.write === true && SYSTEL_PRODUCT_BARCODE_WRITE_ENABLED;
+      const client = new SystelClient(linkRef.current, { address: runAddress, log: logRef.current, ...(write ? { writes: { productBarcode: true } } : {}) });
       const first = barcodeNumbers[0] ?? 1;
       let layout: SystelLayout | null = null;
       for (const digits of [4, 6] as const) {

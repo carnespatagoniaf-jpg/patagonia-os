@@ -1,0 +1,46 @@
+STAGING (loquhcwsvsbqpinefxcc) 2026-10-14 15:17
+
+1. Antes de la reversión:
+[{"ventas":3329,"plata_no_anulada":"15147724.00","items":5223,"movimientos_stock":9695,"suma_stock":"104723.027","tesoreria":61,"tabla_119":"scale_profiles","funcion_119":1,"registro_119":1}]
+
+2. Reversión (supabase/migrations/119_scale_sale_papers.rollback.sql):
+[]
+
+3. Después de la reversión (ventas, stock y tesorería tienen que ser iguales; la 119 ya no está):
+[{"ventas":3329,"plata_no_anulada":"15147724.00","items":5223,"movimientos_stock":9695,"suma_stock":"104723.027","tesoreria":61,"tabla_119":null,"funcion_119":0,"registro_119":0}]
+
+4. Sin la 119: venta normal y Mostrador (empresa sin balanza):
+OK   venta normal: $72000, stock 1001 → 1000
+OK   anulada: stock vuelve a 1001
+(no aplica) Don Julio: sin la 119 la tabla scale_profiles no existe, por eso el conteo da null; lo que importa son las 3 líneas siguientes
+OK   código de producto "1" → Asado $ 15.900 /kg $ 15.900 ×
+OK   etiqueta de balanza (formato de la sucursal) → líneas: Asado $ 15.900 /kg $ 15.900 × / Asado $ 15.900 /kg $ 11.925 × · cantidades: 1 / 0,75
+OK   nada queda "Esperando el TOTAL" (la venta nueva no se activa)
+
+5. Se vuelve a instalar la 119:
+[]
+[{"ventas":3330,"plata_no_anulada":"15147724.00","items":5224,"movimientos_stock":9697,"suma_stock":"104723.027","tesoreria":61,"tabla_119":"scale_profiles","funcion_119":1,"registro_119":1}]
+
+6. Con la 119 reinstalada, prueba completa del servidor (vuelve a cargar catálogo y vínculos):
+OK   catálogo guardado (104 productos) 
+OK   vínculos guardados 
+OK   el servidor rechaza vincular un unitario con un producto por kg: ""GRINGO CAJON DE" se vende por unidad en la balanza y "PRUEBA TROZADITOx1x2" por kg en Patagonia"
+OK   945 tickets reales cobrados: 945 (fallas 0) en 82 s
+OK   plata cobrada $39.552.839 = vendido en la balanza $39.552.839
+OK   con la ventana en 0 ningún papel igual frena una venta: avisos 0 (los 94 papeles iguales del mismo día se cobraron sin bloqueo)
+OK   stock: los 104 productos bajaron exactamente lo vendido (incluye 0 para los no vendidos)
+OK   cada venta tiene su papel registrado (945 de 945)
+OK   reintentos con la misma clave (también 2 a la vez): devuelven la misma venta
+OK   reintentos: el stock no se descuenta otra vez
+OK   dos cajas, mismo papel, al mismo tiempo: 1 cobro y 1 aviso de repetido
+OK   ventana: el mismo papel enseguida pregunta (sí); pasada la ventana se cobra sin preguntar (sí)
+OK   venta anulada: el mismo papel se vuelve a cobrar sin aviso  
+OK   rechaza: los artículos no suman el TOTAL → "Los artículos del ticket de balanza suman 73118.00 y el TOTAL es 73119"
+OK   rechaza: falta un artículo (cantidad del TOTAL) → "El ticket de balanza tiene 3 artículos y se cobraron 2"
+OK   rechaza: producto distinto del vinculado → "El producto 2 de la balanza no está vinculado a ese producto de Patagonia"
+OK   rechaza: artículo de balanza fuera de su ticket → "Hay un artículo de balanza fuera de su ticket"
+OK   rechaza: descuento en un artículo de balanza → "Un artículo de la balanza no puede tener descuento propio (el descuento va a la venta)"
+OK   rechaza: venta libre con código de un producto común → "El producto 5 de la balanza no es una venta libre"
+OK   rechaza: fecha de ticket vieja → "Fecha del ticket de balanza inválida"
+OK   los rechazos no tocaron el stock
+limpieza: 963 ventas de prueba anuladas

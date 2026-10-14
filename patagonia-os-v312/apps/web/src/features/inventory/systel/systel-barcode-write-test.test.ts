@@ -4,6 +4,7 @@ import { SystelClient } from "./systel-client";
 import { FakeCuora } from "./systel-fake";
 import { pluEanSetting } from "./systel-plu";
 import { runStage1FreeSlot, runStage2OneProduct, testRecordFrom } from "./systel-barcode-write-test";
+import { restoreFromBackup, takeProductBackup, writeDataFromRead } from "./systel-product-barcode";
 import { REAL_PLU_13_PECHUGA_SH, REAL_PLU_2_GRINGO_CAJON } from "../../sale/systel-real-plu-records";
 
 // [SIMULADO con registros REALES de Los gringos] La balanza real decide; esto prueba que la herramienta frena bien.
@@ -91,5 +92,50 @@ describe("[SIMULADO] prueba de escritura, etapa 2: un producto real sin ventas",
     assert.equal(r.verdict, "frenado");
     assert.equal(r.rewrite?.verdict, "diferencia_restaurado");
     assert.equal(f.plus.get(6)?.slice(5), before?.slice(5));
+  });
+});
+
+describe("[SIMULADO] protecciones agregadas en la fase 0", () => {
+  it("la prueba 2 no se hace sobre un producto con ventas en 40 días (sus acumulados no se pueden leer)", async () => {
+    const f = scale("binario");
+    f.sales.push({ date: "13/10/26", text: "000003096^13/10/26^12:58:32^02^0002^01^0001^00000^00000^000007200000" });
+    const before = f.plus.get(2);
+    const r = await runStage2OneProduct(client(f), "max60", { number: 2, saleType: "U", mode: "binario", protect, today });
+    assert.equal(r.verdict, "frenado");
+    assert.match(r.steps.at(-1)!.detail, /tiene ventas/);
+    assert.equal(f.plus.get(2), before);
+    assert.equal(f.received.filter((x) => x.fn === 61).length, 0);
+  });
+  it("restauración en una balanza que solo acepta el dígito: manda el respaldo con el dígito y queda igual", async () => {
+    const f = scale("ascii");
+    const c = client(f);
+    const { backup } = await takeProductBackup(c, "max60", [2, 6]);
+    await runStage2OneProduct(c, "max60", { number: 6, saleType: "P", mode: "ascii", protect, today });
+    assert.deepEqual(pluEanSetting(f.plus.get(6)!), { type: 1, config: "20PPPPCCCCCC" });
+    const r = await restoreFromBackup(c, backup, undefined, "ascii");
+    assert.deepEqual(r.map((x) => x.verdict), ["igual", "restaurado"]);
+    assert.deepEqual(pluEanSetting(f.plus.get(6)!), { type: 1, config: "000000000000" });
+  });
+  it("con la forma equivocada la balanza rechaza la restauración y se informa (no queda nada a medias)", async () => {
+    const f = scale("ascii");
+    const c = client(f);
+    const { backup } = await takeProductBackup(c, "max60", [6]);
+    await runStage2OneProduct(c, "max60", { number: 6, saleType: "P", mode: "ascii", protect, today });
+    const r = await restoreFromBackup(c, backup, undefined, "binario");
+    assert.deepEqual(r.map((x) => x.verdict), ["no_restaurado"]);
+  });
+  it("un cliente sin permiso de escritura nunca manda la 61, ni siquiera para restaurar", async () => {
+    const f = scale("binario");
+    const c = client(f, false);
+    const { backup } = await takeProductBackup(c, "max60", [6]);
+    f.plus.set(6, f.plus.get(6)!.replace("TROZADITO", "TROZXDITO"));
+    const r = await restoreFromBackup(c, backup);
+    assert.deepEqual(r.map((x) => x.verdict), ["bloqueado"]);
+    assert.equal(f.received.filter((x) => x.fn === 61).length, 0);
+  });
+  it("la escritura de datos para restaurar: igual al respaldo sin la gestión; con el dígito si hace falta", () => {
+    const d = writeDataFromRead(REAL_PLU_2_GRINGO_CAJON, "max60", "binario");
+    assert.equal(d, REAL_PLU_2_GRINGO_CAJON.slice(0, 4) + REAL_PLU_2_GRINGO_CAJON.slice(5));
+    assert.ok(writeDataFromRead(REAL_PLU_2_GRINGO_CAJON, "max60", "ascii").endsWith("1000000000000N"));
   });
 });

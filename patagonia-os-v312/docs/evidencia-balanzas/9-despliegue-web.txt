@@ -1,0 +1,13 @@
+Versión de producción SIN la marca de escritura (vite build sin VITE_SYSTEL_BARCODE_WRITES), 2026-10-14 15:33:
+  archivos con "Probar en un número libre": 0
+  archivos con "Todos los productos": 0
+  archivos con "Restaurar desde el respaldo": 0
+  archivos con "AUTORIZO": 0
+  la marca queda fija:  Dz=!1 (=!1 es "falso")
+
+Versiones de la web en Netlify (solo lectura; cada una se puede volver a publicar con deploy-netlify.mjs publish <id>):
+  6acf9a463852339c62eabc67  ready  publicada 2026-10-14T15:06:33.263Z
+  6acf7dc721a6c826313bbd88  ready  publicada 2026-10-14T13:04:15.707Z
+  6acf7a713805544cb5694fc3  ready  publicada 2026-10-14T12:50:01.803Z
+  6acedc9113c92309a06d4590  ready  publicada 2026-10-14T01:36:30.244Z
+  6aced38309c1e4546d5689d2  ready  publicada 2026-10-14T00:58:28.026Z

@@ -65,6 +65,19 @@ export function buildBarcodeRewrite(readRaw: string, layout: SystelLayout, newCo
   return updated.slice(0, pd) + updated.slice(pd + 1);
 }
 
+/**
+ * Datos de escritura (sin gestión) de un registro leído, con el tipo de código en la forma que acepta la balanza.
+ * Lo usa la restauración: si la balanza solo acepta el dígito, el respaldo (que tiene el byte) se manda con el dígito.
+ */
+export function writeDataFromRead(readRaw: string, layout: SystelLayout, mode: TypeByteMode): string {
+  const pd = LAYOUT_INFO[layout].pluDigits;
+  const end = readRaw[readRaw.length - 1] === "N" ? readRaw.length - 1 : readRaw.length - 101;
+  const typeAt = end - 13;
+  const t = readRaw.charCodeAt(typeAt);
+  const typed = mode === "ascii" && t <= 3 ? readRaw.slice(0, typeAt) + String(t) + readRaw.slice(typeAt + 1) : readRaw;
+  return typed.slice(0, pd) + typed.slice(pd + 1);
+}
+
 /** ¿El registro releído es igual al de antes salvo tipo + código propio + gestión? */
 export function onlyBarcodeChanged(before: string, after: string, layout: SystelLayout): boolean {
   if (before.length !== after.length) return false;
@@ -87,6 +100,11 @@ export async function rewriteProductBarcode(client: SystelClient, layout: Systel
   const data = buildBarcodeRewrite(current.raw, layout, target, mode);
   if (!data) return { ...base, before: current.raw, verdict: "no_soportado", ok: false, detail: "el registro no tiene la forma esperada; no se escribió nada" };
 
+  // Control ANTES de mandar: lo que se va a escribir es el registro leído con solo el código cambiado (si no, no se manda).
+  const pd0 = LAYOUT_INFO[layout].pluDigits;
+  if (!onlyBarcodeChanged(current.raw, data.slice(0, pd0) + current.raw[pd0] + data.slice(pd0), layout)) {
+    return { ...base, before: current.raw, verdict: "no_soportado", ok: false, detail: "lo que se iba a escribir no coincide con lo leído salvo el código: no se mandó nada" };
+  }
   const reply = await client.writePluRaw(layout, number, data);
   if (reply === "bloqueado") return { ...base, before: current.raw, verdict: "bloqueado", ok: false, detail: "la escritura está bloqueada en Patagonia" };
   if (reply && reply.kind === "error") return { ...base, before: current.raw, verdict: "rechazado", ok: false, detail: `la balanza rechazó la escritura (${describeSystelError(reply.errorCode)}); no cambió nada` };
@@ -97,7 +115,7 @@ export async function rewriteProductBarcode(client: SystelClient, layout: Systel
   const changedOk = backEan.type === 1 && backEan.config === target && onlyBarcodeChanged(current.raw, back.raw, layout);
   if (!onlyBarcodeChanged(current.raw, back.raw, layout)) {
     // Cambió algo más: se vuelve a escribir el registro ORIGINAL (sin la gestión) y se relee.
-    const original = current.raw.slice(0, LAYOUT_INFO[layout].pluDigits) + current.raw.slice(LAYOUT_INFO[layout].pluDigits + 1);
+    const original = writeDataFromRead(current.raw, layout, mode);
     await client.writePluRaw(layout, number, original);
     const restored = await client.readPlu(layout, number);
     const same = !!restored && onlyBarcodeChanged(current.raw, restored.raw, layout) && pluEanSetting(restored.raw).config === ean.config;
@@ -129,7 +147,7 @@ export async function rewriteAllProductBarcodes(
   client: SystelClient,
   layout: SystelLayout,
   products: { number: number; saleType: string }[],
-  opts: { limit?: number; onProgress?: (t: string) => void } = {}
+  opts: { limit?: number; onProgress?: (t: string) => void; mode?: TypeByteMode } = {}
 ): Promise<BulkBarcodeResult> {
   const backup: { number: number; raw: string }[] = [];
   for (const [i, p] of products.entries()) {
@@ -142,7 +160,7 @@ export async function rewriteAllProductBarcodes(
   const todo = products.slice(0, opts.limit ?? products.length);
   for (const [i, p] of todo.entries()) {
     opts.onProgress?.(`Producto ${i + 1} de ${todo.length}`);
-    const r = await rewriteProductBarcode(client, layout, p.number, p.saleType);
+    const r = await rewriteProductBarcode(client, layout, p.number, p.saleType, opts.mode ?? "binario");
     results.push(r);
     if (!r.ok) return { backup, results, stoppedAt: p.number };
   }
@@ -227,7 +245,7 @@ export async function compareWithBackup(client: SystelClient, b: ProductBackup):
  * Vuelve los productos indicados (o todos) a como estaban en el respaldo: escribe el registro original (sin la
  * gestión), relee y compara. Requiere la escritura habilitada. Los que ya están iguales no se tocan.
  */
-export async function restoreFromBackup(client: SystelClient, b: ProductBackup, numbers?: number[]): Promise<{ number: number; verdict: "igual" | "restaurado" | "no_restaurado" | "bloqueado" }[]> {
+export async function restoreFromBackup(client: SystelClient, b: ProductBackup, numbers?: number[], mode: TypeByteMode = "binario"): Promise<{ number: number; verdict: "igual" | "restaurado" | "no_restaurado" | "bloqueado" }[]> {
   const out: { number: number; verdict: "igual" | "restaurado" | "no_restaurado" | "bloqueado" }[] = [];
   const pd = LAYOUT_INFO[b.layout].pluDigits;
   for (const r of b.records.filter((x) => !numbers || numbers.includes(x.number))) {
@@ -236,7 +254,7 @@ export async function restoreFromBackup(client: SystelClient, b: ProductBackup, 
       out.push({ number: r.number, verdict: "igual" });
       continue;
     }
-    const reply = await client.writePluRaw(b.layout, r.number, r.raw.slice(0, pd) + r.raw.slice(pd + 1));
+    const reply = await client.writePluRaw(b.layout, r.number, writeDataFromRead(r.raw, b.layout, mode));
     if (reply === "bloqueado") {
       out.push({ number: r.number, verdict: "bloqueado" });
       continue;

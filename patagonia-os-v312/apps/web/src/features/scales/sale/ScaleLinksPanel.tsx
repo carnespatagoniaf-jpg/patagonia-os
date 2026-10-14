@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { sameProductName } from "../../inventory/systel/systel-sales";
 import { loadSystelLabelTemplates } from "../../sale/systel-label-format";
 import { suggestByName } from "./link-suggest";
-import { isWeighed, profileReadiness, type ScaleCatalogItem, type ScaleLink, type ScaleSaleType } from "./profile";
-import { loadScaleSetup, saveScaleCatalog, setScaleLinks, type ScaleSetup } from "./scale-sale-service";
+import { decodeScaleCode, isWeighed, profileReadiness, type ScaleCatalogItem, type ScaleLink, type ScaleSaleType } from "./profile";
+import { loadScaleSetup, saveScaleCatalog, setScaleLinks, setScaleProfileActive, type ScaleSetup } from "./scale-sale-service";
 
 /**
  * "Productos de la balanza" (Stock → Balanza): qué producto de Patagonia es cada producto de la balanza.
@@ -46,11 +46,13 @@ export function ScaleLinksPanel({ branchId, products }: { branchId: string | nul
   const [busy, setBusy] = useState(false);
   const [note, setNote] = useState("");
   const [choice, setChoice] = useState<Record<number, string>>({});
+  const [probe, setProbe] = useState("");
+  const [probeResult, setProbeResult] = useState("");
   const active = useMemo(() => products.filter((p) => p.active ?? true), [products]);
 
   async function refresh() {
     if (!branchId) return;
-    setSetup(await loadScaleSetup(branchId));
+    setSetup(await loadScaleSetup(branchId, { includeInactive: true }));
     setLoaded(true);
   }
   useEffect(() => {
@@ -105,6 +107,21 @@ export function ScaleLinksPanel({ branchId, products }: { branchId: string | nul
     void saveLinks([link], `Producto ${item.code} de la balanza: guardado.`);
   }
 
+  /** Cómo lee Patagonia un código impreso por la balanza. Solo muestra: no agrega nada ni toca stock. */
+  function explainCode(raw: string): string {
+    if (!setup) return "Primero hay que guardar los productos de la balanza.";
+    const d = decodeScaleCode(raw, setup.profile);
+    if (d.kind === "not_scale") return "No es un código de esta balanza.";
+    if (d.kind === "error") return `No se puede usar: ${d.reason}.`;
+    if (d.kind === "total") return `TOTAL del ticket: $${d.amount.toLocaleString("es-AR")}${d.articles !== null ? `, ${d.articles} artículo(s)` : ""}.`;
+    const name = d.item ? `"${d.item.name.trim()}" (N.º ${d.code} de la balanza)` : `producto N.º ${d.code} (no está en lo leído de la balanza)`;
+    const qty = d.quantity === null ? `cantidad: no se puede saber (${d.quantityNote ?? "?"})` : d.item && isWeighed(d.item.saleType) ? `${d.quantity.toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg` : `${d.quantity} unidad(es)`;
+    const link = links.find((l) => l.code === d.code);
+    const target = d.generic || link?.kind === "libre" ? "venta libre (sin stock)" : link?.kind === "product" ? `descuenta stock de "${active.find((p) => p.id === link.productId)?.name ?? "producto desactivado"}"` : "NO vinculado: Mostrador no lo agrega";
+    const prices = d.item ? ` · precios en la balanza: $${d.item.prices.filter((x) => x > 0).map((x) => x.toLocaleString("es-AR")).join(" / $") || "sin precio"}` : "";
+    return `${name}: ${qty} → ${target}${prices}.`;
+  }
+
   if (!branchId) return null;
   return (
     <div className="panel" style={{ padding: 12, display: "grid", gap: 10 }}>
@@ -117,6 +134,28 @@ export function ScaleLinksPanel({ branchId, products }: { branchId: string | nul
         <span style={{ fontSize: 13 }}>
           {catalog.length} productos de la balanza{setup.readAt ? ` (leídos el ${new Date(setup.readAt).toLocaleString("es-AR")})` : ""}: <b>{linked.length}</b> vinculados, <b>{libre.length}</b> venta libre, <b>{undecided.length}</b> por decidir.
         </span>
+      )}
+      {setup && (
+        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", fontSize: 13 }}>
+          <span>
+            Venta con balanza en Mostrador: <b>{setup.active ? "encendida" : "apagada"}</b>
+            {setup.active ? "" : " (Mostrador funciona como antes; no se borró nada)"}
+          </span>
+          <button
+            className="secondary"
+            disabled={busy}
+            onClick={() => {
+              const next = !setup.active;
+              if (!next && !window.confirm("¿Apagar la venta con balanza en esta sucursal?\n\nMostrador vuelve a funcionar como antes. No se borra nada: las ventas ya cobradas quedan como están y las guardadas sin conexión se suben igual. Se puede volver a encender.")) return;
+              void run(async () => {
+                await setScaleProfileActive(branchId, setup.profile.scaleKey, next);
+                return next ? "Venta con balanza encendida." : "Venta con balanza apagada: Mostrador funciona como antes.";
+              });
+            }}
+          >
+            {setup.active ? "Apagar" : "Encender"}
+          </button>
+        </div>
       )}
       {reading && (
         <div>
@@ -163,6 +202,25 @@ export function ScaleLinksPanel({ branchId, products }: { branchId: string | nul
               </div>
             );
           })}
+        </div>
+      )}
+      {setup && (
+        <div style={{ display: "grid", gap: 4 }}>
+          <label style={{ fontSize: 13 }}>
+            Probar un código impreso (escanealo acá; no agrega nada a ninguna venta):{" "}
+            <input
+              value={probe}
+              onChange={(e) => setProbe(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key !== "Enter") return;
+                setProbeResult(explainCode(probe.trim()));
+                setProbe("");
+              }}
+              placeholder="Código de barras"
+              style={{ width: 200 }}
+            />
+          </label>
+          {probeResult && <span style={{ fontSize: 13 }}>{probeResult}</span>}
         </div>
       )}
       {readiness && (

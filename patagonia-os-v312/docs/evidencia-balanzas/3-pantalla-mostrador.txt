@@ -1,8 +1,8 @@
-Corrida: 2026-10-14 14:29:11
-Pantalla real contra STAGING, empresa aislada PRUEBA Balanzas (staging)
+Corrida: 2026-10-14 15:28
+Pantalla real (Chrome) contra STAGING, empresa aislada PRUEBA Balanzas (staging)
 
 OK   una sola balanza de venta configurada en la sucursal (systel-20)
-OK   estado: 104 productos de la balanza (leídos el 14/10/2026, 02:00:06): 102 vinculados, 0 venta libre, 2 por decidir.
+OK   estado: 104 productos de la balanza (leídos el 14/10/2026, 03:18:31): 102 vinculados, 0 venta libre, 2 por decidir.
 OK   botón "Vincular los que coinciden": Se vincularon 2 productos que coinciden.
 OK   los dos artículos quedan "Esperando el TOTAL"
 OK   sin el TOTAL no deja cobrar
@@ -22,7 +22,6 @@ OK   venta libre sin stock: 2 1 $72000 · libre 1 $6500
 OK   código mal leído: No se agregó: el código se leyó con un error (verificador incorrecto): volvé a escanearlo.
 OK   producto sin vínculo: "ARABES" (N.º 98 de la balanza) no está vinculado a un producto de Patagonia (Stock → Balanza → Vincular productos). No se agregó.
 OK   sin conexión: Sin conexión: la venta se guardó en este equipo y se sube sola apenas vuelva internet.
-OK   al volver la conexión se subió una vez: 5 1.579 $8211, stock trozadito 1000.714
+OK   al volver la conexión se subió una vez: 5 1.402 $7290, stock trozadito 1003.943
 OK   dos cajas, mismo papel: 1 venta (la otra caja recibió el aviso: sí)
-
 TODO OK

@@ -1,0 +1,16 @@
+Corrida: 2026-10-14 15:27
+Probar código impreso, stock solo al cobrar, interruptor (staging)
+OK   probar código (pesable de más de 10 kg): "PATA MUSLOx5x10" (N.º 8 de la balanza): 14,935 kg → descuenta stock de "PRUEBA PATA MUSLOx5x10" · precios en la balanza: $3.600 / $3.400.
+OK   probar código (unitario): "GRINGO CAJON DE" (N.º 2 de la balanza): 1 unidad(es) → descuenta stock de "PRUEBA GRINGO CAJON DE" · precios en la balanza: $72.000 / $68.000.
+OK   probar código (TOTAL real): TOTAL del ticket: $73.118, 2 artículo(s).
+OK   probar código (código mal leído): No se puede usar: el código se leyó con un error (verificador incorrecto): volvé a escanearlo.
+OK   probar códigos no movió el stock
+OK   ticket escaneado y confirmado, todavía sin cobrar: stock 1006.824 (antes 1006.824, sin cambios)
+OK   al cobrar: stock 1006.042 = 1006.824 − 0.782 (una sola vez)
+OK   interruptor: Venta con balanza en Mostrador: apagada (Mostrador funciona como antes; no se borró nada)
+OK   apagada sin borrar nada: papeles 951 (antes 951), catálogo 104 productos
+OK   con la venta con balanza apagada, Mostrador ya no arma papeles (funciona como antes)
+OK   venta guardada sin conexión antes de apagar: se sube igual con la función apagada (subida)
+OK   volver a encender: Venta con balanza en Mostrador: encendida
+OK   quedó en auditoría: {"active":true} · {"active":false}
+TODO OK
