@@ -1,76 +1,40 @@
-# Sesión única por AnyDesk: Systel Cuora Max de Los gringos
+# Sesión única por AnyDesk: Los gringos, de la balanza a la primera venta real
 
-**Preparada, no ejecutada.** Duración: unos 30 minutos.
+**Entorno privado (listo, 14/10):**
+- Dirección: `https://6acfd7120bea23faa0df81f4--sistemapatagonia.netlify.app`.
+- Es un borrador de Netlify con la herramienta de escritura, del commit `83e1b34`.
+- Producción no cambió: sigue `index-B9u41B3l.js`, sin la herramienta.
+- Usa la base de producción. Sin la migración 119, todo lo nuevo de Mostrador queda apagado solo.
 
-**Qué toca:**
-- lee la balanza;
-- crea 2 productos de prueba en números libres;
-- imprime 1 ticket de prueba de unos pocos pesos.
+## Antes del día (nosotros)
+1. Autorizaciones (ver al final).
+2. Mensaje al cliente: dejar la PC prendida con AnyDesk; la balanza prendida, por USB y con papel; el lector conectado; el local sin clientes ~40 min; Mostrador de Patagonia cerrado en otras pestañas.
+3. Si la migración 119 está autorizada, se aplica en producción antes de la sesión (solo agrega; se ensayó su reversión).
 
-**Qué no toca:** ninguno de los productos del cliente, precios, configuración ni ventas anteriores. Producción no se publica.
+## La sesión (lo hacemos nosotros; ✋ = una persona en la balanza)
 
-## 1. ¿Podemos conectarnos en solo lectura? Sí, ya está comprobado
+| # | Paso | Tiempo |
+|---|---|---|
+| 1 | Abrir el entorno privado. El cliente escribe su contraseña (es otra dirección). Stock → Balanza. Elegir el puerto "FT232R (COM3)" | 3 min |
+| 2 | Diagnóstico completo + Respaldar productos (solo lectura). Si no sale "completo", se corta acá | 5 min |
+| 3 | **1. Probar en números libres:** crea 7999 (peso) y 7998 (unidad) a $1. No toca nada del cliente | 2 min |
+| 4 | ✋ Un ticket con 7999 (algo arriba de la balanza) y 7998 × 2. Lo escaneamos en "Probar un código impreso": producto, kg, unidades y TOTAL | 4 min |
+| 5 | ✋ Total del 7999 en el menú de la balanza → **1b. Reescribir** → ✋ total otra vez: ¿cambió? | 4 min |
+| 6 | **Decisión:** si no cambió (o el cliente acepta que se reinicien los totales internos de la balanza) → **3. Todos los productos** (≈5 min, frena ante cualquier diferencia). Si no, se termina acá | 5 min |
+| 7 | "Guardar en Patagonia los productos leídos" → "Vincular los que coinciden" → las 3 sugerencias (96→102, 98→78, 100→80) → encender | 3 min |
+| 8 | ✋ **Primera venta real:** pesan un producto común, imprimen, y en Mostrador (entorno privado) se escanea cada código + el TOTAL, y se cobra | 3 min |
+| 9 | Nosotros: la venta, el papel registrado y el stock bajado una vez (también si es una presentación: cajón = 15 kg) | 2 min |
 
-| Qué | Evidencia real |
-|---|---|
-| Conexión | USB, chip FTDI FT232R, COM3 (foto del 13/10). 115200 baudios, 8N1, balanza N.º 20 (las respuestas llegan con dirección 0x14 = 20) |
-| Modelo y protocolo | Firma `F2000C030000S0060P08000A060D0`: Cuora Max, protocolo 0060, 8.000 productos, precios sin decimales, 30 kg |
-| Lectura de productos (62) | 412 respuestas en la sesión del 14/10 12:53 y los 103 productos leídos completos |
-| Reporte de ventas (72) | 1.430 artículos leídos el 14/10 |
-| Configuración (39) y reloj (28) | Leídos (E_P=20PPPPCCCCII, E_U=21PPPPCCCCII, E_S=22AAIIIIIIII, ETi=S; reloj +11 min) |
-| Usuario | 1 usuario de Los gringos, administrador, plan Estándar: puede abrir Stock → Balanza |
-| Herramienta de lectura | Ya está publicada desde el 14/10 ("Diagnóstico completo (solo lectura)", "Respaldar los productos"). **Para la parte de solo lectura no hace falta publicar nada.** |
-| Sin confirmar | La respuesta "no existe" (E7) a un producto inexistente: nunca se le pidió uno. Si contesta otra cosa, la herramienta frena sin escribir |
-| Riesgo conocido | E3 ("ocupada") mientras algún vendedor tiene un ticket abierto: con el local cerrado no pasa (lecturas completas el 14/10 09:19 y 09:53) |
+La persona en la balanza interviene ~10 minutos: pasos 4, 5 y 8.
 
-## 2. Lista exacta antes de conectarnos
+**Si algo falla:**
+- **Pasos 2 a 5:** nada del cliente cambió.
+- **Paso 6:** frena solo, y "Restaurar desde el respaldo" vuelve los productos atrás.
+- **Pasos 7 a 9:** el interruptor (Apagar) deja Mostrador como antes.
+- **Una venta mal:** se anula y devuelve el stock.
 
-**Autorizaciones (por escrito, antes del día):**
-1. **Tuya:** crear un **borrador privado** de la web armado con la herramienta de escritura. Es una dirección aparte de Netlify; no reemplaza producción ni la cambia, pero la escritura en la balanza solo existe ahí.
-2. **Del cliente:**
-   - crear 2 productos de prueba "PRUEBA PATAGONIA" ($1) en los números 7999 y 7998, que quedan en la balanza y se pueden borrar desde su menú;
-   - imprimir 1 ticket de prueba (unos pocos pesos), que queda en el historial de ventas de la balanza;
-   - mirar 2 veces el total de ese producto de prueba en el menú de la balanza.
-
-**Nuestro lado:**
-3. El borrador armado con `VITE_SYSTEL_BARCODE_WRITES=1` desde la rama `balanzas-venta-staging`, del commit probado. Se valida antes de la sesión: se abre, inicia sesión, y Stock → Balanza muestra los botones.
-4. A mano: la evidencia de la fase 0 (`docs/evidencia-balanzas/`) y la lectura real del 14/10 (en soporte) para comparar.
-5. Quién está de cada lado: vos o yo manejando AnyDesk; del lado del cliente, una persona que inicia sesión, acepta AnyDesk, pesa e imprime el ticket.
-
-**En el local (confirmar por mensaje el día anterior):**
-6. La PC con **Chrome** actualizado, AnyDesk instalado y el ID a mano.
-7. La balanza **prendida, conectada por USB** a esa PC y **con papel**.
-8. El **lector de código de barras** conectado a la misma PC.
-9. **Local cerrado o sin clientes, y ningún ticket abierto** en la balanza (ningún vendedor A–D con artículos sin imprimir).
-10. **Ningún otro programa usando la balanza.** No tiene que haber un Mostrador de Patagonia abierto en otra pestaña (abre el puerto para leer tickets). Si tienen Qendra u otro programa de Systel, que esté cerrado.
-11. El cliente sabe su **usuario y contraseña** de Patagonia: el borrador es otra dirección y pide iniciar sesión otra vez. **La contraseña la escribe el cliente, no nosotros.**
-12. Sabe ver en la balanza el **total por producto** (menú de listados o totales por PLU). Si no lo sabe, se lo guiamos en el momento.
-
-## 3. Guion de la sesión (en este orden; se frena en cualquier ✗)
-
-| # | Qué | Quién | Tiempo | Escribe en la balanza |
-|---|---|---|---|---|
-| 0 | Abrir el borrador. El cliente inicia sesión. Stock → Balanza. Chrome pide el puerto la primera vez: elegir "FT232R USB UART (COM3)" | Cliente + nosotros | 3 min | No |
-| 1 | **Diagnóstico completo (solo lectura)**: firma, reloj, formatos, productos, ventas. Se manda a soporte | Nosotros | 3 min | No |
-| 2 | **Respaldar los productos (solo lectura)**: tiene que decir "completo y verificado" (103 o 104 productos). Después "Comparar con el respaldo": todo igual | Nosotros | 3 min | No |
-| — | **Punto de corte:** si 1 o 2 no salen completos, se termina acá. Se analiza sin molestar más | — | — | — |
-| 3 | Marcar la autorización y tocar **"1. Probar en números libres"**: la balanza contesta "no existe" en 7999 y 7998, se crean los 2 productos de prueba, se releen, y se verifica que los productos del cliente y su historial de ventas siguen iguales | Nosotros | 2 min | **Sí, solo 7999 y 7998** |
-| 4 | **Ticket de prueba:** en la balanza, el producto 7999 con algo encima (≈1 kg) y el 7998 × 2 en el mismo ticket, e imprimir. Escanear el código de cada artículo y el del TOTAL en **"Probar un código impreso"**. Tiene que decir "PRUEBA PATAGONIA … kg" y "… 2 unidad(es)" | Cliente pesa e imprime; nosotros miramos | 5 min | No (es una venta normal de la balanza) |
-| 5 | Menú de la balanza: **total del producto 7999**. Foto o anotarlo | Cliente | 2 min | No |
-| 6 | **"1b. Reescribir el producto de prueba"** (solo el 7999) | Nosotros | 1 min | **Sí, solo 7999** |
-| 7 | Mirar otra vez el total del 7999. **Si quedó igual, la escritura no borra acumulados. Si volvió a cero, sí los borra**, y eso lo tiene que aceptar el cliente antes de tocar sus productos | Cliente | 2 min | No |
-| 8 | Comparar con el respaldo: los productos del cliente siguen iguales. Fin | Nosotros | 2 min | No |
-
-**Qué NO se hace en esta sesión:** la prueba 2 (un producto real), los 87 productos, ni publicar en producción. Eso se decide con los resultados de 4 y 7.
-
-## 4. Qué nos llevamos de la sesión
-- Si la balanza acepta la escritura, y en qué forma (byte o dígito).
-- Si imprime el código de cada artículo y el lector lo lee (peso y **unidades**: lo único que nunca vimos impreso).
-- Si escribir un producto borra sus acumulados en la balanza.
-- El nombre del producto 201 y el catálogo completo actualizado.
-- Todo queda en los reportes de soporte, sin depender de fotos.
-
-## 5. Si algo sale mal
-- **Cualquier ✗ en 1 a 3:** no se escribió nada en los productos del cliente (cada paso lo verifica). Se corta y se analiza.
-- **Corte de conexión durante el paso 3 o 6:** solo pueden quedar a medias los productos de prueba. "Comparar con el respaldo" confirma que los del cliente siguen iguales.
-- **Los productos de prueba** quedan en la balanza. Se borran desde el menú de la balanza (Artículos → Eliminar PLU) o se reusan en la próxima sesión.
+## Decisiones comerciales que solo puede tomar el cliente
+1. **30 MOLIDA x1, 64 PAN RALLADO X1X5 y 65 PAN RALLADO 20 KG:** en la balanza se venden por unidad y en Patagonia por kg, y están en presentaciones que armó él (31 = 5 × 30; 64 usa el stock del 65). ¿Por unidad o por kg?
+2. **97 BOCADITOS CAJA, 99 ARABES X 5, 101 PASCUALINAS X5, 102 COMBO 1 y 103 COMBO 2 de la balanza:** ¿son 103, 79, 81, 82 y 83 de Patagonia?
+3. **Si acepta que la escritura reinicie los totales internos de la balanza** (solo si el paso 5 muestra que pasa).
+4. **El stock inicial que tiene hoy:** todo está en 0. Sin conteo, el stock arranca en negativo hasta que cuente.
