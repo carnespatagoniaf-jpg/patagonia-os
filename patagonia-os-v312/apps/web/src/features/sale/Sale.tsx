@@ -502,6 +502,11 @@ export function Sale() {
 
   async function checkout() {
     if (cart.length === 0 || !shift) return;
+    // Etiquetas de una Systel sin su TOTAL: todavía no se sabe qué precio cobró la balanza.
+    if (cart.some((l) => l.scalePending)) {
+      setMessage("Falta escanear el código del TOTAL del ticket de la balanza: confirma el importe de cada artículo.");
+      return;
+    }
 
     // Factura pedida: se valida antes de cobrar (CUIT para la A, etc.), así nunca
     // queda una venta cobrada con una factura imposible de pedir.

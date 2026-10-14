@@ -211,7 +211,7 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
             <div className="name">
               {line.name}
               <small>
-                {line.kind === "manual" ? "Manual · " : ""}{line.scaleTicket ? "Ticket de la balanza · " : ""}{formatMoney(line.unitPrice)}{line.unit === "kg" ? " /kg" : ` /${UNIT_LABELS[line.unit]}`}
+                {line.kind === "manual" ? "Manual · " : ""}{line.scalePending ? "Esperando el TOTAL del ticket · " : line.scaleTicket ? "Ticket de la balanza · " : ""}{formatMoney(line.unitPrice)}{line.unit === "kg" ? " /kg" : ` /${UNIT_LABELS[line.unit]}`}
               </small>
             </div>
             <input

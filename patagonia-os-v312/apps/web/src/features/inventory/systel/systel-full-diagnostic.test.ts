@@ -119,14 +119,15 @@ describe("[REAL] código de barras de cada producto con los registros leídos de
     const f = scale();
     f.plus.set(2, REAL_PLU_2_GRINGO_CAJON);
     f.plus.set(13, REAL_PLU_13_PECHUGA_SH);
-    let saved: Record<string, { type: number | null; config: string | null }> = {};
+    let saved: Record<string, { type: number | null; config: string | null; p1?: number; p2?: number }> = {};
     const r = await runSystelDiagnostic(new SystelClient(f, { address: 20, busyRetryMs: [] }), { products: GRINGOS, branchConfig: BRANCH_2_4_4, now: NOW, onPluBarcodes: (m) => (saved = m) });
     const s = step(r, "codigo_producto");
     assert.equal(s.status, "aviso");
     assert.ok(s.detail.includes("EN CEROS (código propio vacío): 1 (2)"), s.detail);
     assert.ok(s.detail.includes("formato propio 20PPPPCCCCCC: 1 (13)"), s.detail);
-    assert.deepEqual(saved["2"], { type: 1, config: "000000000000" });
-    assert.deepEqual(saved["13"], { type: 1, config: "20PPPPCCCCCC" });
+    // Precios REALES del registro: CAJON lista 1 $72.000, lista 2 $68.000; PECHUGA S/H $9.200 y $9.000.
+    assert.deepEqual(saved["2"], { type: 1, config: "000000000000", p1: 72000, p2: 68000 });
+    assert.deepEqual(saved["13"], { type: 1, config: "20PPPPCCCCCC", p1: 9200, p2: 9000 });
     // Los productos reales se reconocen igual (código y forma de venta).
     assert.equal(step(r, "productos").status, "ok", step(r, "productos").detail);
   });

@@ -23,6 +23,8 @@ export function configFromSystelTemplate(template: string): ScaleConfig | null {
 export interface SystelLabelTemplates {
   weighed: string | null;
   unit: string | null;
+  /** Formato del código del TOTAL (E_S, ej. "22AAIIIIIIII"): dice cuántos artículos tiene el ticket. */
+  sums?: string | null;
   /** Cuándo los informó la balanza (ms). */
   at: number;
   /**
@@ -30,7 +32,7 @@ export interface SystelLabelTemplates {
    * 1 = el suyo (`config`), 2 = ninguno, 3 = suma. REAL Los gringos 14/10: el 13 tiene "20PPPPCCCCCC" (6 cifras
    * de cantidad) mientras el general es "20PPPPCCCCII" (4): leerlo con el general daría otros kilos.
    */
-  perPlu?: Record<string, { type: number | null; config: string | null }>;
+  perPlu?: Record<string, { type: number | null; config: string | null; p1?: number; p2?: number }>;
 }
 
 const KEY = "patagonia-systel-label-templates";
@@ -41,7 +43,7 @@ export function saveSystelLabelTemplates(values: Record<string, string>): void {
   if (!weighed && !unit) return;
   try {
     const prev = loadSystelLabelTemplates();
-    localStorage.setItem(KEY, JSON.stringify({ weighed, unit, at: Date.now(), perPlu: prev?.perPlu } satisfies SystelLabelTemplates));
+    localStorage.setItem(KEY, JSON.stringify({ weighed, unit, sums: values.E_S ?? null, at: Date.now(), perPlu: prev?.perPlu } satisfies SystelLabelTemplates));
   } catch {
     // sin localStorage se usa el formato de la sucursal
   }
@@ -57,7 +59,7 @@ export function loadSystelLabelTemplates(): SystelLabelTemplates | null {
 }
 
 /** Guarda el código de barras propio de los productos leídos de la balanza (se suma a lo ya guardado). */
-export function saveSystelPluBarcodes(perPlu: Record<string, { type: number | null; config: string | null }>): void {
+export function saveSystelPluBarcodes(perPlu: Record<string, { type: number | null; config: string | null; p1?: number; p2?: number }>): void {
   try {
     const prev = loadSystelLabelTemplates() ?? { weighed: null, unit: null, at: Date.now() };
     localStorage.setItem(KEY, JSON.stringify({ ...prev, perPlu: { ...(prev.perPlu ?? {}), ...perPlu } } satisfies SystelLabelTemplates));

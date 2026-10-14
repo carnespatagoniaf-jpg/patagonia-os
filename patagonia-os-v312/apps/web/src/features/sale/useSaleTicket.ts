@@ -1,13 +1,15 @@
 import { useEffect, useRef, useState } from "react";
 import type { Product, TreasuryAccount } from "@patagonia/domain";
 import { parseAmount } from "../../lib/money";
-import { formatMoney } from "../shifts/format";
+import { formatMoney, localDateIso } from "../shifts/format";
 import type { ProductCategory } from "../inventory/product-categories-service";
 import { parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, type ScaleConfig } from "./scale-config-service";
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
 import { resolveScan } from "./scan-resolve";
 import { closeSystelTicketSession, readSystelTicketFromScale, refreshSystelLabelFormat, systelTicketReadConfigured } from "../inventory/systel/systel-ticket-from-scale";
 import { loadSystelLabelTemplates, systelConfigForCode } from "./systel-label-format";
+import { settleTicket, type ScalePrices } from "./systel-ticket-settle";
+import { decodeSumCode } from "../inventory/systel/systel-sales";
 import type { TicketCandidate } from "../inventory/systel/systel-ticket-detail";
 import type { SystelTicket } from "../inventory/systel/systel-sales";
 import { chargedScaleTickets } from "./sale-service";
@@ -260,7 +262,10 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       setHighlightedIndex(-1);
       return;
     }
-    const resolved = resolveScan(raw, products, systelConfig ?? scaleConfig);
+    // Con el formato de la balanza, un producto sin precio en Patagonia se carga con el precio de lista 1 de la
+    // balanza (provisorio: el importe real sale del TOTAL del ticket).
+    const scanProducts = systelTicketPilot && systelConfig ? withScalePrices(products) : products;
+    const resolved = resolveScan(raw, scanProducts, systelConfig ?? scaleConfig);
     const done = () => {
       setSearch("");
       setHighlightedIndex(-1);
@@ -273,6 +278,12 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     }
     if (resolved.type === "systel_total") {
       done();
+      // Si hay etiquetas de ese ticket esperando, el TOTAL confirma sus importes (no se vuelve a cargar nada).
+      // No necesita la balanza conectada.
+      if (systelTicketPilot && cart.some((l) => l.scalePending)) {
+        void settlePendingWithTotal(raw, resolved.amount);
+        return;
+      }
       if (!systelTicketPilot || !systelTicketReadConfigured()) {
         setMessage(resolved.message);
         return;
@@ -315,6 +326,10 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       ) {
         setMessage("No se agregó el producto.");
         done();
+        return;
+      }
+      if (systelTicketPilot && systelConfig) {
+        addPendingLabel(resolved.product, resolved.quantity);
         return;
       }
       quickAdd(resolved.product, resolved.quantity, "scale");
@@ -364,6 +379,67 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
    * (función 72, solo lectura) y se carga cada artículo con los gramos o unidades que ella registró.
    * Si no se puede leer o algo no coincide, NO se carga nada (ni el total sin stock).
    */
+  /**
+   * Systel con código por producto: cada etiqueta trae producto + cantidad, pero no el precio que se cobró
+   * (lista 1, lista 2 o manual). El artículo queda "esperando el TOTAL" hasta que se escanea el código del TOTAL
+   * del ticket, y ahí se calcula el importe de cada uno (systel-ticket-settle.ts). Sin conexión con la balanza.
+   */
+  function addPendingLabel(product: Product, quantity: number) {
+    const templates = loadSystelLabelTemplates();
+    const p1 = templates?.perPlu?.[product.code]?.p1 ?? 0;
+    const unitPrice = product.priceRetail > 0 ? product.priceRetail : p1;
+    setCart((current) => [
+      ...current,
+      { key: `${product.id}|etiqueta|${Date.now()}|${current.length}`, kind: "product", productId: product.id, name: product.name, unit: product.unit, quantity, unitPrice, source: "scale", scaleTickets: 1, scalePending: true }
+    ]);
+    const qty = product.unit === "kg" ? `${quantity.toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg` : `${quantity} u.`;
+    setMessage(`Agregado: ${product.name} ${qty}. Al terminar, escaneá el código del TOTAL del ticket para confirmar los importes.`);
+    setSearch("");
+    setHighlightedIndex(-1);
+    searchInputRef.current?.focus();
+  }
+
+  /** TOTAL escaneado con artículos de etiqueta esperando: se reparte el total entre ellos (precio de la balanza). */
+  async function settlePendingWithTotal(code: string, amount: number) {
+    const pending = cart.filter((l) => l.scalePending);
+    const templates = loadSystelLabelTemplates();
+    const decoded = decodeSumCode(code, templates?.sums ?? null);
+    const prices = new Map<number, ScalePrices>();
+    const settleLines = pending.map((l) => {
+      const product = products.find((p) => p.id === l.productId);
+      const entry = product ? templates?.perPlu?.[product.code] : undefined;
+      const plu = Number(product?.code ?? 0);
+      if (entry && (entry.p1 ?? 0) > 0) prices.set(plu, { p1: entry.p1 ?? 0, p2: entry.p2 ?? 0 });
+      return { plu, quantity: l.quantity };
+    });
+    const r = settleTicket(settleLines, amount, prices, decoded.ok ? decoded.articles : null);
+    if (!r.ok) {
+      setMessage(`No se confirmaron los importes: ${r.reason}. Revisá que hayas escaneado todos los artículos de ese ticket (y ninguno de otro).`);
+      return;
+    }
+    const day = localDateIso();
+    const keys = pending.map((_, i) => `systel-total:${day}:${code}:${i}`);
+    const charged = await chargedScaleTickets(keys).catch(() => null);
+    if (charged && charged.size > 0 && !window.confirm(`Hoy ya se cobró un ticket con este mismo TOTAL (${formatMoney(amount)}) y los mismos artículos. ¿Es OTRO ticket igual? (Si es el mismo papel, tocá Cancelar.)`)) {
+      setMessage("No se confirmó: ese ticket ya estaba cobrado.");
+      return;
+    }
+    const suffix = charged && charged.size > 0 ? `:${Date.now()}` : "";
+    const byKey = new Map(pending.map((l, i) => [l.key, i]));
+    setCart((current) =>
+      current.map((l) => {
+        const i = byKey.get(l.key);
+        if (i === undefined) return l;
+        return { ...l, scalePending: false, scaleAmount: r.amounts[i], unitPrice: r.amounts[i] / l.quantity, scaleTicket: `${keys[i]}${suffix}` };
+      })
+    );
+    setMessage(
+      r.method === "exacto"
+        ? `Importes confirmados con el TOTAL (${formatMoney(amount)}): cada artículo con el precio que cobró la balanza.`
+        : `Importes confirmados con el TOTAL (${formatMoney(amount)}). Ojo: ${r.detail}.`
+    );
+  }
+
   async function loadSystelTicket(code: string, amount: number) {
     if (readingScaleTicket) return;
     setReadingScaleTicket(true);
@@ -554,4 +630,10 @@ function saveChargedSystelTickets(keys: string[]): void {
   } catch {
     // sin localStorage: el control queda solo dentro de la venta
   }
+}
+
+/** Productos con el precio de lista 1 de la balanza donde Patagonia no tiene precio (solo para leer etiquetas). */
+function withScalePrices(products: Product[]): Product[] {
+  const perPlu = loadSystelLabelTemplates()?.perPlu ?? {};
+  return products.map((p) => (p.priceRetail > 0 || !(perPlu[p.code]?.p1 ?? 0) ? p : { ...p, priceRetail: perPlu[p.code]!.p1! }));
 }

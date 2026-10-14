@@ -36,10 +36,15 @@ export function toCuoraText(text: string, width: number): string {
   return clean.slice(0, width).padEnd(width, " ");
 }
 
-export function buildSystelFrame(address: number, fn: number, data = "", options: { checksum?: boolean } = {}): Uint8Array {
+/**
+ * `allowTypeByteAt`: posición donde se permite un byte 0x00-0x03 (el tipo de código de barras de un producto,
+ * que la balanza real guarda así: 0x01). Cualquier otro byte fuera de lo imprimible se rechaza.
+ */
+export function buildSystelFrame(address: number, fn: number, data = "", options: { checksum?: boolean; allowTypeByteAt?: number } = {}): Uint8Array {
   if (!Number.isInteger(address) || address < 0 || address > 99) throw new Error(`Dirección fuera de rango (0 a 99): ${address}`);
   if (!Number.isInteger(fn) || fn < 1 || fn > 255) throw new Error(`Función inválida: ${fn}`);
   for (let i = 0; i < data.length; i++) {
+    if (i === options.allowTypeByteAt && data.charCodeAt(i) <= 0x03) continue;
     if (data.charCodeAt(i) > 0x7e || data.charCodeAt(i) < 0x20) throw new Error(`Carácter no permitido en la trama (posición ${i})`);
   }
   const body = [address, fn, ...Array.from(data, (c) => c.charCodeAt(0))];
