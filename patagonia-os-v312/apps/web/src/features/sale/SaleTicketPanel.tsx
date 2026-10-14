@@ -218,8 +218,8 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
               type="text"
               inputMode="decimal"
               className="pos-qty-input"
-              readOnly={Boolean(line.scaleTicket)}
-              title={line.scaleTicket ? "Cantidad que pesó la balanza (no se cambia a mano)" : undefined}
+              readOnly={Boolean(line.scaleTicket || line.scalePaper)}
+              title={line.scaleTicket || line.scalePaper ? "Cantidad que pesó la balanza (no se cambia a mano)" : undefined}
               value={qtyDrafts[line.key] ?? String(line.quantity).replace(".", ",")}
               onFocus={(e) => e.target.select()}
               onChange={(e) => {
@@ -235,6 +235,8 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
               inputMode="decimal"
               className="pos-discount-input"
               placeholder="Desc. $"
+              disabled={Boolean(line.scalePaper)}
+              title={line.scalePaper ? "El descuento de un ticket de la balanza va a la venta entera" : undefined}
               value={itemDiscounts[line.key] ?? ""}
               onChange={(e) => setItemDiscounts({ ...itemDiscounts, [line.key]: e.target.value })}
             />

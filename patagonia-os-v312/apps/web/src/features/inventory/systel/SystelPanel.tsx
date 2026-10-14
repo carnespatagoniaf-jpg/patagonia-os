@@ -75,7 +75,7 @@ function boundedDiagnostic<T extends { log: unknown[]; linkEvents: unknown[] }>(
   return out;
 }
 
-export function SystelPanel({ products, pilot = false }: { products: SystelPanelProduct[]; pilot?: boolean }) {
+export function SystelPanel({ products, pilot = false, extra }: { products: SystelPanelProduct[]; pilot?: boolean; extra?: React.ReactNode }) {
   const [open, setOpen] = useState(false);
   const [modelId, setModelId] = useState<SystelModelId>("cuora_max");
   const [address, setAddress] = useState(1);
@@ -424,6 +424,7 @@ ${JSON.stringify({ pasos: r.steps, datos: r.data })}`, { error: r.steps.some((s)
               <button className="secondary" disabled={busy} onClick={() => void handleSalesDiagnostic()}>Diagnóstico completo (solo lectura)</button>
               <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>Solo lectura: no cambia nada en la balanza ni en Patagonia.</p>
             </div>
+            {extra}
             {pilot && <SystelProductBarcodePanel busy={busy} numbers={barcodeNumbers} withReadClient={withReadClient} report={(step, detail) => void autoReport(step, detail)} />}
             {salesDiag && (
               <div className="panel" style={{ padding: 12, display: "grid", gap: 6 }}>

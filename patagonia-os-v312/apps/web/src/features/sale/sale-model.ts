@@ -24,6 +24,10 @@ export interface TicketLine {
   scaleTicket?: string;
   /** Etiqueta de una Systel esperando el código del TOTAL para saber su importe (no se puede cobrar así). */
   scalePending?: boolean;
+  /** Papel de la balanza ("artículos + TOTAL", migración 119) al que pertenece esta línea. */
+  scalePaper?: string;
+  /** Código de la balanza que se escaneó (null = venta libre agregada a mano). */
+  scaleCode?: number | null;
 }
 
 /** Importe de una línea antes de descuentos: el de la balanza si vino de un ticket leído de ella. */

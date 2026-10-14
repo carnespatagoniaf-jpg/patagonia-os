@@ -14,6 +14,7 @@ import { decodeSumCode } from "../inventory/systel/systel-sales";
 import type { TicketCandidate } from "../inventory/systel/systel-ticket-detail";
 import type { SystelTicket } from "../inventory/systel/systel-sales";
 import { chargedScaleTickets } from "./sale-service";
+import { useScalePapers } from "./useScalePapers";
 import { submitScaleSupportReport } from "../scales/support-service";
 import type { PosShift } from "./pos-shift-service";
 import { lineGross, type PaymentRow, type TicketLine } from "./sale-model";
@@ -35,9 +36,11 @@ export interface SaleTicketDeps {
   setShowShiftTotals: (show: boolean) => void;
   /** Leer el detalle del TOTAL de una Systel desde la balanza: solo empresas de la prueba piloto. */
   systelTicketPilot?: boolean;
+  /** Sucursal activa: para la balanza "artículos + TOTAL" configurada en ella (migración 119). */
+  scaleBranchId?: string | null;
 }
 
-export function useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false }: SaleTicketDeps) {
+export function useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false, scaleBranchId = null }: SaleTicketDeps) {
   const [search, setSearch] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -46,6 +49,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
   /** Varios tickets de la balanza con el mismo total: la persona elige cuál (nunca a ciegas). */
   const [scaleTicketChoices, setScaleTicketChoices] = useState<{ amount: number; candidates: TicketCandidate[]; charged: SystelTicket[] } | null>(null);
   const [readingScaleTicket, setReadingScaleTicket] = useState(false);
+  const papers = useScalePapers({ enabled: systelTicketPilot, branchId: scaleBranchId, products, cart, setCart, setMessage });
   const [itemDiscounts, setItemDiscounts] = useState<Record<string, string>>({});
   const [saleDiscount, setSaleDiscount] = useState("");
   const [saleDiscountMode, setSaleDiscountMode] = useState<"amount" | "percent" | "final">("amount");
@@ -252,6 +256,13 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     const raw = search.trim();
     if (!raw) return;
 
+    // Balanza "artículos + TOTAL" de la sucursal (si tiene): sus códigos los lee useScalePapers.
+    if (!products.some((p) => p.code === raw) && papers.handleScan(raw)) {
+      setSearch("");
+      setHighlightedIndex(-1);
+      return;
+    }
+
     // Qué es el código (producto, ticket de total, etiqueta de balanza o error): scan-resolve.ts,
     // lógica pura y probada con etiquetas reales. Acá solo quedan los avisos y el carrito.
     // Systel piloto: el código de cada producto se lee con el formato que informó la balanza (no con el
@@ -360,7 +371,9 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
   }
 
   function removeFromCart(key: string) {
-    setCart((current) => current.filter((l) => l.key !== key));
+    // Un ticket de la balanza ya confirmado se saca entero (sus artículos van juntos).
+    const keys = new Set(cart.find((l) => l.key === key)?.scalePaper ? papers.keysToRemove(key) : [key]);
+    setCart((current) => current.filter((l) => !keys.has(l.key)));
     setItemDiscounts((current) => {
       const next = { ...current };
       delete next[key];
@@ -549,6 +562,7 @@ ${l.name} ${qty}`);
 
   function clearTicket() {
     setScaleTicketChoices(null);
+    papers.reset();
     setCart([]);
     setItemDiscounts({});
     setSaleDiscount("");
@@ -635,7 +649,7 @@ ${l.name} ${qty}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSplit, busy, cart.length, shift, accounts, confirmCharge]);
 
-  return { search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, commitScaleTickets, readingScaleTicket, scaleTicketChoices, setScaleTicketChoices, addScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
+  return { search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, commitScaleTickets, papers, readingScaleTicket, scaleTicketChoices, setScaleTicketChoices, addScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
 }
 
 export type SaleTicket = ReturnType<typeof useSaleTicket>;

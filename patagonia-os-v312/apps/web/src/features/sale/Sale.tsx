@@ -16,6 +16,7 @@ import { useSuppliers } from "../purchases/useSuppliers";
 import { useEmployees } from "../employees/useEmployees";
 import { deletePosShiftOutflow, listPosShiftVales, type PosShiftVale } from "../employees/employees-service";
 import { createPosSale, type CreatePosSaleInput } from "./sale-service";
+import { repeatedPaperTime } from "../scales/sale/scale-sale-service";
 import { getFiscalSettings, requestInvoice, type FiscalSettings } from "../invoicing/invoicing-service";
 import { emptyInvoiceDraft, invoiceDraftError, type InvoiceDraft } from "../invoicing/invoicing-view";
 import { InvoiceRequestFields } from "../invoicing/InvoiceRequestFields";
@@ -154,7 +155,7 @@ export function Sale() {
   const [scaleConfigCalibrated, setScaleConfigCalibrated] = useState(false);
 
 
-  const ticket = useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot: SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? "") });
+  const ticket = useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot: SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? ""), scaleBranchId: branchId ?? null });
   const {
     cart,
     itemDiscounts,
@@ -601,7 +602,8 @@ export function Sale() {
         source: l.source,
         scaleTickets: l.scaleTickets,
         scaleAmount: l.scaleAmount,
-        scaleTicket: l.scaleTicket
+        scaleTicket: l.scaleTicket,
+        ...(l.scalePaper ? { scaleCode: l.scaleCode ?? null } : {})
       }));
       const paymentsPayload = isSplit
         ? payments.map((p) => ({ accountId: p.accountId, amount: parseAmount(p.amount || "0") || 0, reference: p.reference.trim() || undefined }))
@@ -621,6 +623,10 @@ export function Sale() {
         // camino de vuelta.
         idempotencyKey: ""
       };
+      // Tickets de la balanza "artículos + TOTAL": van con sus papeles (el servidor los valida y evita cobrarlos dos veces).
+      const scalePapers = ticket.papers.payload(cart);
+      if (scalePapers.error) throw new Error(scalePapers.error);
+      if (scalePapers.scale) salePayload.scale = scalePapers.scale;
       const fingerprint = JSON.stringify([salePayload.branchId, salePayload.posShiftId, salePayload.items, salePayload.payments, salePayload.discountAmount, salePayload.surchargeAmount]);
       if (saleKeyRef.current?.fingerprint !== fingerprint) saleKeyRef.current = { fingerprint, key: crypto.randomUUID() };
       salePayload.idempotencyKey = saleKeyRef.current.key;
@@ -635,7 +641,26 @@ export function Sale() {
       let saleId: string | null = null;
       const invoiceSnapshot = invoiceDraft;
       try {
-        const result = await createPosSale(salePayload);
+        let result;
+        try {
+          result = await createPosSale(salePayload);
+        } catch (err) {
+          const repeatedAt = repeatedPaperTime(err);
+          if (repeatedAt === null || !salePayload.scale) throw err;
+          // El mismo papel ya se cobró hoy: puede ser otro cliente con exactamente lo mismo, o el mismo papel otra vez.
+          if (!window.confirm(`Ese mismo ticket de la balanza ya se cobró hoy${repeatedAt ? ` a las ${repeatedAt}` : ""}.
+
+¿Es OTRO ticket igual (otro cliente que llevó exactamente lo mismo)?
+
+Aceptar = sí, cobrar este.
+Cancelar = es el mismo papel: no cobrar.`)) {
+            // Con `code`: no es una falla de red, así que NO va a la cola sin conexión (isRetryableError).
+            throw Object.assign(new Error("No se cobró: ese ticket de la balanza ya estaba cobrado."), { code: "TICKET_BALANZA_REPETIDO" });
+          }
+          ticket.papers.confirmRepeat();
+          salePayload.scale = { ...salePayload.scale, papers: salePayload.scale.papers.map((p) => ({ ...p, repeatConfirmed: true })) };
+          result = await createPosSale(salePayload);
+        }
         saleTotal = result.total;
         saleId = result.saleId;
       } catch (err) {

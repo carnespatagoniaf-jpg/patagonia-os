@@ -19,6 +19,7 @@ import { parseAmount } from "../../lib/money";
 import { downloadScaleExportCsv } from "./scale-export";
 import { ScaleSyncPanel } from "./ScaleSyncPanel";
 import { SystelPanel } from "./systel/SystelPanel";
+import { ScaleLinksPanel } from "../scales/sale/ScaleLinksPanel";
 import { SYSTEL_PILOT_COMPANIES } from "./systel/systel-pilot";
 
 /** Balanzas Systel: módulo nuevo, oculto hasta que el dueño autorice publicarlo. */
@@ -672,7 +673,7 @@ export function Inventory() {
             </button>
           )}
           {SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? "") ? (
-            <SystelPanel products={products} pilot />
+            <SystelPanel products={products} pilot extra={<ScaleLinksPanel branchId={branchId} products={products} />} />
           ) : (
             <ScaleSyncPanel products={products} onDownloadCsv={() => downloadScaleExportCsv(products, categories)} />
           )}

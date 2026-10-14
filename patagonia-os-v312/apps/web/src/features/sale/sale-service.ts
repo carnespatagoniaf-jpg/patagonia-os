@@ -11,6 +11,8 @@ export interface CreatePosSaleItemInput {
   /** Importe de la balanza (ticket leído de una Systel): el servidor lo usa en vez del precio del catálogo. */
   scaleAmount?: number;
   scaleTicket?: string;
+  /** Código de la balanza escaneado (venta "artículos + TOTAL", migración 119); null = venta libre sin código. */
+  scaleCode?: number | null;
 }
 
 export interface CreatePosSalePaymentInput {
@@ -33,6 +35,12 @@ export interface CreatePosSaleInput {
    * si el servidor ya tiene una venta con esta clave, devuelve esa misma
    * en vez de crear otra, así un reintento nunca duplica la venta. */
   idempotencyKey: string;
+  /**
+   * Papeles de la balanza de esta venta (artículos + TOTAL, migración 119). Con esto la venta va por
+   * create_pos_scale_sale, que vuelve a validar todo en el servidor y no deja cobrar dos veces el mismo papel.
+   * Viaja en la cola sin conexión igual que el resto.
+   */
+  scale?: { scaleKey: string; papers: Array<{ fingerprint: string; ticketDate: string; total: number; articles: number | null; repeatConfirmed: boolean; items: number[] }> };
 }
 
 export interface CreatePosSaleResult {
@@ -43,20 +51,27 @@ export interface CreatePosSaleResult {
 export async function createPosSale(input: CreatePosSaleInput): Promise<CreatePosSaleResult> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
-  const { data, error } = await supabase.rpc("create_pos_sale", {
+  const { data, error } = await supabase.rpc(input.scale ? "create_pos_scale_sale" : "create_pos_sale", {
     p_branch_id: input.branchId,
     p_items: input.items.map((item) => ({
       ...(item.productId
         ? { product_id: item.productId, quantity: item.quantity, discount_amount: item.discountAmount }
         : { description: item.description, unit_price: item.unitPrice, quantity: item.quantity, discount_amount: item.discountAmount }),
       ...(item.source ? { source: item.source, scale_tickets: item.scaleTickets ?? 1 } : {}),
-      ...(item.scaleAmount !== undefined && item.scaleTicket ? { scale_amount: item.scaleAmount, scale_ticket: item.scaleTicket } : {})
+      ...(item.scaleAmount !== undefined && item.scaleTicket ? { scale_amount: item.scaleAmount, scale_ticket: item.scaleTicket } : {}),
+      ...(item.scaleCode !== undefined ? { scale_code: item.scaleCode } : {})
     })),
     p_payments: input.payments.map((p) => ({ account_id: p.accountId, amount: p.amount, reference: p.reference ?? null })),
     p_pos_shift_id: input.posShiftId,
     p_discount_amount: input.discountAmount,
     p_surcharge_amount: input.surchargeAmount,
-    p_idempotency_key: input.idempotencyKey
+    p_idempotency_key: input.idempotencyKey,
+    ...(input.scale
+      ? {
+          p_scale_key: input.scale.scaleKey,
+          p_papers: input.scale.papers.map((p) => ({ fingerprint: p.fingerprint, ticket_date: p.ticketDate, total: p.total, articles: p.articles, repeat_confirmed: p.repeatConfirmed, items: p.items }))
+        }
+      : {})
   });
   if (error) throw error;
   return { saleId: data.sale_id, total: Number(data.total) };
