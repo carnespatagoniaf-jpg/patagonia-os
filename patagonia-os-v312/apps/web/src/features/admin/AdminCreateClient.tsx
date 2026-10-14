@@ -9,6 +9,7 @@ import {
 import { PLAN_LABELS, PLAN_LIMITS, type Plan } from "../auth/permissions";
 import { billingLabel, billingStatus, formatDayMonth, matchesBillingFilter, matchesCompanySearch, sortByBilling, type BillingFilter, type BillingStatus } from "./company-billing";
 import { todayIso } from "../shifts/format";
+import { grantScaleSupportAccess, listScaleSupportAccess, revokeScaleSupportAccess } from "../scales/support-access";
 import { parseAmount } from "../../lib/money";
 import { AdminSalesPipeline } from "./AdminSalesPipeline";
 import type { Lead } from "./sales-pipeline";
@@ -119,6 +120,32 @@ export function AdminCreateClient() {
   const [trialBusyId, setTrialBusyId] = useState<string | null>(null);
   const [plans, setPlans] = useState<Record<string, CompanyPlanInfo>>({});
   const [planBusyId, setPlanBusyId] = useState<string | null>(null);
+  /** Acceso de soporte a las herramientas técnicas de balanza (migración 120): empresa → vence. */
+  const [supportAccess, setSupportAccess] = useState<Record<string, string>>({});
+  const [supportBusyId, setSupportBusyId] = useState<string | null>(null);
+
+  useEffect(() => {
+    void listScaleSupportAccess().then(setSupportAccess);
+  }, []);
+
+  async function toggleSupportAccess(company: CompanySummary) {
+    setSupportBusyId(company.id);
+    try {
+      if (supportAccess[company.id]) {
+        await revokeScaleSupportAccess(company.id);
+        const next = { ...supportAccess };
+        delete next[company.id];
+        setSupportAccess(next);
+      } else {
+        const until = await grantScaleSupportAccess(company.id, 2, "sesión de soporte de balanza");
+        setSupportAccess({ ...supportAccess, [company.id]: until });
+      }
+    } catch (err) {
+      window.alert(err instanceof Error ? err.message : "No se pudo cambiar el acceso de soporte.");
+    } finally {
+      setSupportBusyId(null);
+    }
+  }
 
   const [billingFilter, setBillingFilter] = useState<BillingFilter>("all");
   const [sortMode, setSortMode] = useState<SortMode>("status");
@@ -573,6 +600,17 @@ export function AdminCreateClient() {
           <span>{company.branchCount} {company.branchCount === 1 ? "sucursal" : "sucursales"}</span>
           <span>{company.userCount} {company.userCount === 1 ? "usuario" : "usuarios"}</span>
           <span>Alta {formatDate(company.createdAt)}</span>
+        </div>
+
+        <div className="admin-trial-row">
+          <span className="muted" style={{ fontSize: 13 }}>
+            {supportAccess[company.id]
+              ? `Herramientas técnicas de balanza abiertas hasta las ${new Date(supportAccess[company.id]).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}`
+              : "Herramientas técnicas de balanza: cerradas"}
+          </span>
+          <button className="secondary" disabled={supportBusyId === company.id} onClick={() => void toggleSupportAccess(company)}>
+            {supportBusyId === company.id ? "…" : supportAccess[company.id] ? "Cerrar" : "Abrir por 2 horas"}
+          </button>
         </div>
 
         <div className="admin-actions">

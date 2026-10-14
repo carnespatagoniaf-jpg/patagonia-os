@@ -49,7 +49,9 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
   /** Varios tickets de la balanza con el mismo total: la persona elige cuál (nunca a ciegas). */
   const [scaleTicketChoices, setScaleTicketChoices] = useState<{ amount: number; candidates: TicketCandidate[]; charged: SystelTicket[] } | null>(null);
   const [readingScaleTicket, setReadingScaleTicket] = useState(false);
-  const papers = useScalePapers({ enabled: systelTicketPilot, branchId: scaleBranchId, products, cart, setCart, setMessage });
+  // Cualquier sucursal con una balanza "artículos + TOTAL" sincronizada desde Mi balanza (scale_profiles activo).
+  // Sin perfil (todas las Kretz y quien no tiene balanza), useScalePapers no hace nada: Mostrador sigue igual.
+  const papers = useScalePapers({ enabled: !!scaleBranchId, branchId: scaleBranchId, products, cart, setCart, setMessage });
   const [itemDiscounts, setItemDiscounts] = useState<Record<string, string>>({});
   const [saleDiscount, setSaleDiscount] = useState("");
   const [saleDiscountMode, setSaleDiscountMode] = useState<"amount" | "percent" | "final">("amount");

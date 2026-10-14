@@ -3,6 +3,11 @@ import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { formatMoney } from "../shifts/format";
 import { ScaleSyncPanel } from "../inventory/ScaleSyncPanel";
+import { MyScale } from "../scales/MyScale";
+import { ScaleSupportTools } from "../scales/ScaleSupportTools";
+import { useActiveBranch } from "../branches/BranchProvider";
+import { useAuth } from "../auth/AuthProvider";
+import { planAllows } from "../auth/permissions";
 import { compareByCode, listProductPrices, type ProductPriceRow } from "./products-service";
 
 const UNIT_LABELS: Record<ProductPriceRow["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
@@ -33,6 +38,8 @@ export function ProductsLookup() {
   const [labelProduct, setLabelProduct] = useState<ProductPriceRow | null>(null);
   const [labelSize, setLabelSize] = useState<LabelSize>("mediana");
   const labelRef = useRef<HTMLElement>(null);
+  const { profile } = useAuth();
+  const { branchId } = useActiveBranch();
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;
@@ -66,12 +73,14 @@ export function ProductsLookup() {
         </div>
       </header>
 
-      <section className="panel">
-        <div className="panel-title">
-          <h2>Balanza</h2>
+      {planAllows(profile, "estandar") && (
+        <div style={{ display: "grid", gap: 12 }}>
+          <MyScale products={products} branchId={branchId} />
+          <ScaleSupportTools>
+            <ScaleSyncPanel products={products} />
+          </ScaleSupportTools>
         </div>
-        <ScaleSyncPanel products={products} />
-      </section>
+      )}
 
       <section className="panel" style={{ marginTop: 18 }}>
         <div className="panel-title">

@@ -1206,3 +1206,36 @@ export async function syncProductsToScale(
 
   return { attempted: toSend.length, skipped, noResponse, transportErrors, responseCodeCounts, failed };
 }
+
+// ── Para "Mi balanza" (features/scales/engine): mismas funciones de siempre, sin pantalla ─────────────────────
+
+/** Usa ESTE puerto (el que eligió la persona en "Conectar balanza") para todo lo de este archivo. */
+export function setScaleSerialPort(port: SerialPort): void {
+  cachedPort = port;
+  cachedPortOpenKey = null;
+  try {
+    localStorage.setItem(PORT_INFO_KEY, portInfoKey(port));
+  } catch {
+    // no crítico
+  }
+}
+
+export interface ReportProductFields {
+  name: string;
+  byWeight: boolean;
+  price: number;
+}
+
+/** Report: lo que tiene grabado la balanza en el PLU `code` (SOLO LECTURA, 5005), o null si está libre. */
+export async function readReportProduct(code: string): Promise<ReportProductFields | null> {
+  const settings = getScaleSerialSettings();
+  const port = await pickPort();
+  const fields = await readExistingPluFields(port, settings, Number(code));
+  if (!fields) return null;
+  return { name: fields[3].trimEnd(), byWeight: fields[6] === "P", price: Number(fields[8]) };
+}
+
+/** Report: cómo tiene que quedar grabado un producto de Patagonia (mismo armado que buildPluFrame). */
+export function expectedReportProduct(product: ScaleSyncableProduct): ReportProductFields {
+  return { name: fixedAscii(product.name, 26).trimEnd(), byWeight: product.unit === "kg", price: Number(fixedDigits(product.priceRetail, 6)) };
+}

@@ -42,7 +42,7 @@ export class FakeCuora implements SystelLink {
 
   constructor(
     readonly layout: SystelLayout,
-    readonly options: { address?: number; decimals?: number; capacity?: number; writeChecksum?: boolean; typeByteAccepted?: "binario" | "ascii"; typeHighBits?: number; loteNulOnWrite?: boolean } = {}
+    readonly options: { address?: number; decimals?: number; capacity?: number; writeChecksum?: boolean; typeByteAccepted?: "binario" | "ascii"; typeHighBits?: number; loteNulOnWrite?: boolean; protocol?: string } = {}
   ) {}
 
   get address(): number {
@@ -76,7 +76,7 @@ export class FakeCuora implements SystelLink {
     switch (fn) {
       case 2: {
         const cap = String(this.options.capacity ?? (this.layout === "cuora2" ? 4000 : 8000)).padStart(5, "0");
-        return this.reply(fn, `F0001C031000S0040P${cap}A060D${this.options.decimals ?? 0}`);
+        return this.reply(fn, `F0001C031000S${this.options.protocol ?? "0040"}P${cap}A060D${this.options.decimals ?? 0}`);
       }
       case 28:
         return this.reply(fn, this.clock);
