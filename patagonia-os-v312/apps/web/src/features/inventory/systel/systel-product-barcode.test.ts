@@ -62,6 +62,19 @@ describe("[SIMULADO con registros REALES] código de barras de cada producto, ca
     assert.equal(f.plus.get(2), REAL_PLU_2_GRINGO_CAJON);
   });
 
+  it("REAL (producto 97): la balanza pone 0x00 en vez del espacio final del lote: no es otro cambio", () => {
+    const before = REAL_PLU_13_PECHUGA_SH;
+    const end = before.length - 1;
+    const lastLote = end - 14;
+    assert.equal(before[lastLote], " ");
+    const after = before.slice(0, lastLote) + "\u0000" + before.slice(lastLote + 1);
+    assert.ok(onlyBarcodeChanged(before, after, "max60"));
+    // Fuera del lote, un 0x00 en lugar de un espacio sí es un cambio.
+    const name = before.indexOf(" ", 8);
+    assert.ok(name >= 0 && name < end - 25);
+    assert.equal(onlyBarcodeChanged(before, before.slice(0, name) + "\u0000" + before.slice(name + 1), "max60"), false);
+  });
+
   it("si la balanza cambia OTRA cosa: se detecta, se intenta restaurar y se frena", async () => {
     const f = scale();
     f.corruptAfterWrite = 2;

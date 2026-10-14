@@ -87,8 +87,18 @@ export function onlyBarcodeChanged(before: string, after: string, layout: Systel
   const end = before[before.length - 1] === "N" ? before.length - 1 : before.length - 101;
   const allowed = new Set<number>([pd]);
   for (let i = end - 13; i < end; i++) allowed.add(i);
-  for (let i = 0; i < before.length; i++) if (!allowed.has(i) && before[i] !== after[i]) return false;
+  for (let i = 0; i < before.length; i++) if (!allowed.has(i) && !sameIgnoringLotePadding(before[i], after[i], i, end)) return false;
   return true;
+}
+
+/**
+ * REAL (Los gringos 14/10, producto 97): al escribir, la balanza guarda 0x00 donde el campo lote (12 caracteres
+ * antes del tipo) tenía un espacio de relleno. No es un cambio de datos: ahí espacio y 0x00 valen lo mismo.
+ */
+export function sameIgnoringLotePadding(a: string, b: string, i: number, end: number): boolean {
+  if (a === b) return true;
+  const pad = (c: string) => c === " " || c === "\u0000";
+  return i >= end - 25 && i < end - 13 && pad(a) && pad(b);
 }
 
 export async function rewriteProductBarcode(client: SystelClient, layout: SystelLayout, number: number, saleType: string, mode: TypeByteMode = "binario"): Promise<BarcodeRewriteResult> {

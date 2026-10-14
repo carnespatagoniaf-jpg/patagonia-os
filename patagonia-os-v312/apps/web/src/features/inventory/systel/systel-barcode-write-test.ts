@@ -1,6 +1,6 @@
 import type { SystelClient } from "./systel-client";
 import { LAYOUT_INFO, pluEanSetting, type SystelLayout } from "./systel-plu";
-import { backupDigest, buildBarcodeRewrite, compareWithBackup, onlyBarcodeChanged, rewriteProductBarcode, takeProductBackup, verifyBackup, type BarcodeRewriteResult, type ProductBackup, type TypeByteMode } from "./systel-product-barcode";
+import { backupDigest, buildBarcodeRewrite, compareWithBackup, onlyBarcodeChanged, sameIgnoringLotePadding, rewriteProductBarcode, takeProductBackup, verifyBackup, type BarcodeRewriteResult, type ProductBackup, type TypeByteMode } from "./systel-product-barcode";
 import { parseSalesReport, salesReportRequest } from "./systel-sales";
 
 /**
@@ -121,7 +121,7 @@ async function writeTestProduct(
     // Todo igual salvo el byte del tipo, donde basta que coincida el tipo (la balanza real agrega bits altos: 0x01 → 0xD1).
     const endAt = expected[expected.length - 1] === "N" ? expected.length - 1 : expected.length - 101;
     const typeAt = endAt - 13;
-    const sameExceptType = expected.length === back.plu.raw.length && [...expected].every((ch, i) => (i === typeAt ? true : ch === back.plu.raw[i])) && pluEanSetting(back.plu.raw).type === pluEanSetting(expected).type;
+    const sameExceptType = expected.length === back.plu.raw.length && [...expected].every((ch, i) => i === typeAt || sameIgnoringLotePadding(ch, back.plu.raw[i], i, endAt)) && pluEanSetting(back.plu.raw).type === pluEanSetting(expected).type;
     const ean = pluEanSetting(back.plu.raw);
     if (!step(`Escritura del N.º ${number} (tipo ${mode}) y relectura`, sameExceptType && ean.type === 1 && ean.config === target, sameExceptType ? `quedó igual a lo escrito; código ${ean.config}` : "lo releído no es igual a lo escrito")) return null;
     return { mode, written: data, readBack: back.plu.raw };
