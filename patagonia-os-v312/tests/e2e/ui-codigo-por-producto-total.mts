@@ -35,17 +35,18 @@ console.log("Stock antes:", JSON.stringify(before));
 const TEMPLATES = {
   weighed: "20PPPPCCCCCC", unit: "21PPPPCCCCCC", sums: "22AAIIIIIIII", at: Date.now(),
   perPlu: {
-    "9002": { type: 1, config: "21PPPPCCCCCC", p1: 72000, p2: 68000 },
-    "9005": { type: 1, config: "20PPPPCCCCCC", p1: 5200, p2: 4700 },
-    "9010": { type: 1, config: "20PPPPCCCCCC", p1: 7400, p2: 7200 },
-    "9012": { type: 1, config: "21PPPPCCCCCC", p1: 106000, p2: 103000 }
+    "9002": { type: 1, config: "21PPPPCCCCCC", p1: 72000, p2: 68000, name: "GRINGO CAJON DE", saleType: "U" },
+    "9005": { type: 1, config: "20PPPPCCCCCC", p1: 5200, p2: 4700, name: "TROZADITOx1x2", saleType: "P" },
+    "9010": { type: 1, config: "20PPPPCCCCCC", p1: 7400, p2: 7200, name: "PECHUGAC/H x1x5", saleType: "P" },
+    "9012": { type: 1, config: "21PPPPCCCCCC", p1: 106000, p2: 103000, name: "CAJON PECH.C/Hx1", saleType: "U" }
   }
 };
 
 const b = await chromium.launch({ channel: "chrome" });
 const p = await b.newPage({ viewport: { width: 1400, height: 1000 } });
 let dialogAnswer = true;
-p.on("dialog", (d) => (dialogAnswer ? d.accept() : d.dismiss()));
+const promptAnswers: string[] = [];
+p.on("dialog", (d) => (d.type() === "prompt" ? d.accept(promptAnswers.shift() ?? "") : dialogAnswer ? d.accept() : d.dismiss()));
 p.on("pageerror", (e) => console.log("[error página]", String(e).slice(0, 300)));
 await p.addInitScript(`localStorage.setItem("patagonia-systel-label-templates", ${JSON.stringify(JSON.stringify(TEMPLATES))});`);
 await p.goto("http://localhost:5194/");
@@ -109,6 +110,16 @@ await scan("2202000731184");
 console.log("  ", await msg());
 await p.getByRole("button", { name: /Cancelar ticket/ }).first().click();
 await p.waitForTimeout(500);
+
+console.log("\n[3b] Ticket REAL con precio MANUAL (13/10: dos cajones a $74.000 y $70.000 = $144.000): no adivina, pide el importe del papel");
+dialogAnswer = true;
+promptAnswers.push("74000", "70000");
+await scan(ean("219002000001"));
+await scan(ean("219002000001"));
+await scan(ean("220200144000"));
+console.log("  ", await msg(), "\n   líneas:", JSON.stringify(await lines()));
+await charge();
+console.log("   venta guardada:", JSON.stringify(await lastSale()));
 
 console.log("\n[4] Falta un artículo: el TOTAL dice 2 y se escaneó 1:");
 await scan(ean("209005000215"));

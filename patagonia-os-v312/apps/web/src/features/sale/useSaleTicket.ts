@@ -9,6 +9,7 @@ import { resolveScan } from "./scan-resolve";
 import { closeSystelTicketSession, readSystelTicketFromScale, refreshSystelLabelFormat, systelTicketReadConfigured } from "../inventory/systel/systel-ticket-from-scale";
 import { loadSystelLabelTemplates, systelConfigForCode } from "./systel-label-format";
 import { settleTicket, type ScalePrices } from "./systel-ticket-settle";
+import { sameProductName } from "../inventory/systel/systel-sales";
 import { decodeSumCode } from "../inventory/systel/systel-sales";
 import type { TicketCandidate } from "../inventory/systel/systel-ticket-detail";
 import type { SystelTicket } from "../inventory/systel/systel-sales";
@@ -329,6 +330,14 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
         return;
       }
       if (systelTicketPilot && systelConfig) {
+        // Que el producto de la balanza sea el MISMO de Patagonia (nombre y forma de venta): real Los gringos,
+        // los códigos 96-103 son otros productos y 29 se venden por unidad en la balanza y figuran por kg.
+        const problem = scaleProductMismatch(resolved.product, resolved.plu);
+        if (problem) {
+          setMessage(`No se agregó: ${problem}`);
+          done();
+          return;
+        }
         addPendingLabel(resolved.product, resolved.quantity);
         return;
       }
@@ -412,7 +421,29 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       if (entry && (entry.p1 ?? 0) > 0) prices.set(plu, { p1: entry.p1 ?? 0, p2: entry.p2 ?? 0 });
       return { plu, quantity: l.quantity };
     });
-    const r = settleTicket(settleLines, amount, prices, decoded.ok ? decoded.articles : null);
+    let r = settleTicket(settleLines, amount, prices, decoded.ok ? decoded.articles : null);
+    if (!r.ok && r.needsPaper) {
+      // No se adivina: el importe de cada artículo se copia del ticket impreso y tiene que sumar el TOTAL.
+      const typed: number[] = [];
+      for (const l of pending) {
+        const qty = l.unit === "kg" ? `${l.quantity.toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg` : `${l.quantity} u.`;
+        const v = window.prompt(`No se puede saber con seguridad el precio de cada artículo (${r.reason}).
+Escribí el IMPORTE impreso en el ticket para:
+${l.name} ${qty}`);
+        const n = v === null ? NaN : parseAmount(v);
+        if (!(n > 0)) {
+          setMessage("No se confirmaron los importes (falta el importe de un artículo).");
+          return;
+        }
+        typed.push(Math.round(n));
+      }
+      const sum = typed.reduce((x, y) => x + y, 0);
+      if (Math.abs(sum - Math.round(amount)) > 1) {
+        setMessage(`No se confirmaron los importes: los que escribiste suman ${formatMoney(sum)} y el TOTAL del ticket es ${formatMoney(amount)}.`);
+        return;
+      }
+      r = { ok: true, method: "exacto", amounts: typed, detail: "importes copiados del ticket impreso" };
+    }
     if (!r.ok) {
       setMessage(`No se confirmaron los importes: ${r.reason}. Revisá que hayas escaneado todos los artículos de ese ticket (y ninguno de otro).`);
       return;
@@ -433,11 +464,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
         return { ...l, scalePending: false, scaleAmount: r.amounts[i], unitPrice: r.amounts[i] / l.quantity, scaleTicket: `${keys[i]}${suffix}` };
       })
     );
-    setMessage(
-      r.method === "exacto"
-        ? `Importes confirmados con el TOTAL (${formatMoney(amount)}): cada artículo con el precio que cobró la balanza.`
-        : `Importes confirmados con el TOTAL (${formatMoney(amount)}). Ojo: ${r.detail}.`
-    );
+    setMessage(`Importes confirmados con el TOTAL (${formatMoney(amount)}): ${r.detail}.`);
   }
 
   async function loadSystelTicket(code: string, amount: number) {
@@ -636,4 +663,14 @@ function saveChargedSystelTickets(keys: string[]): void {
 function withScalePrices(products: Product[]): Product[] {
   const perPlu = loadSystelLabelTemplates()?.perPlu ?? {};
   return products.map((p) => (p.priceRetail > 0 || !(perPlu[p.code]?.p1 ?? 0) ? p : { ...p, priceRetail: perPlu[p.code]!.p1! }));
+}
+
+/** ¿El producto de la etiqueta (según lo leído de la balanza) es el mismo de Patagonia? null si sí; si no, el motivo. */
+function scaleProductMismatch(product: Product, plu: string): string | null {
+  const e = loadSystelLabelTemplates()?.perPlu?.[String(Number(plu))];
+  if (!e || !e.name || !e.saleType) return `el producto ${plu} todavía no se leyó de la balanza (hacé el "Diagnóstico completo" en Stock → Balanza).`;
+  if (!sameProductName(e.name, product.name)) return `en la balanza el producto ${plu} es "${e.name}" y en Patagonia es "${product.name}": son productos distintos.`;
+  const weighed = e.saleType === "P" || e.saleType === "C";
+  if (weighed !== (product.unit === "kg")) return `"${product.name}" se vende ${weighed ? "por peso" : "por unidad"} en la balanza y ${product.unit === "kg" ? "por kg" : "por unidad"} en Patagonia: hay que corregirlo en Stock.`;
+  return null;
 }

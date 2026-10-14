@@ -81,6 +81,16 @@ await p.waitForTimeout(12000);
 const panelText = await p.getByText("Solo lectura: no se cambió nada en la balanza ni en Patagonia.").locator("..").innerText();
 console.log(panelText);
 await p.screenshot({ path: "tests/e2e/ui-systel-diagnostico.png", fullPage: false });
+// Recuadro "Código de barras de cada producto": respaldo y comparación (solo lectura); escritura apagada.
+await p.getByRole("button", { name: /Respaldar los productos \(solo lectura\)/ }).click();
+await p.waitForTimeout(15000);
+console.log("\nRespaldo:", ((await p.locator("body").innerText()).split("\n").find((l) => /Respaldo (completo|INCOMPLETO)/.test(l)) ?? "(sin mensaje)").slice(0, 200));
+await p.getByRole("button", { name: /Comparar con el respaldo \(solo lectura\)/ }).click();
+await p.waitForTimeout(15000);
+console.log("Comparación:", ((await p.locator("body").innerText()).split("\n").find((l) => /Comparación \(solo lectura\)/.test(l)) ?? "(sin mensaje)").slice(0, 200));
+console.log("Botón Probar en este producto deshabilitado:", await p.getByRole("button", { name: /Probar en este producto/ }).isDisabled());
+console.log("Botón Restaurar desde el respaldo deshabilitado:", await p.getByRole("button", { name: /Restaurar desde el respaldo/ }).isDisabled());
+console.log("Botones Activar código por producto visibles:", await p.getByRole("button", { name: /Activar código por producto/ }).count());
 const received: string[] = await p.evaluate(() => (window as any).__scale.received);
 const fns = [...new Set(received.map((r) => Number(r.split(":")[1])))].sort((a, b) => a - b);
 console.log("\nFunciones que recibió la balanza:", fns.join(", "), "· pedidos 72:", received.filter((r) => r.split(":")[1] === "72").map((r) => r.split(":")[2]).join(", "));

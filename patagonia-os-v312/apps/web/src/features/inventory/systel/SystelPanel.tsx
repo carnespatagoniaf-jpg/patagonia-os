@@ -11,6 +11,8 @@ import { runSystelWriteTest, type SystelWriteTestResult } from "./systel-write-t
 import { discoverSystelLink, loadSavedSystelLink, saveSystelLink } from "./systel-discovery";
 import { enableTicketBarcodes, type TicketBarcodeResult } from "./systel-ticket-barcode";
 import { runSystelDiagnostic, type SystelDiagnostic } from "./systel-full-diagnostic";
+import { SystelProductBarcodePanel } from "./SystelProductBarcodePanel";
+import type { SystelLayout } from "./systel-plu";
 import { getBranchScaleConfig } from "../../sale/scale-config-service";
 import { saveSystelLabelTemplates, saveSystelPluBarcodes } from "../../sale/systel-label-format";
 import type { SystelExchangeLog } from "./systel-client";
@@ -296,6 +298,46 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
    * Diagnóstico completo, SOLO LECTURA (systel-full-diagnostic.ts): contesta, modelo, reloj, formatos,
    * productos, ventas guardadas, detalle e interpretación. El resultado completo le llega a soporte.
    */
+  /** Para el recuadro "Código de barras de cada producto": conexión de SOLO LECTURA + formato de producto. */
+  async function withReadClient<T>(fn: (client: SystelClient, layout: SystelLayout) => Promise<T>): Promise<T | null> {
+    if (runningRef.current) return null;
+    runningRef.current = true;
+    setBusy(true);
+    setError("");
+    logRef.current = [];
+    linkEventsRef.current = [];
+    try {
+      const runAddress = await connectScale("código de barras de cada producto");
+      if (runAddress === null || !linkRef.current) return null;
+      setProgress("Leyendo los productos de la balanza (solo lectura)…");
+      const client = new SystelClient(linkRef.current, { address: runAddress, log: logRef.current });
+      const first = barcodeNumbers[0] ?? 1;
+      let layout: SystelLayout | null = null;
+      for (const digits of [4, 6] as const) {
+        const r = await client.detectLayout(first, digits);
+        if (r.layout) {
+          layout = r.layout;
+          break;
+        }
+      }
+      if (!layout) {
+        setError("no se reconoció el formato de los productos de la balanza");
+        return null;
+      }
+      return await fn(client, layout);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      setError(message);
+      void autoReport("error", message, { error: message });
+      return null;
+    } finally {
+      runningRef.current = false;
+      setBusy(false);
+      setProgress("");
+    }
+  }
+  const barcodeNumbers = useMemo(() => [...new Set(products.filter((x) => (x.active ?? true) && /^\d{1,4}$/.test(x.code)).map((x) => Number(x.code)))].sort((a, b) => a - b), [products]);
+
   async function handleSalesDiagnostic() {
     if (runningRef.current) return;
     runningRef.current = true;
@@ -377,10 +419,12 @@ ${JSON.stringify({ pasos: r.steps, datos: r.data })}`, { error: r.steps.some((s)
               <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>La primera vez, Chrome pregunta qué puerto usar: elegí el que dice USB y tocá Conectar.</p>
             </div>
             <div>
-              <button className="secondary" disabled={busy} onClick={() => void handleTicketBarcodes()}>Activar código por producto en la balanza</button>
+              {/* "Activar código por producto" (función 7, escribe en la balanza) se ocultó el 14/10: en Los gringos ya está
+                  activado (ETi=S, lectura real) y por decisión del dueño no queda ningún botón que escriba en la balanza. */}
               <button className="secondary" disabled={busy} onClick={() => void handleSalesDiagnostic()}>Diagnóstico completo (solo lectura)</button>
-              <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>Para que el ticket traiga el código de barras de cada producto y el Mostrador cargue el producto con sus kilos y descuente el stock. Cambia solo esa opción de la balanza y lo comprueba.</p>
+              <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>Solo lectura: no cambia nada en la balanza ni en Patagonia.</p>
             </div>
+            {pilot && <SystelProductBarcodePanel busy={busy} numbers={barcodeNumbers} withReadClient={withReadClient} report={(step, detail) => void autoReport(step, detail)} />}
             {salesDiag && (
               <div className="panel" style={{ padding: 12, display: "grid", gap: 6 }}>
                 <strong>{salesDiag.verdict}</strong>

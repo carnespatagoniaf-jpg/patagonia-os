@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { SystelClient } from "./systel-client";
 import { FakeCuora } from "./systel-fake";
 import { pluEanSetting } from "./systel-plu";
-import { buildBarcodeRewrite, onlyBarcodeChanged, rewriteAllProductBarcodes, rewriteProductBarcode } from "./systel-product-barcode";
+import { buildBarcodeRewrite, compareWithBackup, onlyBarcodeChanged, restoreFromBackup, rewriteAllProductBarcodes, rewriteProductBarcode, takeProductBackup, verifyBackup } from "./systel-product-barcode";
 import { REAL_PLU_13_PECHUGA_SH, REAL_PLU_2_GRINGO_CAJON } from "../../sale/systel-real-plu-records";
 
 // [SIMULADO] Cuora que guarda y devuelve los registros REALES de Los gringos (14/10).
@@ -83,5 +83,49 @@ describe("[SIMULADO con registros REALES] código de barras de cada producto, ca
     assert.equal(r.backup.length, 3);
     assert.deepEqual(r.results.map((x) => [x.number, x.verdict]), [[2, "confirmado"]]);
     assert.equal(pluEanSetting(f.plus.get(86)!).type, 0); // el segundo no se tocó
+  });
+});
+
+describe("[SIMULADO con registros REALES] respaldo, corte de conexión y restauración", () => {
+  it("respaldo completo y verificable; si se toca un byte, la verificación falla", async () => {
+    const f = scale();
+    const { backup, missing } = await takeProductBackup(client(f, false), "max60", [2, 13, 86]);
+    assert.deepEqual(missing, []);
+    assert.equal(verifyBackup(backup).ok, true);
+    // Solo lectura: no se mandó nada que no sea 62.
+    assert.deepEqual([...new Set(f.received.map((x) => x.fn))], [62]);
+    const tampered = { ...backup, records: backup.records.map((r, i) => (i === 0 ? { ...r, raw: r.raw.replace("GRINGO", "GRINGA") } : r)) };
+    assert.equal(verifyBackup(tampered).ok, false);
+  });
+
+  it("se corta la conexión justo después de mandar la escritura: se sabe en qué quedó cada producto y se restaura", async () => {
+    const f = scale();
+    const c = client(f);
+    const { backup } = await takeProductBackup(c, "max60", [2, 13, 86]);
+    // La balanza aplica la escritura pero no llega la respuesta (y tampoco contesta la relectura).
+    const orig = f.exchange.bind(f);
+    let cut = false;
+    f.exchange = async (frame: Uint8Array) => {
+      if (cut) return null;
+      const r = await orig(frame);
+      if (frame[1] === 61) cut = true;
+      return frame[1] === 61 ? null : r;
+    };
+    const r = await rewriteProductBarcode(c, "max60", 2, "U");
+    assert.equal(r.ok, false);
+    assert.equal(r.verdict, "indeterminado");
+    // Vuelve la conexión: comparación SOLO LECTURA contra el respaldo.
+    f.exchange = orig;
+    assert.deepEqual(await compareWithBackup(c, backup), [{ number: 2, state: "solo_codigo" }, { number: 13, state: "igual" }, { number: 86, state: "igual" }]);
+    // Restauración: el 2 vuelve a ser idéntico al respaldo; los otros no se tocan.
+    assert.deepEqual(await restoreFromBackup(c, backup), [{ number: 2, verdict: "restaurado" }, { number: 13, verdict: "igual" }, { number: 86, verdict: "igual" }]);
+    assert.deepEqual((await compareWithBackup(c, backup)).map((s) => s.state), ["igual", "igual", "igual"]);
+  });
+
+  it("la restauración también está bloqueada si la escritura no está habilitada", async () => {
+    const f = scale();
+    const { backup } = await takeProductBackup(client(f, false), "max60", [2]);
+    f.plus.set(2, f.plus.get(2)!.replace("000000000000N", "21PPPPCCCCCCN"));
+    assert.deepEqual(await restoreFromBackup(client(f, false), backup), [{ number: 2, verdict: "bloqueado" }]);
   });
 });

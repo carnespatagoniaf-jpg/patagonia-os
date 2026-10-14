@@ -28,22 +28,25 @@ describe("[REAL] importe de cada artículo desde el código de cada producto + e
       checked++;
       const lines = t.lines.map((l) => ({ plu: l.plu, quantity: weighed.has(l.plu) ? l.grams / 1000 : l.units }));
       const r = settleTicket(lines, t.total, prices, t.lines.length);
-      assert.ok(r.ok, `ticket ${t.ticketId}`);
-      // El total SIEMPRE da exacto.
+      if (!r.ok) {
+        // Sin una única combinación exacta NO se adivina: se piden los importes del papel.
+        assert.equal(r.needsPaper, true, `ticket ${t.ticketId}: ${r.reason}`);
+        misses.push(`${t.ticketId}:papel`);
+        continue;
+      }
       assert.equal(r.amounts.reduce((a, b) => a + b, 0), Math.round(t.total), `ticket ${t.ticketId}`);
-      if (r.method === "exacto" && r.amounts.every((a, i) => Math.abs(a - t.lines[i].amount) <= 1)) exact++;
-      else misses.push(`${t.ticketId}:${r.method}`);
+      if (r.amounts.every((a, i) => Math.abs(a - t.lines[i].amount) <= 1)) exact++;
+      else misses.push(`${t.ticketId}:distinto`);
     }
     assert.ok(checked >= 55, `${checked}`);
     // En la semana completa (1.430 artículos) dio 860 de 861; en el 13/10 se exige al menos 95 %.
     assert.ok(exact / checked >= 0.95, `${exact} de ${checked} exactos; no: ${misses.join(" ")}`);
   });
 
-  it("precio manual (ninguna lista explica el total): reparte en proporción, el total da exacto y queda marcado", () => {
+  it("precio manual (ninguna lista explica el total): NO adivina, pide los importes del ticket impreso", () => {
     const r = settleTicket([{ plu: 2, quantity: 1 }, { plu: 2, quantity: 1 }], 144000 - 4000, prices, 2);
-    assert.ok(r.ok);
-    assert.equal(r.method, "proporcional");
-    assert.equal(r.amounts.reduce((a, b) => a + b, 0), 140000);
+    assert.equal(r.ok, false);
+    assert.equal((r as { needsPaper?: boolean }).needsPaper, true);
   });
 
   it("errores claros: cantidad de artículos distinta del TOTAL, producto sin precio en la balanza, sin artículos", () => {

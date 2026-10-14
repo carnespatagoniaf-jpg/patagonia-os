@@ -32,7 +32,7 @@ export interface SystelLabelTemplates {
    * 1 = el suyo (`config`), 2 = ninguno, 3 = suma. REAL Los gringos 14/10: el 13 tiene "20PPPPCCCCCC" (6 cifras
    * de cantidad) mientras el general es "20PPPPCCCCII" (4): leerlo con el general daría otros kilos.
    */
-  perPlu?: Record<string, { type: number | null; config: string | null; p1?: number; p2?: number }>;
+  perPlu?: Record<string, { type: number | null; config: string | null; p1?: number; p2?: number; name?: string; saleType?: string }>;
 }
 
 const KEY = "patagonia-systel-label-templates";
@@ -59,7 +59,7 @@ export function loadSystelLabelTemplates(): SystelLabelTemplates | null {
 }
 
 /** Guarda el código de barras propio de los productos leídos de la balanza (se suma a lo ya guardado). */
-export function saveSystelPluBarcodes(perPlu: Record<string, { type: number | null; config: string | null; p1?: number; p2?: number }>): void {
+export function saveSystelPluBarcodes(perPlu: Record<string, { type: number | null; config: string | null; p1?: number; p2?: number; name?: string; saleType?: string }>): void {
   try {
     const prev = loadSystelLabelTemplates() ?? { weighed: null, unit: null, at: Date.now() };
     localStorage.setItem(KEY, JSON.stringify({ ...prev, perPlu: { ...(prev.perPlu ?? {}), ...perPlu } } satisfies SystelLabelTemplates));

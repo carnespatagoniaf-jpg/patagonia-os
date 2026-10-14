@@ -50,7 +50,7 @@ export interface DiagnosticInput {
   /** Recibe la configuración leída (para que Mostrador use el formato de códigos de la balanza). */
   onConfig?: (values: Record<string, string>) => void;
   /** Recibe el código de barras propio de cada producto leído (por código de producto). */
-  onPluBarcodes?: (perPlu: Record<string, { type: number | null; config: string | null; p1?: number; p2?: number }>) => void;
+  onPluBarcodes?: (perPlu: Record<string, { type: number | null; config: string | null; p1?: number; p2?: number; name?: string; saleType?: string }>) => void;
 }
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
@@ -237,7 +237,7 @@ export async function runSystelDiagnostic(client: SystelClient, input: Diagnosti
   // Con los precios de lista 1 y 2 (en pesos, según los decimales de la firma): Mostrador los usa para saber el
   // importe de cada artículo a partir del TOTAL (systel-ticket-settle.ts).
   const dec = sig?.priceDecimals === 2 ? 100 : 1;
-  input.onPluBarcodes?.(Object.fromEntries([...eans].map(([n, e]) => [String(cache.plus.get(n)?.code ?? n), { type: e.type, config: e.config, p1: (prices.get(n)?.[0] ?? 0) / dec, p2: (prices.get(n)?.[1] ?? 0) / dec }])));
+  input.onPluBarcodes?.(Object.fromEntries([...eans].map(([n, e]) => [String(cache.plus.get(n)?.code ?? n), { type: e.type, config: e.config, p1: (prices.get(n)?.[0] ?? 0) / dec, p2: (prices.get(n)?.[1] ?? 0) / dec, name: cache.plus.get(n)?.name.trim(), saleType: cache.plus.get(n)?.saleType }])));
   data.codigoPorProducto = { enCeros: zeros, propio: Object.fromEntries(ownFormat), general: generalUse, otros: noCode };
   const ownText = [...ownFormat].map(([cfg, ns]) => `formato propio ${cfg}: ${ns.length} (${ns.slice(0, 8).join(", ")}${ns.length > 8 ? "…" : ""})`);
   add(

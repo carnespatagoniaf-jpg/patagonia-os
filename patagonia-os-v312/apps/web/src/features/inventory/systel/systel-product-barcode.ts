@@ -141,3 +141,101 @@ export async function rewriteAllProductBarcodes(
   }
   return { backup, results, stoppedAt: null };
 }
+
+// ── Respaldo, comparación y restauración ─────────────────────────────────────────────────────────────
+
+export interface ProductBackup {
+  /** Cuándo se leyó (ISO) y de qué balanza. */
+  takenAt: string;
+  address: number;
+  layout: SystelLayout;
+  records: { number: number; raw: string }[];
+  /** Huella de todos los registros juntos: si un byte cambia, cambia la huella. */
+  digest: string;
+}
+
+function fnv1a(text: string): string {
+  let h = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16).padStart(8, "0");
+}
+
+export function backupDigest(records: { number: number; raw: string }[]): string {
+  return fnv1a(records.map((r) => `${r.number}:${r.raw}`).join("\n"));
+}
+
+/**
+ * Respaldo SOLO LECTURA de los productos indicados. Está completo solo si se leyó cada uno con el formato
+ * esperado y con su código de barras propio reconocible. Se puede verificar después (`verifyBackup`).
+ */
+export async function takeProductBackup(client: SystelClient, layout: SystelLayout, numbers: number[], onProgress?: (t: string) => void): Promise<{ backup: ProductBackup; missing: number[] }> {
+  const records: { number: number; raw: string }[] = [];
+  const missing: number[] = [];
+  for (const [i, n] of numbers.entries()) {
+    onProgress?.(`Respaldo ${i + 1} de ${numbers.length}`);
+    const plu = await client.readPlu(layout, n);
+    if (!plu || pluEanSetting(plu.raw).type === null) missing.push(n);
+    else records.push({ number: n, raw: plu.raw });
+  }
+  return { backup: { takenAt: new Date().toISOString(), address: client.address, layout, records, digest: backupDigest(records) }, missing };
+}
+
+/** ¿El respaldo está entero (misma huella) y cada registro tiene la forma de un producto? */
+export function verifyBackup(b: ProductBackup): { ok: boolean; detail: string } {
+  if (backupDigest(b.records) !== b.digest) return { ok: false, detail: "la huella no coincide: el respaldo se modificó o está incompleto" };
+  const bad = b.records.filter((r) => pluEanSetting(r.raw).type === null || !r.raw.startsWith(String(r.number).padStart(LAYOUT_INFO[b.layout].pluDigits, "0")));
+  if (bad.length) return { ok: false, detail: `${bad.length} registros no tienen la forma esperada (${bad.map((r) => r.number).join(", ")})` };
+  return { ok: true, detail: `${b.records.length} productos, huella ${b.digest}` };
+}
+
+export type CompareState = "igual" | "solo_codigo" | "otra_diferencia" | "sin_lectura";
+
+function sameAsBackup(original: string, now: string, layout: SystelLayout): boolean {
+  const a = pluEanSetting(original);
+  const b = pluEanSetting(now);
+  return onlyBarcodeChanged(original, now, layout) && a.config === b.config && a.type === b.type;
+}
+
+/**
+ * SOLO LECTURA: cómo está cada producto respecto del respaldo. Es lo primero que se hace si se cortó la
+ * conexión en medio de una escritura: "igual" (no se escribió), "solo_codigo" (se escribió el código y nada
+ * más), "otra_diferencia" (hay que restaurar) o "sin_lectura".
+ */
+export async function compareWithBackup(client: SystelClient, b: ProductBackup): Promise<{ number: number; state: CompareState }[]> {
+  const out: { number: number; state: CompareState }[] = [];
+  for (const r of b.records) {
+    const now = await client.readPlu(b.layout, r.number);
+    if (!now) out.push({ number: r.number, state: "sin_lectura" });
+    else if (sameAsBackup(r.raw, now.raw, b.layout)) out.push({ number: r.number, state: "igual" });
+    else if (onlyBarcodeChanged(r.raw, now.raw, b.layout)) out.push({ number: r.number, state: "solo_codigo" });
+    else out.push({ number: r.number, state: "otra_diferencia" });
+  }
+  return out;
+}
+
+/**
+ * Vuelve los productos indicados (o todos) a como estaban en el respaldo: escribe el registro original (sin la
+ * gestión), relee y compara. Requiere la escritura habilitada. Los que ya están iguales no se tocan.
+ */
+export async function restoreFromBackup(client: SystelClient, b: ProductBackup, numbers?: number[]): Promise<{ number: number; verdict: "igual" | "restaurado" | "no_restaurado" | "bloqueado" }[]> {
+  const out: { number: number; verdict: "igual" | "restaurado" | "no_restaurado" | "bloqueado" }[] = [];
+  const pd = LAYOUT_INFO[b.layout].pluDigits;
+  for (const r of b.records.filter((x) => !numbers || numbers.includes(x.number))) {
+    const now = await client.readPlu(b.layout, r.number);
+    if (now && sameAsBackup(r.raw, now.raw, b.layout)) {
+      out.push({ number: r.number, verdict: "igual" });
+      continue;
+    }
+    const reply = await client.writePluRaw(b.layout, r.number, r.raw.slice(0, pd) + r.raw.slice(pd + 1));
+    if (reply === "bloqueado") {
+      out.push({ number: r.number, verdict: "bloqueado" });
+      continue;
+    }
+    const back = await client.readPlu(b.layout, r.number);
+    out.push({ number: r.number, verdict: back && sameAsBackup(r.raw, back.raw, b.layout) ? "restaurado" : "no_restaurado" });
+  }
+  return out;
+}

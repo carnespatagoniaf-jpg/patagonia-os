@@ -13,9 +13,8 @@
  *
  * Resultado:
  * - "exacto": una sola combinación de precios explica el total → cada artículo con su importe.
- * - "proporcional": ninguna (precio manual o precio cambiado) o varias → el TOTAL se respeta y se reparte
- *   en proporción al precio de lista 1. Producto, cantidad, stock y total cobrado son exactos; solo el
- *   reparto del importe entre artículos es aproximado, y queda marcado.
+ * - sin una única combinación exacta (precio manual, precio cambiado o varias posibles) NO se adivina:
+ *   el importe de cada artículo se toma del ticket impreso (`needsPaper`).
  * - error: falta el precio de un producto o la cantidad de artículos no coincide.
  */
 
@@ -32,8 +31,9 @@ export interface ScalePrices {
 }
 
 export type SettleResult =
-  | { ok: true; method: "exacto" | "proporcional"; amounts: number[]; detail: string }
-  | { ok: false; reason: string };
+  | { ok: true; method: "exacto"; amounts: number[]; detail: string }
+  /** `needsPaper`: el importe de cada artículo hay que tomarlo del ticket impreso (no se adivina). */
+  | { ok: false; reason: string; needsPaper?: boolean };
 
 const MAX_COMBOS = 4096;
 
@@ -70,16 +70,10 @@ export function settleTicket(lines: SettleLine[], total: number, prices: Map<num
     amounts[amounts.length - 1] += target - amounts.reduce((a, b) => a + b, 0);
     return { ok: true, method: "exacto", amounts, detail: "importe de cada artículo según el precio que usó la balanza" };
   }
-  // Proporcional al precio de lista 1: el total es exacto, el reparto aproximado.
-  const base = options.map((o) => o[0]);
-  const sumBase = base.reduce((a, b) => a + b, 0);
-  if (!(sumBase > 0)) return { ok: false, reason: "no se pudo repartir el total" };
-  const amounts = base.map((b) => Math.round((b / sumBase) * target));
-  amounts[amounts.length - 1] += target - amounts.reduce((a, b) => a + b, 0);
+  // No se adivina: si no hay UNA sola combinación exacta, el importe de cada artículo se toma del papel.
   return {
-    ok: true,
-    method: "proporcional",
-    amounts,
-    detail: matches.size > 1 ? "varias combinaciones de precios dan el total: se repartió en proporción" : "el total no coincide con los precios de lista (precio manual o cambiado): se repartió en proporción"
+    ok: false,
+    reason: matches.size > 1 ? "varias combinaciones de precios dan el total" : "el total no coincide con los precios de lista de la balanza (precio manual o cambiado)",
+    needsPaper: true
   };
 }
