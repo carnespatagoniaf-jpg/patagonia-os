@@ -1,0 +1,41 @@
+▶ formatos de código (cualquier marca)
+  ✔ lee los campos y respeta el verificador (48.0604ms)
+  ✔ no acepta letras desconocidas ni campos partidos (0.1485ms)
+  ✔ como la balanza: si el valor no entra, no hay código (0.1693ms)
+✔ formatos de código (cualquier marca) (49.4735ms)
+▶ Systel Cuora Max de Los gringos: configuración REAL de hoy vs la necesaria
+  ✔ hoy: casi ningún producto vinculado se puede vender escaneando su código (0.888ms)
+  ✔ con 20PPPPCCCCCC / 21PPPPCCCCCC por producto: ningún problema, hasta 999,999 kg (0.2878ms)
+  ✔ códigos REALES del TOTAL de la balanza (tickets 3095 y 3098) (1.5568ms)
+  ✔ más de 10 kg sin perder un gramo (real: 14,935 kg) (0.2261ms)
+  ✔ unidades: enteras o como kilos, y si no se puede saber, no se carga (0.2994ms)
+  ✔ código mal leído o de otro comercio (0.2355ms)
+✔ Systel Cuora Max de Los gringos: configuración REAL de hoy vs la necesaria (3.9555ms)
+▶ papel: artículos + TOTAL
+  ✔ ticket REAL 3095: cajón 1 u. + trozadito 0,215 kg = $73.118 → $72.000 + $1.118 (0.5705ms)
+  ✔ mayorista: el cajón a lista 2 ($68.000) (0.287ms)
+  ✔ precio a mano: no adivina, pide el papel y exige que sume el TOTAL (0.754ms)
+  ✔ falta o sobra un artículo (o el mismo código dos veces): no confirma (0.388ms)
+  ✔ artículos de otro papel mezclados: si la cantidad coincide, el importe no cierra y no confirma (0.2456ms)
+  ✔ producto sin vínculo, vínculo con otra forma de venta, producto desactivado: no se agrega (0.4132ms)
+  ✔ venta libre: se cobra su importe y no tiene producto (no descuenta stock) (0.22ms)
+  ✔ venta libre escaneada (genérico con código): pide su importe (0.3247ms)
+  ✔ REAL 08/10 ticket 2300: dos cajones iguales → pide confirmar con el papel, no reparte solo (0.386ms)
+  ✔ mismo importe y distintos productos: huellas distintas (nunca se toma como el mismo ticket) (0.3052ms)
+  ✔ la huella no depende del orden de escaneo (0.227ms)
+✔ papel: artículos + TOTAL (4.6086ms)
+▶ los 945 tickets REALES de la semana (07-13/10), escaneados como lo haría el cajero
+  ✔ son 945 tickets y 1.430 artículos (0.2546ms)
+  ✔ todos se cobran, y el producto y la cantidad de cada artículo son los de la balanza (1.0694ms)
+  ✔ el total de cada ticket es exacto y el importe de CADA artículo es el de la balanza (ningún reparto adivinado) (0.9214ms)
+  ✔ stock: lo que se descontaría por producto es exactamente lo vendido en la balanza (1.5973ms)
+  ✔ huellas repetidas en el mismo día (dos clientes con lo mismo) se confirman, no se bloquean (1.076ms)
+✔ los 945 tickets REALES de la semana (07-13/10), escaneados como lo haría el cajero (5.2099ms)
+ℹ tests 25
+ℹ suites 4
+ℹ pass 25
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 3006.4952

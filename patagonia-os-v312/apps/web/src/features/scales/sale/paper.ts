@@ -87,6 +87,12 @@ export function setLibreAmount(paper: Paper, index: number, amount: number): Pap
 
 export type CloseResult =
   | { ok: true; amounts: number[]; method: "listas" | "papel"; detail: string }
+  /**
+   * Hay 2 o más artículos IGUALES (mismo producto y cantidad) y las listas los explican a todos con el mismo precio.
+   * Puede ser cierto, o precios a mano que suman lo mismo. Real (08/10, ticket 2300): dos cajones a $74.000 + $70.000
+   * se deducían como $72.000 + $72.000. La persona confirma mirando el papel (acceptSplit) o escribe los importes.
+   */
+  | { ok: false; need: "confirm_split"; amounts: number[]; question: string; reason: string }
   | { ok: false; need: "libre_amounts"; indexes: number[]; reason: string }
   | { ok: false; need: "paper_amounts"; reason: string }
   | { ok: false; need: "fix"; reason: string };
@@ -118,7 +124,7 @@ export function settleWithPrices(quantities: number[], prices: number[][], targe
  * Cierra el papel con el TOTAL. `paperAmounts`: importes de los PRODUCTOS (no de las ventas libres) copiados del papel,
  * en el orden del papel, cuando las listas no alcanzan.
  */
-export function closePaper(paper: Paper, total: { amount: number; articles: number | null }, paperAmounts?: number[]): CloseResult {
+export function closePaper(paper: Paper, total: { amount: number; articles: number | null }, paperAmounts?: number[], opts: { acceptSplit?: boolean } = {}): CloseResult {
   const items = paper.items;
   if (items.length === 0) return { ok: false, need: "fix", reason: "no hay productos de este ticket escaneados antes del TOTAL" };
   if (total.articles !== null && total.articles !== items.length) {
@@ -154,6 +160,16 @@ export function closePaper(paper: Paper, total: { amount: number; articles: numb
     if (s === "ninguna") return { ok: false, need: "paper_amounts", reason: "el total no coincide con los precios de lista de la balanza (precio a mano o cambiado)" };
     if (s === "varias") return { ok: false, need: "paper_amounts", reason: "más de una combinación de precios da el total" };
     productIdx.forEach((idx, k) => (result[idx] = s[k]));
+    const groups = new Map<string, number[]>();
+    for (const idx of productIdx) {
+      const key = `${items[idx].productId}|${items[idx].quantity}`;
+      groups.set(key, [...(groups.get(key) ?? []), idx]);
+    }
+    const repeated = [...groups.values()].filter((g) => g.length > 1);
+    if (repeated.length > 0 && !opts.acceptSplit) {
+      const question = repeated.map((g) => `${g.length} × ${describeItem(items[g[0]])}: $${result[g[0]].toLocaleString("es-AR")} cada uno`).join("; ");
+      return { ok: false, need: "confirm_split", amounts: result, question, reason: "hay artículos iguales: hay que confirmar con el papel el importe de cada uno" };
+    }
   }
   return { ok: true, amounts: result, method: "listas", detail: productIdx.length ? "importe de cada artículo según el precio de lista que usó la balanza" : "venta libre" };
 }

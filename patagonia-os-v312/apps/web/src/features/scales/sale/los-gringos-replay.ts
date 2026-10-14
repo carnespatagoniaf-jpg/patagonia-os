@@ -19,6 +19,8 @@ import type { RealTicket } from "./los-gringos-fixture";
 export interface ReplayResult {
   ok: boolean;
   method?: "listas" | "papel";
+  /** Hubo que confirmar con el papel un reparto entre artículos iguales. */
+  confirmedSplit?: boolean;
   /** Por cada artículo cobrado: producto (o null si es venta libre), cantidad e importe. */
   lines: Array<{ productId: string | null; quantity: number; amount: number; realAmount: number }>;
   fingerprint?: string;
@@ -52,6 +54,15 @@ export function replayTicket(t: RealTicket, profile: ScaleSaleProfile, links: Sc
   const scan = decodeScaleCode(totalBarcode, profile);
   if (scan.kind !== "total") return { ok: false, lines: [], problem: "el TOTAL no se reconoce" };
   let close = closePaper(paper, scan);
+  // Artículos iguales: el cajero mira el papel. Si los importes del papel son los propuestos, confirma; si no, los escribe.
+  let confirmedSplit = false;
+  if (!close.ok && close.need === "confirm_split") {
+    const proposal = close.amounts;
+    if (proposal.every((a, i) => paper.items[i].kind !== "product" || Math.abs(a - real[i]) <= 1)) {
+      close = closePaper(paper, scan, undefined, { acceptSplit: true });
+      confirmedSplit = true;
+    } else close = { ok: false, need: "paper_amounts", reason: "el papel dice otros importes" };
+  }
   if (!close.ok && close.need === "paper_amounts") {
     close = closePaper(paper, scan, paper.items.map((it, i) => (it.kind === "product" ? real[i] : -1)).filter((a) => a >= 0));
   }
@@ -59,6 +70,7 @@ export function replayTicket(t: RealTicket, profile: ScaleSaleProfile, links: Sc
   return {
     ok: true,
     method: close.method,
+    confirmedSplit,
     totalBarcode,
     fingerprint: paperFingerprint(totalBarcode, paper),
     lines: paper.items.map((it, i) => ({ productId: it.productId, quantity: it.quantity, amount: close.ok ? close.amounts[i] : 0, realAmount: real[i] }))

@@ -44,7 +44,7 @@ await sb.rpc("set_scale_links", { p_branch_id: branch, p_scale_key: "systel-20",
 const prof = await sb.from("scale_profiles").select("scale_key").eq("branch_id", branch);
 check((prof.data ?? []).length === 1, `una sola balanza de venta configurada en la sucursal (${(prof.data ?? []).map((p: any) => p.scale_key).join(", ")})`);
 
-const browser = await chromium.launch({ channel: "chrome" });
+const browser = await chromium.launch(process.env.PW_BUNDLED ? {} : { channel: "chrome" });
 async function openPage(): Promise<{ page: Page; dialogs: string[]; answers: Array<string | boolean> }> {
   const ctx = await browser.newContext({ viewport: { width: 1400, height: 1000 } });
   const page = await ctx.newPage();
@@ -114,18 +114,27 @@ let sale = await lastSale();
 check(sale.total === 73118 && sale.claims === 1 && sale.items.sort().join(" | ") === "2 1 $72000 | 5 0.215 $1118", `venta: $${sale.total}, ${sale.items.join(" · ")}, papeles ${sale.claims}`);
 check((await stockOf("2")) === s2 - 1 && Math.round(((await stockOf("5")) - (s5 - 0.215)) * 1000) === 0, "stock: -1 cajón y -0,215 kg de trozadito, una sola vez");
 
-// 3. El mismo papel otra vez: pregunta; "Cancelar" = no se cobra.
+// 3. El mismo papel otra vez enseguida (ej. la 2.ª copia que imprime la balanza): pregunta al escanear el TOTAL.
+//    "Cancelar" = no se agrega nada.
 await scan(page, item(5, 0.215));
 await scan(page, item(2, 1));
-await scan(page, "2202000731184");
 answers.push(false);
-await charge(page);
-check(dialogs.some((d) => /ya se cobró hoy/.test(d)), `aviso de papel repetido: "${dialogs.find((d) => /ya se cobró/.test(d)) ?? "NO APARECIÓ"}"`);
-check((await lastSale()).id === sale.id, "con Cancelar no se cobró otra vez");
+await scan(page, "2202000731184");
+check(dialogs.some((d) => /ya se cobró en esta caja hace/.test(d)), `aviso al escanear el TOTAL: "${dialogs.find((d) => /ya se cobró/.test(d)) ?? "NO APARECIÓ"}"`);
 await page.screenshot({ path: "../../tests/e2e/balanza-repetido.png" });
-check(/No se cobró: ese ticket de la balanza ya estaba cobrado/.test(await bodyLine(page, /No se cobró/)) && !/guardada solo en esta computadora/.test(await page.locator("body").innerText()), `al cancelar: "${await bodyLine(page, /No se cobró/)}" y no queda ninguna venta pendiente sin conexión`);
-if (await page.getByRole("button", { name: /Cancelar ticket/ }).count()) await page.getByRole("button", { name: /Cancelar ticket/ }).first().click();
-await page.waitForTimeout(500);
+check(/No se agregó: ese ticket de la balanza ya estaba cobrado/.test(await bodyLine(page, /No se agregó/)) && !(await page.getByRole("button", { name: /Cancelar ticket/ }).count()), `al cancelar: "${await bodyLine(page, /No se agregó/)}" y el ticket queda vacío`);
+check((await lastSale()).id === sale.id, "no se cobró otra vez");
+
+// 3b. Dos artículos IGUALES con precio a mano que suma como la lista (REAL 08/10, ticket 2300: $74.000 + $70.000):
+//     no reparte solo; pregunta. Cancelar → se escriben los importes del papel.
+answers.push(false, "74000", "70000");
+await scan(page, item(2, 1));
+await scan(page, item(2, 1));
+await scan(page, total(2, 144000));
+check(dialogs.some((d) => /Mirá el ticket impreso: 2 × .*\$72\.000 cada uno/.test(d)), `artículos iguales: "${dialogs.find((d) => /Mirá el ticket/.test(d)) ?? "NO PREGUNTÓ"}"`);
+await charge(page);
+sale = await lastSale();
+check(sale.items.sort().join(" | ") === "2 1 $70000 | 2 1 $74000", `importes reales del papel: ${sale.items.join(" · ")}`);
 
 // 4. Mayorista (REAL 3087 en parte): cajón a lista 2.
 await scan(page, item(2, 1));

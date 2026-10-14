@@ -692,6 +692,7 @@ Cancelar = es el mismo papel: no cobrar.`)) {
       setMovementReceipt(null);
       // Los tickets de la balanza Systel de esta venta ya no se pueden volver a cargar en otra.
       ticket.commitScaleTickets();
+      ticket.papers.commit();
       clearTicket();
       setInvoiceDraft(emptyInvoiceDraft());
       // El ticket tiene que salir sí o sí -- se imprime antes de refrescar

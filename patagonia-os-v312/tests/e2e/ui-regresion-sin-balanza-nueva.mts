@@ -1,0 +1,40 @@
+// Regresión en STAGING, empresa "Carnicería Don Julio" (no tiene la balanza "artículos + TOTAL"): Mostrador lee
+// igual que antes un código de producto y una etiqueta de balanza con el formato de la sucursal. No cobra.
+import fs from "node:fs";
+import { chromium } from "playwright";
+import { createClient } from "@supabase/supabase-js";
+const readEnv = (p: string) => Object.fromEntries(fs.readFileSync(new URL(p, import.meta.url), "utf8").split(/\r?\n/).filter((l) => l.includes("=")).map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1).trim()]));
+const env = readEnv("../../.env.demo-staging");
+const sb = createClient(env.DEMO_SUPABASE_URL, env.DEMO_SUPABASE_ANON_KEY, { auth: { persistSession: false } });
+await sb.auth.signInWithPassword({ email: env.DEMO_OWNER_EMAIL, password: env.DEMO_OWNER_PASSWORD });
+const { count } = await sb.from("scale_profiles").select("*", { count: "exact", head: true });
+console.log(count === 0 ? "OK  " : "FALLA", `Don Julio no tiene balanza "artículos + TOTAL" configurada (${count})`);
+const { data: cfg } = await sb.from("branches").select("id").eq("id", env.DEMO_BRANCH_ID).single();
+const { data: prod } = await sb.from("products_with_stock").select("code, name, unit, price_retail").eq("branch_id", cfg!.id).eq("unit", "kg").gt("price_retail", 0).order("code").limit(1).single();
+const ean = (s: string) => s + ((10 - (s.split("").map(Number).reduce((a, d, i) => a + d * (i % 2 === 0 ? 1 : 3), 0) % 10)) % 10);
+const b = await chromium.launch({ channel: "chrome" });
+const p = await b.newPage({ viewport: { width: 1400, height: 1000 } });
+await p.goto("http://localhost:5195/");
+await p.getByLabel(/mail/i).fill(env.DEMO_OWNER_EMAIL);
+await p.getByLabel(/contraseña|clave/i).fill(env.DEMO_OWNER_PASSWORD);
+await p.getByRole("button", { name: /ingresar|entrar/i }).click();
+await p.waitForTimeout(3500);
+await p.getByRole("button", { name: /^Mostrador$/ }).first().click();
+await p.waitForTimeout(3000);
+const box = p.getByPlaceholder(/Escane|Buscar|código/i).first();
+const scan = async (c: string) => { await box.fill(c); await box.press("Enter"); await p.waitForTimeout(900); };
+const rows = async () => (await p.locator(".pos-cart-row").allInnerTexts()).map((t) => t.replace(/\s+/g, " "));
+await scan(prod!.code);
+const r1 = await rows();
+console.log(r1.some((r) => r.includes(prod!.name)) ? "OK  " : "FALLA", `código de producto "${prod!.code}" → ${r1.join(" / ")}`);
+// Etiqueta con el formato que tiene calibrado la sucursal (o el Kretz por defecto 1/5/5): 0,750 kg.
+const { data: bc } = await sb.from("branch_scale_configs").select("prefix_length, plu_length, weight_length, payload_type").eq("branch_id", env.DEMO_BRANCH_ID).maybeSingle();
+const fmt = bc ?? { prefix_length: 1, plu_length: 5, weight_length: 5, payload_type: "weight" };
+console.log("     formato de etiquetas de la sucursal:", JSON.stringify(fmt));
+const label = ean("2".padEnd(fmt.prefix_length, "0") + prod!.code.padStart(fmt.plu_length, "0") + "750".padStart(fmt.weight_length, "0"));
+await scan(label);
+const qtys = await p.locator(".pos-qty-input").evaluateAll((els) => els.map((e) => (e as HTMLInputElement).value));
+console.log(qtys.length === 2 && qtys[1] === "0,75" ? "OK  " : "FALLA", `etiqueta de balanza (formato de la sucursal) → líneas: ${(await rows()).join(" / ")} · cantidades: ${qtys.join(" / ")}`);
+console.log(!(await p.locator("body").innerText()).includes("Esperando el TOTAL") ? "OK  " : "FALLA", "nada queda \"Esperando el TOTAL\" (la venta nueva no se activa)");
+await p.getByRole("button", { name: /Cancelar ticket/ }).first().click();
+await b.close();

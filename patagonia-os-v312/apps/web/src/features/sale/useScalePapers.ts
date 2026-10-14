@@ -132,11 +132,15 @@ export function useScalePapers(deps: {
           }
           paper = setLibreAmount(paper, idx, n);
         }
-      } else if (r.need === "paper_amounts") {
+      } else if (r.need === "confirm_split" && window.confirm(`Mirá el ticket impreso: ${r.question}.\n\n¿Es así?\n\nAceptar = sí.\nCancelar = escribir el importe de cada uno.`)) {
+        r = closePaper(paper, total, undefined, { acceptSplit: true });
+        continue;
+      } else if (r.need === "paper_amounts" || r.need === "confirm_split") {
+        const ask = r.need === "confirm_split" ? "Escribí el IMPORTE impreso en el ticket para:" : `No se puede saber con seguridad el precio de cada producto (${r.reason}).\nEscribí el IMPORTE impreso en el ticket para:`;
         const amounts: number[] = [];
         for (const it of paper.items) {
           if (it.kind !== "product") continue;
-          const n = Math.round(parseAmount(window.prompt(`No se puede saber con seguridad el precio de cada producto (${r.reason}).\nEscribí el IMPORTE impreso en el ticket para:\n${describeItem(it)}`) ?? "") || 0);
+          const n = Math.round(parseAmount(window.prompt(`${ask}\n${describeItem(it)}`) ?? "") || 0);
           if (!(n > 0)) {
             setMessage("No se confirmó el ticket: falta el importe de un producto.");
             return;
@@ -156,6 +160,23 @@ export function useScalePapers(deps: {
     }
     const amounts = r.amounts;
     const fingerprint = paperFingerprint(total.barcode, paper);
+    // ¿El mismo papel se cobró recién en ESTA caja, o ya está en esta venta? Se pregunta solo dentro de la ventana
+    // (real: con 3 minutos, 6 avisos por semana en vez de 94). Las otras cajas las controla el servidor al cobrar.
+    const windowMs = (setup?.repeatWindowMinutes ?? 3) * 60_000;
+    const recentHere = loadRecentPapers().find((x) => x.fp === fingerprint && Date.now() - x.at < windowMs);
+    const inThisSale = confirmed.some((p) => p.fingerprint === fingerprint);
+    let repeatConfirmed = false;
+    if (recentHere || inThisSale) {
+      const when = recentHere ? `en esta caja hace ${Math.max(1, Math.round((Date.now() - recentHere.at) / 60_000))} min` : "en esta misma venta";
+      if (!window.confirm(`Este mismo ticket de la balanza ya se cobró ${when}.\n\n¿Es OTRO ticket igual (otro cliente que llevó exactamente lo mismo)?\n\nAceptar = sí, es otro.\nCancelar = es el mismo papel: no se agrega.`)) {
+        const drop = new Set(keys);
+        setCart((c) => c.filter((l) => !drop.has(l.key)));
+        setOpen(newPaper());
+        setMessage("No se agregó: ese ticket de la balanza ya estaba cobrado.");
+        return;
+      }
+      repeatConfirmed = true;
+    }
     const byKey = new Map(keys.map((k, i) => [k, i]));
     setCart((c) =>
       [...c, ...added].map((l) => {
@@ -167,7 +188,7 @@ export function useScalePapers(deps: {
           : { ...l, scalePending: false, unitPrice: amounts[i] };
       })
     );
-    setConfirmed((c) => [...c, { id: open.id, fingerprint, ticketDate: localDateIso(), total: total.amount, articles: total.articles, keys, repeatConfirmed: false }]);
+    setConfirmed((c) => [...c, { id: open.id, fingerprint, ticketDate: localDateIso(), total: total.amount, articles: total.articles, keys, repeatConfirmed }]);
     setOpen(newPaper());
     setMessage(`Ticket de la balanza confirmado: ${formatMoney(total.amount)} (${r.detail}).`);
   }
@@ -201,12 +222,33 @@ export function useScalePapers(deps: {
     return { scale: { scaleKey: setup.profile.scaleKey, papers } };
   }
 
+  /** Venta cobrada (o guardada sin conexión): sus papeles quedan como "recién cobrados en esta caja". */
+  function commit() {
+    saveRecentPapers([...loadRecentPapers(), ...confirmed.map((p) => ({ fp: p.fingerprint, at: Date.now() }))]);
+  }
+
   function confirmRepeat() {
     setConfirmed((c) => c.map((p) => ({ ...p, repeatConfirmed: true })));
   }
 
   const pendingCount = cart.filter((l) => l.scalePending).length;
-  return { setup, active: !!setup, handleScan, keysToRemove, reset, payload, confirmRepeat, pendingCount };
+  return { setup, active: !!setup, handleScan, keysToRemove, reset, payload, confirmRepeat, commit, pendingCount };
+}
+
+const RECENT_KEY = "patagonia-scale-papers-recent";
+function loadRecentPapers(): Array<{ fp: string; at: number }> {
+  try {
+    return JSON.parse(localStorage.getItem(RECENT_KEY) ?? "[]") as Array<{ fp: string; at: number }>;
+  } catch {
+    return [];
+  }
+}
+function saveRecentPapers(list: Array<{ fp: string; at: number }>) {
+  try {
+    localStorage.setItem(RECENT_KEY, JSON.stringify(list.filter((x) => Date.now() - x.at < 86_400_000).slice(-500)));
+  } catch {
+    // sin localStorage: queda el control del servidor
+  }
 }
 
 function lineFor(it: Paper["items"][number], key: string, paperId: string): TicketLine {

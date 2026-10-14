@@ -93,6 +93,9 @@ const before = await stockNow();
 
 // 4. Los 945 tickets.
 const tickets = realTickets();
+// La semana real se manda en 85 segundos: con la ventana de 3 minutos todo papel igual del mismo día "sería reciente".
+// Para medir la carga real se cobra con la ventana en 0 (nunca pregunta) y la ventana se prueba aparte (punto 6b).
+await sb.rpc("set_scale_repeat_window", { p_branch_id: branch, p_scale_key: SCALE, p_minutes: 0 });
 let sold = 0, repeatedAsked = 0, failed = 0, money = 0;
 const expectedDelta = new Map<string, number>();
 const saleIds: string[] = [];
@@ -115,7 +118,8 @@ for (const t of tickets) {
 const realMoney = tickets.reduce((s, t) => s + t.lines.reduce((a, l) => a + l.amount, 0), 0);
 check(sold === 945 && failed === 0, `945 tickets reales cobrados: ${sold} (fallas ${failed}) en ${Math.round((Date.now() - t0) / 1000)} s`);
 check(Math.round(money) === Math.round(realMoney), `plata cobrada $${money.toLocaleString("es-AR")} = vendido en la balanza $${realMoney.toLocaleString("es-AR")}`);
-check(repeatedAsked === 94, `"¿es otro ticket igual?" se preguntó ${repeatedAsked} veces (esperado 94: mismos papeles el mismo día)`);
+check(repeatedAsked === 0, `con la ventana en 0 ningún papel igual frena una venta: avisos ${repeatedAsked} (los 94 papeles iguales del mismo día se cobraron sin bloqueo)`);
+await sb.rpc("set_scale_repeat_window", { p_branch_id: branch, p_scale_key: SCALE, p_minutes: 3 });
 const after = await stockNow();
 let stockOk = 0, stockBad = 0;
 for (const p of products) {
@@ -152,6 +156,17 @@ const [ra, rb] = await Promise.all([sb.rpc("create_pos_scale_sale", a.payload), 
 const okCount = [ra, rb].filter((x) => !x.error).length;
 const repCount = [ra, rb].filter((x) => x.error && /TICKET_BALANZA_REPETIDO/.test(x.error.message)).length;
 check(okCount === 1 && repCount === 1, `dos cajas, mismo papel, al mismo tiempo: ${okCount} cobro y ${repCount} aviso de repetido`);
+
+// 6b. Ventana: el mismo papel pasados los minutos de la ventana se cobra sin preguntar (ventana de 1 min para no esperar 3).
+await sb.rpc("set_scale_repeat_window", { p_branch_id: branch, p_scale_key: SCALE, p_minutes: 1 });
+const win = { ...extra, date: `ventana-${crypto.randomUUID()}` };
+const w1 = await sb.rpc("create_pos_scale_sale", buildSale(win).payload);
+const w2 = await sb.rpc("create_pos_scale_sale", buildSale(win).payload);
+console.log("     esperando 65 s (ventana de 1 minuto)…");
+await new Promise((r) => setTimeout(r, 65_000));
+const w3 = await sb.rpc("create_pos_scale_sale", buildSale(win).payload);
+check(!w1.error && !!w2.error && /TICKET_BALANZA_REPETIDO/.test(w2.error.message) && !w3.error, `ventana: el mismo papel enseguida pregunta (${w2.error ? "sí" : "no"}); pasada la ventana se cobra sin preguntar (${w3.error ? "NO: " + w3.error.message : "sí"})`);
+await sb.rpc("set_scale_repeat_window", { p_branch_id: branch, p_scale_key: SCALE, p_minutes: 3 });
 
 // 7. Anular libera el papel: después se puede cobrar sin el aviso.
 const okSale = (ra.error ? rb : ra).data.sale_id;

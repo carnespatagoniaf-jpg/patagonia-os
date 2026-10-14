@@ -7,7 +7,9 @@
 -- cantidad de artículos). El stock baja al cobrar, en la misma transacción.
 --
 -- 1. scale_profiles: formatos de código de la balanza (leídos de ella, solo lectura) por sucursal.
---    repeat_window_minutes = cuánto tiempo se considera "repetido" el mismo papel (1440 = todo el día).
+--    repeat_window_minutes = durante cuántos minutos el mismo papel se pregunta "¿es otro ticket igual?" (0 = nunca).
+--    Por defecto 3. Real (Los gringos, 945 tickets): con todo el día serían 94 avisos por semana (clientes que llevan
+--    lo mismo); con 3 minutos, 6. Nunca se bloquea solo: se pregunta, y la respuesta queda registrada.
 -- 2. scale_catalog_items: catálogo de la balanza (nombre, forma de venta, precios de lista, código de
 --    barras) + el VÍNCULO a un producto de Patagonia, decidido por el dueño o un administrador:
 --    'product' (descuenta stock), 'libre' (se cobra el importe, sin stock) o 'none' (no se vende).
@@ -33,7 +35,7 @@ create table if not exists public.scale_profiles (
   total_format text,
   amount_decimals int not null default 0 check (amount_decimals between 0 and 3),
   generic_codes int[] not null default '{}',
-  repeat_window_minutes int not null default 1440 check (repeat_window_minutes between 0 and 1440),
+  repeat_window_minutes int not null default 3 check (repeat_window_minutes between 0 and 1440),
   read_at timestamptz,
   updated_by uuid,
   updated_at timestamptz not null default now(),
@@ -76,6 +78,9 @@ create table if not exists public.pos_scale_paper_claims (
   created_at timestamptz not null default now(),
   unique (company_id, branch_id, scale_key, ticket_date, fingerprint, occurrence)
 );
+
+-- Bases donde la 119 ya se había aplicado con la ventana de todo el día.
+alter table public.scale_profiles alter column repeat_window_minutes set default 3;
 
 create index if not exists pos_scale_paper_claims_sale_idx on public.pos_scale_paper_claims (sale_id);
 
@@ -330,6 +335,32 @@ begin
 end;
 $$;
 
+-- Ventana del aviso de papel repetido (dueño o administrador).
+create or replace function public.set_scale_repeat_window(p_branch_id uuid, p_scale_key text, p_minutes int)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_user uuid := auth.uid();
+  v_company uuid;
+  v_role text;
+begin
+  select company_id, role into v_company, v_role from public.profiles where id = v_user and active = true;
+  if v_company is null then raise exception 'Perfil inválido'; end if;
+  if v_role not in ('owner', 'admin') then raise exception 'Solo el dueño o un administrador puede cambiar esto'; end if;
+  if p_minutes is null or p_minutes < 0 or p_minutes > 1440 then raise exception 'Minutos inválidos (0 a 1440)'; end if;
+  update public.scale_profiles set repeat_window_minutes = p_minutes, updated_by = v_user, updated_at = now()
+  where company_id = v_company and branch_id = p_branch_id and scale_key = p_scale_key;
+  if not found then raise exception 'La balanza no está configurada en esa sucursal'; end if;
+  insert into public.audit_log (company_id, branch_id, user_id, action, entity_type, entity_id, new_data)
+  values (v_company, p_branch_id, v_user, 'scale_profile.repeat_window', 'scale_profile', p_scale_key, jsonb_build_object('minutes', p_minutes));
+end;
+$$;
+
+revoke all on function public.set_scale_repeat_window(uuid, text, int) from public, anon;
+grant execute on function public.set_scale_repeat_window(uuid, text, int) to authenticated;
 revoke all on function public.save_scale_catalog(uuid, text, jsonb, jsonb) from public, anon;
 revoke all on function public.set_scale_links(uuid, text, jsonb) from public, anon;
 revoke all on function public.create_pos_scale_sale(uuid, jsonb, jsonb, uuid, numeric, numeric, uuid, text, jsonb) from public, anon;

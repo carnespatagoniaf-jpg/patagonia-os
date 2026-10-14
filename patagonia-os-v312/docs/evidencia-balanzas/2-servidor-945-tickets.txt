@@ -1,0 +1,33 @@
+Corrida: 2026-10-14 13:59:44
+Base: STAGING loquhcwsvsbqpinefxcc, empresa aislada PRUEBA Balanzas (staging)
+
+OK   catálogo guardado (104 productos) 
+OK   vínculos guardados 
+OK   el servidor rechaza vincular un unitario con un producto por kg: ""GRINGO CAJON DE" se vende por unidad en la balanza y "PRUEBA TROZADITOx1x2" por kg en Patagonia"
+OK   945 tickets reales cobrados: 945 (fallas 0) en 84 s
+OK   plata cobrada $39.552.839 = vendido en la balanza $39.552.839
+OK   con la ventana en 0 ningún papel igual frena una venta: avisos 0 (los 94 papeles iguales del mismo día se cobraron sin bloqueo)
+OK   stock: los 104 productos bajaron exactamente lo vendido (incluye 0 para los no vendidos)
+OK   cada venta tiene su papel registrado (945 de 945)
+OK   reintentos con la misma clave (también 2 a la vez): devuelven la misma venta
+OK   reintentos: el stock no se descuenta otra vez
+OK   dos cajas, mismo papel, al mismo tiempo: 1 cobro y 1 aviso de repetido
+     esperando 65 s (ventana de 1 minuto)…
+OK   ventana: el mismo papel enseguida pregunta (sí); pasada la ventana se cobra sin preguntar (sí)
+OK   venta anulada: el mismo papel se vuelve a cobrar sin aviso  
+OK   rechaza: los artículos no suman el TOTAL → "Los artículos del ticket de balanza suman 73118.00 y el TOTAL es 73119"
+OK   rechaza: falta un artículo (cantidad del TOTAL) → "El ticket de balanza tiene 3 artículos y se cobraron 2"
+OK   rechaza: producto distinto del vinculado → "El producto 2 de la balanza no está vinculado a ese producto de Patagonia"
+OK   rechaza: artículo de balanza fuera de su ticket → "Hay un artículo de balanza fuera de su ticket"
+OK   rechaza: descuento en un artículo de balanza → "Un artículo de la balanza no puede tener descuento propio (el descuento va a la venta)"
+OK   rechaza: venta libre con código de un producto común → "El producto 5 de la balanza no es una venta libre"
+OK   rechaza: fecha de ticket vieja → "Fecha del ticket de balanza inválida"
+OK   los rechazos no tocaron el stock
+limpieza: 963 ventas de prueba anuladas
+
+== Aislamiento entre empresas ==
+OK   Don Julio ve 0 filas de scale_profiles de otra empresa
+OK   Don Julio ve 0 filas de scale_catalog_items de otra empresa
+OK   Don Julio ve 0 filas de pos_scale_paper_claims de otra empresa
+OK   Don Julio no puede cambiar vínculos de otra empresa: Sucursal inválida
+OK   sin sesión no se puede vender: permission denied for function create_pos_scale_sale

@@ -134,6 +134,20 @@ describe("papel: artículos + TOTAL", () => {
     p = setLibreAmount(p, 0, 15438);
     assert.deepEqual(closePaper(p, { amount: 15438, articles: 1 }).ok, true);
   });
+  it("REAL 08/10 ticket 2300: dos cajones iguales → pide confirmar con el papel, no reparte solo", () => {
+    let p = (scan(emptyPaper(), cajon) as { paper: Paper }).paper;
+    p = (scan(p, cajon) as { paper: Paper }).paper;
+    const r = closePaper(p, { amount: 144000, articles: 2 });
+    assert.equal(!r.ok && r.need, "confirm_split");
+    assert.match((r as { question: string }).question, /2 × .*: \$72\.000 cada uno/);
+    assert.deepEqual(closePaper(p, { amount: 144000, articles: 2 }, [74000, 70000]).ok, true);
+  });
+  it("mismo importe y distintos productos: huellas distintas (nunca se toma como el mismo ticket)", () => {
+    // $72.000 = 1 cajón GRINGO (lista 1) o 1 cajón MINDANAO (lista 2, $72.000): mismo TOTAL, otro papel.
+    const a = (scan(emptyPaper(), cajon) as { paper: Paper }).paper;
+    const b = (scan(emptyPaper(), expectedItemCode(item(3), target, 1)!) as { paper: Paper }).paper;
+    assert.notEqual(paperFingerprint("2201000720004", a), paperFingerprint("2201000720004", b));
+  });
   it("la huella no depende del orden de escaneo", () => {
     let a = (scan(emptyPaper(), cajon) as { paper: Paper }).paper;
     a = (scan(a, trozadito(0.215)) as { paper: Paper }).paper;
@@ -163,7 +177,7 @@ describe("los 945 tickets REALES de la semana (07-13/10), escaneados como lo har
       });
     }
   });
-  it("el total de cada ticket es exacto y el importe por artículo coincide salvo 1 caso conocido", () => {
+  it("el total de cada ticket es exacto y el importe de CADA artículo es el de la balanza (ningún reparto adivinado)", () => {
     let mismatch = 0;
     const counts = { listas: 0, papel: 0 };
     for (const { t, r } of results) {
@@ -172,10 +186,12 @@ describe("los 945 tickets REALES de la semana (07-13/10), escaneados como lo har
       if (r.lines.some((l) => Math.abs(l.amount - l.realAmount) > 1)) mismatch++;
       counts[r.method!]++;
     }
-    // 08/10 ticket 2300: dos cajones a mano $74.000 + $70.000 = $144.000 = 2 × $72.000 (lista 1): mismo producto,
-    // misma cantidad. Stock y total exactos; solo cambia el reparto entre dos líneas iguales.
-    assert.equal(mismatch, 1);
-    assert.deepEqual(counts, { listas: 912, papel: 33 });
+    // Antes, el 08/10 ticket 2300 (dos cajones a mano $74.000 + $70.000) se deducía como 2 × $72.000. Ahora los
+    // artículos iguales se confirman con el papel: 0 diferencias.
+    assert.equal(mismatch, 0);
+    assert.deepEqual(counts, { listas: 911, papel: 34 });
+    // Confirmaciones de "artículos iguales" que vería el cajero en la semana (y en ninguna se aceptó un reparto falso).
+    assert.equal(results.filter((x) => x.r.confirmedSplit).length, 2);
   });
   it("stock: lo que se descontaría por producto es exactamente lo vendido en la balanza", () => {
     const sold = new Map<string, number>();

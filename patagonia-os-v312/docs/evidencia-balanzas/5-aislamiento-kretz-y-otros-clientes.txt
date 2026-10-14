@@ -1,0 +1,28 @@
+Regresión (staging, empresa sin la balanza nueva):
+OK   Don Julio no tiene balanza "artículos + TOTAL" configurada (0)
+OK   código de producto "1" → Asado $ 15.900 /kg $ 15.900 ×
+     formato de etiquetas de la sucursal: {"prefix_length":1,"plu_length":6,"weight_length":5,"payload_type":"weight"}
+OK   etiqueta de balanza (formato de la sucursal) → líneas: Asado $ 15.900 /kg $ 15.900 × / Asado $ 15.900 /kg $ 11.925 × · cantidades: 1 / 0,75
+OK   nada queda "Esperando el TOTAL" (la venta nueva no se activa)
+
+Archivos que YA EXISTÍAN y cambian respecto de la versión publicada (10310f5):
+ .../apps/web/src/features/inventory/Inventory.tsx  |   3 +-
+ .../src/features/inventory/systel/SystelPanel.tsx  |   3 +-
+ .../src/features/inventory/systel/systel-pilot.ts  |   3 +-
+ .../apps/web/src/features/sale/Sale.tsx            |  31 ++-
+ .../apps/web/src/features/sale/SaleTicketPanel.tsx |   6 +-
+ .../apps/web/src/features/sale/sale-model.ts       |   4 +
+ .../apps/web/src/features/sale/sale-service.ts     |  21 +-
+ .../apps/web/src/features/sale/useSaleTicket.ts    |  20 +-
+ .../supabase/functions/help-chat/index.ts          |   1 +
+ 19 files changed, 1431 insertions(+), 14 deletions(-)
+
+Kretz, lectura de etiquetas y drivers de balanzas sin cambios:
+SIN CAMBIOS
+
+Migración 119 - objetos existentes que modifica:
+ninguno: solo crea 3 tablas y 4 funciones nuevas; create_pos_sale se llama, no se modifica
+
+Migración 119 en producción:
+(consulta: select version from public.schema_migrations where version like '119%' en tayylvhfmoybchutybcz)
+Producción (tayylvhfmoybchutybcz), consultado 2026-10-14 14:38: migración 119 = 0, tabla scale_profiles = no existe, función create_pos_scale_sale = 0. Producción no tiene nada de esto.
