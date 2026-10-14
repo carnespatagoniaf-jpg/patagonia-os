@@ -42,7 +42,7 @@ export class FakeCuora implements SystelLink {
 
   constructor(
     readonly layout: SystelLayout,
-    readonly options: { address?: number; decimals?: number; capacity?: number; writeChecksum?: boolean; typeByteAccepted?: "binario" | "ascii"; typeHighBits?: number } = {}
+    readonly options: { address?: number; decimals?: number; capacity?: number; writeChecksum?: boolean; typeByteAccepted?: "binario" | "ascii"; typeHighBits?: number; loteNulOnWrite?: boolean } = {}
   ) {}
 
   get address(): number {
@@ -152,6 +152,11 @@ export class FakeCuora implements SystelLink {
           const t1 = rec.charCodeAt(end1 - 13);
           const low1 = t1 >= 48 ? t1 - 48 : t1;
           rec = rec.slice(0, end1 - 13) + String.fromCharCode(this.options.typeHighBits | low1) + rec.slice(end1 - 12);
+        }
+        // REAL (Los gringos 14/10, producto 97): al escribir desde la PC, el último carácter del lote queda en 0x00 si era espacio.
+        if (this.layout !== "cuora2" && this.options.loteNulOnWrite) {
+          const end2 = rec[rec.length - 1] === "N" ? rec.length - 1 : rec.length - 101;
+          if (rec[end2 - 14] === " ") rec = rec.slice(0, end2 - 14) + String.fromCharCode(0) + rec.slice(end2 - 13);
         }
         const fixed = info.pluDigits + 1 + 18 + info.priceLists * (this.layout === "max7" ? 12 : 6) + info.codeDigits + 2 + 4 + 1 + info.tareDigits;
         const tail = rec.slice(fixed);
