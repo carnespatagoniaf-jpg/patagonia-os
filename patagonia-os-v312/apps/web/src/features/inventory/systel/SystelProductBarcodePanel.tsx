@@ -1,8 +1,9 @@
 import { useState } from "react";
 import type { SystelClient } from "./systel-client";
 import { compareWithBackup, restoreFromBackup, rewriteAllProductBarcodes, takeProductBackup, targetCodeFor, verifyBackup, type ProductBackup, type TypeByteMode } from "./systel-product-barcode";
-import { runStage1FreeSlot, runStage2OneProduct, type WriteTestReport } from "./systel-barcode-write-test";
-import { pluEanSetting, type SystelLayout } from "./systel-plu";
+import { runStage1FreeSlot, runStage2OneProduct, runTestProductRewrite, type WriteTestReport } from "./systel-barcode-write-test";
+import { saveSystelPluBarcodes } from "../../sale/systel-label-format";
+import { parsePluAs, pluEanSetting, type SystelLayout } from "./systel-plu";
 
 /**
  * "Código de barras de cada producto" (Stock → Balanza, solo empresas piloto Systel).
@@ -28,7 +29,9 @@ const STATE_KEY = "patagonia-systel-barcode-writes";
 
 interface WriteState {
   signature: string;
-  stage1?: { at: string; mode: TypeByteMode; number: number };
+  stage1?: { at: string; mode: TypeByteMode; number: number; unitNumber?: number };
+  /** Reescritura de un producto de prueba (para ver si la balanza borra sus acumulados). */
+  stage1b?: { at: string; number: number };
   stage2?: { at: string; number: number };
   bulk?: { at: string; done: number; stoppedAt: number | null };
 }
@@ -145,13 +148,33 @@ export function SystelProductBarcodePanel(p: ProductBarcodePanelProps) {
 
   async function handleStage1() {
     if (!backup || !confirmWrite("Prueba 1: escribir un producto \"PRUEBA PATAGONIA\" (sin precio) en un número LIBRE de la balanza.")) return;
-    const template = backup.records.find((r) => pluEanSetting(r.raw).type !== null)?.number;
+    // Moldes reales: un producto por peso y otro por unidad del respaldo (los productos de prueba se arman con su forma).
+    const withEan = backup.records.filter((r) => pluEanSetting(r.raw).type !== null);
+    const saleTypeOf = (raw: string) => parsePluAs(backup.layout, raw)?.saleType ?? "";
+    const template = withEan.find((r) => saleTypeOf(r.raw) === "P")?.number ?? withEan[0]?.number;
+    const unitTemplate = withEan.find((r) => saleTypeOf(r.raw) === "U")?.number;
     if (template === undefined) {
       setNote("El respaldo no tiene un producto de referencia con código de barras.");
       return;
     }
-    const r = await p.withReadClient((client, layout) => runStage1FreeSlot(client, layout, { templateNumber: template, protect: p.numbers, today: new Date() }), { write: true });
-    if (r) finish(r, "Prueba 1 (número libre)", r.mode && r.number !== null ? { stage1: { at: new Date().toISOString(), mode: r.mode, number: r.number } } : {});
+    const r = await p.withReadClient((client, layout) => runStage1FreeSlot(client, layout, { templateNumber: template, unitTemplateNumber: unitTemplate, protect: p.numbers, today: new Date() }), { write: true });
+    // Los productos de prueba quedan en la lectura de esta computadora, para "Probar un código impreso".
+    if (r?.verdict === "confirmado" && r.number !== null) {
+      saveSystelPluBarcodes({
+        [String(r.number)]: { type: 1, config: "20PPPPCCCCCC", p1: 1, p2: 0, name: "PRUEBA PATAGONIA", saleType: "P" },
+        ...(r.unitNumber ? { [String(r.unitNumber)]: { type: 1, config: "21PPPPCCCCCC", p1: 1, p2: 0, name: "PRUEBA PATAGONIA", saleType: "U" } } : {})
+      });
+    }
+    if (r) finish(r, "Prueba 1 (número libre)", r.mode && r.number !== null ? { stage1: { at: new Date().toISOString(), mode: r.mode, number: r.number, unitNumber: r.unitNumber } } : {});
+  }
+
+  async function handleStage1b() {
+    if (!state?.stage1) return;
+    const n = state.stage1.number;
+    if (!confirmWrite(`Prueba 1b: reescribir el producto de prueba N.º ${n} (igual que se haría con uno real). Antes: vendé el producto de prueba en un ticket y anotá su total en el menú de la balanza (Totales por PLU); después de esto, mirá si el total sigue igual.`)) return;
+    const mode = state.stage1.mode;
+    const r = await p.withReadClient((client, layout) => runTestProductRewrite(client, layout, { number: n, mode, protect: p.numbers }), { write: true });
+    if (r) finish(r, `Prueba 1b (reescritura del N.º ${n})`, { stage1b: { at: new Date().toISOString(), number: n } });
   }
 
   async function handleStage2() {
@@ -230,8 +253,12 @@ export function SystelProductBarcodePanel(p: ProductBarcodePanelProps) {
             <input type="checkbox" checked={authorized} onChange={(e) => setAuthorized(e.target.checked)} /> El dueño y el cliente autorizaron esta prueba (el local está cerrado, sin tickets abiertos)
           </label>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-            <button disabled={p.busy || !backupOk} onClick={() => void handleStage1()}>1. Probar en un número libre</button>
-            <span className="muted" style={{ fontSize: 12 }}>{state?.stage1 ? `✓ confirmada (N.º ${state.stage1.number}, tipo ${state.stage1.mode})` : "Crea \"PRUEBA PATAGONIA\" sin precio en un número que no existe."}</span>
+            <button disabled={p.busy || !backupOk} onClick={() => void handleStage1()}>1. Probar en números libres</button>
+            <span className="muted" style={{ fontSize: 12 }}>{state?.stage1 ? `✓ confirmada (N.º ${state.stage1.number} por peso${state.stage1.unitNumber ? ` y ${state.stage1.unitNumber} por unidad` : ""}, tipo ${state.stage1.mode})` : "Crea \"PRUEBA PATAGONIA\" ($1) por peso y por unidad en números que no existen."}</span>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <button className="secondary" disabled={p.busy || !state?.stage1} onClick={() => void handleStage1b()}>1b. Reescribir el producto de prueba</button>
+            <span className="muted" style={{ fontSize: 12 }}>{state?.stage1b ? "✓ hecha: compará el total del producto de prueba en la balanza antes y después" : "Para saber si la balanza borra los acumulados al escribir, sin tocar productos reales."}</span>
           </div>
           <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
             <label className="muted" style={{ fontSize: 13 }}>

@@ -109,8 +109,14 @@ export function ScaleLinksPanel({ branchId, products }: { branchId: string | nul
 
   /** Cómo lee Patagonia un código impreso por la balanza. Solo muestra: no agrega nada ni toca stock. */
   function explainCode(raw: string): string {
-    if (!setup) return "Primero hay que guardar los productos de la balanza.";
-    const d = decodeScaleCode(raw, setup.profile);
+    // Sin productos guardados en Patagonia, se usa la última lectura de la balanza de esta computadora (solo para mostrar).
+    const fresh = catalogFromLastReading();
+    const lastReading = fresh ?? reading;
+    // Con productos guardados, se suman los de la lectura que no estén (ej. los productos de prueba 7999/7998).
+    const extra = setup && lastReading ? lastReading.items.filter((i) => !setup.profile.catalog.some((c) => c.code === i.code)) : [];
+    const profile = setup ? { ...setup.profile, catalog: [...setup.profile.catalog, ...extra] } : (lastReading ? { scaleKey: SCALE_KEY, brand: "systel", weighedFormat: lastReading.formats.weighed, unitFormat: lastReading.formats.unit, totalFormat: lastReading.formats.sums, amountDecimals: 0, genericCodes: [], catalog: lastReading.items } : null);
+    if (!profile) return "Primero hay que leer la balanza (Diagnóstico completo).";
+    const d = decodeScaleCode(raw, profile);
     if (d.kind === "not_scale") return "No es un código de esta balanza.";
     if (d.kind === "error") return `No se puede usar: ${d.reason}.`;
     if (d.kind === "total") return `TOTAL del ticket: $${d.amount.toLocaleString("es-AR")}${d.articles !== null ? `, ${d.articles} artículo(s)` : ""}.`;
@@ -204,7 +210,7 @@ export function ScaleLinksPanel({ branchId, products }: { branchId: string | nul
           })}
         </div>
       )}
-      {setup && (
+      {(setup || reading) && (
         <div style={{ display: "grid", gap: 4 }}>
           <label style={{ fontSize: 13 }}>
             Probar un código impreso (escanealo acá; no agrega nada a ninguna venta):{" "}

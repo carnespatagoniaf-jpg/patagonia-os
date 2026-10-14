@@ -11,6 +11,7 @@ import { REAL_PLU_13_PECHUGA_SH, REAL_PLU_2_GRINGO_CAJON } from "../../apps/web/
 import { realCatalog } from "../../apps/web/src/features/scales/sale/los-gringos-fixture";
 import { pluEanSetting } from "../../apps/web/src/features/inventory/systel/systel-plu";
 import { onlyBarcodeChanged } from "../../apps/web/src/features/inventory/systel/systel-product-barcode";
+import { buildCode, parseTemplate } from "../../apps/web/src/features/scales/sale/label-template";
 
 const readEnv = (p: string) => Object.fromEntries(fs.readFileSync(new URL(p, import.meta.url), "utf8").split(/\r?\n/).filter((l) => l.includes("=")).map((l) => [l.slice(0, l.indexOf("=")), l.slice(l.indexOf("=") + 1).trim()]));
 const env = readEnv("../../.env.balanzas-staging");
@@ -50,6 +51,8 @@ async function run(typeByteAccepted: "binario" | "ascii") {
     const w = window;
     localStorage.removeItem("patagonia-systel-barcode-writes");
     localStorage.removeItem("patagonia-systel-product-backup");
+    // Lo que deja el "Diagnóstico completo" en esta computadora: los formatos de código de la balanza (reales).
+    localStorage.setItem("patagonia-systel-label-templates", JSON.stringify({ weighed: "20PPPPCCCCII", unit: "21PPPPCCCCII", sums: "22AAIIIIIIII", at: Date.now(), perPlu: {} }));
     localStorage.setItem("patagonia-systel-link", JSON.stringify({ address: 20, settings: { baudRate: 115200, stopBits: 1, parity: "none" } }));
     w.__scale = { received: [], plus: ${JSON.stringify(PLUS)}, mode: ${JSON.stringify(typeByteAccepted)} };
     const xor = (a) => a.reduce((x, y) => x ^ y, 0);
@@ -114,21 +117,43 @@ async function run(typeByteAccepted: "binario" | "ascii") {
   };
   const scale = async () => p.evaluate(() => (window as any).__scale) as Promise<{ received: { fn: number; data: string }[]; plus: Record<string, string> }>;
 
-  check(await p.getByRole("button", { name: /1\. Probar en un número libre/ }).isDisabled(), "sin respaldo del día, la prueba 1 está deshabilitada");
+  check(await p.getByRole("button", { name: /1\. Probar en números libres/ }).isDisabled(), "sin respaldo del día, la prueba 1 está deshabilitada");
   await p.getByRole("button", { name: /Respaldar los productos/ }).click();
   check(await waitFor(/Respaldo completo y verificado/), `respaldo: ${await line(/Respaldo (completo|INCOMPLETO)/)}`);
   check(await p.getByRole("button", { name: /2\. Probar en este producto/ }).isDisabled() && await p.getByRole("button", { name: /3\. Todos los productos/ }).isDisabled(), "la 2 y la 3 están deshabilitadas antes de la 1");
 
-  await p.getByRole("button", { name: /1\. Probar en un número libre/ }).click();
+  await p.getByRole("button", { name: /1\. Probar en números libres/ }).click();
   check(/Marcá primero/.test(await line(/Marcá primero/)), "sin marcar la autorización no escribe");
   await p.getByLabel(/autorizaron esta prueba/).check();
   const before1 = (await scale()).received.length;
-  await p.getByRole("button", { name: /1\. Probar en un número libre/ }).click();
+  await p.getByRole("button", { name: /1\. Probar en números libres/ }).click();
   check(await waitFor(/Prueba 1 \(número libre\): (CONFIRMADO|FRENADO)/), `prueba 1: ${await line(/Prueba 1 \(número libre\)/)}`);
   let s = await scale();
   const writes1 = s.received.slice(before1).filter((x) => x.fn === 61);
-  check(/CONFIRMADO/.test(await line(/Prueba 1 \(número libre\)/)) && writes1.every((x) => x.data.startsWith("7999")), `la prueba 1 escribió solo en el N.º 7999 (${writes1.length} escritura(s): ${typeByteAccepted === "ascii" ? "byte rechazado, dígito aceptado" : "byte aceptado"})`);
-  check(!!s.plus["7999"] && s.plus["7999"].slice(5, 23) === "PRUEBA PATAGONIA  " && s.plus["7999"].slice(23, 35) === "000000000000", `producto de prueba en la balanza: "${s.plus["7999"]?.slice(5, 23)}", precios ${s.plus["7999"]?.slice(23, 35)}`);
+  check(/CONFIRMADO/.test(await line(/Prueba 1 \(número libre\)/)) && writes1.every((x) => x.data.startsWith("7999") || x.data.startsWith("7998")), `la prueba 1 escribió solo en los N.º 7999 y 7998 (${writes1.length} escritura(s): ${typeByteAccepted === "ascii" ? "byte rechazado, dígito aceptado, y el de unidad" : "byte aceptado, y el de unidad"})`);
+  check(pluEanSetting(s.plus["7998"] ?? "").config === "21PPPPCCCCCC" && s.plus["7998"]?.slice(5, 23) === "PRUEBA PATAGONIA  ", `producto de prueba por unidad (7998): código ${pluEanSetting(s.plus["7998"] ?? "").config}`);
+  check(!!s.plus["7999"] && s.plus["7999"].slice(5, 23) === "PRUEBA PATAGONIA  " && s.plus["7999"].slice(23, 35) === "000001000000", `producto de prueba por peso (7999): "${s.plus["7999"]?.slice(5, 23)}", precios ${s.plus["7999"]?.slice(23, 35)} ($1)`);
+
+  // Lo que imprimiría la balanza al vender los productos de prueba: el cliente lo escanea en "Probar un código impreso".
+  const probe = p.getByPlaceholder("Código de barras");
+  for (const [code, re, what] of [
+    [buildCode(parseTemplate("20PPPPCCCCCC")!, { P: 7999, C: 1530 })!, /PRUEBA PATAGONIA.*N\.º 7999.*1,530 kg/, "pesado 1,530 kg"],
+    [buildCode(parseTemplate("21PPPPCCCCCC")!, { P: 7998, C: 2 })!, /PRUEBA PATAGONIA.*N\.º 7998.*2 unidad/, "2 unidades"],
+    [buildCode(parseTemplate("22AAIIIIIIII")!, { A: 2, I: 4 })!, /TOTAL del ticket: \$4, 2 artículo/, "TOTAL $4"]
+  ] as const) {
+    await probe.fill(code);
+    await probe.press("Enter");
+    await p.waitForTimeout(300);
+    const t = await line(/TOTAL del ticket|unidad\(es\)|kg →|No se puede usar|No es un código/);
+    check(re.test(t), `probar el código impreso (${what}): ${t}`);
+  }
+
+  // 1b: reescribir el producto de prueba (para comparar su total en la balanza antes y después).
+  const n61 = (await scale()).received.filter((x) => x.fn === 61).length;
+  await p.getByRole("button", { name: /1b\. Reescribir el producto de prueba/ }).click();
+  check(await waitFor(/Prueba 1b \(reescritura del N\.º 7999\): CONFIRMADO/), `1b: ${await line(/Prueba 1b/)}`);
+  s = await scale();
+  check(s.received.filter((x) => x.fn === 61).slice(n61 - s.received.filter((x) => x.fn === 61).length).every((x) => x.data.startsWith("7999")), "la 1b escribió solo en el producto de prueba 7999");
   check(Object.keys(ORIGINAL).every((k) => s.plus[k] === ORIGINAL[k]), "después de la prueba 1, los 104 productos del cliente están byte a byte iguales");
 
   await p.getByLabel(/Producto N\.º/).fill("2");
@@ -156,7 +181,7 @@ async function run(typeByteAccepted: "binario" | "ascii") {
   s = await scale();
   const restoredOk = Object.keys(ORIGINAL).every((k) => s.plus[k].slice(5) === ORIGINAL[k].slice(5));
   check(restoredOk, "restaurados: los 104 productos iguales al original salvo la marca \"gestionado por PC\" (no se puede volver a \"balanza\")");
-  check(!!s.plus["7999"], "el producto de prueba 7999 sigue en la balanza (no se usa ninguna función de borrado; el cliente lo borra a mano o se reusa)");
+  check(!!s.plus["7999"] && !!s.plus["7998"], "los productos de prueba 7999 y 7998 siguen en la balanza (no se usa ninguna función de borrado; el cliente los borra a mano o se reusan)");
   await p.screenshot({ path: "../../tests/e2e/systel-escritura-codigos.png", fullPage: true });
   await b.close();
 }

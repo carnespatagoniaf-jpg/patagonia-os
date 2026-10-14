@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { SystelClient } from "./systel-client";
 import { FakeCuora } from "./systel-fake";
 import { pluEanSetting } from "./systel-plu";
-import { runStage1FreeSlot, runStage2OneProduct, testRecordFrom } from "./systel-barcode-write-test";
+import { runStage1FreeSlot, runStage2OneProduct, runTestProductRewrite, testRecordFrom } from "./systel-barcode-write-test";
 import { restoreFromBackup, takeProductBackup, writeDataFromRead } from "./systel-product-barcode";
 import { REAL_PLU_13_PECHUGA_SH, REAL_PLU_2_GRINGO_CAJON } from "../../sale/systel-real-plu-records";
 
@@ -21,12 +21,12 @@ const client = (f: FakeCuora, write = true) => new SystelClient(f, { address: 20
 const protect = [2, 13, 6];
 
 describe("[SIMULADO] prueba de escritura, etapa 1: número libre", () => {
-  it("el registro de prueba es el de referencia con otro número, nombre de prueba y sin precios", () => {
+  it("el registro de prueba es el de referencia con otro número, nombre de prueba y $1 (lista 2 en 0)", () => {
     const r = testRecordFrom(REAL_PLU_13_PECHUGA_SH, "max60", 7999)!;
     assert.equal(r.length, REAL_PLU_13_PECHUGA_SH.length);
     assert.equal(r.slice(0, 4), "7999");
     assert.equal(r.slice(5, 23), "PRUEBA PATAGONIA  ");
-    assert.equal(r.slice(23, 35), "000000000000");
+    assert.equal(r.slice(23, 35), "000001000000");
     assert.equal(r.slice(35, 40), "07999");
     assert.equal(r.slice(40), REAL_PLU_13_PECHUGA_SH.slice(40));
   });
@@ -137,5 +137,31 @@ describe("[SIMULADO] protecciones agregadas en la fase 0", () => {
     const d = writeDataFromRead(REAL_PLU_2_GRINGO_CAJON, "max60", "binario");
     assert.equal(d, REAL_PLU_2_GRINGO_CAJON.slice(0, 4) + REAL_PLU_2_GRINGO_CAJON.slice(5));
     assert.ok(writeDataFromRead(REAL_PLU_2_GRINGO_CAJON, "max60", "ascii").endsWith("1000000000000N"));
+  });
+});
+
+describe("[SIMULADO] sesión única: dos productos de prueba y reescritura de prueba", () => {
+  it("crea un producto de prueba por peso (7999) y otro por unidad (7998); los del cliente iguales", async () => {
+    const f = scale("ascii");
+    const r = await runStage1FreeSlot(client(f), "max60", { templateNumber: 13, unitTemplateNumber: 2, protect, today });
+    assert.equal(r.verdict, "confirmado", JSON.stringify(r.steps));
+    assert.deepEqual([r.number, r.unitNumber, r.mode], [7999, 7998, "ascii"]);
+    assert.deepEqual(pluEanSetting(f.plus.get(7999)!), { type: 1, config: "20PPPPCCCCCC" });
+    assert.deepEqual(pluEanSetting(f.plus.get(7998)!), { type: 1, config: "21PPPPCCCCCC" });
+    assert.equal(f.plus.get(7998)![f.plus.get(7998)!.length - 15 - 40] !== undefined, true);
+    assert.equal(f.plus.get(2), REAL_PLU_2_GRINGO_CAJON);
+  });
+  it("la reescritura de prueba solo acepta un producto \"PRUEBA PATAGONIA\"", async () => {
+    const f = scale("binario");
+    const c = client(f);
+    await runStage1FreeSlot(c, "max60", { templateNumber: 13, protect, today });
+    const ok = await runTestProductRewrite(c, "max60", { number: 7999, mode: "binario", protect });
+    assert.equal(ok.verdict, "confirmado", JSON.stringify(ok.steps));
+    const before2 = f.plus.get(2);
+    const n61 = f.received.filter((x) => x.fn === 61).length;
+    const no = await runTestProductRewrite(c, "max60", { number: 2, mode: "binario", protect });
+    assert.equal(no.verdict, "frenado");
+    assert.equal(f.plus.get(2), before2);
+    assert.equal(f.received.filter((x) => x.fn === 61).length, n61);
   });
 });
