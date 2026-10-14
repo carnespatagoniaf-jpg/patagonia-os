@@ -33,6 +33,10 @@ export class FakeCuora implements SystelLink {
   sales: { date: string; text: string }[] = [];
   /** Separador entre un artículo y el siguiente en el reporte ("^" o nada: el documento no lo dice). */
   salesSeparator: "^" | "" = "^";
+  /** Para simular otra forma de leer el rango: la fecha de fin NO se incluye. */
+  salesEndExclusive = false;
+  /** Fecha y hora de la balanza (función 28). */
+  clock = "12:00:00 13/10/26";
 
   constructor(
     readonly layout: SystelLayout,
@@ -72,6 +76,8 @@ export class FakeCuora implements SystelLink {
         const cap = String(this.options.capacity ?? (this.layout === "cuora2" ? 4000 : 8000)).padStart(5, "0");
         return this.reply(fn, `F0001C031000S0040P${cap}A060D${this.options.decimals ?? 0}`);
       }
+      case 28:
+        return this.reply(fn, this.clock);
       case 23:
         return this.reply(fn, "00T");
       case 39:
@@ -148,8 +154,10 @@ export class FakeCuora implements SystelLink {
         const inRange = this.sales.filter((l) => {
           const [d, m, y] = l.date.split("/");
           const iso = `20${y}${m}${d}`;
-          return iso >= from && iso <= to;
+          return iso >= from && (this.salesEndExclusive ? iso < to : iso <= to);
         });
+        // REAL (Los gringos 13/10): sin ventas en el rango pedido contesta E7 ("el dato pedido no existe").
+        if (inRange.length === 0) return this.reply(fn, "E7");
         return this.reply(fn, inRange.map((l) => l.text).join(this.salesSeparator) + "F");
       }
       default:

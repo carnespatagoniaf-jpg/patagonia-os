@@ -226,12 +226,23 @@ export class SystelClient {
    * interpretar) para que `parseSalesReport` decida si coinciden con el documento. La respuesta
    * tiene que terminar en "F" y con la verificación correcta; si no, se sigue esperando.
    */
-  async salesReport(from: Date, to: Date = from): Promise<{ data: string } | { error: string }> {
-    const r = await this.call("reporte de ventas", 72, salesReportRequest(from, to), { timeoutMs: Math.max(this.timeoutMs, 20000) });
+  async salesReport(from: Date, to: Date = from): Promise<{ data: string } | { error: string; code?: string | null }> {
+    return this.salesReportRaw(salesReportRequest(from, to));
+  }
+
+  /** Igual, con los 12 números del pedido tal cual (diagnóstico: probar formas de fecha). */
+  async salesReportRaw(request: string): Promise<{ data: string } | { error: string; code?: string | null }> {
+    const r = await this.call(`reporte de ventas ${request}`, 72, request, { timeoutMs: Math.max(this.timeoutMs, 20000) });
     if (!r) return { error: "la balanza no contestó el reporte de ventas" };
-    if (r.kind === "error") return { error: `la balanza contestó ${r.errorCode} (${describeSystelError(r.errorCode)})` };
+    if (r.kind === "error") return { error: `la balanza contestó ${r.errorCode} (${describeSystelError(r.errorCode)})`, code: r.errorCode };
     if (r.kind !== "data") return { error: `respuesta inesperada al reporte de ventas: "${r.data.slice(0, 40)}"` };
     return { data: r.data };
+  }
+
+  /** Fecha y hora de la balanza (función 28, solo lectura): "HH:MM:SS DD/MM/AA". */
+  async clock(): Promise<string | null> {
+    const r = await this.call("fecha y hora", 28, "");
+    return r && r.kind === "data" ? r.data : null;
   }
 
   async list(): Promise<{ entries: PluListEntry[]; digits: 4 | 6 | null } | null> {

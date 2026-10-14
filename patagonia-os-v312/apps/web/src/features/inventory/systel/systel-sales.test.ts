@@ -4,7 +4,7 @@ import type { Product } from "@patagonia/domain";
 import { SystelClient } from "./systel-client";
 import { FakeCuora, fakeReadRecord, fakeSaleLine } from "./systel-fake";
 import { decodeSumCode, findTicketsForTotal, groupTickets, linkTicketLines, parseSalesReport, salesReportRequest, ticketKey, type ScalePluInfo } from "./systel-sales";
-import { readTicketDetail } from "./systel-ticket-detail";
+import { readTicketDetail, readTodaySalesDiagnostic } from "./systel-ticket-detail";
 
 const product = (code: string, name: string, unit: "kg" | "unit" | "box", priceRetail: number) =>
   ({ id: `id-${code}`, code, name, unit, priceRetail, cost: 0, stock: 0, minStock: 0, active: true }) as unknown as Product;
@@ -175,5 +175,25 @@ describe("[SIMULADO] todo el camino contra una Cuora simulada según el document
     const r = await read(f2);
     assert.equal(r.ok, false);
     assert.match((r as { reason: string }).reason, /E3/);
+  });
+});
+
+describe("[SIMULADO] diagnóstico \"Leer las ventas de hoy\" después del E7 real", () => {
+  it("con E7 en el pedido del documento prueba otras formas con la fecha de la balanza y se queda con la que trae ventas", async () => {
+    const fake = scale();
+    fake.salesEndExclusive = true; // la balanza no incluye el día de fin → "hoy a hoy" da E7, como la real
+    const r = await readTodaySalesDiagnostic(new SystelClient(fake, { address: 20, busyRetryMs: [] }), DAY);
+    assert.equal(r.ok, true, r.summary);
+    assert.ok(r.summary.includes("reloj de la balanza: 12:00:00 13/10/26"), r.summary);
+    assert.ok(r.summary.includes("hoy a mañana (fin sin incluir) (131026141026)"), r.summary);
+    assert.deepEqual(fake.received.filter((x) => x.fn === 72).map((x) => x.data), ["131026131026", "131026141026"]);
+    assert.deepEqual([...new Set(fake.received.map((x) => x.fn))].sort((a, b) => a - b), [28, 39, 62, 72]);
+  });
+  it("si ninguna forma trae ventas: lo dice con cada intento, y no manda nada que no sea lectura", async () => {
+    const fake = scale([]);
+    const r = await readTodaySalesDiagnostic(new SystelClient(fake, { address: 20, busyRetryMs: [] }), DAY);
+    assert.equal(r.ok, false);
+    assert.equal(fake.received.filter((x) => x.fn === 72).length, 6);
+    assert.match(r.summary, /año-mes-día.*E7/);
   });
 });
