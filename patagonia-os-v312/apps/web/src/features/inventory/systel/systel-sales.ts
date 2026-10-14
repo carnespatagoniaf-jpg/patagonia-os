@@ -45,10 +45,23 @@ export interface SystelSalesReport {
 
 const pad2 = (n: number) => String(n).padStart(2, "0");
 
-/** Datos del pedido de la función 72 para un día (o un rango). */
-export function salesReportRequest(from: Date, to: Date = from): string {
+/**
+ * Datos del pedido de la función 72: día-mes-año de inicio + día-mes-año de FIN SIN INCLUIR.
+ * REAL (Los gringos, 14/10 09:29): "141026141026" (hoy a hoy, como se lee el documento) → E7;
+ * "141026151026" (hoy a mañana) → reporte válido (vacío: "F", todavía no había ventas). O sea, la fecha de
+ * fin no se incluye y un rango de un solo día con la misma fecha es inválido (E7).
+ * Por defecto se piden AYER y HOY (por si se escanea un ticket impreso antes de la medianoche): un ticket ya
+ * cobrado no se vuelve a cargar porque la identidad es por artículo.
+ */
+export function salesReportRequest(from: Date, toExclusive?: Date): string {
   const part = (d: Date) => `${pad2(d.getDate())}${pad2(d.getMonth() + 1)}${pad2(d.getFullYear() % 100)}`;
-  return part(from) + part(to);
+  const end = toExclusive ?? new Date(from.getFullYear(), from.getMonth(), from.getDate() + 1);
+  return part(from) + part(end);
+}
+
+/** Pedido de Mostrador: ayer y hoy (fin = mañana, sin incluir). */
+export function mostradorSalesRequest(today: Date): string {
+  return salesReportRequest(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1), new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1));
 }
 
 // Un artículo, con los anchos del documento. El "^" después del importe es opcional (ver arriba).

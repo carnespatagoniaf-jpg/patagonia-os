@@ -19,7 +19,7 @@ import {
   type SystelPlu,
   type SystelSignature
 } from "./systel-plu";
-import { salesReportRequest } from "./systel-sales";
+import { mostradorSalesRequest } from "./systel-sales";
 
 /**
  * Cliente Systel (Cuora 2 / Cuora Max). Seguridad primero:
@@ -226,8 +226,9 @@ export class SystelClient {
    * interpretar) para que `parseSalesReport` decida si coinciden con el documento. La respuesta
    * tiene que terminar en "F" y con la verificación correcta; si no, se sigue esperando.
    */
-  async salesReport(from: Date, to: Date = from): Promise<{ data: string } | { error: string; code?: string | null }> {
-    return this.salesReportRaw(salesReportRequest(from, to));
+  /** Reporte de ventas de ayer y hoy (ver `mostradorSalesRequest`: la fecha de fin no se incluye). */
+  async salesReport(today: Date): Promise<{ data: string } | { error: string; code?: string | null }> {
+    return this.salesReportRaw(mostradorSalesRequest(today));
   }
 
   /** Igual, con los 12 números del pedido tal cual (diagnóstico: probar formas de fecha). */

@@ -12,7 +12,7 @@ import { discoverSystelLink, loadSavedSystelLink, saveSystelLink } from "./syste
 import { enableTicketBarcodes, type TicketBarcodeResult } from "./systel-ticket-barcode";
 import { runSystelDiagnostic, type SystelDiagnostic } from "./systel-full-diagnostic";
 import { getBranchScaleConfig } from "../../sale/scale-config-service";
-import { saveSystelLabelTemplates } from "../../sale/systel-label-format";
+import { saveSystelLabelTemplates, saveSystelPluBarcodes } from "../../sale/systel-label-format";
 import type { SystelExchangeLog } from "./systel-client";
 import type { SystelLinkEvent } from "./systel-serial";
 import { submitScaleSupportReport } from "../../scales/support-service";
@@ -312,7 +312,7 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
       const branchConfig = branchId ? await getBranchScaleConfig(branchId).catch(() => null) : null;
       // Inventory pasa los productos completos; si alguno no trae id, se usa su código (solo para comparar).
       const asProducts = products.map((p) => ({ ...p, id: (p as { id?: string }).id ?? `codigo-${p.code}` })) as unknown as Product[];
-      const r = await runSystelDiagnostic(client, { products: asProducts, branchConfig, onProgress: (t) => setProgress(`${t}… (solo lectura, no cambia nada)`), onConfig: saveSystelLabelTemplates });
+      const r = await runSystelDiagnostic(client, { products: asProducts, branchConfig, onProgress: (t) => setProgress(`${t}… (solo lectura, no cambia nada)`), onConfig: saveSystelLabelTemplates, onPluBarcodes: saveSystelPluBarcodes });
       setSalesDiag(r);
       void autoReport("diagnóstico completo (solo lectura)", `${r.verdict}
 ${JSON.stringify({ pasos: r.steps, datos: r.data })}`, { error: r.steps.some((s) => s.status === "falla") ? r.verdict : undefined });

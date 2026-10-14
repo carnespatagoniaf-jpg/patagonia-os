@@ -3,8 +3,8 @@ import assert from "node:assert/strict";
 import type { Product } from "@patagonia/domain";
 import { SystelClient } from "./systel-client";
 import { FakeCuora, fakeReadRecord, fakeSaleLine } from "./systel-fake";
-import { assignLineKeys, decodeSumCode, findTicketsForTotal, groupTickets, linkTicketLines, parseSalesReport, salesReportRequest, type ScalePluInfo } from "./systel-sales";
-import { readTicketDetail, readTodaySalesDiagnostic } from "./systel-ticket-detail";
+import { assignLineKeys, decodeSumCode, findTicketsForTotal, groupTickets, linkTicketLines, mostradorSalesRequest, parseSalesReport, salesReportRequest, type ScalePluInfo } from "./systel-sales";
+import { readTicketDetail } from "./systel-ticket-detail";
 
 const product = (code: string, name: string, unit: "kg" | "unit" | "box", priceRetail: number) =>
   ({ id: `id-${code}`, code, name, unit, priceRetail, cost: 0, stock: 0, minStock: 0, active: true }) as unknown as Product;
@@ -46,8 +46,9 @@ const read = (fake: FakeCuora, extra: Partial<Parameters<typeof readTicketDetail
   readTicketDetail(new SystelClient(fake, { address: 20, busyRetryMs: [1, 1, 1] }), { code: TOTAL_CODE, amount: 73118, products: GRINGOS, usedKeys: [], now: DAY, ...extra });
 
 describe("reporte de ventas de la Systel (función 72, solo lectura): formato", () => {
-  it("pedido: día, mes y año de inicio y de fin", () => {
-    assert.equal(salesReportRequest(DAY), "131026131026");
+  it("[REAL 14/10] pedido: día-mes-año de inicio y de fin SIN INCLUIR (hoy a hoy da E7 en la balanza real)", () => {
+    assert.equal(salesReportRequest(DAY), "131026141026");
+    assert.equal(mostradorSalesRequest(DAY), "121026141026");
   });
   it("con o sin \"^\" entre artículos; lo que no coincide con el documento se rechaza entero", () => {
     for (const sep of ["^", ""]) assert.equal(parseSalesReport(t3095.map((l) => l.text).join(sep) + "F").lines.length, 2);
@@ -208,28 +209,8 @@ describe("[SIMULADO] todo el camino contra una Cuora simulada según el document
   });
 });
 
-describe("[SIMULADO] diagnóstico \"Leer las ventas de hoy\" después del E7 real", () => {
-  it("con E7 en el pedido del documento prueba otras formas con la fecha de la balanza y se queda con la que trae ventas", async () => {
-    const fake = scale();
-    fake.salesEndExclusive = true; // la balanza no incluye el día de fin → "hoy a hoy" da E7, como la real
-    const r = await readTodaySalesDiagnostic(new SystelClient(fake, { address: 20, busyRetryMs: [] }), DAY);
-    assert.equal(r.ok, true, r.summary);
-    assert.ok(r.summary.includes("reloj de la balanza: 12:00:00 13/10/26"), r.summary);
-    assert.ok(r.summary.includes("hoy a mañana (fin sin incluir) (131026141026)"), r.summary);
-    assert.deepEqual(fake.received.filter((x) => x.fn === 72).map((x) => x.data), ["131026131026", "131026141026"]);
-    assert.deepEqual([...new Set(fake.received.map((x) => x.fn))].sort((a, b) => a - b), [28, 39, 62, 72]);
-  });
-  it("si ninguna forma trae ventas: lo dice con cada intento, y no manda nada que no sea lectura", async () => {
-    const fake = scale([]);
-    const r = await readTodaySalesDiagnostic(new SystelClient(fake, { address: 20, busyRetryMs: [] }), DAY);
-    assert.equal(r.ok, false);
-    assert.equal(fake.received.filter((x) => x.fn === 72).length, 6);
-    assert.match(r.summary, /año-mes-día.*E7/);
-  });
-});
-
-describe("E7 real: sin ventas guardadas NO es un error de comunicación", () => {
-  it("la balanza contesta E7 a la 72 → \"sin_ventas\" (no se reintenta ni se pide volver a escanear)", async () => {
+describe("[REAL 14/10] reporte vacío (\"F\") = sin ventas guardadas, NO error de comunicación", () => {
+  it("la balanza contesta solo \"F\" → \"sin_ventas\" (no se reintenta ni se pide volver a escanear)", async () => {
     const fake = scale([]);
     const r = await read(fake);
     assert.equal(r.ok, false);

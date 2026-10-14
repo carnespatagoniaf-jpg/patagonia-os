@@ -25,6 +25,12 @@ export interface SystelLabelTemplates {
   unit: string | null;
   /** Cuándo los informó la balanza (ms). */
   at: number;
+  /**
+   * Código de barras PROPIO de cada producto (función 62), por código de producto: tipo 0 = usa el general,
+   * 1 = el suyo (`config`), 2 = ninguno, 3 = suma. REAL Los gringos 14/10: el 13 tiene "20PPPPCCCCCC" (6 cifras
+   * de cantidad) mientras el general es "20PPPPCCCCII" (4): leerlo con el general daría otros kilos.
+   */
+  perPlu?: Record<string, { type: number | null; config: string | null }>;
 }
 
 const KEY = "patagonia-systel-label-templates";
@@ -34,7 +40,8 @@ export function saveSystelLabelTemplates(values: Record<string, string>): void {
   const unit = values.E_U ?? null;
   if (!weighed && !unit) return;
   try {
-    localStorage.setItem(KEY, JSON.stringify({ weighed, unit, at: Date.now() } satisfies SystelLabelTemplates));
+    const prev = loadSystelLabelTemplates();
+    localStorage.setItem(KEY, JSON.stringify({ weighed, unit, at: Date.now(), perPlu: prev?.perPlu } satisfies SystelLabelTemplates));
   } catch {
     // sin localStorage se usa el formato de la sucursal
   }
@@ -49,18 +56,54 @@ export function loadSystelLabelTemplates(): SystelLabelTemplates | null {
   }
 }
 
+/** Guarda el código de barras propio de los productos leídos de la balanza (se suma a lo ya guardado). */
+export function saveSystelPluBarcodes(perPlu: Record<string, { type: number | null; config: string | null }>): void {
+  try {
+    const prev = loadSystelLabelTemplates() ?? { weighed: null, unit: null, at: Date.now() };
+    localStorage.setItem(KEY, JSON.stringify({ ...prev, perPlu: { ...(prev.perPlu ?? {}), ...perPlu } } satisfies SystelLabelTemplates));
+  } catch {
+    // nada
+  }
+}
+
+const fixedPrefix = (t: string) => /^\d+/.exec(t)?.[0] ?? "";
+const pluSlice = (t: string) => {
+  const a = t.indexOf("P");
+  return a < 0 ? null : [a, t.lastIndexOf("P") + 1] as const;
+};
+
 /**
- * El formato con el que hay que leer ESTE código, según el formato que informó la balanza:
- * - el código empieza con los números fijos del formato de pesables o de unitarios → ese formato;
- * - si coincide con uno que Patagonia no entiende → "no_soportado" (no se carga);
- * - si no empieza con ninguno → null (no es una etiqueta de esa balanza; sigue el camino normal).
+ * El formato con el que hay que leer ESTE código, según lo que informó la balanza:
+ * - formatos posibles: el general de pesables y de unitarios, y el propio de cada producto leído (tipo 1);
+ *   se quedan los que empiezan con los mismos números fijos que el código;
+ * - si no queda ninguno → null (no es una etiqueta de esa balanza; sigue el camino normal);
+ * - con esos formatos se lee el N.º de producto; si dan productos distintos → "no_soportado";
+ * - si ese producto tiene su propio formato (tipo 1) se usa ése; si usa el general (tipo 0), el general;
+ * - si no se sabe qué usa ese producto y los formatos posibles leen distinto la cantidad → "no_soportado"
+ *   (no se arriesga a cargar mal los kilos).
  */
 export function systelConfigForCode(code: string, templates: SystelLabelTemplates | null): ScaleConfig | "no_soportado" | null {
   if (!templates || !/^\d{13}$/.test(code)) return null;
-  for (const t of [templates.weighed, templates.unit]) {
-    if (!t) continue;
-    const fixed = /^\d+/.exec(t)?.[0] ?? "";
-    if (fixed && code.startsWith(fixed)) return configFromSystelTemplate(t) ?? "no_soportado";
-  }
-  return null;
+  const general = [templates.weighed, templates.unit].filter((t): t is string => !!t && code.startsWith(fixedPrefix(t)) && fixedPrefix(t) !== "");
+  const own = Object.values(templates.perPlu ?? {})
+    .filter((e) => e.type === 1 && e.config && e.config.includes("P"))
+    .map((e) => e.config as string)
+    .filter((t) => fixedPrefix(t) !== "" && code.startsWith(fixedPrefix(t)));
+  const candidates = [...new Set([...general, ...own])];
+  if (candidates.length === 0) return null;
+  const plus = new Set(candidates.map((t) => {
+    const sl = pluSlice(t);
+    return sl ? String(Number(code.slice(sl[0], sl[1]))) : "?";
+  }));
+  if (plus.size !== 1 || plus.has("?")) return "no_soportado";
+  const plu = [...plus][0];
+  const entry = templates.perPlu?.[plu];
+  if (entry && entry.type === 1) return entry.config && entry.config.includes("P") ? configFromSystelTemplate(entry.config) ?? "no_soportado" : "no_soportado";
+  if (entry && entry.type === 0) return general.length === 1 ? configFromSystelTemplate(general[0]) ?? "no_soportado" : "no_soportado";
+  if (entry && entry.type !== null) return "no_soportado";
+  // No se sabe qué formato usa ese producto: solo si todos los posibles leen igual.
+  const configs = candidates.map((t) => configFromSystelTemplate(t));
+  if (configs.some((c) => !c)) return "no_soportado";
+  const first = JSON.stringify(configs[0]);
+  return configs.every((c) => JSON.stringify(c) === first) ? configs[0] : "no_soportado";
 }

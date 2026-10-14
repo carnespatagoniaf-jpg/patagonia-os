@@ -65,12 +65,14 @@ export async function readTicketDetail(
   // 2. Reporte de ventas de hoy.
   const report = await client.salesReport(now);
   if ("error" in report) {
-    // E7 = "el dato pedido no existe": la balanza contestó bien pero no tiene ventas guardadas para ese día
-    // (real Los gringos 13/10). No es un problema del cable: volver a escanear no lo cambia.
-    if (report.code === "E7") return { ok: false, stage: "sin_ventas", reason: "la balanza no tiene ventas guardadas para hoy (contestó E7)" };
+    // E7 = "el dato pedido no existe". REAL (14/10): la balanza lo contesta a un rango inválido (inicio = fin),
+    // no a "no hay ventas" (eso es un reporte vacío). No es un problema del cable: avisa a soporte.
+    if (report.code === "E7") return { ok: false, stage: "formato", reason: "la balanza rechazó el pedido de ventas (E7); ya le llegó el aviso a soporte" };
     return { ok: false, stage: "lectura", reason: report.error };
   }
   const parsed = parseSalesReport(report.data);
+  // REAL (14/10 09:29): sin ventas en el período la balanza contesta solo "F".
+  if (parsed.ok && parsed.lines.length === 0) return { ok: false, stage: "sin_ventas", reason: "la balanza no tiene ventas guardadas de ayer ni de hoy (puede que se haya hecho \"Cerrar ventas\")" };
   if (!parsed.ok) return { ok: false, stage: "formato", reason: `el reporte de ventas de la balanza vino en un formato que Patagonia no reconoce: ${parsed.problem}` };
 
   // 3. Tickets con ese total exacto (y esa cantidad de artículos), sin artículos ya cobrados (identidad por artículo).
@@ -116,61 +118,4 @@ async function readPluInfo(client: SystelClient, cache: PluCache, n: number): Pr
   }
   const plu = await client.readPlu(cache.layout, n);
   return plu ? { number: n, code: plu.code, name: plu.name, saleType: plu.saleType } : null;
-}
-
-/**
- * Diagnóstico de SOLO LECTURA para soporte: configuración (39), reporte de ventas de hoy (72) y el
- * código/tipo de los productos vendidos hoy (62/3, hasta 30). No carga nada en ninguna venta.
- */
-export async function readTodaySalesDiagnostic(client: SystelClient, now = new Date(), onConfig?: (values: Record<string, string>) => void): Promise<{ summary: string; ok: boolean; plus: ScalePluInfo[] }> {
-  const config = await client.config();
-  if (config) onConfig?.(config.values);
-  // Real Los gringos 13/10 20:42: con "131026131026" (día-mes-año inicio y fin, como dice el documento) la
-  // balanza contestó E7 ("el dato pedido no existe"): conoce la 72 y aceptó el largo, pero no encontró nada.
-  // Se prueban, solo leyendo, otras formas del pedido con la fecha de la PROPIA balanza (función 28), y se
-  // para en la primera que traiga ventas. Todo queda en el registro que llega a soporte.
-  const clock = await client.clock();
-  const m = clock?.match(/(\d\d)\/(\d\d)\/(\d\d)/);
-  const [dd, mm, yy] = m ? [m[1], m[2], m[3]] : [String(now.getDate()).padStart(2, "0"), String(now.getMonth() + 1).padStart(2, "0"), String(now.getFullYear() % 100).padStart(2, "0")];
-  const next = new Date(2000 + Number(yy), Number(mm) - 1, Number(dd) + 1);
-  const n = { dd: String(next.getDate()).padStart(2, "0"), mm: String(next.getMonth() + 1).padStart(2, "0"), yy: String(next.getFullYear() % 100).padStart(2, "0") };
-  const variants: [string, string][] = [
-    ["día-mes-año, hoy a hoy", dd + mm + yy + dd + mm + yy],
-    ["día-mes-año, hoy a mañana (fin sin incluir)", dd + mm + yy + n.dd + n.mm + n.yy],
-    ["día-mes-año, todo el mes", "01" + mm + yy + n.dd + n.mm + n.yy],
-    ["día-mes-año, todo el año", "0101" + yy + "3112" + yy],
-    ["año-mes-día, hoy a mañana", yy + mm + dd + n.yy + n.mm + n.dd],
-    ["mes-día-año, hoy a mañana", mm + dd + yy + n.mm + n.dd + n.yy]
-  ];
-  const tried: string[] = [];
-  let report: { data: string } | null = null;
-  let used = "";
-  for (const [label, req] of variants) {
-    const r = await client.salesReportRaw(req);
-    if ("data" in r) {
-      report = r;
-      used = `${label} (${req})`;
-      break;
-    }
-    tried.push(`${label} (${req}): ${r.code ?? r.error}`);
-    // Si la balanza no contesta o está ocupada, no se sigue probando.
-    if (r.code !== "E7") break;
-  }
-  const head = `reloj de la balanza: ${clock ?? "no se pudo leer"} · configuración: ${config ? "leída" : "no se pudo leer"}`;
-  if (!report) return { ok: false, summary: `${head} · reporte de ventas, sin datos en: ${tried.join("; ")}`, plus: [] };
-  const parsed = parseSalesReport(report.data);
-  if (!parsed.ok) return { ok: false, summary: `${head} · pedido que anduvo: ${used} · reporte de ventas de ${report.data.length} caracteres que no coincide con el documento: ${parsed.problem}`, plus: [] };
-  const tickets = groupTickets(parsed.lines);
-  const ids = new Set(parsed.lines.map((l) => `${l.date}|${Number(l.ticketId)}`)).size;
-  const cache: PluCache = { layout: null, plus: new Map() };
-  for (const n of [...new Set(parsed.lines.map((l) => l.plu))].slice(0, 30)) {
-    const info = await readPluInfo(client, cache, n);
-    if (info) cache.plus.set(n, info);
-  }
-  const plus = [...cache.plus.values()];
-  return {
-    ok: true,
-    summary: `${head} · pedido que anduvo: ${used} · reporte de ventas leído: ${parsed.lines.length} artículos con ${ids} números distintos (${ids === parsed.lines.length ? "un número por ARTÍCULO" : "un número por TICKET"}) · formato de sumas ${config?.values.E_S ?? "?"} · productos leídos ${plus.length} (formato ${cache.layout ?? "no reconocido"}): ${plus.map((p) => `N.º ${p.number} = código ${p.code} ${p.saleType} "${p.name.trim()}"`).join(", ")}`,
-    plus
-  };
 }

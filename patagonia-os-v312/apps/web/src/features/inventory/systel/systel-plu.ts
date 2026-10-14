@@ -282,3 +282,29 @@ export function priceToRaw(pesos: number, decimals: number): number | null {
 export function rawToPesos(raw: number, decimals: number): number {
   return decimals === 2 ? raw / 100 : raw;
 }
+
+/** Código de barras de UN producto (función 62): tipo y configuración EAN (V6.0/V7 pág. 18). */
+export interface PluEan {
+  /** 0 = EAN general, 1 = EAN del PLU, 2 = no usar EAN, 3 = EAN suma; null si no se pudo leer. */
+  type: 0 | 1 | 2 | 3 | null;
+  /** 12 caracteres (P, C, I, B, S o números); null si no se pudo leer. */
+  config: string | null;
+}
+
+/**
+ * Lee el código de barras propio de un producto del FINAL del registro de la 62: tipo EAN (1) +
+ * configuración EAN (12) + ingredientes "N" (o "S" + 100 caracteres).
+ * REAL (Los gringos, 14/10): PLU 2 → tipo byte 0x01 (no el carácter "1") + "000000000000" (por eso el ticket
+ * imprime "0 000000 000000"); PLU 13 → 0x01 + "20PPPPCCCCCC" (su propio formato, distinto del general).
+ */
+export function pluEanSetting(raw: string): PluEan {
+  let end = raw.length;
+  if (raw[end - 1] === "N") end -= 1;
+  else if (raw.length >= 101 && raw[raw.length - 101] === "S") end -= 101;
+  else return { type: null, config: null };
+  if (end < 13) return { type: null, config: null };
+  const config = raw.slice(end - 12, end);
+  const t = raw.charCodeAt(end - 13);
+  const type = t <= 3 ? t : t >= 48 && t <= 51 ? t - 48 : null;
+  return { type: type as PluEan["type"], config: /^[0-9PCIBS]{12}$/.test(config) ? config : null };
+}

@@ -4,6 +4,8 @@ import type { Product } from "@patagonia/domain";
 import { resolveScan } from "./scan-resolve";
 import { LOS_GRINGOS_LABEL_CONFIG, TRIPLES_LABELS } from "./scale-real-labels";
 import { configFromSystelTemplate, systelConfigForCode, type SystelLabelTemplates } from "./systel-label-format";
+import { pluEanSetting } from "../inventory/systel/systel-plu";
+import { REAL_PLU_13_PECHUGA_SH, REAL_PLU_2_GRINGO_CAJON } from "./systel-real-plu-records";
 
 const product = (code: string, name: string, unit: "kg" | "unit", priceRetail: number) =>
   ({ id: `id-${code}`, code, name, unit, priceRetail, cost: 0, stock: 0, minStock: 0, active: true }) as unknown as Product;
@@ -53,5 +55,32 @@ describe("formato del código de cada producto según lo que informa la balanza 
     assert.equal(systelConfigForCode("2202000731184", T_1310), null); // TOTAL (22…)
     assert.equal(systelConfigForCode("7790001234567", T_1310), null);
     assert.equal(systelConfigForCode(ean("200005021518"), null), null);
+  });
+});
+
+describe("[REAL] código de barras propio de cada producto (registros 62 leídos de Los gringos el 14/10)", () => {
+  const PECHUGA = product("13", "PECHUGA S/H x1x3", "kg", 9000);
+  it("PLU 2: código propio EN CEROS (por eso el ticket imprime 0 000000 000000); PLU 13: formato propio 20PPPPCCCCCC", () => {
+    assert.deepEqual(pluEanSetting(REAL_PLU_2_GRINGO_CAJON), { type: 1, config: "000000000000" });
+    assert.deepEqual(pluEanSetting(REAL_PLU_13_PECHUGA_SH), { type: 1, config: "20PPPPCCCCCC" });
+  });
+  const templates: SystelLabelTemplates = {
+    ...T_1310,
+    perPlu: { "2": pluEanSetting(REAL_PLU_2_GRINGO_CAJON), "13": pluEanSetting(REAL_PLU_13_PECHUGA_SH), "5": { type: 1, config: "000000000000" } }
+  };
+  it("una etiqueta de la PECHUGA (13) con su formato propio se lee 0,215 kg; con el general serían 0,002 kg", () => {
+    const code = ean("200013000215"); // 20 + 0013 + 000215
+    assert.deepEqual(qty(resolveScan(code, [...GRINGOS, PECHUGA], systelConfigForCode(code, templates) as never)), ["13", 0.215]);
+    assert.deepEqual(qty(resolveScan(code, [...GRINGOS, PECHUGA], systelConfigForCode(code, T_1310) as never)), ["13", 0.002]);
+  });
+  it("producto cuyo formato no se conoce y los formatos posibles leen distinto: NO se carga", () => {
+    assert.equal(systelConfigForCode(ean("200077000215"), templates), "no_soportado");
+  });
+  it("producto con código propio en ceros (no debería imprimir etiqueta útil): NO se carga", () => {
+    assert.equal(systelConfigForCode(ean("200005021518"), templates), "no_soportado");
+  });
+  it("producto que usa el formato general (tipo 0): se lee con el general", () => {
+    const t: SystelLabelTemplates = { ...templates, perPlu: { ...templates.perPlu, "5": { type: 0, config: "000000000000" } } };
+    assert.deepEqual(qty(resolveScan(ean("200005021518"), GRINGOS, systelConfigForCode(ean("200005021518"), t) as never)), ["5", 0.215]);
   });
 });

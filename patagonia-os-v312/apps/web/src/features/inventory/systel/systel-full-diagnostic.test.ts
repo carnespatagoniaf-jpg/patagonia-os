@@ -4,6 +4,7 @@ import type { Product } from "@patagonia/domain";
 import { SYSTEL_READ_FUNCTIONS, SystelClient } from "./systel-client";
 import { FakeCuora, fakeReadRecord, fakeSaleLine } from "./systel-fake";
 import { labelFor, runSystelDiagnostic, salesRequestVariants } from "./systel-full-diagnostic";
+import { REAL_PLU_13_PECHUGA_SH, REAL_PLU_2_GRINGO_CAJON } from "../../sale/systel-real-plu-records";
 
 const product = (code: string, name: string, unit: "kg" | "unit", priceRetail: number) =>
   ({ id: `id-${code}`, code, name, unit, priceRetail, cost: 0, stock: 0, minStock: 0, active: true }) as unknown as Product;
@@ -29,25 +30,24 @@ const step = (r: Awaited<ReturnType<typeof run>>, id: string) => r.steps.find((s
 describe("[SIMULADO] diagnóstico completo de la Systel, solo lectura", () => {
   it("balanza con ventas guardadas (el ticket real de 2 artículos): todo OK y solo funciones de lectura", async () => {
     const f = scale();
-    f.salesEndExclusive = true; // como si la balanza no incluyera el día de fin (una de las causas posibles del E7 real)
     f.sales = [
       fakeSaleLine({ ticket: 3095, date: "13/10/26", time: "12:55:34", plu: 2, units: 1, amount: 72000 }),
       fakeSaleLine({ ticket: 3095, date: "13/10/26", time: "12:55:34", plu: 5, grams: 215, amount: 1118 })
     ];
     const r = await run(f);
-    assert.deepEqual(r.steps.map((s) => [s.id, s.status]), [["respuesta", "ok"], ["modelo", "ok"], ["reloj", "ok"], ["formatos", "ok"], ["productos", "ok"], ["ventas", "ok"], ["detalle", "ok"], ["interpretacion", "ok"]], JSON.stringify(r.steps, null, 1));
-    assert.match(step(r, "ventas").detail, /hoy a mañana/);
+    assert.deepEqual(r.steps.map((s) => [s.id, s.status]), [["respuesta", "ok"], ["modelo", "ok"], ["reloj", "ok"], ["formatos", "ok"], ["productos", "ok"], ["codigo_producto", "ok"], ["ventas", "ok"], ["detalle", "ok"], ["interpretacion", "ok"]], JSON.stringify(r.steps, null, 1));
+    assert.ok(step(r, "ventas").detail.includes('2 artículos en el pedido "hoy" (131026141026)'), step(r, "ventas").detail);
     assert.match(step(r, "interpretacion").detail, /2 de 2 artículos/);
     for (const x of f.received) assert.ok((SYSTEL_READ_FUNCTIONS as readonly number[]).includes(x.fn), `mandó la función ${x.fn}`);
   });
 
-  it("E7 a todas las formas (como la balanza real el 13/10): lo dice sin concluir que no hubo ventas", async () => {
+  it("[REAL 14/10] sin ventas guardadas (la balanza contesta solo F): busca hacia atrás y lo dice, sin concluir que no hubo ventas", async () => {
     const f = scale();
     const r = await run(f);
     assert.equal(step(r, "ventas").status, "aviso");
-    assert.match(step(r, "ventas").detail, /E7.*7 formas.*No prueba que hoy no se haya vendido/);
-    assert.equal(f.received.filter((x) => x.fn === 72).length, 7);
-    assert.match(r.verdict, /código de cada producto/);
+    assert.match(step(r, "ventas").detail, /no tiene ventas guardadas.*Cerrar ventas/);
+    assert.deepEqual(f.received.filter((x) => x.fn === 72).map((x) => x.data), ["131026141026", "061026141026", "011026141026", "010100141026"]);
+    assert.match(r.verdict, /vacío/);
     // Lo demás igual se diagnosticó.
     assert.equal(step(r, "formatos").status, "ok");
     assert.equal(step(r, "productos").status, "ok");
@@ -102,15 +102,32 @@ describe("[SIMULADO] diagnóstico completo de la Systel, solo lectura", () => {
 });
 
 describe("piezas del diagnóstico", () => {
-  it("formas del pedido: la primera es la del documento (día-mes-año, hoy a hoy)", () => {
+  it("[REAL 14/10] pedidos: hoy (fin = mañana, sin incluir) y después hacia atrás", () => {
     const v = salesRequestVariants(NOW);
-    assert.equal(v[0][1], "131026131026");
-    assert.equal(v[1][1], "131026141026");
-    assert.equal(v.length, 7);
+    assert.equal(v[0][1], "131026141026");
+    assert.equal(v.length, 4);
   });
   it("la etiqueta que imprimiría la balanza con su formato real (13/10)", () => {
     assert.equal(labelFor("20PPPPCCCCII", 5, 215)?.slice(0, 12), "200005021500");
     assert.equal(labelFor("21PPPPCCCCII", 2, 1)?.slice(0, 12), "210002000100");
     assert.equal(labelFor("20PPPPCCCCII", 5, 12345), null); // 12,345 kg no entra en 4 cifras
+  });
+});
+
+describe("[REAL] código de barras de cada producto con los registros leídos de Los gringos el 14/10", () => {
+  it("dice qué productos imprimen el código en ceros y cuáles tienen formato propio, y lo guarda para Mostrador", async () => {
+    const f = scale();
+    f.plus.set(2, REAL_PLU_2_GRINGO_CAJON);
+    f.plus.set(13, REAL_PLU_13_PECHUGA_SH);
+    let saved: Record<string, { type: number | null; config: string | null }> = {};
+    const r = await runSystelDiagnostic(new SystelClient(f, { address: 20, busyRetryMs: [] }), { products: GRINGOS, branchConfig: BRANCH_2_4_4, now: NOW, onPluBarcodes: (m) => (saved = m) });
+    const s = step(r, "codigo_producto");
+    assert.equal(s.status, "aviso");
+    assert.ok(s.detail.includes("EN CEROS (código propio vacío): 1 (2)"), s.detail);
+    assert.ok(s.detail.includes("formato propio 20PPPPCCCCCC: 1 (13)"), s.detail);
+    assert.deepEqual(saved["2"], { type: 1, config: "000000000000" });
+    assert.deepEqual(saved["13"], { type: 1, config: "20PPPPCCCCCC" });
+    // Los productos reales se reconocen igual (código y forma de venta).
+    assert.equal(step(r, "productos").status, "ok", step(r, "productos").detail);
   });
 });

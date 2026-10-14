@@ -34,7 +34,7 @@ export class FakeCuora implements SystelLink {
   /** Separador entre un artículo y el siguiente en el reporte ("^" o nada: el documento no lo dice). */
   salesSeparator: "^" | "" = "^";
   /** Para simular otra forma de leer el rango: la fecha de fin NO se incluye. */
-  salesEndExclusive = false;
+  salesEndExclusive = true;
   /** Fecha y hora de la balanza (función 28). */
   clock = "12:00:00 13/10/26";
 
@@ -156,8 +156,9 @@ export class FakeCuora implements SystelLink {
           const iso = `20${y}${m}${d}`;
           return iso >= from && (this.salesEndExclusive ? iso < to : iso <= to);
         });
-        // REAL (Los gringos 13/10): sin ventas en el rango pedido contesta E7 ("el dato pedido no existe").
-        if (inRange.length === 0) return this.reply(fn, "E7");
+        // REAL (Los gringos 14/10): con inicio = fin contesta E7; con un rango válido sin ventas, solo "F".
+        if (this.salesEndExclusive && from >= to) return this.reply(fn, "E7");
+        if (!this.salesEndExclusive && inRange.length === 0) return this.reply(fn, "E7");
         return this.reply(fn, inRange.map((l) => l.text).join(this.salesSeparator) + "F");
       }
       default:
