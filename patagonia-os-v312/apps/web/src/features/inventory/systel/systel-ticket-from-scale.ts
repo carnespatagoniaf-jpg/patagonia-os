@@ -3,6 +3,7 @@ import { SystelClient, type SystelExchangeLog } from "./systel-client";
 import { loadSavedSystelLink } from "./systel-discovery";
 import { FTDI_VENDOR_ID, SerialSystelLink, type SystelLinkEvent } from "./systel-serial";
 import { readTicketDetail, type PluCache, type TicketDetailResult } from "./systel-ticket-detail";
+import { saveSystelLabelTemplates } from "../../sale/systel-label-format";
 
 /**
  * Mostrador ↔ balanza Systel por cable, para leer el detalle de los tickets de TOTAL.
@@ -80,6 +81,24 @@ async function openSession(): Promise<{ session: Session } | { error: string }> 
   return { session: { link, client, port, openedAt: Date.now(), log, events, cache: { layout: null, plus: new Map() } } };
 }
 
+/**
+ * Al entrar a Mostrador: lee la configuración de la balanza (solo lectura) para saber con qué formato
+ * imprime los códigos de cada producto. Si no contesta, se sigue con el formato guardado.
+ */
+export function refreshSystelLabelFormat(): Promise<void> {
+  const run = busy.then(async () => {
+    if (!session) {
+      const opened = await openSession();
+      if ("error" in opened) return;
+      session = opened.session;
+    }
+    const config = await session.client.config().catch(() => null);
+    if (config) saveSystelLabelTemplates(config.values);
+  });
+  busy = run.catch(() => {});
+  return run.catch(() => {});
+}
+
 /** Cierra la conexión (al salir de Mostrador). */
 export async function closeSystelTicketSession(): Promise<void> {
   const s = session;
@@ -132,7 +151,7 @@ async function readNow(input: Parameters<typeof readSystelTicketFromScale>[0]): 
   try {
     // Los productos se releen en cada ticket (alguien pudo cambiarlos en la balanza); el formato no cambia.
     const cache: PluCache = { layout: s.cache.layout, plus: new Map() };
-    result = await readTicketDetail(s.client, { ...input, cache });
+    result = await readTicketDetail(s.client, { ...input, cache, onConfig: saveSystelLabelTemplates });
     s.cache.layout = cache.layout;
   } catch (err) {
     result = { ok: false, stage: "lectura", reason: err instanceof Error ? err.message : String(err) };

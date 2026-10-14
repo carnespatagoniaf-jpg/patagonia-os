@@ -10,6 +10,7 @@ import { runSystelWriteTest, type SystelWriteTestResult } from "./systel-write-t
 import { discoverSystelLink, loadSavedSystelLink, saveSystelLink } from "./systel-discovery";
 import { enableTicketBarcodes, type TicketBarcodeResult } from "./systel-ticket-barcode";
 import { readTodaySalesDiagnostic } from "./systel-ticket-detail";
+import { saveSystelLabelTemplates } from "../../sale/systel-label-format";
 import type { SystelExchangeLog } from "./systel-client";
 import type { SystelLinkEvent } from "./systel-serial";
 import { submitScaleSupportReport } from "../../scales/support-service";
@@ -304,7 +305,7 @@ export function SystelPanel({ products, pilot = false }: { products: SystelPanel
       if (runAddress === null || !linkRef.current) return;
       setProgress("Leyendo las ventas de hoy en la balanza (solo lectura)…");
       const client = new SystelClient(linkRef.current, { address: runAddress, log: logRef.current });
-      const r = await readTodaySalesDiagnostic(client);
+      const r = await readTodaySalesDiagnostic(client, new Date(), saveSystelLabelTemplates);
       setSalesDiag(r.summary);
       void autoReport("leer ventas de hoy (solo lectura)", r.summary, { error: r.ok ? undefined : r.summary });
     } catch (err) {

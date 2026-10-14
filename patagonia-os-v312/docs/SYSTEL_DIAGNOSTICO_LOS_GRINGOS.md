@@ -393,3 +393,40 @@ La secuencia de recuperación del E3 (1 → 0 → número) es una **HIPÓTESIS**
 **Pruebas.**
 - Simuladas: 20 automáticas (`systel-sales.test.ts`) y la pantalla real de staging (`tests/e2e/ui-ticket-detalle-balanza.mts`): dos tickets iguales → elegir; el otro se carga solo; tercera vez bloqueado; anulada → se puede volver a cargar. Se cobró el importe de la balanza con el precio de Patagonia en $9.999, y el stock bajó por la cantidad de la balanza.
 - Real: ninguna respuesta 72/62 de la balanza de Los gringos todavía.
+
+## N. 2026-10-13 noche — Primera respuesta REAL de la función 72, y formato de código cambiado
+
+**Lectura real (20:42 UTC, PC de Los gringos, puerto FT232R COM3, sin E3):**
+- `14 17 03`→… ping OK ("00D");
+- 39 OK;
+- `14 48 "131026131026" 5c` → `14 48 "E7" 2e`.
+
+**E7 = "El dato pedido no existe"** (documento, pág. 4).
+- La balanza conoce la 72: no contestó E4.
+- Aceptó el largo: no contestó E5.
+- No encontró ventas para ese pedido.
+
+El manual de la Cuora Max (menú 2. Reportes → 4. Detalle Desde-Hasta; 5. Cerrar ventas) dice que "Cerrar ventas" BORRA de la memoria lo vendido. Causas posibles, sin confirmar:
+- el rango con el fin sin incluir;
+- otro orden de fecha;
+- el reloj de la balanza;
+- que se haya hecho "Cerrar ventas".
+
+El diagnóstico nuevo lee el reloj (28) y prueba 6 formas del pedido. Mostrador ahora trata E7 como "sin ventas guardadas", sin reintentar; no lo confunde con un error de cable.
+
+**Numeración.** El "Detalle de ventas" impreso del manual numera CADA artículo ("VENTA Nº38, Nº39…"). El emparejamiento ahora acepta las dos formas:
+- mismo N.º;
+- N.º consecutivos del mismo vendedor, en 30 minutos.
+
+La identidad pasó a ser POR ARTÍCULO: `systel:<balanza>:<fecha>:<N.º>:<vendedor>:<hora>:<PLU>:<orden>`, guardada en `pos_sale_items.scale_ticket`. Así un artículo no se cobra dos veces en otro agrupamiento.
+
+**Formato del código de cada producto (real, configuración 39).**
+- 09/10: `E_P=20PPPPCCCCCC`, `E_U=21PPPPCCCCCC`.
+- 13/10: `E_P=20PPPPCCCCII`, `E_U=21PPPPCCCCII`. Alguien lo cambió en la balanza. El de sumas pasó de `22BBIIIIIIII` a `22AAIIIIIIII`.
+
+Con la configuración de la sucursal (2/4/6), un código nuevo de 0,215 kg se leería 21,518 kg. Ahora:
+- Mostrador (piloto Systel) lee el formato de la balanza al entrar y en cada TOTAL, y lo guarda (`systel-label-format.ts`).
+- Cada etiqueta se lee con ESE formato.
+- Un formato que no se entiende sin suponer, no se carga.
+
+Pruebas: `systel-label-format.test.ts` (formatos reales) y `systel-sales.test.ts` (27).

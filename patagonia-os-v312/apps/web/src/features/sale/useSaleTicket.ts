@@ -6,7 +6,8 @@ import type { ProductCategory } from "../inventory/product-categories-service";
 import { parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, type ScaleConfig } from "./scale-config-service";
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
 import { resolveScan } from "./scan-resolve";
-import { closeSystelTicketSession, readSystelTicketFromScale, systelTicketReadConfigured } from "../inventory/systel/systel-ticket-from-scale";
+import { closeSystelTicketSession, readSystelTicketFromScale, refreshSystelLabelFormat, systelTicketReadConfigured } from "../inventory/systel/systel-ticket-from-scale";
+import { loadSystelLabelTemplates, systelConfigForCode } from "./systel-label-format";
 import type { TicketCandidate } from "../inventory/systel/systel-ticket-detail";
 import type { SystelTicket } from "../inventory/systel/systel-sales";
 import { chargedScaleTickets } from "./sale-service";
@@ -89,7 +90,11 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
   const grossTotal = cart.reduce((sum, line) => sum + lineGross(line), 0);
 
   // La conexión con la balanza Systel queda abierta mientras se está en Mostrador; se cierra al salir.
-  useEffect(() => () => void closeSystelTicketSession(), []);
+  useEffect(() => {
+    // Empresas piloto con la Systel por cable: al entrar se lee con qué formato imprime los códigos.
+    if (systelTicketPilot && systelTicketReadConfigured()) void refreshSystelLabelFormat();
+    return () => void closeSystelTicketSession();
+  }, [systelTicketPilot]);
   const itemDiscountTotal = cart.reduce((sum, line) => sum + (parseAmount(itemDiscounts[line.key] || "0") || 0), 0);
   const saleSurchargeRaw = parseAmount(saleSurcharge || "0") || 0;
   const saleSurchargeValue = saleSurchargeMode === "percent" ? Math.round((grossTotal * saleSurchargeRaw) / 100) : saleSurchargeRaw;
@@ -246,7 +251,16 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
 
     // Qué es el código (producto, ticket de total, etiqueta de balanza o error): scan-resolve.ts,
     // lógica pura y probada con etiquetas reales. Acá solo quedan los avisos y el carrito.
-    const resolved = resolveScan(raw, products, scaleConfig);
+    // Systel piloto: el código de cada producto se lee con el formato que informó la balanza (no con el
+    // de la sucursal, que puede haber quedado viejo: real Los gringos 09/10 → 13/10).
+    const systelConfig = systelTicketPilot ? systelConfigForCode(raw, loadSystelLabelTemplates()) : null;
+    if (systelConfig === "no_soportado") {
+      setMessage("La balanza imprime el código de los productos con un formato que Patagonia no puede leer sin riesgo de cargar mal los kilos. No se agregó nada: buscá el producto y escribí los kilos del ticket, y avisá a soporte.");
+      setSearch("");
+      setHighlightedIndex(-1);
+      return;
+    }
+    const resolved = resolveScan(raw, products, systelConfig ?? scaleConfig);
     const done = () => {
       setSearch("");
       setHighlightedIndex(-1);
@@ -366,7 +380,9 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       setMessage(
         r.stage === "lectura"
           ? `No se cargó nada: no se pudo leer el ticket en la balanza (${r.reason}). Escaneá el TOTAL de nuevo en unos segundos.`
-          : `No se cargó nada: ${r.reason}.`
+          : r.stage === "sin_ventas"
+            ? `No se cargó nada: ${r.reason}. Cargá cada producto buscándolo y escribiendo los kilos que dice el ticket.`
+            : `No se cargó nada: ${r.reason}.`
       );
     } else if (r.candidates.length === 1 && r.charged.length === 0) {
       addScaleTicket(r.candidates[0]);
@@ -396,7 +412,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       setMessage(`No se cargó nada: ${c.problem}.`);
       return;
     }
-    if (cart.some((l) => l.scaleTicket === c.key)) {
+    if (c.lines.some((l) => cart.some((x) => x.scaleTicket === l.lineKey))) {
       setMessage("Ese ticket de la balanza ya está cargado en esta venta.");
       return;
     }
@@ -414,7 +430,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
         source: "scale" as const,
         scaleTickets: 1,
         scaleAmount: l.amount,
-        scaleTicket: c.key
+        scaleTicket: l.lineKey
       }))
     ]);
     const detail = lines.map((l) => `${l.product.name} ${l.product.unit === "kg" ? `${l.quantity.toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg` : `${l.quantity} u.`} ${formatMoney(l.amount)}`).join(" + ");

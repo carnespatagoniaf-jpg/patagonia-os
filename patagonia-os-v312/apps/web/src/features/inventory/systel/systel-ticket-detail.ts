@@ -1,7 +1,7 @@
 import type { Product } from "@patagonia/domain";
 import type { SystelClient } from "./systel-client";
 import type { SystelLayout } from "./systel-plu";
-import { decodeSumCode, findTicketsForTotal, groupTickets, linkTicketLines, parseSalesReport, ticketKey, type ScalePluInfo, type SystelTicket, type TicketCartLine } from "./systel-sales";
+import { assignLineKeys, decodeSumCode, findTicketsForTotal, groupTickets, linkTicketLines, parseSalesReport, ticketLineKeys, type ScalePluInfo, type SystelTicket, type TicketCartLine } from "./systel-sales";
 
 /**
  * Del código del TOTAL de un ticket de Systel al detalle de ese ticket, leído de la balanza por cable.
@@ -11,6 +11,7 @@ import { decodeSumCode, findTicketsForTotal, groupTickets, linkTicketLines, pars
  */
 
 export interface TicketCandidate {
+  /** Identidades de sus artículos, unidas (para la pantalla). */
   key: string;
   ticket: SystelTicket;
   /** null si algún artículo no se pudo vincular (ver `problem`). */
@@ -24,7 +25,7 @@ export type TicketDetailResult =
    * un reescaneo de ese mismo papel: Mostrador pide confirmar aunque quede un solo candidato.
    */
   | { ok: true; candidates: TicketCandidate[]; charged: SystelTicket[]; articles: number | null }
-  | { ok: false; stage: "lectura" | "formato" | "ticket" | "productos"; reason: string };
+  | { ok: false; stage: "lectura" | "sin_ventas" | "formato" | "ticket" | "productos"; reason: string };
 
 export interface PluCache {
   layout: SystelLayout | null;
@@ -45,6 +46,8 @@ export async function readTicketDetail(
     charged?: (keys: string[]) => Promise<Set<string>>;
     now?: Date;
     cache?: PluCache;
+    /** Recibe la configuración leída (formato de los códigos de barras de la balanza). */
+    onConfig?: (values: Record<string, string>) => void;
   }
 ): Promise<TicketDetailResult> {
   const now = input.now ?? new Date();
@@ -52,6 +55,7 @@ export async function readTicketDetail(
 
   // 1. Qué dice el código del TOTAL en ESTA balanza (importe, artículos, N.º de balanza).
   const config = await client.config();
+  if (config) input.onConfig?.(config.values);
   const decoded = decodeSumCode(input.code, config?.values.E_S ?? null);
   if (!decoded.ok) return { ok: false, stage: "ticket", reason: decoded.reason };
   if (decoded.scale !== null && decoded.scale !== client.address) {
@@ -60,18 +64,24 @@ export async function readTicketDetail(
 
   // 2. Reporte de ventas de hoy.
   const report = await client.salesReport(now);
-  if ("error" in report) return { ok: false, stage: "lectura", reason: report.error };
+  if ("error" in report) {
+    // E7 = "el dato pedido no existe": la balanza contestó bien pero no tiene ventas guardadas para ese día
+    // (real Los gringos 13/10). No es un problema del cable: volver a escanear no lo cambia.
+    if (report.code === "E7") return { ok: false, stage: "sin_ventas", reason: "la balanza no tiene ventas guardadas para hoy (contestó E7)" };
+    return { ok: false, stage: "lectura", reason: report.error };
+  }
   const parsed = parseSalesReport(report.data);
   if (!parsed.ok) return { ok: false, stage: "formato", reason: `el reporte de ventas de la balanza vino en un formato que Patagonia no reconoce: ${parsed.problem}` };
 
-  // 3. Tickets con ese total exacto (y esa cantidad de artículos), sin los ya cobrados por identidad.
+  // 3. Tickets con ese total exacto (y esa cantidad de artículos), sin artículos ya cobrados (identidad por artículo).
+  const lines = assignLineKeys(parsed.lines, client.address);
   const used = new Set(input.usedKeys);
-  let match = findTicketsForTotal(groupTickets(parsed.lines), input.amount, { scale: client.address, articles: decoded.articles, usedKeys: used });
+  let match = findTicketsForTotal(lines, input.amount, { articles: decoded.articles, usedKeys: used });
   if (!match.ok) return { ok: false, stage: "ticket", reason: match.reason };
   if (input.charged) {
-    const charged = await input.charged(match.candidates.map((t) => ticketKey(client.address, t)));
+    const charged = await input.charged([...new Set([...match.candidates, ...match.charged].flatMap(ticketLineKeys))]);
     if (charged.size) {
-      match = findTicketsForTotal(groupTickets(parsed.lines), input.amount, { scale: client.address, articles: decoded.articles, usedKeys: [...used, ...charged] });
+      match = findTicketsForTotal(lines, input.amount, { articles: decoded.articles, usedKeys: [...used, ...charged] });
       if (!match.ok) return { ok: false, stage: "ticket", reason: match.reason };
     }
   }
@@ -86,7 +96,7 @@ export async function readTicketDetail(
 
   const candidates = tickets.map((t) => {
     const linked = linkTicketLines(t, cache.plus, input.products);
-    return { key: ticketKey(client.address, t), ticket: t, lines: linked.ok ? linked.lines : null, problem: linked.ok ? null : linked.reason };
+    return { key: ticketLineKeys(t).join("|"), ticket: t, lines: linked.ok ? linked.lines : null, problem: linked.ok ? null : linked.reason };
   });
   if (candidates.length === 1 && !candidates[0].lines) return { ok: false, stage: "productos", reason: candidates[0].problem ?? "no se pudo vincular" };
   return { ok: true, candidates, charged: match.charged, articles: decoded.articles };
@@ -112,8 +122,9 @@ async function readPluInfo(client: SystelClient, cache: PluCache, n: number): Pr
  * Diagnóstico de SOLO LECTURA para soporte: configuración (39), reporte de ventas de hoy (72) y el
  * código/tipo de los productos vendidos hoy (62/3, hasta 30). No carga nada en ninguna venta.
  */
-export async function readTodaySalesDiagnostic(client: SystelClient, now = new Date()): Promise<{ summary: string; ok: boolean; plus: ScalePluInfo[] }> {
+export async function readTodaySalesDiagnostic(client: SystelClient, now = new Date(), onConfig?: (values: Record<string, string>) => void): Promise<{ summary: string; ok: boolean; plus: ScalePluInfo[] }> {
   const config = await client.config();
+  if (config) onConfig?.(config.values);
   // Real Los gringos 13/10 20:42: con "131026131026" (día-mes-año inicio y fin, como dice el documento) la
   // balanza contestó E7 ("el dato pedido no existe"): conoce la 72 y aceptó el largo, pero no encontró nada.
   // Se prueban, solo leyendo, otras formas del pedido con la fecha de la PROPIA balanza (función 28), y se
@@ -150,6 +161,7 @@ export async function readTodaySalesDiagnostic(client: SystelClient, now = new D
   const parsed = parseSalesReport(report.data);
   if (!parsed.ok) return { ok: false, summary: `${head} · pedido que anduvo: ${used} · reporte de ventas de ${report.data.length} caracteres que no coincide con el documento: ${parsed.problem}`, plus: [] };
   const tickets = groupTickets(parsed.lines);
+  const ids = new Set(parsed.lines.map((l) => `${l.date}|${Number(l.ticketId)}`)).size;
   const cache: PluCache = { layout: null, plus: new Map() };
   for (const n of [...new Set(parsed.lines.map((l) => l.plu))].slice(0, 30)) {
     const info = await readPluInfo(client, cache, n);
@@ -158,7 +170,7 @@ export async function readTodaySalesDiagnostic(client: SystelClient, now = new D
   const plus = [...cache.plus.values()];
   return {
     ok: true,
-    summary: `${head} · pedido que anduvo: ${used} · reporte de ventas leído: ${parsed.lines.length} artículos en ${tickets.length} tickets hoy · formato de sumas ${config?.values.E_S ?? "?"} · productos leídos ${plus.length} (formato ${cache.layout ?? "no reconocido"}): ${plus.map((p) => `N.º ${p.number} = código ${p.code} ${p.saleType} "${p.name.trim()}"`).join(", ")}`,
+    summary: `${head} · pedido que anduvo: ${used} · reporte de ventas leído: ${parsed.lines.length} artículos con ${ids} números distintos (${ids === parsed.lines.length ? "un número por ARTÍCULO" : "un número por TICKET"}) · formato de sumas ${config?.values.E_S ?? "?"} · productos leídos ${plus.length} (formato ${cache.layout ?? "no reconocido"}): ${plus.map((p) => `N.º ${p.number} = código ${p.code} ${p.saleType} "${p.name.trim()}"`).join(", ")}`,
     plus
   };
 }

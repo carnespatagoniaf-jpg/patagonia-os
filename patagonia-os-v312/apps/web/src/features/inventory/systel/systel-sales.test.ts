@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { Product } from "@patagonia/domain";
 import { SystelClient } from "./systel-client";
 import { FakeCuora, fakeReadRecord, fakeSaleLine } from "./systel-fake";
-import { decodeSumCode, findTicketsForTotal, groupTickets, linkTicketLines, parseSalesReport, salesReportRequest, ticketKey, type ScalePluInfo } from "./systel-sales";
+import { assignLineKeys, decodeSumCode, findTicketsForTotal, groupTickets, linkTicketLines, parseSalesReport, salesReportRequest, type ScalePluInfo } from "./systel-sales";
 import { readTicketDetail, readTodaySalesDiagnostic } from "./systel-ticket-detail";
 
 const product = (code: string, name: string, unit: "kg" | "unit" | "box", priceRetail: number) =>
@@ -65,23 +65,53 @@ describe("el código del TOTAL según el formato de sumas de la balanza (configu
   });
 });
 
-describe("1 y 2: identidad del ticket, no su importe", () => {
-  const tickets = groupTickets(parseSalesReport([...t3095, ...t3101].map((l) => l.text).join("^") + "F").lines);
+describe("1 y 2: identidad por ARTÍCULO, no por importe ni por código del TOTAL", () => {
+  const lines = assignLineKeys(parseSalesReport([...t3095, ...t3101].map((l) => l.text).join("^") + "F").lines, 20);
   it("dos tickets distintos con el mismo total y la misma cantidad de artículos: devuelve LOS DOS (no elige)", () => {
-    const m = findTicketsForTotal(tickets, 73118, { scale: 20, articles: 2 });
+    const m = findTicketsForTotal(lines, 73118, { articles: 2 });
     assert.ok(m.ok);
-    assert.deepEqual(m.candidates.map((t) => Number(t.ticketId)), [3101, 3095]);
-    assert.notEqual(ticketKey(20, m.candidates[0]), ticketKey(20, m.candidates[1]));
+    assert.deepEqual(m.candidates.map((t) => t.ticketId), ["3101", "3095"]);
   });
-  it("cobrado uno (por identidad), el otro con el mismo total se puede cobrar", () => {
-    const k3095 = ticketKey(20, tickets.find((t) => Number(t.ticketId) === 3095)!);
-    const m = findTicketsForTotal(tickets, 73118, { scale: 20, articles: 2, usedKeys: [k3095] });
+  it("cobrados los artículos de uno, el otro con el mismo total se puede cobrar, y el cobrado se informa", () => {
+    const used = lines.filter((l) => Number(l.ticketId) === 3095).map((l) => l.key!);
+    const m = findTicketsForTotal(lines, 73118, { articles: 2, usedKeys: used });
     assert.ok(m.ok);
-    assert.deepEqual(m.candidates.map((t) => Number(t.ticketId)), [3101]);
-    assert.deepEqual(m.charged.map((t) => Number(t.ticketId)), [3095]);
+    assert.deepEqual(m.candidates.map((t) => t.ticketId), ["3101"]);
+    assert.deepEqual(m.charged.map((t) => t.ticketId), ["3095"]);
   });
-  it("la identidad es balanza + fecha + N.º + vendedor + hora", () => {
-    assert.equal(ticketKey(20, tickets.find((t) => Number(t.ticketId) === 3095)!), "systel:20:13/10/26:3095:01:12:55:34");
+  it("la identidad de cada artículo: balanza + fecha + N.º + vendedor + hora + PLU + orden", () => {
+    assert.deepEqual(lines.filter((l) => Number(l.ticketId) === 3095).map((l) => l.key), ["systel:20:13/10/26:3095:01:12:55:34:2:1", "systel:20:13/10/26:3095:01:12:55:34:5:1"]);
+  });
+});
+
+describe("numeración POR ARTÍCULO (como el \"Detalle de ventas\" impreso del manual: VENTA Nº38, Nº39…)", () => {
+  // Mismo ticket real, pero con un N.º por artículo: cajón = 38, trozadito = 39.
+  const perItem = [
+    fakeSaleLine({ ticket: 37, date: "13/10/26", time: "12:40:00", plu: 5, grams: 300, amount: 1560 }),
+    fakeSaleLine({ ticket: 38, date: "13/10/26", time: "12:55:20", plu: 2, units: 1, amount: 72000 }),
+    fakeSaleLine({ ticket: 39, date: "13/10/26", time: "12:55:34", plu: 5, grams: 215, amount: 1118 }),
+    fakeSaleLine({ ticket: 40, date: "13/10/26", time: "12:58:00", seller: 2, plu: 5, grams: 215, amount: 1118 })
+  ];
+  const lines = assignLineKeys(parseSalesReport(perItem.map((l) => l.text).join("^") + "F").lines, 20);
+  it("encuentra el ticket de 2 artículos con N.º consecutivos del mismo vendedor que suman el total", () => {
+    const m = findTicketsForTotal(lines, 73118, { articles: 2 });
+    assert.ok(m.ok);
+    assert.deepEqual(m.candidates.map((t) => [t.ticketId, t.lines.map((l) => l.plu)]), [["38-39", [2, 5]]]);
+  });
+  it("no junta artículos de otro vendedor ni N.º salteados", () => {
+    // 39 (vendedor 1) + 40 (vendedor 2) no forman un ticket; 37 y 39 no son consecutivos.
+    assert.equal(findTicketsForTotal(lines, 2236, { articles: 2 }).ok, false);
+    assert.equal(findTicketsForTotal(lines, 2678, { articles: 2 }).ok, false);
+  });
+  it("un artículo ya cobrado no se puede volver a cobrar dentro de OTRO grupo", () => {
+    const k39 = lines.find((l) => Number(l.ticketId) === 39)!.key!;
+    // $1.118 de 1 artículo: está el 39 (vendedor 1) y el 40 (vendedor 2). Cobrado el 39, queda solo el 40.
+    const m = findTicketsForTotal(lines, 1118, { articles: 1, usedKeys: [k39] });
+    assert.ok(m.ok);
+    assert.deepEqual(m.candidates.map((t) => t.ticketId), ["40"]);
+    // Y el ticket 38-39 ya no se ofrece como libre.
+    const m2 = findTicketsForTotal(lines, 73118, { articles: 2, usedKeys: [k39] });
+    assert.equal(m2.ok, false);
   });
 });
 
@@ -195,5 +225,23 @@ describe("[SIMULADO] diagnóstico \"Leer las ventas de hoy\" después del E7 rea
     assert.equal(r.ok, false);
     assert.equal(fake.received.filter((x) => x.fn === 72).length, 6);
     assert.match(r.summary, /año-mes-día.*E7/);
+  });
+});
+
+describe("E7 real: sin ventas guardadas NO es un error de comunicación", () => {
+  it("la balanza contesta E7 a la 72 → \"sin_ventas\" (no se reintenta ni se pide volver a escanear)", async () => {
+    const fake = scale([]);
+    const r = await read(fake);
+    assert.equal(r.ok, false);
+    assert.equal((r as { stage: string }).stage, "sin_ventas");
+    assert.equal(fake.received.filter((x) => x.fn === 72).length, 1);
+  });
+  it("la balanza no contesta, o contesta E3 siempre → \"lectura\" (problema de comunicación)", async () => {
+    const mute = scale();
+    mute.silent = true;
+    assert.equal(((await read(mute)) as { stage: string }).stage, "lectura");
+    const busy = scale();
+    busy.busyReplies = 1000;
+    assert.equal(((await read(busy)) as { stage: string }).stage, "lectura");
   });
 });
