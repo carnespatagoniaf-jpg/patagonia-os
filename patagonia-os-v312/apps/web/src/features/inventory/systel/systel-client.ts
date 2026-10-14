@@ -277,6 +277,16 @@ export class SystelClient {
     return { layout: null, detail: details.join("; ") };
   }
 
+  /** Lee un producto distinguiendo "no existe" (E7) de "no se pudo leer". Para elegir un número LIBRE sin suponer. */
+  async readPluStatus(layout: SystelLayout, number: number): Promise<{ plu: SystelPlu } | { missing: true } | { error: string }> {
+    const r = await this.call(`leer PLU ${number}`, LAYOUT_INFO[layout].readFn, readPluRequest(layout, number));
+    if (!r) return { error: "sin respuesta" };
+    if (r.kind === "error") return r.errorCode === "E7" ? { missing: true } : { error: describeSystelError(r.errorCode) };
+    if (r.kind !== "data") return { error: "respuesta inesperada" };
+    const plu = detectPluLayouts(r.data, number, [layout])[0];
+    return plu ? { plu } : { error: "registro con otra forma" };
+  }
+
   async readPlu(layout: SystelLayout, number: number): Promise<SystelPlu | null> {
     const info = LAYOUT_INFO[layout];
     const r = await this.call(`leer PLU ${number}`, info.readFn, readPluRequest(layout, number));

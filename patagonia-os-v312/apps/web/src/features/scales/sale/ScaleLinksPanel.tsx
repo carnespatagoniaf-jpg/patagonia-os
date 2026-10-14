@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { sameProductName } from "../../inventory/systel/systel-sales";
 import { loadSystelLabelTemplates } from "../../sale/systel-label-format";
+import { suggestByName } from "./link-suggest";
 import { isWeighed, profileReadiness, type ScaleCatalogItem, type ScaleLink, type ScaleSaleType } from "./profile";
 import { loadScaleSetup, saveScaleCatalog, setScaleLinks, type ScaleSetup } from "./scale-sale-service";
 
@@ -141,12 +142,16 @@ export function ScaleLinksPanel({ branchId, products }: { branchId: string | nul
             const same = active.find((p) => p.code === String(item.code));
             const reason = !same ? "no hay un producto con ese código en Patagonia" : !compatible(item, same) ? `en Patagonia "${same.name}" se vende ${same.unit === "kg" ? "por kg" : "por unidad"}` : `en Patagonia el ${item.code} es "${same.name}"`;
             const options = active.filter((p) => compatible(item, p)).sort((a, b) => Number(sameProductName(item.name, b.name)) - Number(sameProductName(item.name, a.name)) || a.name.localeCompare(b.name));
+            // Sugerencia: UN solo producto con el mismo nombre y la misma forma de venta (link-suggest.ts: mismo nombre, conservadora).
+            // Queda elegida en la lista; se guarda recién cuando la persona toca "Guardar".
+            const suggested = suggestByName(item, options);
+            if (suggested && choice[item.code] === undefined) queueMicrotask(() => setChoice((c) => (c[item.code] === undefined ? { ...c, [item.code]: suggested.id } : c)));
             return (
               <div key={item.code} style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center", fontSize: 13 }}>
                 <span style={{ minWidth: 260 }}>
                   <b>{item.code}</b> · {item.name.trim()} ({typeText(item.saleType)}, ${item.prices.filter((x) => x > 0).map((x) => x.toLocaleString("es-AR")).join(" / $") || "sin precio"})
                   <br />
-                  <span className="muted" style={{ fontSize: 12 }}>{reason}</span>
+                  <span className="muted" style={{ fontSize: 12 }}>{reason}{suggested ? ` · sugerido por el nombre: "${suggested.name}" (confirmá con Guardar)` : ""}</span>
                 </span>
                 <select value={choice[item.code] ?? ""} onChange={(e) => setChoice({ ...choice, [item.code]: e.target.value })} disabled={busy} aria-label={`Vínculo del producto ${item.code} de la balanza`}>
                   <option value="">— elegir —</option>

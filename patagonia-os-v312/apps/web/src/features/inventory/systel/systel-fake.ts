@@ -21,6 +21,8 @@ export class FakeCuora implements SystelLink {
   busyReplies = 0;
   /** Rompe el registro del PLU indicado después de una escritura (para probar el freno). */
   corruptAfterWrite: number | null = null;
+  /** Con true, rompe el registro solo en la PRIMERA escritura (la restauración sí queda bien). */
+  corruptOnce = false;
   /** No aplica los cambios de precio (contesta ACK igual). */
   ignorePriceChange = false;
   /** Configuración (función 39) tal cual la devuelve la balanza; null = la de ejemplo. */
@@ -40,7 +42,7 @@ export class FakeCuora implements SystelLink {
 
   constructor(
     readonly layout: SystelLayout,
-    readonly options: { address?: number; decimals?: number; capacity?: number; writeChecksum?: boolean } = {}
+    readonly options: { address?: number; decimals?: number; capacity?: number; writeChecksum?: boolean; typeByteAccepted?: "binario" | "ascii" } = {}
   ) {}
 
   get address(): number {
@@ -136,12 +138,23 @@ export class FakeCuora implements SystelLink {
         } else {
           rec = data.slice(0, pd) + "1" + data.slice(pd);
         }
+        // Tipo de código en la escritura: si se le pide, la balanza simulada acepta una sola forma (la real todavía no se sabe).
+        if (this.layout !== "cuora2" && this.options.typeByteAccepted) {
+          const end0 = rec[rec.length - 1] === "N" ? rec.length - 1 : rec.length - 101;
+          const t = rec.charCodeAt(end0 - 13);
+          if ((this.options.typeByteAccepted === "binario" && t > 3) || (this.options.typeByteAccepted === "ascii" && t <= 3)) return this.reply(fn, "E8");
+          // Guarda (y devuelve) el tipo como byte, como la real.
+          if (t > 3) rec = rec.slice(0, end0 - 13) + String.fromCharCode(t - 48) + rec.slice(end0 - 12);
+        }
         const fixed = info.pluDigits + 1 + 18 + info.priceLists * (this.layout === "max7" ? 12 : 6) + info.codeDigits + 2 + 4 + 1 + info.tareDigits;
         const tail = rec.slice(fixed);
         const flag = tail[info.tailFixed - 1];
         if (tail.length !== info.tailFixed + (flag === "S" ? 100 : 0)) return this.reply(fn, "E5");
         this.plus.set(n, rec);
-        if (this.corruptAfterWrite === n) this.plus.set(n, rec.slice(0, pd + 1) + "X" + rec.slice(pd + 2));
+        if (this.corruptAfterWrite === n) {
+          this.plus.set(n, rec.slice(0, pd + 1) + "X" + rec.slice(pd + 2));
+          if (this.corruptOnce) this.corruptAfterWrite = null;
+        }
         return this.reply(fn, "ACK");
       }
       case 72: {

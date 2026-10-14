@@ -45,7 +45,14 @@ export function targetCodeFor(saleType: string): string | null {
  * Datos de la escritura (61) a partir del registro leído (62): sin el carácter de gestión y con el código
  * propio nuevo. Devuelve null si el registro no tiene la forma esperada (no se escribe nada).
  */
-export function buildBarcodeRewrite(readRaw: string, layout: SystelLayout, newConfig: string): string | null {
+/**
+ * Cómo va el tipo de código en la escritura. El documento (V6.0/V7, función 61) dice "1 número", pero la balanza lo
+ * DEVUELVE como byte 0x01 (función 62, real Los gringos). "binario" manda lo mismo que devuelve; "ascii" manda el dígito.
+ * Cuál acepta se averigua UNA vez, en un número de producto libre (systel-barcode-write-test.ts), y después se usa ese.
+ */
+export type TypeByteMode = "binario" | "ascii";
+
+export function buildBarcodeRewrite(readRaw: string, layout: SystelLayout, newConfig: string, mode: TypeByteMode = "binario"): string | null {
   if (!/^[0-9PCIBS]{12}$/.test(newConfig)) return null;
   if (layout === "cuora2") return null;
   const pd = LAYOUT_INFO[layout].pluDigits;
@@ -53,7 +60,7 @@ export function buildBarcodeRewrite(readRaw: string, layout: SystelLayout, newCo
   if (ean.type === null || ean.config === null) return null;
   const end = readRaw[readRaw.length - 1] === "N" ? readRaw.length - 1 : readRaw.length - 101;
   const typeAt = end - 13;
-  const typeChar = readRaw.charCodeAt(typeAt) <= 3 ? "\u0001" : "1";
+  const typeChar = mode === "ascii" ? "1" : "\u0001";
   const updated = readRaw.slice(0, typeAt) + typeChar + newConfig + readRaw.slice(end);
   return updated.slice(0, pd) + updated.slice(pd + 1);
 }
@@ -69,7 +76,7 @@ export function onlyBarcodeChanged(before: string, after: string, layout: Systel
   return true;
 }
 
-export async function rewriteProductBarcode(client: SystelClient, layout: SystelLayout, number: number, saleType: string): Promise<BarcodeRewriteResult> {
+export async function rewriteProductBarcode(client: SystelClient, layout: SystelLayout, number: number, saleType: string, mode: TypeByteMode = "binario"): Promise<BarcodeRewriteResult> {
   const base = { number, before: null as string | null, after: null as string | null };
   const target = targetCodeFor(saleType);
   if (!target) return { ...base, verdict: "no_soportado", ok: false, detail: `forma de venta "${saleType}" sin código definido` };
@@ -77,7 +84,7 @@ export async function rewriteProductBarcode(client: SystelClient, layout: Systel
   if (!current) return { ...base, verdict: "sin_lectura", ok: false, detail: "no se pudo leer el producto; no se escribió nada" };
   const ean = pluEanSetting(current.raw);
   if (ean.type === 1 && ean.config === target) return { ...base, before: current.raw, after: current.raw, verdict: "ya_estaba", ok: true, detail: `ya tenía ${target}` };
-  const data = buildBarcodeRewrite(current.raw, layout, target);
+  const data = buildBarcodeRewrite(current.raw, layout, target, mode);
   if (!data) return { ...base, before: current.raw, verdict: "no_soportado", ok: false, detail: "el registro no tiene la forma esperada; no se escribió nada" };
 
   const reply = await client.writePluRaw(layout, number, data);
