@@ -105,3 +105,73 @@ Probado contra los registros reales de los PLU 2 y 13 en la balanza simulada: pr
 - balanza: reescribir el respaldo del paso 3;
 - página: republicar la versión anterior en Netlify;
 - sucursal: valor anterior en `audit_log`.
+
+## 7. Revisión del 14/10 (tarde): datos, protocolo y alternativa "solo el TOTAL"
+
+Hecho solo con evidencia existente. No se escribió nada en la balanza ni en los datos del cliente. No se publicó nada.
+
+### 7.1 Catálogo balanza ↔ Patagonia (103 registros 62 reales vs catálogo de producción del 14/10)
+
+- **66 iguales** (código, nombre y forma de venta).
+- **29 por unidad en la balanza y por kg en Patagonia:** 30, 62–85, 92–95. Todos tienen stock 0 y ningún movimiento en Patagonia, así que cambiarlos no afecta stock ni ventas. Es dato comercial: requiere autorización.
+- **96–103 son otros productos.** En la balanza: 96 BOCADITOS MUZZA (P), 97 BOCADITOS CAJA (U), 98 ARABES, 99 ARABES X 5, 100 PASCUALINAS, 101 PASCUALINAS X5, 102 COMBO 1, 103 COMBO 2. En Patagonia son los "MAYORISTA" y los bocaditos. El 98–103 de la balanza repite nombres del 78–83 con otros precios. No se puede decidir con certeza: lo decide el dueño o el cliente.
+- **8001 y 8002 no son productos:** son los PLU genéricos de la balanza (venta libre con precio a mano).
+  - Fuera de la memoria de 8.000 PLU, sector 00, un precio distinto en cada venta.
+  - 8001 = por unidad (6 ventas), 8002 = por peso (11 ventas).
+  - Patagonia no puede descontar stock por ellos: van como "venta sin producto" con el importe exacto.
+- **201 existe en la balanza** (lista de PLU del 09/10) y vende 1 u. a $500 (40 ventas en la semana). No tenemos su nombre (nunca se leyó su registro 62), así que no se puede crear con certeza.
+- **La balanza tiene más PLU** que Patagonia (104–128, 200, 201, 400–405, 500–503…). En la semana solo se vendió el 201.
+- **Cobertura con el reporte real (945 tickets):**
+
+  | Situación del catálogo | Tickets que se pueden vincular completos |
+  |---|---|
+  | Hoy | 821 (86,9 %) |
+  | Corrigiendo los 29 | 882 (93,3 %) |
+  | Más el 201 | 921 (97,5 %) |
+
+  Quedan 16 con genéricos y 8 con una línea de $0.
+
+### 7.2 Protocolo: lo que encontramos al releer V6.0/V7.0 y el manual
+
+- **El código propio de cada PLU se configura también desde el menú de la balanza.** Manual, "editar/crear PLU": "1. USAR EAN GRAL. / 2. CONFIGURAR EAN / 3. NO USAR EAN".
+  - Los 4 productos que ya lo tienen (13, 14, 50, 51) tienen gestión 0, es decir que se hicieron en la balanza, no desde una PC.
+  - Es la vía oficial y sin riesgo de protocolo, pero hay que hacerla a mano producto por producto.
+- **El formato general actual no alcanza.** E_P=20PPPPCCCCII trae 4 cifras de cantidad (hasta 9,999 kg), y 57 de 1.003 ventas por peso reales superan los 10 kg (máximo 14,935 kg). Hace falta CCCCCC: el código propio por producto, o cambiar el general.
+- **Función 61 (riesgos no resueltos por el documento):**
+  1. No lleva el campo "Mantener totales" (N/M) que sí tiene la función 4. No se sabe si reescribir un PLU pone en cero sus acumulados de venta en la balanza.
+  2. El documento dice que el tipo de EAN es "1 número", pero la balanza lo devuelve como byte binario 0x01. No se sabe cuál de los dos acepta al escribir. Nosotros mandamos 0x01, como lo devuelve.
+  3. El texto de la 61 no incluye el byte de verificación. Nosotros lo mandamos y reintentamos sin él ante E5.
+- **Hubo una PC escribiendo en esta balanza:** PLU 29–31, 34, 62, 63, 67, 68, 98–111, 400–405 y 500–503 tienen versión 1 ("gestionado PC"), probablemente Qendra. Si ese programa sigue sincronizando, puede pisar cualquier cambio nuestro.
+- **El código del TOTAL no puede traer el número de ticket.** Los campos posibles son números fijos, I (importe), B (balanza) y A (artículos).
+- La configuración real tiene Sinc=0: la balanza no queda bloqueada esperando sincronización al encenderse.
+
+### 7.3 Alternativa "solo el TOTAL" (A diferida), simulada con la semana real
+
+**Idea:**
+- el cajero escanea solo el código del TOTAL, como hoy;
+- la venta se cobra con el importe exacto;
+- el detalle (productos, kilos, unidades, importes reales de lista 1, lista 2 o manual) se lee después con la función 72, solo lectura, al cerrar la caja o cuando la balanza está libre, y recién ahí se descuenta el stock.
+
+**Vínculo de cada cobro con su ticket:** mismo TOTAL, misma cantidad de artículos y el ticket impreso más cercano antes del cobro. Se corrige el reloj leyendo la hora de la balanza (función 28).
+
+**Resultado sobre los 945 tickets reales (simulación del momento de cobro):**
+
+| Demora en cobrar | Impresos sin cobrar | Error de reloj | Cobros con el contenido correcto |
+|---|---|---|---|
+| hasta 2 min | 0 % | 0 | 945 de 945 |
+| hasta 5 min | 0 % | 0 | 945 de 945 |
+| hasta 10 min | 5 % | +4 min | 896 de 896 |
+| hasta 15 min | 10 % | −4 min | 858 de 858 |
+
+- **Por qué funciona:** 801 tickets tienen un TOTAL+cantidad único en el día. 130 se repiten pero con el mismo contenido, así que da igual cuál se tome. Solo 14 (5 grupos) se repiten con distinto contenido, y están separados por 43 min o más.
+- **Ventajas sobre C:**
+  - no hay que escribir en la balanza;
+  - el cajero escanea un solo código;
+  - el importe de cada artículo es el real, sin deducirlo.
+- **Costo:** el stock baja al leer (al cierre), no en el momento.
+- **Requiere:** una migración (venta con "detalle pendiente" + una RPC que lo complete y descuente stock), la lectura al cierre y una pantalla de revisión para lo que no se vincule (nunca se adivina).
+- **No construido. Requiere autorización.**
+- **Evidencia de que la lectura funciona con el local tranquilo:** lecturas reales completas el 13/10 12:03 y 12:27 y el 14/10 09:19 y 09:53.
+- **Sin confirmar:**
+  - que la lectura funcione siempre al cierre;
+  - que la balanza conserve el historial hasta leerlo. El 14/10 tenía desde el 07/10. No se sabe si su "cierre de ventas" lo borra.
