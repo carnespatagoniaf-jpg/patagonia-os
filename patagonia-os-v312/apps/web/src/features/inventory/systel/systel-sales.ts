@@ -64,8 +64,11 @@ export function mostradorSalesRequest(today: Date): string {
   return salesReportRequest(new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1), new Date(today.getFullYear(), today.getMonth(), today.getDate() + 1));
 }
 
-// Un artículo, con los anchos del documento. El "^" después del importe es opcional (ver arriba).
-const LINE = /(\d{9})\^(\d\d\/\d\d\/\d\d)\^(\d\d:\d\d:\d\d)\^(\d{2})\^(\d{6})\^(\d{2})\^(\d{4})\^(\d{5})\^(\d{5})\^(\d{12})\^?/y;
+// Un artículo. REAL (Los gringos, 14/10, 1.430 artículos del 07 al 13/10): el N.º de PLU viene con 4 cifras
+// (el documento dice 6) y entre un artículo y el siguiente hay un ";" (el documento no lo muestra). Ej. real:
+// "000003095^13/10/26^12:55:34^02^0005^01^0000^00215^00000^000000111800;" = ticket 3095, TROZADITO 215 g $1.118.
+// Se aceptan las dos formas (4 o 6 cifras; ";", "^" o nada entre artículos).
+const LINE = /(\d{9})\^(\d\d\/\d\d\/\d\d)\^(\d\d:\d\d:\d\d)\^(\d{2})\^(\d{4}|\d{6})\^(\d{2})\^(\d{4})\^(\d{5})\^(\d{5})\^(\d{12})[;^]?/y;
 
 /** Interpreta los datos de la respuesta (sin dirección, función ni verificación). */
 export function parseSalesReport(data: string): SystelSalesReport {
@@ -194,7 +197,12 @@ export function candidateTickets(lines: SystelSaleLine[], amount: number, articl
     const id = ls.map((l) => l.key ?? `${l.ticketId}:${l.plu}:${l.time}`).sort().join("|");
     if (!out.has(id)) out.set(id, makeTicket(ls));
   };
-  for (const t of groupTickets(lines)) add(t.lines);
+  const groups = groupTickets(lines);
+  for (const t of groups) add(t.lines);
+  // REAL (Los gringos, 945 tickets): la balanza numera POR TICKET (varios artículos con el mismo N.º). En ese caso
+  // juntar N.º consecutivos mezclaría artículos de tickets distintos (pasó: "3094-3095" falso). Solo si TODOS los
+  // artículos tienen N.º distinto (numeración por artículo) se arman tickets por N.º consecutivos.
+  if (groups.some((t) => t.lines.length > 1)) return [...out.values()];
   const bySeller = new Map<string, SystelSaleLine[]>();
   for (const l of lines) {
     const k = `${l.date}|${l.seller}`;
@@ -261,10 +269,26 @@ export interface TicketCartLine {
 
 export type TicketToCart = { ok: true; lines: TicketCartLine[] } | { ok: false; reason: string };
 
+const norm = (x: string) => x.normalize("NFD").replace(/[̀-ͯ]/g, "").toUpperCase().replace(/[^A-Z0-9]+/g, " ").trim();
+
+/**
+ * ¿El nombre de la balanza (18 caracteres, cortado) y el de Patagonia son el mismo producto? Al menos la mitad de
+ * las palabras de 3 o más letras del nombre de la balanza tienen que aparecer en el de Patagonia.
+ * REAL Los gringos: del 1 al 95 coinciden ("HAMB. Y ALB. x1x" ↔ "HAMB. Y ALB. x1x2", "LEA A BOLSA 10 K" ↔
+ * "LEÑA BOLSA 10 KG"); del 96 al 103 son otros productos ("BOCADITOS MUZZA" ↔ "PATA MUSLO MAYORISTA").
+ */
+export function sameProductName(scaleName: string, patagoniaName: string): boolean {
+  const words = norm(scaleName).split(" ").filter((w) => w.length >= 3);
+  if (words.length === 0) return true;
+  const target = norm(patagoniaName).replace(/ /g, "");
+  const hits = words.filter((w) => target.includes(w)).length;
+  return hits * 2 >= words.length;
+}
+
 /**
  * Cada artículo → producto de Patagonia, con la cantidad y el importe de la BALANZA:
  * - vínculo por CÓDIGO: el reporte da el N.º de PLU; su código se lee de la balanza (62) y se busca
- *   el producto de Patagonia con ese código;
+ *   el producto de Patagonia con ese código, y el NOMBRE tiene que coincidir (`sameProductName`);
  * - unidad de venta: pesable/congelado en la balanza ↔ por kg en Patagonia; unitario ↔ por unidad o caja;
  *   y el artículo del reporte tiene que traer gramos (pesable) o unidades (unitario), no lo otro;
  * - el importe es el de la balanza (no depende del precio de Patagonia, que no se toca).
@@ -279,6 +303,7 @@ export function linkTicketLines(ticket: SystelTicket, plus: Map<number, ScalePlu
     const label = `"${info.name.trim()}" (N.º ${l.plu} de la balanza, código ${info.code})`;
     const p = active.find((x) => x.code === String(info.code));
     if (!p) return { ok: false, reason: `${label} no tiene un producto activo con el código ${info.code} en Patagonia` };
+    if (!sameProductName(info.name, p.name)) return { ok: false, reason: `${label}: en Patagonia el código ${info.code} es \"${p.name}\", otro producto. Hay que corregir el código en Patagonia o en la balanza` };
     if (info.saleType === "E" || l.drained > 0) return { ok: false, reason: `${label} es un producto escurrido: Patagonia todavía no lo interpreta` };
     const weighed = info.saleType === "P" || info.saleType === "C";
     if (weighed !== (p.unit === "kg")) {
