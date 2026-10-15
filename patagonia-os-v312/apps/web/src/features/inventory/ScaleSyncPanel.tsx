@@ -18,6 +18,7 @@ import {
   readAuraListOnScale,
   runAuraSyncOnScale,
   setAuraItemBarcodesOnScale,
+  probeAuraTotalsOnScale,
   getScalePortDescription,
   getScaleSerialSettings,
   isScalePortPaired,
@@ -359,6 +360,23 @@ export function ScaleSyncPanel({ products, onDownloadCsv }: { products: ScaleSyn
       } else {
         report(`❌ No se pudo: ${r.detail}. No se cambió nada.${supportText}`);
       }
+    } catch (err) {
+      report(err instanceof Error ? err.message : "No se pudo hablar con la balanza.");
+    } finally {
+      setScaleBusy(false);
+    }
+  }
+
+  /** Aura: ¿entrega lo vendido por producto? Solo lectura (kretz/aura-totals-probe.ts). El resultado va a soporte. */
+  async function handleAuraTotalsProbe() {
+    setScaleBusy(true);
+    setScaleLog("Leyendo la balanza (solo lectura)…");
+    try {
+      const r = await probeAuraTotalsOnScale((text) => setScaleLog(text));
+      const canSend = profile?.role === "owner" || profile?.role === "admin";
+      const exchanges = r.exchanges.map((e) => `${e.step}: tx ${e.tx} | rx ${e.rx || "(nada)"}${e.kretz ? ` [${e.kretz.code}] ${e.kretz.data}` : ""}`).join("\n");
+      const sent = canSend ? await handleSendToSupport(`Aura totales por producto (5008, solo lectura): ${r.verdict} - ${r.detail}\n${exchanges}`) : false;
+      report(`${r.verdict === "recorre_sin_borrar" ? "✅" : "ℹ️"} ${r.detail}. No se cambió nada en la balanza.${sent ? " El resultado ya le llegó al equipo de Patagonia OS." : ""}`);
     } catch (err) {
       report(err instanceof Error ? err.message : "No se pudo hablar con la balanza.");
     } finally {
@@ -835,6 +853,10 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
                     <button className="secondary" disabled={scaleBusy || noSerial || !scalePortReady} onClick={() => void handleAuraItemBarcodes(true)}>Imprimir un código por producto</button>
                     <button className="secondary" disabled={scaleBusy || noSerial || !scalePortReady} onClick={() => void handleAuraItemBarcodes(false)}>Volver a solo el total</button>
                   </div>
+                  <p className="setting-help" style={{ marginTop: 6 }}>
+                    <strong>Lo vendido por producto (solo lectura):</strong> pregunta si la balanza entrega cuánto vendió de cada producto, sin borrar nada. Sirve para saber si Patagonia puede bajar el stock leyendo la balanza.
+                  </p>
+                  <div><button className="secondary" disabled={scaleBusy || noSerial || !scalePortReady} onClick={() => void handleAuraTotalsProbe()}>Leer lo vendido por producto (solo lectura)</button></div>
                 </SettingSection>
               )}
 

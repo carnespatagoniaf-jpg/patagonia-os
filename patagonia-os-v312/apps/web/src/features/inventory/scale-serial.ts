@@ -1,4 +1,5 @@
 import type { Product } from "@patagonia/domain";
+import { probeAuraTotals } from "./kretz/aura-totals-probe";
 import { STAGE_LABELS, runKretzDiscovery, saveDiagnosticRecord, savePluScan, scanAllPlus, type DiagnosticRecord, type DiscoveryVerdict, type PluScan } from "./kretz/discovery";
 import { runAuraWriteTest, saveAuraWriteTest, type AuraWriteTestResult } from "./kretz/aura-write-test";
 import { runAuraModelProbe, saveModelProbe, type ModelProbeResult } from "./kretz/aura-model-probe";
@@ -1238,4 +1239,13 @@ export async function readReportProduct(code: string): Promise<ReportProductFiel
 /** Report: cómo tiene que quedar grabado un producto de Patagonia (mismo armado que buildPluFrame). */
 export function expectedReportProduct(product: ScaleSyncableProduct): ReportProductFields {
   return { name: fixedAscii(product.name, 26).trimEnd(), byWeight: product.unit === "kg", price: Number(fixedDigits(product.priceRetail, 6)) };
+}
+
+/** Aura: ¿entrega lo vendido por producto? SOLO LECTURA (5008/5001, nunca borra). Ver kretz/aura-totals-probe.ts. */
+export async function probeAuraTotalsOnScale(onProgress: (text: string) => void) {
+  const port = await pickPort();
+  cachedPortOpenKey = null;
+  const r = await probeAuraTotals(port, auraResponder(), { onProgress });
+  cachedPortOpenKey = null;
+  return r;
 }
