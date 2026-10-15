@@ -1,8 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import type { Product } from "@patagonia/domain";
 import { allocateCarcassCost, carcassCutLineTotal, carcassTemplateCutWeight, marginPercent } from "@patagonia/domain";
-import { applyCarcassCosts } from "./carcass-service";
-import { isSupabaseConfigured } from "../../lib/supabase";
 import { useCarcass } from "./useCarcass";
 import { useCarcassTemplates } from "./useCarcassTemplates";
 import { useSuppliers } from "../purchases/useSuppliers";
@@ -462,24 +460,12 @@ export function Carcass() {
   const gananciaTotal = selectedBatch ? cutsTotal - selectedBatch.totalCost : 0;
   // Costo real de cada corte de esta res (la compra repartida por lo que vale cada corte). Misma cuenta que la base.
   const realCosts = useMemo(() => (selectedBatch ? allocateCarcassCost(selectedBatch.totalCost, cuts) : []), [selectedBatch, cuts]);
-  const [applyingCosts, setApplyingCosts] = useState(false);
-
-  async function handleApplyCosts() {
-    if (!selectedBatch) return;
-    const kg = realCosts.filter((l) => products.find((p) => p.id === l.productId)?.unit === "kg");
-    if (kg.length === 0) return;
-    if (!window.confirm(`Se va a cambiar el costo de ${kg.length} ${kg.length === 1 ? "producto" : "productos"} en Stock por el costo real de esta res. Los precios de venta no cambian. ¿Seguir?`)) return;
-    setApplyingCosts(true);
-    try {
-      const r = await applyCarcassCosts(selectedBatch.id);
-      setMessage(`Listo: se actualizó el costo de ${r.updated} ${r.updated === 1 ? "producto" : "productos"} en Stock.`);
-      if (branchId) setProducts(await listProductsForBranch(branchId));
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : (err as { message?: string })?.message ?? "No se pudieron actualizar los costos.");
-    } finally {
-      setApplyingCosts(false);
-    }
-  }
+  // El costo pasa solo a Stock al guardar cada corte (migración 123): se recargan los productos para mostrar el de hoy.
+  useEffect(() => {
+    if (!branchId || !selectedBatch) return;
+    listProductsForBranch(branchId).then(setProducts).catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cuts, selectedBatch?.totalCost]);
   const margenTotal = selectedBatch ? marginPercent(selectedBatch.totalCost, cutsTotal) : 0;
 
   function handlePrint() {
@@ -798,7 +784,7 @@ export function Carcass() {
             <div className="no-print" style={{ marginTop: 20 }}>
               <h3 style={{ margin: "0 0 6px" }}>Costo real de cada corte</h3>
               <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
-                Lo que pagaste por la res, repartido según lo que vale cada corte: el que se vende más caro carga más costo por kilo, y lo que no se vende (hueso, grasa) no carga costo.
+                Lo que pagaste por la res, repartido según lo que vale cada corte: el que se vende más caro carga más costo por kilo, y lo que no se vende (hueso, grasa) no carga costo. Pasa solo a Stock cada vez que guardás un corte (si el producto salió en una res más nueva, manda la más nueva).
               </p>
               <table className="data-table">
                 <thead>
@@ -819,11 +805,6 @@ export function Carcass() {
                   })}
                 </tbody>
               </table>
-              {isSupabaseConfigured && (
-                <button style={{ marginTop: 12 }} disabled={applyingCosts || !realCosts.some((l) => products.find((p) => p.id === l.productId)?.unit === "kg")} onClick={() => void handleApplyCosts()}>
-                  {applyingCosts ? "Actualizando…" : "Pasar estos costos a Stock"}
-                </button>
-              )}
             </div>
           )}
         </section>

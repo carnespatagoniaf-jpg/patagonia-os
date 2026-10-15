@@ -143,15 +143,3 @@ export async function deleteCarcassCut(cutId: string): Promise<void> {
   if (error) throw error;
 }
 
-/**
- * Pasa a Stock el costo real de cada corte de la res (migración 122, apply_carcass_costs): la compra repartida según
- * lo que vale cada corte. Solo productos por kilo. Dueño o administrador. Devuelve cuántos se actualizaron.
- */
-export async function applyCarcassCosts(batchId: string): Promise<{ updated: number; skipped: number }> {
-  if (!supabase) throw new Error("Supabase no está configurado.");
-
-  const { data, error } = await supabase.rpc("apply_carcass_costs", { p_batch_id: batchId });
-  if (error) throw error;
-  const result = data as { updated: unknown[]; skipped: unknown[] };
-  return { updated: result.updated?.length ?? 0, skipped: result.skipped?.length ?? 0 };
-}
