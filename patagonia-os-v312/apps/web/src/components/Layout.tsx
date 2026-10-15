@@ -3,8 +3,11 @@ import { BarChart3, Beef, Boxes, ChefHat, Download, FileText, HandCoins, Handsha
 import { useAuth } from "../features/auth/AuthProvider";
 import { PLAN_LABELS, canAccessPage, planAllows, profilePlan, type Page } from "../features/auth/permissions";
 
-/** Facturas (ARCA) se ve en staging y con VITE_INVOICING=1; en producción recién cuando esté la conexión real con ARCA (parte 2). */
-const SHOW_INVOICING = import.meta.env.MODE === "staging" || import.meta.env.VITE_INVOICING === "1";
+/**
+ * Facturas (ARCA) visible para todos (decisión del dueño, 14/10): se cargan los datos fiscales y se ven los pasos de
+ * ARCA; "Probar conexión con ARCA" y la factura en Mostrador se activan cuando esté la parte 2 (Edge Function).
+ */
+const SHOW_INVOICING = true;
 import { useActiveBranch } from "../features/branches/BranchProvider";
 import { TrialBanner } from "./TrialBanner";
 import { HelpChat } from "../features/help/HelpChat";

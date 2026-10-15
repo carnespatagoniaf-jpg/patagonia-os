@@ -58,7 +58,7 @@ begin
   values (p_company_id, auth.uid(), v_expires, p_reason)
   on conflict (company_id) do update set granted_by = excluded.granted_by, granted_at = now(), expires_at = excluded.expires_at, reason = excluded.reason;
   insert into public.audit_log (company_id, user_id, action, entity_type, entity_id, new_data)
-  values (p_company_id, auth.uid(), 'support.scale_access_granted', 'company', p_company_id, jsonb_build_object('expires_at', v_expires, 'hours', p_hours, 'reason', p_reason));
+  values (p_company_id, auth.uid(), 'support.scale_access_granted', 'company', p_company_id::text, jsonb_build_object('expires_at', v_expires, 'hours', p_hours, 'reason', p_reason));
   return v_expires;
 end;
 $$;
@@ -77,7 +77,7 @@ begin
   delete from public.support_access_grants where company_id = p_company_id;
   if found then
     insert into public.audit_log (company_id, user_id, action, entity_type, entity_id, new_data)
-    values (p_company_id, auth.uid(), 'support.scale_access_revoked', 'company', p_company_id, '{}'::jsonb);
+    values (p_company_id, auth.uid(), 'support.scale_access_revoked', 'company', p_company_id::text, '{}'::jsonb);
   end if;
 end;
 $$;
