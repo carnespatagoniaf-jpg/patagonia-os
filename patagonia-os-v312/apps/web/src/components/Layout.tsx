@@ -10,6 +10,7 @@ import { PLAN_LABELS, canAccessPage, planAllows, profilePlan, type Page } from "
 const SHOW_INVOICING = true;
 import { useActiveBranch } from "../features/branches/BranchProvider";
 import { TrialBanner } from "./TrialBanner";
+import { NewsBanner } from "./NewsBanner";
 import { HelpChat } from "../features/help/HelpChat";
 
 export type { Page };
@@ -267,6 +268,7 @@ export function Layout({ page, onPageChange, children }: Props) {
 
       <main className="main-content">
         <TrialBanner />
+        <NewsBanner onPageChange={onPageChange} />
         {children}
       </main>
       {import.meta.env.VITE_HELP_CHAT === "1" && planAllows(profile, "estandar") && <HelpChat />}
