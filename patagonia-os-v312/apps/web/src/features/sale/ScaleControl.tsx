@@ -62,6 +62,11 @@ export function ScaleVoidForm({ visible, shift, products, scaleConfig, onMessage
       setError("Ese código no es un ticket de la balanza (o el producto no está cargado en Stock).");
       return;
     }
+    if (voids.some((v) => v.barcode === code.trim())) {
+      setScanned(null);
+      setError("Ese ticket ya está anulado: no hace falta escanearlo de nuevo.");
+      return;
+    }
     setScanned(result);
   }
 
