@@ -616,8 +616,8 @@ export function Carcass() {
             <span>{loading ? "Cargando…" : `${batches.length}`}</span>
           </div>
           <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-            ¿Vino con factura del proveedor? Cargala en <strong>Compras</strong> y marcá la línea "Para despostar": la res aparece sola acá
-            (y con plantilla, ya repartida en cortes). No la cargues también acá, porque la deuda con el proveedor quedaría doble.
+            Despiece es para saber cuánto rindió y cuánto te costó cada corte. La factura del proveedor va en <strong>Compras</strong>:
+            marcá la línea "Para despostar" y la res aparece sola acá (con plantilla, ya repartida en cortes). Una res cargada acá no genera deuda con el proveedor.
           </p>
           {showBatchForm ? (
             <>
@@ -625,7 +625,7 @@ export function Carcass() {
                 <input type="date" value={batchDate} onChange={(e) => setBatchDate(e.target.value)} />
                 <AnimalTypePicker value={animalType} options={animalTypeOptions} onChange={setAnimalType} />
                 <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-                  <option value="">Proveedor (opcional)…</option>
+                  <option value="">Proveedor (opcional, solo como dato)…</option>
                   {suppliers.map((s) => (
                     <option key={s.id} value={s.id}>{s.name}</option>
                   ))}
