@@ -502,6 +502,11 @@ export function Sale() {
   }
 
   async function checkout() {
+    // Ticket de TOTAL de la balanza a medio cargar: no se cobra sin él (quedaría afuera de la venta).
+    if (ticket.ticketDetail) {
+      setMessage("Terminá el ticket de la balanza: cargá sus productos o tocá \"Cobrar solo el total\".");
+      return;
+    }
     if (cart.length === 0 || !shift) return;
     // Etiquetas de una Systel sin su TOTAL: todavía no se sabe qué precio cobró la balanza.
     if (cart.some((l) => l.scalePending)) {

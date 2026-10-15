@@ -5,6 +5,7 @@ import { formatMoney } from "../shifts/format";
 import { parseQuantity } from "./quantity";
 import { lineGross, UNIT_LABELS } from "./sale-model";
 import type { SaleTicket } from "./useSaleTicket";
+import { TicketDetailPanel } from "./TicketDetailPanel";
 
 // Columna izquierda de Mostrador: buscador, ticket armándose, descuentos,
 // medios de pago y barra de cobro. Es solo vista: el estado vive en
@@ -119,6 +120,16 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
     </div>
 
     {ticket.scaleTicketChoices && <ScaleTicketChoices ticket={ticket} />}
+    {ticket.ticketDetail && (
+      <TicketDetailPanel
+        key={ticket.ticketDetail.key}
+        total={ticket.ticketDetail.total}
+        products={ticket.detailProducts}
+        onConfirm={ticket.confirmTicketDetail}
+        onTotalOnly={ticket.chargeTicketTotalOnly}
+        onCancel={() => ticket.setTicketDetail(null)}
+      />
+    )}
 
     <div className="pos-toolbar">
       <button className={`pos-toolbar-btn${showManualForm ? " active" : ""}`} onClick={() => setShowManualForm((v) => !v)}>
