@@ -243,6 +243,15 @@ describe("[SIMULADO] Mi balanza con una Kretz Aura (mismo plan y envío que el p
     assert.match(out.message, /Frenamos/);
   });
 
+  it("al sincronizar, Mostrador de la sucursal queda leyendo el código por producto (Pre-Empaque)", async () => {
+    const { io } = auraIO();
+    const saved: string[] = [];
+    const s = new KretzSession("kretz-aura", ctx(products), "datos", { ...io, saveItemConfig: async (b) => void saved.push(b) });
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, true);
+    assert.deepEqual(saved, ["b1"]);
+  });
+
   it("modo pesaje: no hay nada que sincronizar, se explica qué hacer", async () => {
     const { io } = auraIO();
     const s = new KretzSession("kretz-aura", ctx(products), "peso", io);

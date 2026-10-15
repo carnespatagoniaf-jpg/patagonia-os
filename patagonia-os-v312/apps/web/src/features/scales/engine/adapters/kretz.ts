@@ -32,6 +32,8 @@ export interface KretzIO {
   runAuraSync: typeof runAuraSyncOnScale;
   readReport: typeof readReportProduct;
   sendReport: typeof syncProductsToScale;
+  /** Mostrador de la sucursal lee los códigos por producto de la Aura (2-3-7 con importe). Solo con base. */
+  saveItemConfig?: (branchId: string) => Promise<void>;
 }
 
 export const KRETZ_IO: KretzIO = { diagnose: diagnoseScaleLink, readAuraList: readAuraListOnScale, runAuraSync: runAuraSyncOnScale, readReport: readReportProduct, sendReport: syncProductsToScale };
@@ -127,6 +129,16 @@ export class KretzSession implements ScaleSession {
       const plan = opts.allowReplace ? planAuraSync(st.records, st.products, { replaceConflicts: true }) : st.plan;
       const r = await this.io.runAuraSync(plan, (t) => onProgress("sincronizar", "Mandando tus productos a la balanza…", ...progressNumbers(t)), () => false, true);
       if (r.verdict !== "ok") return { ok: false, verified: r.written.length, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, support: { verdict: r.verdict, detail: r.detail, stoppedAt: r.stoppedAt } };
+      // La Aura imprime el TOTAL en los tickets con varios productos (manual Aura Eco §7.1.7; el código por producto
+      // del ticket de suma no existe: real Pollo y mar 15/10). En Pre-Empaque (ALT + 7) imprime un ticket por producto
+      // con su código 2-3-7 + importe: Mostrador de la sucursal queda leyendo ese formato.
+      if (r.barcode === "ok" && this.ctx.online && this.ctx.branchId && this.io.saveItemConfig) {
+        try {
+          await this.io.saveItemConfig(this.ctx.branchId);
+        } catch {
+          // sin esto, Mostrador sigue leyendo el TOTAL (detalle a mano); no frena la sincronización
+        }
+      }
       return { ok: true, verified: r.written.length, message: done(opts.allowReplace ? [] : prepared.pending), pending: opts.allowReplace ? [] : prepared.pending };
     }
 
@@ -171,18 +183,23 @@ function progressNumbers(text: string): [number, number] | [] {
   return m ? [Number(m[1]), Number(m[2])] : [];
 }
 
-export const kretzAdapter: ScaleAdapter = {
-  family: "kretz",
-  async identify(port: SerialPort, ctx: EngineContext, onProgress: ProgressFn): Promise<ScaleSession | null> {
-    onProgress("buscar", "Buscando tu balanza…");
-    setScaleSerialPort(port);
-    const d = await KRETZ_IO.diagnose(() => onProgress("buscar", "Buscando tu balanza…"), { modelId: "aura" });
-    const info = { verdict: d.verdict, puerto: d.portLabel, configuracion: d.dataSettings };
-    if (d.verdict === "puerto") throw new FriendlyError("puerto_ocupado", d.message);
-    if (d.verdict === "peso") return new KretzSession("kretz-aura", ctx, "peso", KRETZ_IO, info);
-    if (d.verdict !== "datos" || !d.dataSettings) return null;
-    const model = kretzModelForLetter(d.dataSettings.deviceType);
-    if (model !== "kretz-otra") saveModelId(model === "kretz-aura" ? "aura" : "report-lt");
-    return new KretzSession(model, ctx, "datos", KRETZ_IO, info);
-  }
-};
+/** El adaptador Kretz con las funciones que le pase quien lo arma (live.ts suma guardar el formato en la base). */
+export function makeKretzAdapter(io: KretzIO): ScaleAdapter {
+  return {
+    family: "kretz",
+    async identify(port: SerialPort, ctx: EngineContext, onProgress: ProgressFn): Promise<ScaleSession | null> {
+      onProgress("buscar", "Buscando tu balanza…");
+      setScaleSerialPort(port);
+      const d = await io.diagnose(() => onProgress("buscar", "Buscando tu balanza…"), { modelId: "aura" });
+      const info = { verdict: d.verdict, puerto: d.portLabel, configuracion: d.dataSettings };
+      if (d.verdict === "puerto") throw new FriendlyError("puerto_ocupado", d.message);
+      if (d.verdict === "peso") return new KretzSession("kretz-aura", ctx, "peso", io, info);
+      if (d.verdict !== "datos" || !d.dataSettings) return null;
+      const model = kretzModelForLetter(d.dataSettings.deviceType);
+      if (model !== "kretz-otra") saveModelId(model === "kretz-aura" ? "aura" : "report-lt");
+      return new KretzSession(model, ctx, "datos", io, info);
+    }
+  };
+}
+
+export const kretzAdapter: ScaleAdapter = makeKretzAdapter(KRETZ_IO);

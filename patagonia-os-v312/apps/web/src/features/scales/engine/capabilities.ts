@@ -43,12 +43,15 @@ export const SCALE_CAPABILITIES: Record<ScaleModelId, ScaleCapabilities> = {
     label: "Kretz Aura",
     readProducts: "real",
     sendProducts: "real",
-    itemBarcodes: "simulado",
+    // El ticket con varios productos trae SOLO el código del TOTAL (manual Aura Eco §7.1.7) y la Aura de Pollo y mar
+    // rechazó el 1080 (respuesta 02). Código por producto = modo Pre-Empaque (ALT + 7, §12.5): un ticket por producto.
+    itemBarcodes: "no",
     verifyAfterWrite: "real",
     ticketSale: "real",
     sources: [
       "Pollo y mar 05/10/2026: 223 productos mandados, cada uno releído; los demás sin cambios",
-      "Código por producto (1080): publicado 08/10 sin confirmación de una Aura real"
+      "Pollo y mar 15/10/2026: código por producto en el ticket de suma (1080) RECHAZADO (respuesta 02)",
+      "Manual Aura Eco Rev.01 §7.1.7 y §12.5: formatos pesable / unitario / suma; Pre-Empaque imprime un ticket por producto"
     ]
   },
   "kretz-otra": {

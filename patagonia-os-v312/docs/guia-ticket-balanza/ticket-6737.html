@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Ticket de balanza — cómo cargarlo</title>
+<style>
+  body { margin: 0; background: #f2f4f7; font-family: Inter, "Segoe UI", system-ui, sans-serif; color: #18202b; }
+  .wrap { width: 760px; padding: 24px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  .sub { color: #697386; margin: 0 0 16px; font-size: 14px; }
+  .panel { background: white; border: 1px solid #e5e7eb; border-radius: 16px; padding: 18px; }
+  .search { border: 2px solid #8b1e1e; border-radius: 12px; padding: 12px 14px; color: #8b95a5; margin-bottom: 14px; }
+  .card { border: 2px solid #8b1e1e; border-radius: 12px; padding: 14px; display: grid; gap: 10px; }
+  .card strong { font-size: 16px; }
+  .muted { color: #697386; font-size: 13px; }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .in { border: 1px solid #d6dce5; border-radius: 10px; padding: 9px 11px; background: white; font-size: 14px; }
+  .prod { flex: 1; }
+  .amt { width: 110px; }
+  .kg { width: 90px; color: #697386; font-size: 13px; }
+  .ok { color: #176329; font-weight: 700; }
+  .btns { display: flex; gap: 8px; }
+  .b { border-radius: 10px; padding: 9px 14px; font-weight: 700; font-size: 14px; border: 1px solid #d6dce5; background: white; }
+  .b.main { background: #8b1e1e; color: white; border-color: #8b1e1e; }
+  .tag { position: relative; }
+  .n { display: inline-grid; place-items: center; width: 24px; height: 24px; border-radius: 50%; background: #f5b400; color: #18202b; font-weight: 800; font-size: 13px; margin-right: 6px; flex: none; }
+  .note { margin-top: 14px; font-size: 14px; display: grid; gap: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Mostrador: ticket de la balanza de $6.737</h1>
+  <p class="sub">Así tiene que quedar antes de tocar "Cargar productos".</p>
+  <div class="panel">
+    <div class="search">🔍 Escaneá o escribí el nombre / código del producto…</div>
+    <div class="card">
+      <strong>Ticket de la balanza de $ 6.737: ¿qué productos lleva?</strong>
+      <span class="muted">Elegí cada producto del papel y copiá su importe (el número de la derecha). Así se cobra igual y baja el stock.</span>
+      <div class="row"><span class="n">1</span><div class="in prod">1 · milanesas de pollo</div><div class="in amt">2842</div><div class="kg">0,245 kg</div></div>
+      <div class="row"><span class="n">2</span><div class="in prod">21 · COSTELETAS</div><div class="in amt">3895</div><div class="kg">0,245 kg</div></div>
+      <div><span class="b">+ Otro producto</span></div>
+      <span class="ok"><span class="n">3</span>✓ Suma justo $ 6.737</span>
+      <div class="btns"><span class="b main">Cargar productos</span><span class="b">Cobrar solo el total (no baja stock)</span><span class="b">Cancelar</span></div>
+    </div>
+  </div>
+  <div class="note">
+    <div><span class="n">1</span>Escribí <b>1</b> y elegí "milanesas de pollo" de la lista. Importe <b>2842</b>.</div>
+    <div><span class="n">2</span>Escribí <b>21</b> y elegí "COSTELETAS" (no "COSTELETAS CERDO"). Importe <b>3895</b>.</div>
+    <div><span class="n">3</span>Cuando dice "✓ Suma justo $ 6.737", tocá <b>Cargar productos</b> y cobrá como siempre.</div>
+  </div>
+</div>
+</body>
+</html>
