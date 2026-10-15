@@ -342,6 +342,45 @@ export function carcassCutLineTotal(cut: { weight: Quantity; unitPrice: Money })
   return roundMoney(cut.weight * cut.unitPrice);
 }
 
+export interface CarcassCostLine {
+  productId: string;
+  /** Kilos de este producto que salieron de la res. */
+  weight: Quantity;
+  /** Kilos × precio de venta (lo que vale lo que salió). */
+  value: Money;
+  /** Parte de la compra de la res que le toca. */
+  cost: Money;
+  /** Costo real por kilo (redondeado a centavos). */
+  costPerKg: Money;
+}
+
+/**
+ * Costo real de cada corte de una res: la compra se reparte según lo que VALE cada corte (kilos × precio de venta),
+ * así el lomo carga más costo por kilo que el hueso, y lo que no se vende (precio 0) no carga costo. Si ningún corte
+ * tiene precio, se reparte por kilos. Los cortes sin producto también participan del reparto (se llevan su parte),
+ * pero solo se devuelven los que tienen producto, agrupados por producto.
+ * La MISMA cuenta, con el mismo redondeo, la hace la base en apply_carcass_costs (migración 122): cambiar las dos juntas.
+ */
+export function allocateCarcassCost(totalCost: Money, cuts: { productId?: string | null; weight: Quantity; unitPrice: Money }[]): CarcassCostLine[] {
+  const totalValue = cuts.reduce((s, c) => s + c.weight * c.unitPrice, 0);
+  const totalWeight = cuts.reduce((s, c) => s + c.weight, 0);
+  const byProduct = new Map<string, { weight: number; value: number; cost: number }>();
+  for (const c of cuts) {
+    if (!c.productId) continue;
+    const value = c.weight * c.unitPrice;
+    const share = totalValue > 0 ? (totalCost * value) / totalValue : totalWeight > 0 ? (totalCost * c.weight) / totalWeight : 0;
+    const prev = byProduct.get(c.productId) ?? { weight: 0, value: 0, cost: 0 };
+    byProduct.set(c.productId, { weight: prev.weight + c.weight, value: prev.value + value, cost: prev.cost + share });
+  }
+  return [...byProduct].map(([productId, x]) => ({
+    productId,
+    weight: Math.round(x.weight * 1000) / 1000,
+    value: roundMoney(x.value),
+    cost: roundMoney(x.cost),
+    costPerKg: x.weight > 0 ? roundMoney(x.cost / x.weight) : 0
+  }));
+}
+
 export interface CarcassCutTemplate {
   id: string;
   animalType: string;

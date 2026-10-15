@@ -4,6 +4,7 @@ import {
   assertSellable,
   cartTotal,
   carcassCutLineTotal,
+  allocateCarcassCost,
   estimatedProfit,
   marginPercent,
   priceFromMargin,
@@ -66,6 +67,37 @@ test("margen es 0 cuando el costo es 0 (evita división por cero)", () => {
 test("calcula el subtotal de un corte por peso x precio", () => {
   // Asado de la media 119: 8.61kg a $16.000/kg -> $137.760 (planilla real de despiece)
   assert.equal(carcassCutLineTotal({ weight: 8.61, unitPrice: 16000 }), 137760);
+});
+
+test("allocateCarcassCost: la compra se reparte por lo que vale cada corte", () => {
+  // Media res de 100 kg a $5.000/kg = $500.000. Lomo 5 kg a $20.000, asado 20 kg a $10.000, carne picada 30 kg a
+  // $6.000, hueso 10 kg sin precio. Valor total = 100.000 + 200.000 + 180.000 = 480.000.
+  const lines = allocateCarcassCost(500000, [
+    { productId: "lomo", weight: 5, unitPrice: 20000 },
+    { productId: "asado", weight: 20, unitPrice: 10000 },
+    { productId: "picada", weight: 30, unitPrice: 6000 },
+    { productId: null, weight: 10, unitPrice: 0 }
+  ]);
+  assert.deepEqual(lines.map((l) => [l.productId, l.cost, l.costPerKg]), [
+    ["lomo", 104166.67, 20833.33],
+    ["asado", 208333.33, 10416.67],
+    ["picada", 187500, 6250]
+  ]);
+  // Todo el costo queda en lo que se vende (el hueso no carga costo).
+  assert.equal(Math.round(lines.reduce((s, l) => s + l.cost, 0)), 500000);
+});
+
+test("allocateCarcassCost: el mismo producto en dos cortes se suma; sin precios se reparte por kilos", () => {
+  const lines = allocateCarcassCost(120000, [
+    { productId: "pollo", weight: 10, unitPrice: 0 },
+    { productId: "pollo", weight: 10, unitPrice: 0 },
+    { productId: "menudo", weight: 4, unitPrice: 0 }
+  ]);
+  assert.deepEqual(lines.map((l) => [l.productId, l.weight, l.cost, l.costPerKg]), [
+    ["pollo", 20, 100000, 5000],
+    ["menudo", 4, 20000, 5000]
+  ]);
+  assert.deepEqual(allocateCarcassCost(1000, []), []);
 });
 
 test("recipeCost: milanesas con merma de limpieza en la nalga", () => {
