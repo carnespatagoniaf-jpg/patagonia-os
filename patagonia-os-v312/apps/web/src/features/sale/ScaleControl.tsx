@@ -5,7 +5,8 @@ import { parseAmount } from "../../lib/money";
 import { formatMoney } from "../shifts/format";
 import type { ScaleConfig } from "./scale-barcode";
 import { compareScaleControl, describeScaleTicket, type ScaleComparison, type ScannedScaleTicket, parseScaleAmount, parseScaleKg, suggestScaleCorrection } from "./scale-control";
-import { getScaleControl, listScaleVoids, saveScaleControl, voidScaleTicket, type ScaleControlState, type ScaleVoid } from "./scale-control-service";
+import { findScaleTicketSale, getScaleControl, listScaleVoids, saveScaleControl, voidScaleTicket, type ScaleControlState, type ScaleTicketSaleHit, type ScaleVoid } from "./scale-control-service";
+import { chargedTicketWarning } from "./scale-void-warning";
 import type { PosShift } from "./pos-shift-service";
 import { quantityNumber } from "./quantity";
 
@@ -33,6 +34,8 @@ export function ScaleVoidForm({ visible, shift, products, scaleConfig, onMessage
   const [reason, setReason] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  /** 125: ese papel ya se cobró en los turnos del control (anularlo taparía un faltante). */
+  const [charged, setCharged] = useState<ScaleTicketSaleHit | null>(null);
   const [voids, setVoids] = useState<ScaleVoid[]>([]);
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -54,8 +57,9 @@ export function ScaleVoidForm({ visible, shift, products, scaleConfig, onMessage
 
   if (!visible) return null;
 
-  function readCode() {
+  async function readCode() {
     setError("");
+    setCharged(null);
     const result = describeScaleTicket(code, scaleConfig, products);
     if (!result) {
       setScanned(null);
@@ -68,10 +72,21 @@ export function ScaleVoidForm({ visible, shift, products, scaleConfig, onMessage
       return;
     }
     setScanned(result);
+    if (!isSupabaseConfigured) return;
+    try {
+      setCharged(await findScaleTicketSale(shift.id, {
+        productId: result.kind === "label" ? result.product.id : null,
+        weightKg: result.kind === "label" ? result.weightKg : null,
+        amount: result.amount
+      }));
+    } catch {
+      // informativo: si no se puede consultar, se anula como siempre
+    }
   }
 
   async function confirmVoid() {
     if (!scanned) return;
+    if (charged && !window.confirm(chargedTicketWarning(charged) + " ¿Anularlo igual?")) return;
     if (!isSupabaseConfigured) {
       setError("En modo demostración no se guarda.");
       return;
@@ -91,6 +106,7 @@ export function ScaleVoidForm({ visible, shift, products, scaleConfig, onMessage
       onMessage(`Ticket de balanza anulado: ${formatMoney(scanned.amount)}. Guardalo junto con la caja.`);
       setCode("");
       setScanned(null);
+      setCharged(null);
       setReason("");
       await reload();
       inputRef.current?.focus();
@@ -114,10 +130,10 @@ export function ScaleVoidForm({ visible, shift, products, scaleConfig, onMessage
         ref={inputRef}
         placeholder="Escaneá el ticket que salió mal"
         value={code}
-        onChange={(e) => { setCode(e.target.value); setScanned(null); }}
-        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); readCode(); } }}
+        onChange={(e) => { setCode(e.target.value); setScanned(null); setCharged(null); }}
+        onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void readCode(); } }}
       />
-      {!scanned && <button className="secondary" disabled={!code.trim()} onClick={readCode}>Leer ticket</button>}
+      {!scanned && <button className="secondary" disabled={!code.trim()} onClick={() => void readCode()}>Leer ticket</button>}
       {scanned && (
         <>
           <p style={{ margin: 0 }}>
@@ -125,10 +141,11 @@ export function ScaleVoidForm({ visible, shift, products, scaleConfig, onMessage
               ? <>Ticket de total de la balanza por <strong>{formatMoney(scanned.amount)}</strong></>
               : <><strong>{scanned.product.name}</strong>{scanned.weightKg !== null ? ` · ${kg(scanned.weightKg)}` : ""} · <strong>{formatMoney(scanned.amount)}</strong></>}
           </p>
+          {charged && <p className="message warning" style={{ margin: 0 }}>{chargedTicketWarning(charged)}</p>}
           <input placeholder="Motivo (opcional): peso mal, producto equivocado…" value={reason} onChange={(e) => setReason(e.target.value)} />
           <div style={{ display: "flex", gap: 8 }}>
             <button disabled={busy} onClick={() => void confirmVoid()}>{busy ? "Anulando…" : "Anular ticket"}</button>
-            <button className="secondary" onClick={() => { setScanned(null); setCode(""); }}>Otro ticket</button>
+            <button className="secondary" onClick={() => { setScanned(null); setCharged(null); setCode(""); }}>Otro ticket</button>
           </div>
         </>
       )}

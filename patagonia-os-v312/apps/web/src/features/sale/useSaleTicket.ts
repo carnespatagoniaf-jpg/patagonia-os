@@ -18,6 +18,9 @@ import { useScalePapers } from "./useScalePapers";
 import { submitScaleSupportReport } from "../scales/support-service";
 import type { PosShift } from "./pos-shift-service";
 import { lineGross, type PaymentRow, type TicketLine } from "./sale-model";
+import { isSupabaseConfigured } from "../../lib/supabase";
+import { findScaleTicketVoid, undoScaleTicketVoid } from "./scale-control-service";
+import { hourAr, undoVoidQuestion, voidedTicketQuestion } from "./scale-void-warning";
 import { parseQuantity } from "./quantity";
 import type { DetailRow } from "./ticket-detail";
 
@@ -313,6 +316,12 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       done();
       return;
     }
+    // 125: un papel que ya está anulado en el control de la balanza se pregunta antes de cobrarlo
+    // (real Haedo 13/10: anulado 14:14 y cobrado 14:24; el control lo restaba igual).
+    if (resolved.type === "ticket_total" || resolved.type === "label") {
+    const scan = resolved;
+    const applyScaleScan = () => {
+    const resolved = scan;
     if (resolved.type === "ticket_total") {
       const ticketTotal = resolved.amount;
       if (cart.some((l) => l.key === resolved.key)) {
@@ -362,6 +371,15 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       setMessage(`Agregado: ${resolved.detail}.`);
       return;
     }
+    };
+    if (!shift || !isSupabaseConfigured || (scan.type === "label" && systelTicketPilot && systelConfig)) {
+      applyScaleScan();
+      return;
+    }
+    done();
+    void scanUnlessVoided(shift.id, raw, applyScaleScan);
+    return;
+    }
     if (resolved.type === "product") {
       void addProductFromSearch(resolved.product);
       return;
@@ -374,6 +392,30 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     }
 
     setMessage("No se encontró ningún producto con ese código.");
+  }
+
+  /** Si el papel ya está anulado en los turnos del control: "¿Cobrarlo igual?" y, si sí, ofrece deshacer
+   * la anulación. Sin conexión no frena la venta (findScaleTicketVoid devuelve null enseguida). */
+  async function scanUnlessVoided(shiftId: string, barcode: string, apply: () => void) {
+    const hit = await findScaleTicketVoid(shiftId, barcode);
+    if (!hit) {
+      apply();
+      return;
+    }
+    if (!window.confirm(voidedTicketQuestion(hit))) {
+      setMessage("No se cargó: ese ticket estaba anulado.");
+      searchInputRef.current?.focus();
+      return;
+    }
+    const undo = window.confirm(undoVoidQuestion(hit));
+    apply();
+    if (!undo) return;
+    try {
+      await undoScaleTicketVoid(shiftId, hit.id);
+      setMessage(`Se deshizo la anulación de las ${hourAr(hit.createdAt)}: el control de la balanza ya no resta ese ticket.`);
+    } catch (err) {
+      setMessage(`Se cargó el ticket, pero no se pudo deshacer la anulación: ${err instanceof Error ? err.message : "error"}. Avisá al encargado.`);
+    }
   }
 
   function removeFromCart(key: string) {
