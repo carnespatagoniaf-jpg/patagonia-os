@@ -1,5 +1,6 @@
 import type { Product } from "@patagonia/domain";
 import { probeAuraTotals } from "./kretz/aura-totals-probe";
+import { listenScale } from "./kretz/scale-listen";
 import { STAGE_LABELS, runKretzDiscovery, saveDiagnosticRecord, savePluScan, scanAllPlus, type DiagnosticRecord, type DiscoveryVerdict, type PluScan } from "./kretz/discovery";
 import { runAuraWriteTest, saveAuraWriteTest, type AuraWriteTestResult } from "./kretz/aura-write-test";
 import { runAuraModelProbe, saveModelProbe, type ModelProbeResult } from "./kretz/aura-model-probe";
@@ -1246,6 +1247,15 @@ export async function probeAuraTotalsOnScale(onProgress: (text: string) => void)
   const port = await pickPort();
   cachedPortOpenKey = null;
   const r = await probeAuraTotals(port, auraResponder(), { onProgress });
+  cachedPortOpenKey = null;
+  return r;
+}
+
+/** "Escuchar la balanza": SOLO LECTURA, no manda nada. Ver kretz/scale-listen.ts. */
+export async function listenScaleOnScale(baudRate: number, seconds = 60) {
+  const port = await pickPort();
+  cachedPortOpenKey = null;
+  const r = await listenScale(port, { baudRate, seconds });
   cachedPortOpenKey = null;
   return r;
 }

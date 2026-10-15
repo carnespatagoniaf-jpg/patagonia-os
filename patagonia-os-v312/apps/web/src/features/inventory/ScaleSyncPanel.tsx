@@ -19,6 +19,7 @@ import {
   runAuraSyncOnScale,
   setAuraItemBarcodesOnScale,
   probeAuraTotalsOnScale,
+  listenScaleOnScale,
   getScalePortDescription,
   getScaleSerialSettings,
   isScalePortPaired,
@@ -362,6 +363,31 @@ export function ScaleSyncPanel({ products, onDownloadCsv }: { products: ScaleSyn
       }
     } catch (err) {
       report(err instanceof Error ? err.message : "No se pudo hablar con la balanza.");
+    } finally {
+      setScaleBusy(false);
+    }
+  }
+
+  const [listenBaud, setListenBaud] = useState(9600);
+  const [listenText, setListenText] = useState("");
+
+  /** Prueba 1 del ticket acumulado: escucha el cable 60 s sin mandar nada (kretz/scale-listen.ts). El resultado va a soporte. */
+  async function handleListenScale() {
+    setScaleBusy(true);
+    setListenText("");
+    setScaleLog("Escuchando la balanza 60 segundos… hacé la venta de 2 productos ahora.");
+    try {
+      const r = await listenScaleOnScale(listenBaud, 60);
+      setListenText(r.text || "(no llegó nada)");
+      const canSend = profile?.role === "owner" || profile?.role === "admin";
+      const sent = canSend ? await handleSendToSupport(`Escuchar la balanza (${listenBaud} baudios, solo lectura): ${r.detail}
+TEXTO:
+${r.text}
+HEX:
+${r.hex.slice(0, 15000)}`) : false;
+      report(`${r.ok ? (r.raster ? "ℹ️" : "✅") : "ℹ️"} ${r.detail}. No se le mandó nada a la balanza.${sent ? " El resultado ya le llegó al equipo de Patagonia OS." : ""}`);
+    } catch (err) {
+      report(err instanceof Error ? err.message : "No se pudo escuchar la balanza.");
     } finally {
       setScaleBusy(false);
     }
@@ -857,6 +883,16 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
                     <strong>Lo vendido por producto (solo lectura):</strong> pregunta si la balanza entrega cuánto vendió de cada producto, sin borrar nada. Sirve para saber si Patagonia puede bajar el stock leyendo la balanza.
                   </p>
                   <div><button className="secondary" disabled={scaleBusy || noSerial || !scalePortReady} onClick={() => void handleAuraTotalsProbe()}>Leer lo vendido por producto (solo lectura)</button></div>
+                  <p className="setting-help" style={{ marginTop: 6 }}>
+                    <strong>Escuchar la balanza (solo lectura):</strong> para la prueba del ticket acumulado. En la balanza, poner Impresor = TM-T58, tocar este botón y hacer una venta de 2 productos en el próximo minuto. Muestra lo que mandó la balanza por el cable. No le manda nada.
+                  </p>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                    <select value={listenBaud} onChange={(e) => setListenBaud(Number(e.target.value))} disabled={scaleBusy}>
+                      {[9600, 19200, 38400, 57600, 115200].map((b) => <option key={b} value={b}>{b} baudios</option>)}
+                    </select>
+                    <button className="secondary" disabled={scaleBusy || noSerial || !scalePortReady} onClick={() => void handleListenScale()}>Escuchar la balanza 60 segundos</button>
+                  </div>
+                  {listenText && <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, background: "#f6f7f9", padding: 10, borderRadius: 8, maxHeight: 320, overflow: "auto" }}>{listenText}</pre>}
                 </SettingSection>
               )}
 
