@@ -7,7 +7,9 @@ export const SYSTEL_DEPS: SystelDeps = {
   saveCatalog: (branchId, profile, catalog) => saveScaleCatalog(branchId, profile, catalog),
   setLinks: setScaleLinks,
   setActive: setScaleProfileActive,
-  saveLocalBackup: saveProductBackupLocally
+  saveLocalBackup: saveProductBackupLocally,
+  // Build de laboratorio para la prueba controlada en una balanza real (nunca en producción).
+  forceWritable: import.meta.env.VITE_SYSTEL_PUSH_LAB === "1"
 };
 
 export const systelAdapter = makeSystelAdapter(SYSTEL_DEPS);

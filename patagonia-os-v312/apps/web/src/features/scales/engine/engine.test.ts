@@ -12,7 +12,6 @@ import { FriendlyError, friendlyKind, friendlyMessage } from "./friendly";
 import { familyOrder, loadRememberedScale, rememberScale } from "./memory";
 import type { EngineContext, EngineProduct, ScaleAdapter, ScaleSession } from "./types";
 import type { ScaleLink } from "../sale/profile";
-import type { ScaleSetup } from "../sale/scale-sale-service";
 
 const noop = () => {};
 
@@ -53,83 +52,97 @@ const ctx = (products = GRINGOS_PRODUCTS): EngineContext => ({ branchId: "b1", p
 
 beforeEach(() => installFakeLocalStorage());
 
-describe("[SIMULADO, registros REALES] Mi balanza con una Systel Cuora Max", () => {
-  it("lee, compara, configura el código de cada producto, verifica y guarda en Patagonia", async () => {
-    const f = cuora();
-    const { deps, calls } = fakeDb();
-    const s = new SystelSession(f, 20, ctx(), deps);
-    const prep = await s.prepare(noop);
+describe("[SIMULADO, registros REALES] Mi balanza con una Systel Cuora Max: Patagonia → balanza", () => {
+  // Patagonia (con precios). 13 ya está igual; 97 en la balanza es otro producto; 78 no está en la balanza; 98 está solo en la balanza.
+  const PRODUCTS = [
+    P("p1", "1", "ALPINA CAJON DE 15 KG", "unit", 82000),
+    P("p4", "4", "POLLO ENTEROxKG", "kg", 5400),
+    P("p13", "13", "PECHUGA S/H x1x3", "kg", 9200),
+    P("p86", "86", "CRINKLE KG", "kg", 9000),
+    P("p97", "97", "PECHUGA MAYORISTA", "kg", 8000),
+    P("p78", "78", "ARABES", "unit", 1000),
+    P("p500", "500", "SIN PRECIO", "kg", 0),
+    P("pX", "VAC-1", "CODIGO RARO", "kg", 100)
+  ];
+  const lab = (deps: SystelDeps): SystelDeps => ({ ...deps, forceWritable: true });
+
+  it("prepara: qué se manda, qué ya está, qué es de otro producto y qué no se toca", async () => {
+    const { deps } = fakeDb();
+    const prep = await new SystelSession(cuora(), 20, ctx(PRODUCTS), lab(deps)).prepare(noop);
     assert.equal(prep.model, "systel-cuora-max");
     assert.equal(prep.canWrite, true);
-    assert.equal(prep.scaleProducts, 6);
-    assert.equal(prep.writes, 5); // 1, 4, 86 (tipo general), 97 (tipo general), 98 → el 13 ya estaba
-    // 1 ALPINA CAJON DE (cortado) → 1; 4 y 13 iguales; 86 igual; 98 ARABES → 78 por nombre idéntico. 97 queda para revisar.
-    assert.equal(prep.newLinks, 5);
+    assert.equal(prep.ready, 1); // 13
+    assert.equal(prep.writes, 4); // 1 (nombre), 4 (precio), 86 (código de barras), 78 (nuevo)
     assert.deepEqual(prep.pending.map((x) => x.code), [97]);
-    assert.ok(prep.notes.some((n) => /precios se siguen cargando/.test(n)));
-
-    const out = await s.sync(prep, noop);
-    assert.equal(out.ok, true, out.message);
-    assert.match(out.message, /ya podés vender/);
-    for (const [n, raw] of GRINGOS) {
-      const now = f.plus.get(n)!;
-      assert.equal(now.slice(0, 4) + now.slice(5, 56), raw.slice(0, 4) + raw.slice(5, 56), `producto ${n}: nombre/precios/forma de venta intactos`);
-      assert.equal(pluEanSetting(now).type, 1);
-    }
-    assert.ok(calls.backup, "respaldo guardado antes de escribir");
-    assert.equal(calls.active, true);
-    assert.equal(calls.catalog!.find((c) => c.code === 4)!.eanConfig, "20PPPPCCCCCC");
-    assert.equal(calls.catalog!.find((c) => c.code === 1)!.eanConfig, "21PPPPCCCCCC");
-    assert.deepEqual(calls.links!.map((l) => `${l.code}→${l.productId}`).sort(), ["13→p13", "1→p1", "4→p4", "86→p86", "98→p78"]);
-    // Sin escribir nada en el lote: solo función 61 sobre los 5 que faltaban, nunca 32/5/9/26/42.
-    assert.ok(f.received.every((r) => ![5, 9, 26, 32, 42].includes(r.fn)));
-    assert.equal(f.received.filter((r) => r.fn === 61).length, 5);
+    assert.ok(prep.notes.some((n) => /1 producto no tiene precio/.test(n)));
+    assert.ok(prep.notes.some((n) => /1 producto tiene un código que no sirve/.test(n)));
+    assert.ok(prep.notes.some((n) => /La balanza tiene 1 producto que no está en Patagonia: no se toca/.test(n))); // el 98
   });
 
-  it("una segunda vez no escribe nada (ya está todo listo)", async () => {
+  it("sincroniza: nombre, precio, forma de venta y código de cada producto; relee; Mostrador queda listo", async () => {
+    const f = cuora();
+    const { deps, calls } = fakeDb();
+    const s = new SystelSession(f, 20, ctx(PRODUCTS), lab(deps));
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, true, out.message);
+    const read = (n: number) => f.plus.get(n)!;
+    assert.equal(read(1).slice(5, 23), "ALPINA CAJON DE 15");
+    assert.equal(read(4).slice(23, 29), "005400");
+    assert.equal(read(1).slice(29, 35), "078000", "la lista 2 de la balanza no se toca");
+    assert.deepEqual(pluEanSetting(read(86)), { type: 1, config: "20PPPPCCCCCC" });
+    assert.ok(read(78), "producto nuevo creado");
+    assert.equal(read(78).slice(5, 23), "ARABES            ");
+    assert.deepEqual(pluEanSetting(read(78)), { type: 1, config: "21PPPPCCCCCC" });
+    assert.equal(read(97), GRINGOS.find(([n]) => n === 97)![1], "el 97 (otro producto en la balanza) no se toca");
+    assert.equal(read(98), GRINGOS.find(([n]) => n === 98)![1], "lo que Patagonia no tiene no se toca");
+    assert.equal(f.plus.has(500), false);
+    assert.ok(calls.backup, "copia guardada antes de escribir");
+    assert.deepEqual(calls.links!.map((l) => `${l.code}→${l.productId}`).sort(), ["13→p13", "1→p1", "4→p4", "78→p78", "86→p86"]);
+    assert.equal(calls.active, true);
+    assert.ok(f.received.every((r) => ![5, 9, 26, 32, 42].includes(r.fn)), "nunca borra ni cierra ventas");
+  });
+
+  it("con autorización, reemplaza el número ocupado por el producto de Patagonia", async () => {
     const f = cuora();
     const { deps } = fakeDb();
-    const s = new SystelSession(f, 20, ctx(), deps);
+    const s = new SystelSession(f, 20, ctx(PRODUCTS), lab(deps));
+    const out = await s.sync(await s.prepare(noop), noop, { allowReplace: true });
+    assert.equal(out.ok, true);
+    assert.equal(f.plus.get(97)!.slice(5, 23), "PECHUGA MAYORISTA ");
+    assert.equal(out.pending.length, 0);
+  });
+
+  it("la segunda vez no escribe nada", async () => {
+    const f = cuora();
+    const { deps } = fakeDb();
+    const s = new SystelSession(f, 20, ctx(PRODUCTS), lab(deps));
     await s.sync(await s.prepare(noop), noop);
     const before = f.received.length;
-    const s2 = new SystelSession(f, 20, ctx(), deps);
+    const s2 = new SystelSession(f, 20, ctx(PRODUCTS), lab(deps));
     const prep2 = await s2.prepare(noop);
     assert.equal(prep2.writes, 0);
     await s2.sync(prep2, noop);
     assert.ok(f.received.slice(before).every((r) => r.fn !== 61));
   });
 
-  it("balanza Systel con OTRA firma: se lee y se vincula, pero NO se escribe nada", async () => {
-    const f = cuora("0040");
-    const { deps, calls } = fakeDb();
-    const s = new SystelSession(f, 20, ctx(), deps);
-    const prep = await s.prepare(noop);
-    assert.equal(prep.model, "systel-otra");
-    assert.equal(prep.canWrite, false);
-    assert.equal(prep.writes, 0);
-    const out = await s.sync(prep, noop);
-    assert.equal(out.ok, true);
-    assert.equal(f.received.filter((r) => r.fn === 61).length, 0);
-    assert.ok(calls.catalog);
-  });
-
-  it("si la balanza cambia otra cosa al escribir: frena, restaura y NO guarda nada en Patagonia", async () => {
+  it("si la balanza guarda otra cosa: vuelve a escribir lo que había, lo comprueba y frena sin tocar Patagonia", async () => {
     const f = cuora();
     f.corruptAfterWrite = 4;
     f.corruptOnce = true;
     const { deps, calls } = fakeDb();
-    const s = new SystelSession(f, 20, ctx(), deps);
+    const s = new SystelSession(f, 20, ctx(PRODUCTS), lab(deps));
     const out = await s.sync(await s.prepare(noop), noop);
     assert.equal(out.ok, false);
     assert.match(out.message, /Frenamos para cuidar tus productos/);
+    assert.equal((out.support as { restored: boolean }).restored, true);
+    assert.equal(f.plus.get(4)!.slice(23, 29), "005200", "el 4 quedó como estaba");
     assert.equal(calls.catalog, undefined);
-    assert.equal(calls.active, undefined);
   });
 
-  it("se corta el cable a mitad (la balanza deja de contestar): frena sin guardar nada", async () => {
+  it("se corta el cable a mitad: frena y no guarda nada en Patagonia", async () => {
     const f = cuora();
     const { deps, calls } = fakeDb();
-    const s = new SystelSession(f, 20, ctx(), deps);
+    const s = new SystelSession(f, 20, ctx(PRODUCTS), lab(deps));
     const prep = await s.prepare(noop);
     let writes = 0;
     const orig = f.exchange.bind(f);
@@ -142,15 +155,40 @@ describe("[SIMULADO, registros REALES] Mi balanza con una Systel Cuora Max", () 
     assert.equal(calls.catalog, undefined);
   });
 
-  it("respeta lo que ya decidió una persona (no pisa vínculos)", async () => {
+  it("si alguien cambió la balanza entre la lectura y el envío, no escribe encima", async () => {
     const f = cuora();
-    const setup = { profile: { scaleKey: "systel", brand: "systel", weighedFormat: null, unitFormat: null, totalFormat: null, amountDecimals: 0, genericCodes: [], catalog: [] }, links: [{ code: 97, kind: "product" as const, productId: "p103" }, { code: 4, kind: "libre" as const, productId: null }], readAt: null, repeatWindowMinutes: 3, active: true };
-    const { deps, calls } = fakeDb(setup);
-    const s = new SystelSession(f, 20, ctx(), deps);
+    const { deps } = fakeDb();
+    const s = new SystelSession(f, 20, ctx(PRODUCTS), lab(deps));
     const prep = await s.prepare(noop);
-    assert.equal(prep.pending.length, 0);
-    await s.sync(prep, noop);
-    assert.ok(!calls.links!.some((l) => l.code === 97 || l.code === 4));
+    f.plus.set(1, f.plus.get(1)!.replace("082000", "099000"));
+    const out = await s.sync(prep, noop);
+    assert.equal(out.ok, false);
+    assert.equal(f.plus.get(1)!.slice(23, 29), "099000");
+  });
+
+  it("sin la prueba controlada en una balanza real, no escribe: avisa que lo habilita soporte", async () => {
+    const f = cuora();
+    const { deps } = fakeDb();
+    const s = new SystelSession(f, 20, ctx(PRODUCTS), deps);
+    const prep = await s.prepare(noop);
+    assert.equal(prep.canWrite, false);
+    assert.match(prep.blocker!, /lo hace soporte/);
+    await assert.rejects(() => s.sync(prep, noop));
+    assert.equal(f.received.filter((r) => r.fn === 61).length, 0);
+  });
+
+  it("Systel con otra firma: nunca escribe, aunque sea el build de laboratorio", async () => {
+    const f = cuora("0040");
+    const { deps } = fakeDb();
+    const prep = await new SystelSession(f, 20, ctx(PRODUCTS), lab(deps)).prepare(noop);
+    assert.equal(prep.model, "systel-otra");
+    assert.equal(prep.canWrite, false);
+  });
+
+  it("un cajero no puede mandar productos (tiene que ser el dueño o un administrador)", async () => {
+    const { deps } = fakeDb();
+    const prep = await new SystelSession(cuora(), 20, { ...ctx(PRODUCTS), canManageLinks: false }, lab(deps)).prepare(noop);
+    assert.match(prep.blocker!, /dueño o un administrador/);
   });
 });
 

@@ -106,7 +106,7 @@ export interface SystelClientOptions {
    * Que una funcione no habilita la otra: en producción salen de SYSTEL_VERIFIED_WRITE_PROFILES
    * (por firma + formato + operación), hoy vacío.
    */
-  writes?: { price?: boolean; create?: boolean; ticketBarcodes?: boolean; productBarcode?: boolean };
+  writes?: { price?: boolean; create?: boolean; ticketBarcodes?: boolean; productBarcode?: boolean; products?: boolean };
 }
 
 export class SystelError extends Error {
@@ -122,14 +122,14 @@ export class SystelClient {
   private readonly timeoutMs: number;
   private readonly busyRetryMs: number[];
   private readonly createChecksum: "con" | "sin_experimental";
-  private readonly writes: { price: boolean; create: boolean; ticketBarcodes: boolean; productBarcode: boolean };
+  private readonly writes: { price: boolean; create: boolean; ticketBarcodes: boolean; productBarcode: boolean; products: boolean };
 
   constructor(private readonly link: SystelLink, options: SystelClientOptions) {
     this.address = options.address;
     this.timeoutMs = options.timeoutMs ?? 1500;
     this.createChecksum = options.createChecksum ?? "con";
     this.log = options.log ?? [];
-    this.writes = { price: options.writes?.price === true, create: options.writes?.create === true, ticketBarcodes: options.writes?.ticketBarcodes === true, productBarcode: options.writes?.productBarcode === true };
+    this.writes = { price: options.writes?.price === true, create: options.writes?.create === true, ticketBarcodes: options.writes?.ticketBarcodes === true, productBarcode: options.writes?.productBarcode === true, products: options.writes?.products === true };
     this.busyRetryMs = options.busyRetryMs ?? [300, 800, 1500, 3000, 5000];
   }
 
@@ -331,6 +331,17 @@ export class SystelClient {
     // El byte del tipo de código (0x01) está 13 lugares antes del final de los datos fijos (antes de ingredientes).
     const end = data[data.length - 1] === "N" ? data.length - 1 : data.length - 101;
     return this.call(`código de barras del producto ${number} (función ${LAYOUT_INFO[layout].writeFn})`, LAYOUT_INFO[layout].writeFn, data, { token: WRITE_TOKEN, allowTypeByteAt: end - 13 });
+  }
+
+  /**
+   * Mi balanza (Patagonia → balanza): escribe el producto COMPLETO (función 61) con los datos que arma
+   * scales/engine/adapters/systel-push.ts (nombre, precio, código, forma de venta y código de barras, el resto del
+   * registro leído tal cual). Bloqueado salvo `writes.products`. No relee: lo hace quien llama.
+   */
+  async writeProductRecord(layout: SystelLayout, number: number, data: string): Promise<SystelReply | null | "bloqueado"> {
+    if (!this.writes.products) return "bloqueado";
+    const end = data[data.length - 1] === "N" ? data.length - 1 : data.length - 101;
+    return this.call(`producto ${number} desde Patagonia (función ${LAYOUT_INFO[layout].writeFn})`, LAYOUT_INFO[layout].writeFn, data, { token: WRITE_TOKEN, allowTypeByteAt: end - 13 });
   }
 
   async createPlu(layout: SystelLayout, input: NewPluInput, knownNumbers: Set<number>): Promise<WriteOutcome> {

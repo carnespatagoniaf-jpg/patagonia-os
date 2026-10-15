@@ -63,13 +63,16 @@ export const SCALE_CAPABILITIES: Record<ScaleModelId, ScaleCapabilities> = {
   "systel-cuora-max": {
     label: "Systel Cuora Max",
     readProducts: "real",
-    // Precios por cable (función 33): documentado, sin probar en una balanza real.
-    sendProducts: "no",
+    // Patagonia → balanza con la función 61 (producto completo). Comprobado en Los gringos: crear productos con nombre,
+    // precio y forma de venta (7999 a 7995) y reescribir el registro completo de 103 productos. Falta UNA prueba
+    // controlada: cambiarle precio y nombre a un producto que ya existe y ver si la balanza conserva sus totales.
+    sendProducts: "simulado",
     itemBarcodes: "real",
     verifyAfterWrite: "real",
     ticketSale: "real",
     sources: [
       "Los gringos 14/10/2026: 103 productos con su código propio (función 61), cada uno releído; ventas y demás datos iguales",
+      "Los gringos 14/10/2026: productos de prueba creados con nombre, precio y forma de venta, releídos iguales",
       "Ticket real: 2179950000014 (7995 × 1 u), 2000130002101 (13, 0,210 kg), TOTAL 2202000019336"
     ]
   },
