@@ -367,6 +367,20 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
         addPendingLabel(resolved.product, resolved.quantity);
         return;
       }
+      if (resolved.amount !== undefined) {
+        // La etiqueta trae el importe (Kretz Aura en Pre-Empaque): se cobra el importe del papel, exacto, en su propia
+        // línea (dos papeles del mismo producto son dos líneas). Mismo camino que el ticket leído de una Systel.
+        const amount = resolved.amount;
+        const product = resolved.product;
+        const stamp = `${raw}@${Date.now()}`;
+        setCart((current) => [
+          ...current,
+          { key: `${product.id}|${stamp}`, kind: "product", productId: product.id, name: product.name, unit: product.unit, quantity: resolved.quantity, unitPrice: amount / resolved.quantity, source: "scale", scaleTickets: 1, scaleAmount: amount, scaleTicket: stamp }
+        ]);
+        setMessage(`Agregado: ${resolved.detail}, ${formatMoney(amount)}.`);
+        done();
+        return;
+      }
       quickAdd(resolved.product, resolved.quantity, "scale");
       setMessage(`Agregado: ${resolved.detail}.`);
       return;

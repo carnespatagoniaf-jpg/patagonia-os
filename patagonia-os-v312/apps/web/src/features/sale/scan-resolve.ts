@@ -22,7 +22,7 @@ import { parseAuraSumTicket, parseSystelSumTicket, parseTicketTotalBarcode, pars
 
 export type ScanResolution =
   | { type: "product"; product: Product }
-  | { type: "label"; product: Product; quantity: number; plu: string; detail: string }
+  | { type: "label"; product: Product; quantity: number; plu: string; detail: string; /** Importe impreso por la balanza (etiquetas con importe): se cobra ESE, no cantidad × precio. */ amount?: number }
   | { type: "ticket_total"; amount: number; key: string }
   | { type: "ticket_without_amount"; message: string }
   /** TOTAL de una Systel: el detalle se lee de la balanza por cable (si está conectada); si no, `message`. */
@@ -131,7 +131,9 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
     if (!(quantity > 0)) {
       return { type: "error", message: `La etiqueta de ${p.name} trae cantidad 0. No se agregó nada.` };
     }
-    return { type: "label", product: p, quantity, plu: label.plu, detail: `${p.name}: ${fmtQty(quantity, p.unit)} (etiqueta de balanza)` };
+    // Con importe: se cobra lo que cobró la balanza (real Pollo y mar 15/10: 0,245 kg × $15.900 = $3.895,50 y la Aura
+    // imprime $3.895; recalcular daba $3.896).
+    return { type: "label", product: p, quantity, plu: label.plu, detail: `${p.name}: ${fmtQty(quantity, p.unit)} (etiqueta de balanza)`, ...(label.kind === "amount" ? { amount: label.amount } : {}) };
   }
 
   // 4. Código exacto sin distinguir mayúsculas, o búsqueda.

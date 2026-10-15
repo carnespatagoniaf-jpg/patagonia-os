@@ -155,3 +155,23 @@ describe("[REAL] ticket de la balanza Systel de TripleS (un código por producto
     assert.match((r as { message: string }).message, /cada producto/);
   });
 });
+
+describe("[REAL] Kretz Aura en Pre-Empaque (Pollo y mar 15/10/2026, un ticket por producto)", () => {
+  // Ticket real "ENV:15OCT26 COSTELETAS 0.245kg @ 15900$/kg 3895$", código 2002103895000 (2-3-7 con importe).
+  const AURA_ITEM = { prefixLength: 2, pluLength: 3, weightLength: 7, weightDivisor: 100, totalLength: 13, payloadType: "amount" as const };
+  const products = [product("21", "COSTELETAS", "kg", 15900), product("1", "milanesas de pollo", "kg", 11600)];
+
+  it("carga el producto con sus kilos y el importe EXACTO del papel ($3.895, no $3.896)", () => {
+    const r = resolveScan("2002103895000", products, AURA_ITEM);
+    assert.equal(r.type, "label");
+    assert.equal(r.type === "label" && r.product.code, "21");
+    assert.equal(r.type === "label" && r.quantity, 0.245);
+    assert.equal(r.type === "label" && r.amount, 3895);
+  });
+
+  it("el ticket con varios productos (código del TOTAL 998) sigue siendo un total", () => {
+    const r = resolveScan("2099806737003", products, AURA_ITEM);
+    assert.equal(r.type, "ticket_total");
+    assert.equal(r.type === "ticket_total" && r.amount, 6737);
+  });
+});
