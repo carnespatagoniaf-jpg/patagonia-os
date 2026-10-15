@@ -158,6 +158,9 @@ export interface PurchaseItem {
   unit: "kg" | "unit";
   unitPrice: Money;
   lineTotal: Money;
+  /** Línea "para despostar" (migración 126): animal y kilos totales; crea la res en Despiece. */
+  carcassAnimalType?: string;
+  carcassWeight?: Quantity;
 }
 
 export interface Purchase {
@@ -326,6 +329,8 @@ export interface CarcassBatch {
   totalCost: Money;
   notes?: string;
   createdAt: string;
+  /** La res vino de una línea de Compras (migración 126): peso, costo, fecha y proveedor se corrigen en Compras. */
+  purchaseItemId?: string;
 }
 
 export interface CarcassCut {

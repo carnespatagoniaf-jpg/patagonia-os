@@ -7,6 +7,16 @@ export interface PurchaseLineInput {
   quantity: number;
   unit: "kg" | "unit";
   unitPrice: number;
+  /** Para despostar (migración 126): crea la res en Despiece; sin producto. */
+  carcassAnimalType?: string;
+  /** Kilos totales cuando la línea es por unidad (ej. 4 cajones = 80 kg). */
+  carcassWeight?: number;
+}
+
+export interface PurchaseCarcassResult {
+  batchId: string;
+  animalType: string;
+  cuts: number;
 }
 
 export interface CreatePurchaseInput {
@@ -17,7 +27,7 @@ export interface CreatePurchaseInput {
   items: PurchaseLineInput[];
 }
 
-export async function createPurchase(input: CreatePurchaseInput): Promise<{ id: string; total: number }> {
+export async function createPurchase(input: CreatePurchaseInput): Promise<{ id: string; total: number; carcass: PurchaseCarcassResult[] }> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const payload = input.items.map((item) => ({
@@ -25,7 +35,8 @@ export async function createPurchase(input: CreatePurchaseInput): Promise<{ id: 
     description: item.description ?? null,
     quantity: item.quantity,
     unit: item.unit,
-    unit_price: item.unitPrice
+    unit_price: item.unitPrice,
+    ...(item.carcassAnimalType ? { carcass_animal_type: item.carcassAnimalType, carcass_weight: item.carcassWeight ?? null } : {})
   }));
 
   const { data, error } = await supabase.rpc("create_purchase_transaction", {
@@ -37,7 +48,12 @@ export async function createPurchase(input: CreatePurchaseInput): Promise<{ id: 
   });
 
   if (error) throw error;
-  return { id: data.id, total: Number(data.total) };
+  const carcass = ((data.carcass ?? []) as Array<{ batch_id: string; animal_type: string; cuts: number }>).map((c) => ({
+    batchId: c.batch_id,
+    animalType: c.animal_type,
+    cuts: Number(c.cuts)
+  }));
+  return { id: data.id, total: Number(data.total), carcass };
 }
 
 interface PurchaseRow {
@@ -102,6 +118,8 @@ interface PurchaseItemRow {
   unit: "kg" | "unit";
   unit_price: number;
   line_total: number;
+  carcass_animal_type?: string | null;
+  carcass_weight?: number | null;
 }
 
 function mapPurchaseItem(row: PurchaseItemRow): PurchaseItem {
@@ -113,7 +131,9 @@ function mapPurchaseItem(row: PurchaseItemRow): PurchaseItem {
     quantity: Number(row.quantity),
     unit: row.unit,
     unitPrice: Number(row.unit_price),
-    lineTotal: Number(row.line_total)
+    lineTotal: Number(row.line_total),
+    carcassAnimalType: row.carcass_animal_type ?? undefined,
+    carcassWeight: row.carcass_weight == null ? undefined : Number(row.carcass_weight)
   };
 }
 
@@ -122,7 +142,7 @@ export async function listPurchaseItems(purchaseId: string): Promise<PurchaseIte
 
   const { data, error } = await supabase
     .from("purchase_items")
-    .select("id,purchase_id,product_id,description,quantity,unit,unit_price,line_total")
+    .select("id,purchase_id,product_id,description,quantity,unit,unit_price,line_total,carcass_animal_type,carcass_weight")
     .eq("purchase_id", purchaseId);
 
   if (error) throw error;

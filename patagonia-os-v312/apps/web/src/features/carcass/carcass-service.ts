@@ -11,6 +11,7 @@ interface CarcassBatchRow {
   total_cost: number;
   notes: string | null;
   created_at: string;
+  purchase_item_id?: string | null;
 }
 
 function mapBatch(row: CarcassBatchRow): CarcassBatch {
@@ -23,7 +24,8 @@ function mapBatch(row: CarcassBatchRow): CarcassBatch {
     totalWeight: Number(row.total_weight),
     totalCost: Number(row.total_cost),
     notes: row.notes ?? undefined,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    purchaseItemId: row.purchase_item_id ?? undefined
   };
 }
 
@@ -32,7 +34,7 @@ export async function listCarcassBatches(branchId: string): Promise<CarcassBatch
 
   const { data, error } = await supabase
     .from("carcass_batches")
-    .select("id,branch_id,batch_date,animal_type,supplier_id,total_weight,total_cost,notes,created_at")
+    .select("id,branch_id,batch_date,animal_type,supplier_id,total_weight,total_cost,notes,created_at,purchase_item_id")
     .eq("branch_id", branchId)
     .order("batch_date", { ascending: false });
 

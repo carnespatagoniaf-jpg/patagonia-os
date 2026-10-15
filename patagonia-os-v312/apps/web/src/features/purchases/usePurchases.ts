@@ -133,7 +133,7 @@ export function usePurchases() {
         });
 
         await loadSupplier(supplierId);
-        return { id: purchaseId, total };
+        return { id: purchaseId, total, carcass: [] };
       }
 
       const input: CreatePurchaseInput = { branchId, supplierId, purchaseDate, invoiceNumber, items: lines };

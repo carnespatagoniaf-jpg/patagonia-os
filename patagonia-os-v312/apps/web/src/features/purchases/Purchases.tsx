@@ -11,6 +11,9 @@ import { useTreasury } from "../shifts/useTreasury";
 import type { PurchaseLineInput } from "./purchases-service";
 import { parseAmount } from "../../lib/money";
 import { quantityNumber } from "../sale/quantity";
+import { useAuth } from "../auth/AuthProvider";
+import { can } from "../auth/permissions";
+import { useCarcassTemplates } from "../carcass/useCarcassTemplates";
 
 interface DraftLine {
   key: string;
@@ -19,11 +22,18 @@ interface DraftLine {
   quantity: string;
   unit: "kg" | "unit";
   unitPrice: string;
+  /** Para despostar (migración 126): la res aparece sola en Despiece. */
+  carcass: boolean;
+  animalType: string;
+  /** Kilos totales cuando se compra por unidad (cajones). */
+  carcassWeight: string;
 }
 
 function emptyLine(): DraftLine {
-  return { key: crypto.randomUUID(), productId: "", description: "", quantity: "", unit: "kg", unitPrice: "" };
+  return { key: crypto.randomUUID(), productId: "", description: "", quantity: "", unit: "kg", unitPrice: "", carcass: false, animalType: "", carcassWeight: "" };
 }
+
+const DEFAULT_ANIMAL_TYPES = ["Vaca / media res", "Cerdo", "Pollo", "Mocho"];
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -72,6 +82,19 @@ export function Purchases() {
     voidPurchase
   } = usePurchases();
   const { accounts } = useTreasury();
+  const { profile } = useAuth();
+  // Para despostar: solo quien tiene Despiece (plan Estándar o más).
+  const canCarcass = can(profile, "carcass.manage");
+  const { templates } = useCarcassTemplates();
+  const animalTypes = useMemo(() => {
+    const seen = new Map<string, string>();
+    for (const name of [...DEFAULT_ANIMAL_TYPES, ...templates.map((t) => t.animalType)]) {
+      if (name.trim() && !seen.has(name.trim().toLowerCase())) seen.set(name.trim().toLowerCase(), name.trim());
+    }
+    return [...seen.values()];
+  }, [templates]);
+  const templateCutsFor = (animalType: string) =>
+    templates.filter((t) => t.animalType.trim().toLowerCase() === animalType.trim().toLowerCase()).length;
 
   const [products, setProducts] = useState<Product[]>(isSupabaseConfigured ? [] : demoProducts);
   const [updateCosts, setUpdateCosts] = useState(true);
@@ -219,14 +242,27 @@ export function Purchases() {
         const unitPrice = parseAmount(line.unitPrice);
         if (!Number.isFinite(quantity) || quantity <= 0) throw new Error("Cada ítem necesita una cantidad válida.");
         if (!Number.isFinite(unitPrice) || unitPrice < 0) throw new Error("Cada ítem necesita un precio válido.");
+        if (line.carcass) {
+          const animalType = line.animalType.trim();
+          if (!animalType) throw new Error("En la línea para despostar, elegí qué es (Pollo, Vaca / media res…).");
+          if (line.unit === "kg") return { carcassAnimalType: animalType, description: animalType, quantity, unit: line.unit, unitPrice };
+          const weight = quantityNumber(line.carcassWeight);
+          if (!Number.isFinite(weight) || weight <= 0) throw new Error(`Poné cuántos kilos son en total los ${line.quantity} de ${animalType}.`);
+          return { carcassAnimalType: animalType, carcassWeight: weight, description: animalType, quantity, unit: line.unit, unitPrice };
+        }
         if (line.productId) return { productId: line.productId, quantity, unit: line.unit, unitPrice };
         if (!line.description.trim()) throw new Error("Elegí un producto o escribí una descripción.");
         return { description: line.description.trim(), quantity, unit: line.unit, unitPrice };
       });
 
-      await createPurchase(selectedSupplierId, purchaseDate, invoiceNumber.trim() || undefined, parsed);
+      const created = await createPurchase(selectedSupplierId, purchaseDate, invoiceNumber.trim() || undefined, parsed);
       setLines([emptyLine()]);
       setInvoiceNumber("");
+      const carcassNote = created.carcass
+        .map((c) => c.cuts > 0
+          ? ` ${c.animalType}: repartido solo en ${c.cuts} cortes, ya están en Stock (si querés, corregí los kilos reales en Despiece).`
+          : ` ${c.animalType}: quedó en Despiece para cargar los cortes.`)
+        .join("");
 
       // Con inflación el costo del producto se desactualiza si nadie lo edita a
       // mano: se actualiza con el precio de esta compra (opcional, tildado por defecto).
@@ -247,7 +283,7 @@ export function Purchases() {
           }
         }
       }
-      setMessage(`Compra registrada.${costNote}`);
+      setMessage(`Compra registrada.${carcassNote}${costNote}`);
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo registrar la compra.");
     } finally {
@@ -352,7 +388,9 @@ export function Purchases() {
 
   async function handleVoidPurchase(purchaseId: string) {
     if (busy) return;
-    if (!window.confirm("¿Seguro que querés anular esta compra? Se revierte el stock que había sumado y no se puede deshacer.")) return;
+    const hasCarcass = (items[purchaseId] ?? []).some((item) => item.carcassAnimalType);
+    const carcassWarning = hasCarcass ? " También se borra de Despiece lo que vino para despostar, con sus cortes." : "";
+    if (!window.confirm(`¿Seguro que querés anular esta compra? Se revierte el stock que había sumado y no se puede deshacer.${carcassWarning}`)) return;
     setBusy(true);
     try {
       if (!selectedSupplierId) return;
@@ -578,7 +616,32 @@ export function Purchases() {
                 return (
                   <div key={line.key} className="purchase-line">
                     <div className="purchase-line-product">
-                      {selectedProduct ? (
+                      {line.carcass ? (
+                        <>
+                          <input
+                            list="purchase-animal-types"
+                            placeholder="¿Qué es? (Pollo, Vaca…)"
+                            value={line.animalType}
+                            onChange={(e) => updateLine(line.key, { animalType: e.target.value })}
+                          />
+                          {line.unit === "unit" && (
+                            <input
+                              type="text"
+                              inputMode="decimal"
+                              placeholder="Kilos en total"
+                              value={line.carcassWeight}
+                              onFocus={(e) => e.target.select()}
+                              onChange={(e) => updateLine(line.key, { carcassWeight: e.target.value })}
+                              style={{ marginTop: 4 }}
+                            />
+                          )}
+                          <small className="muted">
+                            {line.animalType.trim() && templateCutsFor(line.animalType) > 0
+                              ? `Se reparte solo en ${templateCutsFor(line.animalType)} cortes y entran a Stock.`
+                              : "Aparece en Despiece para cargar los cortes (con una plantilla de cortes se reparte solo)."}
+                          </small>
+                        </>
+                      ) : selectedProduct ? (
                         <>
                           <span className="purchase-line-picked">
                             <strong>{selectedProduct.name}</strong>
@@ -616,6 +679,19 @@ export function Purchases() {
                           )}
                         </div>
                       )}
+                      {canCarcass && (
+                        <label className="muted" style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, marginTop: 4, whiteSpace: "nowrap" }} title="Media res, cajones de pollo…: aparece solo en Despiece">
+                          <input
+                            type="checkbox"
+                            checked={line.carcass}
+                            style={{ width: "auto", margin: 0 }}
+                            onChange={(e) => updateLine(line.key, e.target.checked
+                              ? { carcass: true, productId: "", animalType: line.animalType || line.description }
+                              : { carcass: false })}
+                          />
+                          <span>Para despostar</span>
+                        </label>
+                      )}
                     </div>
                     <input
                       type="text"
@@ -642,8 +718,12 @@ export function Purchases() {
                 );
               })}
             </div>
+            <datalist id="purchase-animal-types">
+              {animalTypes.map((name) => <option key={name} value={name} />)}
+            </datalist>
             <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
               Para una descripción libre (sin elegir un producto de la lista): escribí el nombre y tocá afuera o Esc.
+              {canCarcass && " Lo que se desposta (media res, cajones de pollo) marcalo \"Para despostar\": aparece solo en Despiece, no hace falta cargarlo dos veces."}
             </p>
 
             <div style={{ marginTop: 12 }}>
@@ -716,7 +796,14 @@ export function Purchases() {
                     <tbody>
                       {(items[purchase.id] ?? []).map((item) => (
                         <tr key={item.id}>
-                          <td>{item.description ?? products.find((p) => p.id === item.productId)?.name ?? "Producto"}</td>
+                          <td>
+                            {item.description ?? products.find((p) => p.id === item.productId)?.name ?? "Producto"}
+                            {item.carcassAnimalType && (
+                              <small className="muted" style={{ display: "block" }}>
+                                Para despostar{item.unit === "unit" && item.carcassWeight ? ` · ${item.carcassWeight} kg` : ""} · está en Despiece
+                              </small>
+                            )}
+                          </td>
                           {editingItemId === item.id ? (
                             <>
                               <td>

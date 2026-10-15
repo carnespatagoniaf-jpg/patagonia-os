@@ -615,6 +615,10 @@ export function Carcass() {
             <h2>Reses cargadas</h2>
             <span>{loading ? "Cargando…" : `${batches.length}`}</span>
           </div>
+          <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
+            ¿Vino con factura del proveedor? Cargala en <strong>Compras</strong> y marcá la línea "Para despostar": la res aparece sola acá
+            (y con plantilla, ya repartida en cortes). No la cargues también acá, porque la deuda con el proveedor quedaría doble.
+          </p>
           {showBatchForm ? (
             <>
               <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10 }}>
@@ -678,8 +682,14 @@ export function Carcass() {
                     ) : (
                       <button className="secondary" onClick={() => setSelectedId(b.id)}>Ver</button>
                     )}{" "}
-                    <button className="secondary" onClick={() => startEditBatch(b.id)}>Editar</button>{" "}
-                    <button className="danger" onClick={() => handleDeleteBatch(b.id)}>Quitar</button>
+                    {b.purchaseItemId ? (
+                      <small className="muted">De Compras · se corrige allá</small>
+                    ) : (
+                      <>
+                        <button className="secondary" onClick={() => startEditBatch(b.id)}>Editar</button>{" "}
+                        <button className="danger" onClick={() => handleDeleteBatch(b.id)}>Quitar</button>
+                      </>
+                    )}
                   </td>
                 </tr>
               ))}
