@@ -1,0 +1,89 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<title>Ticket de balanza: las dos formas</title>
+<style>
+  body { margin: 0; background: #f2f4f7; font-family: Inter, "Segoe UI", system-ui, sans-serif; color: #18202b; }
+  .wrap { width: 980px; padding: 26px; }
+  h1 { margin: 0 0 4px; font-size: 24px; }
+  .sub { margin: 0 0 18px; color: #697386; font-size: 14px; }
+  .cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+  .col { background: white; border: 1px solid #e5e7eb; border-radius: 16px; padding: 18px; display: grid; gap: 12px; align-content: start; }
+  .tag { display: inline-block; font-weight: 800; font-size: 13px; padding: 4px 10px; border-radius: 999px; }
+  .bad { background: #fdf3f2; color: #8b1e1e; }
+  .good { background: #eaf6ee; color: #176329; }
+  h2 { margin: 0; font-size: 18px; }
+  .ticket { margin: 0 auto; width: 300px; background: #fff; border: 1px dashed #c3cad5; padding: 14px 16px; font-family: "Courier New", monospace; font-size: 13px; line-height: 1.35; box-shadow: 0 6px 18px rgba(0,0,0,.06); }
+  .c { text-align: center; }
+  .r { text-align: right; }
+  .sep { border-top: 1px dashed #999; margin: 6px 0; }
+  .bars { height: 34px; margin: 4px auto 0; width: 210px; background: repeating-linear-gradient(90deg, #111 0 2px, #fff 2px 4px, #111 4px 5px, #fff 5px 8px, #111 8px 11px, #fff 11px 12px); }
+  .bars.small { height: 24px; width: 170px; }
+  .num { text-align: center; font-size: 11px; letter-spacing: 1px; }
+  .hl { outline: 2px solid #176329; outline-offset: 2px; border-radius: 3px; }
+  .hlb { outline: 2px solid #8b1e1e; outline-offset: 2px; border-radius: 3px; }
+  ul { margin: 0; padding-left: 18px; font-size: 14px; display: grid; gap: 5px; }
+  .foot { margin-top: 18px; background: white; border: 1px solid #e5e7eb; border-radius: 16px; padding: 16px 18px; font-size: 14px; display: grid; gap: 6px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Ticket de balanza con varios productos: las dos formas</h1>
+  <p class="sub">Mismo pedido: 1 kg de bondiola, costeletas y milanesas de pollo.</p>
+  <div class="cols">
+    <div class="col">
+      <span class="tag bad">HOY · Kretz Aura de Sonia</span>
+      <h2>Un solo código: el del TOTAL</h2>
+      <div class="ticket">
+        <div class="c">KRETZ S.A.</div>
+        <div>FECHA:15/10/26 &nbsp;&nbsp;&nbsp;&nbsp; T.0034</div>
+        <div class="sep"></div>
+        <div>BONDIOLA</div><div>&nbsp;1.000kg @ 14500$/kg</div><div class="r">14500$</div>
+        <div>COSTELETAS</div><div>&nbsp;0.245kg @ 15900$/kg</div><div class="r">3895$</div>
+        <div>MILANESAS DE POL</div><div>&nbsp;0.190kg @ 11600$/kg</div><div class="r">2204$</div>
+        <div class="sep"></div>
+        <div>03 ART. &nbsp; TOTAL = &nbsp;20599$</div>
+        <div class="hlb"><div class="bars"></div><div class="num">2 099802 059900</div></div>
+      </div>
+      <ul>
+        <li>El código solo dice "total $20.599": no dice qué productos son.</li>
+        <li>Mostrador no puede saber los productos solo con escanear.</li>
+        <li>Para bajar el stock hay que cargar el detalle a mano.</li>
+        <li>La Aura <b>no tiene</b> la opción de código por producto: lo dice su manual y la balanza la rechazó al probarla (15/10).</li>
+      </ul>
+    </div>
+    <div class="col">
+      <span class="tag good">LO QUE QUEREMOS · Report Pro o Systel Cuora Max</span>
+      <h2>Un código debajo de cada producto</h2>
+      <div class="ticket">
+        <div class="c">BALANZA</div>
+        <div>FECHA:15/10/26 &nbsp;&nbsp;&nbsp;&nbsp; T.0034</div>
+        <div class="sep"></div>
+        <div>BONDIOLA</div><div>&nbsp;1.000kg @ 14500$/kg</div><div class="r">14500$</div>
+        <div class="hl"><div class="bars small"></div><div class="num">2 000301 000003</div></div>
+        <div>COSTELETAS</div><div>&nbsp;0.245kg @ 15900$/kg</div><div class="r">3895$</div>
+        <div class="hl"><div class="bars small"></div><div class="num">2 002100 024504</div></div>
+        <div>MILANESAS DE POL</div><div>&nbsp;0.190kg @ 11600$/kg</div><div class="r">2204$</div>
+        <div class="hl"><div class="bars small"></div><div class="num">2 000100 019007</div></div>
+        <div class="sep"></div>
+        <div>03 ART. &nbsp; TOTAL = &nbsp;20599$</div>
+        <div><div class="bars"></div><div class="num">2 202000 205997</div></div>
+      </div>
+      <ul>
+        <li>Un solo papel, de corrido, saliendo de la balanza.</li>
+        <li>Cada producto trae su código con el producto y los kilos.</li>
+        <li>La cajera escanea los códigos y aparecen los 3 productos solos; el TOTAL controla que no falte ninguno.</li>
+        <li>El stock baja de cada producto al cobrar.</li>
+        <li>Así ya funciona con la Systel de Los gringos. En Kretz, lo tiene la <b>Report Pro</b> (opción "TIQUET C.B. INDIVID").</li>
+      </ul>
+    </div>
+  </div>
+  <div class="foot">
+    <b>Cómo llegar al ticket de la derecha con la Kretz de Sonia:</b>
+    <div><b>Opción 1:</b> preguntarle a Kretz si hay una actualización de la Aura Eco (o Aura Eco 2) que agregue el "código de barras individual en ticket de suma". Si existe, Patagonia lo activa sola al sincronizar: el comando ya está hecho.</div>
+    <div><b>Opción 2:</b> si Kretz dice que no, cambiar a una balanza que lo haga: Kretz Report Pro o Systel Cuora Max.</div>
+  </div>
+</div>
+</body>
+</html>

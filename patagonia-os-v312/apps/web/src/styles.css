@@ -697,3 +697,15 @@ a.button-link:hover { background: #731818; }
 @media (max-width: 720px) { .my-scale-review-row { grid-template-columns: 1fr; } .my-scale { padding: 18px 16px; } }
 .my-scale-support { border: 1px dashed #c3cad5; border-radius: 14px; padding: 12px 14px; background: #fafbfc; width: 100%; }
 .my-scale-support summary { cursor: pointer; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+
+/* Botón "Balanza" (features/scales/ScaleButton.tsx): toda la configuración de la balanza en un panel lateral. */
+.scale-button { display: inline-flex; align-items: center; gap: 8px; min-height: 40px; padding: 8px 14px; border-radius: 10px; border: 1px solid #d6dce5; background: white; color: #18202b; font-weight: 700; font-size: 14px; flex: none; }
+.scale-button:hover { border-color: #8b1e1e; color: #8b1e1e; }
+.scale-button svg { color: #8b1e1e; }
+.scale-drawer-backdrop { position: fixed; inset: 0; background: rgba(24, 32, 43, .35); z-index: 60; display: flex; justify-content: flex-end; }
+.scale-drawer { width: min(720px, 100%); height: 100%; background: #f2f4f7; box-shadow: -12px 0 32px rgba(0, 0, 0, .15); display: flex; flex-direction: column; }
+.scale-drawer-head { display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; background: white; border-bottom: 1px solid #e5e7eb; font-size: 18px; }
+.scale-drawer-close { border: none; background: none; padding: 6px; border-radius: 8px; color: #697386; }
+.scale-drawer-close:hover { background: #f2f4f7; color: #18202b; }
+.scale-drawer-body { padding: 18px; overflow-y: auto; display: grid; gap: 12px; align-content: start; }
+@media (max-width: 720px) { .scale-drawer-body { padding: 12px; } }

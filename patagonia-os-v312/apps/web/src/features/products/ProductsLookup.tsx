@@ -5,6 +5,7 @@ import { formatMoney } from "../shifts/format";
 import { ScaleSyncPanel } from "../inventory/ScaleSyncPanel";
 import { MyScale } from "../scales/MyScale";
 import { ScaleSupportTools } from "../scales/ScaleSupportTools";
+import { ScaleButton } from "../scales/ScaleButton";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { useAuth } from "../auth/AuthProvider";
 import { planAllows } from "../auth/permissions";
@@ -71,18 +72,17 @@ export function ProductsLookup() {
           <h1>Productos y precios</h1>
           <p className="muted">Consultá el precio de venta de cualquier producto, o imprimí una etiqueta para la góndola.</p>
         </div>
+        {planAllows(profile, "estandar") && (
+          <ScaleButton>
+            <MyScale products={products} branchId={branchId} />
+            <ScaleSupportTools>
+              <ScaleSyncPanel products={products} />
+            </ScaleSupportTools>
+          </ScaleButton>
+        )}
       </header>
 
-      {planAllows(profile, "estandar") && (
-        <div style={{ display: "grid", gap: 12 }}>
-          <MyScale products={products} branchId={branchId} />
-          <ScaleSupportTools>
-            <ScaleSyncPanel products={products} />
-          </ScaleSupportTools>
-        </div>
-      )}
-
-      <section className="panel" style={{ marginTop: 18 }}>
+      <section className="panel">
         <div className="panel-title">
           <h2>Buscar producto</h2>
           <span>{loading ? "Cargando…" : `${filtered.length} productos`}</span>

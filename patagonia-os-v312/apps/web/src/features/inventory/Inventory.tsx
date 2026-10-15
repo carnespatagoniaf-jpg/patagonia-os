@@ -23,6 +23,7 @@ import { ScaleLinksPanel } from "../scales/sale/ScaleLinksPanel";
 import { SYSTEL_PILOT_COMPANIES } from "./systel/systel-pilot";
 import { MyScale } from "../scales/MyScale";
 import { ScaleSupportTools } from "../scales/ScaleSupportTools";
+import { ScaleButton } from "../scales/ScaleButton";
 
 /** Balanzas Systel: módulo nuevo, oculto hasta que el dueño autorice publicarlo. */
 const SHOW_SYSTEL_PANEL = false;
@@ -636,6 +637,29 @@ export function Inventory() {
           <h1>Productos, costos y márgenes</h1>
           <p className="muted">Costo, margen y precio de venta por producto — se usa en Compras y en Rentabilidad.</p>
         </div>
+        {/* Todo lo de la balanza, guardado en un panel (pedido del dueño 15/10): Mi balanza, la lista para cargar a mano y,
+            solo para soporte, las herramientas técnicas (migración 120). */}
+        <ScaleButton>
+          {planAllows(profile, "estandar") && <MyScale products={products} branchId={branchId} />}
+          <div>
+            <button className="secondary" onClick={() => downloadScaleExportCsv(products, categories)}>Descargar lista para balanza</button>
+          </div>
+          {planAllows(profile, "estandar") && (
+            <ScaleSupportTools>
+              {SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? "") ? (
+                <SystelPanel products={products} pilot extra={<ScaleLinksPanel branchId={branchId} products={products} />} />
+              ) : (
+                <ScaleSyncPanel products={products} onDownloadCsv={() => downloadScaleExportCsv(products, categories)} />
+              )}
+              {SHOW_SYSTEL_PANEL && <SystelPanel products={products} />}
+              {SystelLabPanel && (
+                <Suspense fallback={null}>
+                  <SystelLabPanel />
+                </Suspense>
+              )}
+            </ScaleSupportTools>
+          )}
+        </ScaleButton>
       </header>
 
       {message && <div className="message">{message}</div>}
@@ -668,31 +692,7 @@ export function Inventory() {
           <button className="secondary" onClick={() => setShowCategoryManager((v) => !v)}>
             {showCategoryManager ? "Ocultar categorías" : "Gestionar categorías"}
           </button>
-          <button className="secondary" onClick={() => downloadScaleExportCsv(products, categories)}>
-            Descargar lista para balanza
-          </button>
         </div>
-
-        {/* Mi balanza: la única pantalla de balanza del cliente (conectar → sincronizar → vender). */}
-        {planAllows(profile, "estandar") && (
-          <div style={{ marginBottom: 16, display: "grid", gap: 12 }}>
-            <MyScale products={products} branchId={branchId} />
-            {/* Lo técnico, intacto pero fuera del alcance del cliente: solo soporte (migración 120). */}
-            <ScaleSupportTools>
-              {SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? "") ? (
-                <SystelPanel products={products} pilot extra={<ScaleLinksPanel branchId={branchId} products={products} />} />
-              ) : (
-                <ScaleSyncPanel products={products} onDownloadCsv={() => downloadScaleExportCsv(products, categories)} />
-              )}
-              {SHOW_SYSTEL_PANEL && <SystelPanel products={products} />}
-              {SystelLabPanel && (
-                <Suspense fallback={null}>
-                  <SystelLabPanel />
-                </Suspense>
-              )}
-            </ScaleSupportTools>
-          </div>
-        )}
 
         <PriceTools products={products} categories={categories} onApplied={reload} />
 
