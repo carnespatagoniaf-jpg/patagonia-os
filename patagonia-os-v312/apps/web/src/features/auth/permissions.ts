@@ -142,7 +142,8 @@ const PERMISSION_MIN_PLAN: Partial<Record<Permission, Plan>> = {
 /** Páginas que piden un plan más alto que su permiso (ej. Sucursales: el
  * permiso branches.manage también maneja el selector de sucursal, que
  * Estándar necesita, pero la pantalla de resumen es de Full). */
-const PAGE_MIN_PLAN: Partial<Record<string, Plan>> = { branches: "full", reconciliation: "full", invoicing: "full" };
+// Facturas (ARCA) bajó de Full a Estándar el 15/10/2026 (decisión del dueño; migración 121).
+const PAGE_MIN_PLAN: Partial<Record<string, Plan>> = { branches: "full", reconciliation: "full", invoicing: "estandar" };
 
 /** Plan de la empresa del usuario. Sin dato (modo demo, o la base todavía
  * sin la migración 101) cuenta como Full: nunca se le saca algo a nadie por
