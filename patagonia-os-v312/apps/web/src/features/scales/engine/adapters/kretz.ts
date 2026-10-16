@@ -1,5 +1,5 @@
 import { planAuraSync, summarizeAuraPlan, type AuraSyncItem } from "../../../inventory/kretz/aura-sync";
-import { saveModelId } from "../../../inventory/kretz/models";
+import { getStoredModelId, saveModelId } from "../../../inventory/kretz/models";
 import {
   diagnoseScaleLink,
   expectedReportProduct,
@@ -183,21 +183,36 @@ function progressNumbers(text: string): [number, number] | [] {
   return m ? [Number(m[1]), Number(m[2])] : [];
 }
 
+/**
+ * En qué orden se buscan las Kretz: primero el modelo que ya se usó en esta PC, después el otro.
+ * La Aura (9600, 2 bits de stop, "H") y la Report LT (115200, 1 bit de stop, "C") no se encuentran con la
+ * configuración de la otra: buscando solo como Aura, una Report LT real nunca contestaba (Carnes Patagonia, 16/10).
+ */
+export function kretzSearchOrder(stored: string | null): ("aura" | "report-lt")[] {
+  return stored === "report-lt" ? ["report-lt", "aura"] : ["aura", "report-lt"];
+}
+
 /** El adaptador Kretz con las funciones que le pase quien lo arma (live.ts suma guardar el formato en la base). */
-export function makeKretzAdapter(io: KretzIO): ScaleAdapter {
+export function makeKretzAdapter(io: KretzIO, storedModel: () => string | null = getStoredModelId): ScaleAdapter {
   return {
     family: "kretz",
     async identify(port: SerialPort, ctx: EngineContext, onProgress: ProgressFn): Promise<ScaleSession | null> {
       onProgress("buscar", "Buscando tu balanza…");
       setScaleSerialPort(port);
-      const d = await io.diagnose(() => onProgress("buscar", "Buscando tu balanza…"), { modelId: "aura" });
-      const info = { verdict: d.verdict, puerto: d.portLabel, configuracion: d.dataSettings };
-      if (d.verdict === "puerto") throw new FriendlyError("puerto_ocupado", d.message);
-      if (d.verdict === "peso") return new KretzSession("kretz-aura", ctx, "peso", io, info);
-      if (d.verdict !== "datos" || !d.dataSettings) return null;
-      const model = kretzModelForLetter(d.dataSettings.deviceType);
-      if (model !== "kretz-otra") saveModelId(model === "kretz-aura" ? "aura" : "report-lt");
-      return new KretzSession(model, ctx, "datos", io, info);
+      const tried: Record<string, unknown>[] = [];
+      for (const modelId of kretzSearchOrder(storedModel())) {
+        const d = await io.diagnose(() => onProgress("buscar", "Buscando tu balanza…"), { modelId });
+        const info = { verdict: d.verdict, puerto: d.portLabel, configuracion: d.dataSettings, buscado_como: modelId, intentos_anteriores: tried.slice() };
+        if (d.verdict === "puerto") throw new FriendlyError("puerto_ocupado", d.message);
+        if (d.verdict === "peso") return new KretzSession("kretz-aura", ctx, "peso", io, info);
+        if (d.verdict === "datos" && d.dataSettings) {
+          const model = kretzModelForLetter(d.dataSettings.deviceType);
+          if (model !== "kretz-otra") saveModelId(model === "kretz-aura" ? "aura" : "report-lt");
+          return new KretzSession(model, ctx, "datos", io, info);
+        }
+        tried.push({ buscado_como: modelId, verdict: d.verdict, detalle: d.message });
+      }
+      throw new Error(`kretz no contestó: ${JSON.stringify(tried)}`);
     }
   };
 }

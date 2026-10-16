@@ -45,8 +45,9 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     []
   );
 
+  // Los errores llegan a soporte con cualquier usuario: en el local suele estar abierta la sesión del cajero.
   async function report(stage: string, technical: unknown, extra: Record<string, unknown> = {}) {
-    if (!canReport || !isSupabaseConfigured) return;
+    if (!profile || !isSupabaseConfigured) return;
     try {
       const info = session.current?.supportInfo() ?? {};
       await submitScaleSupportReport({

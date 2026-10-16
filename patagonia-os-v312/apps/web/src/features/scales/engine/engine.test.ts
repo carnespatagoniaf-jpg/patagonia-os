@@ -6,7 +6,7 @@ import { pluEanSetting } from "../../inventory/systel/systel-plu";
 import { auraName } from "../../inventory/kretz/aura-sync";
 import { expectedReportProduct, type ReportProductFields } from "../../inventory/scale-serial";
 import { SystelSession, type SystelDeps } from "./adapters/systel";
-import { KretzSession, kretzModelForLetter, type KretzIO } from "./adapters/kretz";
+import { KretzSession, kretzModelForLetter, makeKretzAdapter, type KretzIO } from "./adapters/kretz";
 import { connectScale } from "./engine";
 import { FriendlyError, friendlyKind, friendlyMessage } from "./friendly";
 import { familyOrder, loadRememberedScale, rememberScale } from "./memory";
@@ -321,6 +321,43 @@ describe("[SIMULADO] Mi balanza con una Kretz Report", () => {
     const prep = await new KretzSession("kretz-otra", ctx(products), "datos", io).prepare(noop);
     assert.equal(prep.canWrite, false);
     assert.ok(prep.blocker);
+  });
+
+  // Real 16/10: la Report LT de Carnes Patagonia (115200, "C") no contestaba porque "Mi balanza" solo la buscaba como Aura.
+  function kretzSearchIO(answersAs: "aura" | "report-lt" | null, searched: string[]): KretzIO {
+    const diagnose = (async (_p: unknown, o: { modelId?: string } = {}) => {
+      searched.push(o.modelId ?? "");
+      if (o.modelId !== answersAs) return { verdict: "nada", portLabel: "USB", dataSettings: null, message: "no contestó" };
+      return { verdict: "datos", portLabel: "USB", message: "", dataSettings: { baudRate: answersAs === "aura" ? 9600 : 115200, stopBits: answersAs === "aura" ? 2 : 1, deviceType: answersAs === "aura" ? "H" : "C", equipmentId: "01" } };
+    }) as unknown as KretzIO["diagnose"];
+    return { ...reportIO({}).io, diagnose };
+  }
+
+  it("encuentra una Report LT aunque nunca se haya usado en esta PC (busca como Aura y después como Report)", async () => {
+    const searched: string[] = [];
+    const s = await makeKretzAdapter(kretzSearchIO("report-lt", searched), () => null).identify(port(0x1a86), ctx(products), noop);
+    assert.equal(s?.model, "kretz-report-lt");
+    assert.deepEqual(searched, ["aura", "report-lt"]);
+  });
+
+  it("si en esta PC ya se usó una Report LT, la busca primero así", async () => {
+    const searched: string[] = [];
+    const s = await makeKretzAdapter(kretzSearchIO("report-lt", searched), () => "report-lt").identify(port(0x1a86), ctx(products), noop);
+    assert.equal(s?.model, "kretz-report-lt");
+    assert.deepEqual(searched, ["report-lt"]);
+  });
+
+  it("una Aura se sigue encontrando en el primer intento", async () => {
+    const searched: string[] = [];
+    const s = await makeKretzAdapter(kretzSearchIO("aura", searched), () => null).identify(port(0x1a86), ctx(products), noop);
+    assert.equal(s?.model, "kretz-aura");
+    assert.deepEqual(searched, ["aura"]);
+  });
+
+  it("si no contesta de ninguna forma, el detalle de los dos intentos va a soporte", async () => {
+    const searched: string[] = [];
+    await assert.rejects(() => makeKretzAdapter(kretzSearchIO(null, searched), () => null).identify(port(0x1a86), ctx(products), noop), /aura.*report-lt/);
+    assert.deepEqual(searched, ["aura", "report-lt"]);
   });
 });
 

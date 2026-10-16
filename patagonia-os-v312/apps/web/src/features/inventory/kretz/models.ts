@@ -146,6 +146,17 @@ export function getSavedModelId(): KretzModelId {
   return "report-lt";
 }
 
+/** El modelo guardado en esta PC, o null si nunca se guardó ninguno (a diferencia de getSavedModelId, no inventa "report-lt"). */
+export function getStoredModelId(): KretzModelId | null {
+  try {
+    const id = localStorage.getItem(MODEL_KEY);
+    if (id && KRETZ_MODELS.some((m) => m.id === id)) return id as KretzModelId;
+  } catch {
+    // sin localStorage
+  }
+  return null;
+}
+
 export function saveModelId(id: KretzModelId): void {
   try {
     localStorage.setItem(MODEL_KEY, id);
