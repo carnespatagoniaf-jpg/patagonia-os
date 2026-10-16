@@ -3,8 +3,9 @@ import { CheckCircle2, Scale, TriangleAlert } from "lucide-react";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 import { connectScale, markSynced } from "./engine/engine";
-import { SCALE_ADAPTERS } from "./engine/live";
-import { friendlyMessage } from "./engine/friendly";
+import { adaptersForChoice } from "./engine/live";
+import { friendlyKind, friendlyMessage } from "./engine/friendly";
+import { choiceLabel, loadScaleChoice, SCALE_CHOICES, saveScaleChoice, type ScaleChoice } from "./engine/choice";
 import { forgetRememberedScale, loadRememberedScale } from "./engine/memory";
 import type { EngineProduct, EngineStep, PendingItem, PreparedSync, ScaleSession } from "./engine/types";
 import { setScaleLinks } from "./sale/scale-sale-service";
@@ -35,6 +36,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
   const [replace, setReplace] = useState(false);
   const session = useRef<ScaleSession | null>(null);
   const remembered = loadRememberedScale();
+  const [choice, setChoice] = useState<ScaleChoice | null>(() => loadScaleChoice(remembered));
   const canReport = profile?.role === "owner" || profile?.role === "admin";
   const ctx = useMemo(() => ({ branchId, products, online: isSupabaseConfigured, canManageLinks: canReport }), [branchId, products, canReport]);
 
@@ -51,8 +53,8 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     try {
       const info = session.current?.supportInfo() ?? {};
       await submitScaleSupportReport({
-        note: `Mi balanza · ${stage}: ${technical instanceof Error ? technical.message : String(technical)}`.slice(0, 500),
-        logText: JSON.stringify({ ...info, ...extra, tecnico: (technical as { technical?: string })?.technical ?? null }).slice(0, 20000),
+        note: `Mi balanza (${choice ?? "sin elegir"}) · ${stage}: ${technical instanceof Error ? technical.message : String(technical)}`.slice(0, 500),
+        logText: JSON.stringify({ eligio: choice, ...info, ...extra, tecnico: (technical as { technical?: string })?.technical ?? null }).slice(0, 20000),
         connections: [],
         branchId
       });
@@ -68,14 +70,14 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     const progress = (step: EngineStep, text: string, done?: number, total?: number) => setPhase({ kind: "trabajando", stage: "conectar", step, text, done, total });
     progress("permiso", "Preparando…");
     try {
-      const s = await connectScale(ctx, progress, { adapters: SCALE_ADAPTERS });
+      const s = await connectScale(ctx, progress, { adapters: adaptersForChoice(choice ?? "auto") });
       session.current = s;
       const prepared = await s.prepare(progress);
       if (prepared.blocker) setPhase({ kind: "bloqueado", prepared });
       else if (prepared.upToDate) setPhase({ kind: "listo", message: "¡Listo! Tu balanza está conectada y ya podés vender.", pending: prepared.pending, model: prepared.label });
       else setPhase({ kind: "listo_para_sincronizar", prepared });
     } catch (err) {
-      setPhase({ kind: "error", message: friendlyMessage(err) });
+      setPhase({ kind: "error", message: connectErrorMessage(err, choice) });
       void report("conectar", err);
     }
   }
@@ -109,14 +111,22 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     }
   }
 
+  function pickChoice(c: ScaleChoice) {
+    saveScaleChoice(c);
+    setChoice(c);
+    setPhase({ kind: "inicio" });
+  }
+
   function useAnother() {
+    saveScaleChoice(null);
+    setChoice(null);
     forgetRememberedScale();
     void session.current?.close();
     session.current = null;
     setPhase({ kind: "inicio" });
   }
 
-  const stepIndex = phase.kind === "inicio" || (phase.kind === "trabajando" && phase.stage === "conectar") || phase.kind === "error" ? 0 : phase.kind === "listo" ? 2 : 1;
+  const stepIndex = !choice ? 0 : phase.kind === "listo" ? 2 : 1;
 
   return (
     <section className="my-scale">
@@ -129,7 +139,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       </div>
 
       <ol className="my-scale-steps" aria-label="Pasos">
-        {["Conectar", "Sincronizar", "Vender"].map((label, i) => (
+        {["Elegí tu balanza", "Pasá los productos"].map((label, i) => (
           <li key={label} className={i < stepIndex ? "done" : i === stepIndex ? "current" : ""}>
             <span>{i < stepIndex ? "✓" : i + 1}</span>
             {label}
@@ -137,11 +147,29 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
         ))}
       </ol>
 
-      {phase.kind === "inicio" && (
+      {phase.kind === "inicio" && !choice && (
         <div className="my-scale-body">
-          <p className="my-scale-status">{remembered ? "Conectá tu balanza para seguir trabajando." : "Conectá tu balanza para empezar a trabajar."}</p>
+          <p className="my-scale-status">¿Qué balanza tenés?</p>
+          <p className="muted">La marca está adelante o en la etiqueta de atrás de la balanza.</p>
+          <div className="my-scale-choices">
+            {SCALE_CHOICES.map((c) => (
+              <button key={c.id} className="my-scale-choice" onClick={() => pickChoice(c.id)}>
+                <strong>{c.label}</strong>
+                <span>{c.hint}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {phase.kind === "inicio" && choice && (
+        <div className="my-scale-body">
+          <p className="my-scale-status">Tu balanza: {choice === "auto" ? "la busca Patagonia" : choiceLabel(choice)}</p>
           <p className="muted">Enchufala a esta computadora por el cable USB y prendela.</p>
-          <button className="my-scale-primary" onClick={() => void handleConnect()}>CONECTAR BALANZA</button>
+          <button className="my-scale-primary" onClick={() => void handleConnect()}>PASAR PRODUCTOS A LA BALANZA</button>
+          <div className="my-scale-actions">
+            <button className="secondary" onClick={useAnother}>Es otra balanza</button>
+          </div>
         </div>
       )}
 
@@ -204,12 +232,20 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
           <p className="my-scale-status bad"><TriangleAlert size={20} /> {phase.message}</p>
           <div className="my-scale-actions">
             <button className="my-scale-primary" onClick={() => void handleConnect()}>PROBAR DE NUEVO</button>
-            {remembered && <button className="secondary" onClick={useAnother}>Usar otra balanza</button>}
+            <button className="secondary" onClick={useAnother}>Es otra balanza</button>
           </div>
         </div>
       )}
     </section>
   );
+}
+
+/** El error al conectar, nombrando la balanza que eligió el cliente y qué revisar en ESA balanza. */
+function connectErrorMessage(err: unknown, choice: ScaleChoice | null): string {
+  if (friendlyKind(err) !== "no_contesta" || !choice || choice === "auto") return friendlyMessage(err);
+  const label = choiceLabel(choice);
+  const check = choice === "kretz-aura" ? "el cable enchufado y, en el menú de la balanza, COMUNI → MODO \"Datos\"" : "el cable USB enchufado y que no esté abierto el programa de la balanza";
+  return `Tu ${label} no contestó. Revisá que esté prendida, ${check}, y probá de nuevo. Si no es una ${label}, tocá "Es otra balanza".`;
 }
 
 function Fact({ value, label, tone }: { value: number; label: string; tone?: "warn" }) {

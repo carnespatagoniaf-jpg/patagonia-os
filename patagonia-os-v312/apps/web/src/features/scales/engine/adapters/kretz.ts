@@ -193,14 +193,15 @@ export function kretzSearchOrder(stored: string | null): ("aura" | "report-lt")[
 }
 
 /** El adaptador Kretz con las funciones que le pase quien lo arma (live.ts suma guardar el formato en la base). */
-export function makeKretzAdapter(io: KretzIO, storedModel: () => string | null = getStoredModelId): ScaleAdapter {
+export function makeKretzAdapter(io: KretzIO, storedModel: () => string | null = getStoredModelId, only: "aura" | "report-lt" | null = null): ScaleAdapter {
   return {
     family: "kretz",
     async identify(port: SerialPort, ctx: EngineContext, onProgress: ProgressFn): Promise<ScaleSession | null> {
       onProgress("buscar", "Buscando tu balanza…");
       setScaleSerialPort(port);
       const tried: Record<string, unknown>[] = [];
-      for (const modelId of kretzSearchOrder(storedModel())) {
+      // Si el cliente eligió su modelo, se conecta solo con ese (en segundos); si no, se prueban los dos.
+      for (const modelId of only ? [only] : kretzSearchOrder(storedModel())) {
         const d = await io.diagnose(() => onProgress("buscar", "Buscando tu balanza…"), { modelId });
         const info = { verdict: d.verdict, puerto: d.portLabel, configuracion: d.dataSettings, buscado_como: modelId, intentos_anteriores: tried.slice() };
         if (d.verdict === "puerto") throw new FriendlyError("puerto_ocupado", d.message);

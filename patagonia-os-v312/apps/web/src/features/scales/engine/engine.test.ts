@@ -354,6 +354,13 @@ describe("[SIMULADO] Mi balanza con una Kretz Report", () => {
     assert.deepEqual(searched, ["aura"]);
   });
 
+  it("si el cliente eligió Kretz Report, conecta solo como Report (sin pasar por la búsqueda de la Aura)", async () => {
+    const searched: string[] = [];
+    const s = await makeKretzAdapter(kretzSearchIO("report-lt", searched), () => "aura", "report-lt").identify(port(0x1a86), ctx(products), noop);
+    assert.equal(s?.model, "kretz-report-lt");
+    assert.deepEqual(searched, ["report-lt"]);
+  });
+
   it("si no contesta de ninguna forma, el detalle de los dos intentos va a soporte", async () => {
     const searched: string[] = [];
     await assert.rejects(() => makeKretzAdapter(kretzSearchIO(null, searched), () => null).identify(port(0x1a86), ctx(products), noop), /aura.*report-lt/);
