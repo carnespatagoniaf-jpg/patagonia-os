@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { billingLabel, billingStatus, matchesBillingFilter, matchesCompanySearch, sortByBilling, type BillingInfo } from "./company-billing";
+import { billingLabel, billingReminderMessage, billingStatus, matchesBillingFilter, matchesCompanySearch, monthsOwed, revenueSummary, sortByBilling, type BillingInfo } from "./company-billing";
 
 const TODAY = "2026-10-05";
 const NOW = Date.parse("2026-10-05T15:00:00Z");
@@ -64,5 +64,32 @@ describe("billingLabel", () => {
     assert.equal(billingLabel(overdue, TODAY, NOW), "Debe desde 30/09/2026");
     assert.equal(billingLabel(trialExpired, TODAY, NOW), "Prueba vencida, sin pago");
     assert.equal(billingLabel(none, TODAY, NOW), "Sin pagos registrados");
+  });
+});
+
+describe("plata del panel", () => {
+  const price = () => 39000;
+  it("meses adeudados", () => {
+    assert.equal(monthsOwed(overdue, TODAY), 1);
+    assert.equal(monthsOwed({ ...overdue, paidUntil: "2026-08-01" }, TODAY), 3);
+    assert.equal(monthsOwed(paid, TODAY), 0);
+    assert.equal(monthsOwed(trial, TODAY), 0);
+  });
+  it("abono mensual, cobrado del mes y vencido", () => {
+    const r = revenueSummary([paid, soon, overdue, trial, none], price, [
+      { paymentDate: "2026-10-02", amount: 39000 },
+      { paymentDate: "2026-10-04", amount: null },
+      { paymentDate: "2026-09-28", amount: 39000 }
+    ], TODAY);
+    assert.deepEqual(r, { monthly: 117000, collectedThisMonth: 39000, overdue: 39000, overdueCount: 1, dueThisMonth: 78000, dueThisMonthCount: 2 });
+  });
+  it("mensaje de WhatsApp según el estado", () => {
+    const msg = billingReminderMessage({ ...overdue, ownerFullName: "Julio Pérez" }, 39000, TODAY, NOW)!;
+    assert.match(msg, /^¡Hola Julio!/);
+    assert.match(msg, /venció el 30\/09\/2026 \(\$39\.000 por mes\)/);
+    assert.match(billingReminderMessage(soon, 39000, TODAY, NOW)!, /vence el 07\/10\/2026/);
+    assert.match(billingReminderMessage(trialExpired, 20000, TODAY, NOW)!, /Terminó la prueba gratis de El Toro/);
+    assert.equal(billingReminderMessage(paid, 39000, TODAY, NOW), null);
+    assert.equal(billingReminderMessage(trial, 39000, TODAY, NOW), null);
   });
 });

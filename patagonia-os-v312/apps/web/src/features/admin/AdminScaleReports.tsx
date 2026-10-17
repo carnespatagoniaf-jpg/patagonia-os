@@ -1,6 +1,6 @@
-// Oculto del panel de administrador desde 2026-10-05 (pedido del dueño: "esto borralo").
-// Los reportes se siguen guardando en la base (scale_support_reports); para volver
-// a verlos, montar <AdminScaleReports /> otra vez en AdminCreateClient.tsx.
+// Pestaña "Soporte" del panel de administrador (2026-10-17). Estuvo oculta desde
+// 2026-10-05 ("esto borralo": molestaba en medio de Clientes); volvió en su propia
+// pestaña para que los errores que mandan los clientes se vean en algún lado.
 import { useCallback, useEffect, useState } from "react";
 import { Scale } from "lucide-react";
 import { listScaleSupportReports, setScaleSupportReportResolved, type ScaleSupportReport } from "./admin-service";
@@ -8,7 +8,7 @@ import { listScaleSupportReports, setScaleSupportReportResolved, type ScaleSuppo
 /** Reportes de balanzas que mandan los clientes con "Enviar a soporte"
  * (pantalla Balanzas). Las balanzas se prueban en el local del cliente sin
  * nadie de Patagonia OS al lado: esto es lo que pasó allá, con el nombre del cliente. */
-export function AdminScaleReports() {
+export function AdminScaleReports({ onChange }: { onChange?: () => void } = {}) {
   const [reports, setReports] = useState<ScaleSupportReport[]>([]);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -32,6 +32,7 @@ export function AdminScaleReports() {
     try {
       await setScaleSupportReportResolved(report.id, !report.resolvedAt);
       await reload();
+      onChange?.();
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo actualizar el reporte.");
     } finally {
@@ -52,7 +53,7 @@ export function AdminScaleReports() {
   }
 
   const pending = reports.filter((r) => !r.resolvedAt);
-  if (!error && reports.length === 0) return null;
+  if (!error && reports.length === 0) return <p className="muted">No hay reportes de balanzas. Cuando un cliente toque "Enviar a soporte" (o la balanza dé un error), aparece acá.</p>;
 
   return (
     <section className="admin-trial-alert">

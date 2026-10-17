@@ -1,18 +1,19 @@
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { Building2, LockKeyhole, MapPin, Plus, Search } from "lucide-react";
+import { Building2, LockKeyhole, MapPin, MessageCircle, Plus, Search } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import {
   PROVINCES, createClient, deleteClient, deleteCompanyPayment, listCompanies, listCompanyPayments, listCompanyPlans, registerCompanyPayment,
   setCompanyActive, setCompanyLocation, setCompanyPaidUntil, setCompanyPlan, setCompanyTrial,
-  saveLead, type CompanyPayment, type CompanyPlanInfo, type CompanySummary, type CreateClientResult
+  listScaleSupportReports, saveLead, type CompanyPayment, type CompanyPlanInfo, type CompanySummary, type CreateClientResult
 } from "./admin-service";
 import { PLAN_LABELS, PLAN_LIMITS, type Plan } from "../auth/permissions";
-import { billingLabel, billingStatus, formatDayMonth, matchesBillingFilter, matchesCompanySearch, sortByBilling, type BillingFilter, type BillingStatus } from "./company-billing";
+import { billingLabel, billingReminderMessage, billingStatus, formatDayMonth, revenueSummary, matchesBillingFilter, matchesCompanySearch, sortByBilling, type BillingFilter, type BillingStatus } from "./company-billing";
 import { todayIso } from "../shifts/format";
 import { grantScaleSupportAccess, listScaleSupportAccess, revokeScaleSupportAccess } from "../scales/support-access";
 import { parseAmount } from "../../lib/money";
 import { AdminSalesPipeline } from "./AdminSalesPipeline";
-import type { Lead } from "./sales-pipeline";
+import { whatsappLink, type Lead } from "./sales-pipeline";
+import { AdminScaleReports } from "./AdminScaleReports";
 
 const PLAN_OPTIONS: Plan[] = ["basico", "estandar", "full"];
 const PLAN_PRICES: Record<Plan, string> = { basico: "$20.000", estandar: "$39.000", full: "$69.000" };
@@ -29,7 +30,7 @@ const BILLING_TONE: Record<BillingStatus, string> = {
 };
 
 type SortMode = "status" | "number" | "province";
-type AdminTab = "clientes" | "ventas";
+type AdminTab = "clientes" | "ventas" | "soporte";
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
@@ -159,6 +160,32 @@ export function AdminCreateClient() {
   const [history, setHistory] = useState<CompanyPayment[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [editPaidUntil, setEditPaidUntil] = useState("");
+  /** Pagos del mes en curso de todos los clientes, para "Cobrado este mes". */
+  const [monthPayments, setMonthPayments] = useState<CompanyPayment[]>([]);
+  const [pendingReports, setPendingReports] = useState(0);
+
+  const reloadPendingReports = useCallback(() => {
+    listScaleSupportReports()
+      .then((list) => setPendingReports(list.filter((r) => !r.resolvedAt).length))
+      .catch(() => setPendingReports(0));
+  }, []);
+
+  useEffect(() => {
+    reloadPendingReports();
+  }, [reloadPendingReports]);
+
+  useEffect(() => {
+    // Solo puede tener pagos este mes quien tiene su último pago este mes.
+    const month = todayIso().slice(0, 7);
+    const withPayments = companies.filter((c) => c.lastPaymentDate?.slice(0, 7) === month);
+    let cancelled = false;
+    void Promise.all(withPayments.map((c) => listCompanyPayments(c.id).catch(() => [] as CompanyPayment[]))).then((lists) => {
+      if (!cancelled) setMonthPayments(lists.flat());
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [companies]);
 
   const reloadCompanies = useCallback(async () => {
     setCompaniesLoading(true);
@@ -417,6 +444,8 @@ export function AdminCreateClient() {
   for (const c of activeCompanies) {
     for (const f of ["paid", "owes", "trial", "none"] as const) if (matchesBillingFilter(statusOf(c), f)) billingCounts[f] += 1;
   }
+  const revenue = revenueSummary(activeCompanies, (c) => planPrice(c.id), monthPayments, today);
+  const monthName = new Date(`${today}T12:00:00`).toLocaleDateString("es-AR", { month: "long" });
   const trialAlerts = activeCompanies
     .filter((c) => !c.paidUntil)
     .map((c) => ({ company: c, days: trialDaysLeft(c) }))
@@ -485,6 +514,16 @@ export function AdminCreateClient() {
             <button className="secondary" onClick={() => void openHistory(company)}>{historyId === company.id ? "Cerrar" : "Pagos"}</button>
           </div>
         </div>
+        {(() => {
+          const reminder = company.active ? billingReminderMessage(company, planPrice(company.id), today) : null;
+          if (!reminder) return null;
+          const link = whatsappLink(company.contactPhone, reminder);
+          return link ? (
+            <a className="sales-wa-button" href={link} target="_blank" rel="noreferrer"><MessageCircle size={14} /> Cobrar por WhatsApp</a>
+          ) : (
+            <span className="muted" style={{ fontSize: 12 }}>Para cobrar por WhatsApp falta el teléfono de este cliente.</span>
+          );
+        })()}
         {company.lastPaymentDate && (
           <span className="muted" style={{ fontSize: 12 }}>
             Último pago: {formatDayMonth(company.lastPaymentDate)}
@@ -646,6 +685,9 @@ export function AdminCreateClient() {
       <div className="admin-tabs">
         <button className={tab === "clientes" ? "active" : ""} onClick={() => setTab("clientes")}>Clientes</button>
         <button className={tab === "ventas" ? "active" : ""} onClick={() => setTab("ventas")}>Ventas</button>
+        <button className={tab === "soporte" ? "active" : ""} onClick={() => setTab("soporte")}>
+          Soporte{pendingReports > 0 && <span className="admin-tab-badge">{pendingReports}</span>}
+        </button>
       </div>
 
       {tab === "clientes" && <div className="admin-kpis">
@@ -653,6 +695,18 @@ export function AdminCreateClient() {
         <div className="kpi-card"><span>Pagaron</span><strong>{billingCounts.paid}</strong></div>
         <div className="kpi-card"><span>Deben</span><strong>{billingCounts.owes}</strong></div>
         <div className="kpi-card"><span>En prueba</span><strong>{billingCounts.trial}</strong></div>
+        <div className="kpi-card"><span>Abono mensual</span><strong>{formatMoney(revenue.monthly)}</strong></div>
+        <div className="kpi-card"><span>Cobrado en {monthName}</span><strong>{formatMoney(revenue.collectedThisMonth)}</strong></div>
+        <div className="kpi-card">
+          <span>Vencido sin cobrar</span>
+          <strong style={revenue.overdue > 0 ? { color: "#c92a2a" } : undefined}>{formatMoney(revenue.overdue)}</strong>
+          {revenue.overdueCount > 0 && <small className="muted">{revenue.overdueCount} {revenue.overdueCount === 1 ? "cliente" : "clientes"}</small>}
+        </div>
+        <div className="kpi-card">
+          <span>Falta cobrar en {monthName}</span>
+          <strong>{formatMoney(revenue.dueThisMonth)}</strong>
+          {revenue.dueThisMonthCount > 0 && <small className="muted">{revenue.dueThisMonthCount} {revenue.dueThisMonthCount === 1 ? "cliente" : "clientes"}, contando lo vencido</small>}
+        </div>
       </div>}
 
       {(showForm || result) && (
@@ -708,6 +762,8 @@ export function AdminCreateClient() {
       )}
 
       {message && <div className="message warning">{message}</div>}
+
+      {tab === "soporte" && <AdminScaleReports onChange={reloadPendingReports} />}
 
       {tab === "ventas" && <AdminSalesPipeline companies={companies} onCreateFromLead={createFromLead} reloadKey={pipelineReloadKey} />}
 

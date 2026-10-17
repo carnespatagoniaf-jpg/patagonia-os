@@ -95,3 +95,85 @@ export function billingLabel(info: BillingInfo, todayIso: string, now: number = 
     case "none": return "Sin pagos registrados";
   }
 }
+
+/** Meses de abono que debe un cliente vencido (al menos 1). 0 si no está vencido. */
+export function monthsOwed(info: BillingInfo, todayIso: string): number {
+  const days = paidDaysLeft(info, todayIso);
+  if (days === null || days >= 0) return 0;
+  return Math.max(1, Math.ceil(-days / 30));
+}
+
+export interface RevenueSummary {
+  /** Suma del abono mensual de los clientes que ya pagaron alguna vez. */
+  monthly: number;
+  /** Lo cobrado en el mes calendario de `todayIso` (por fecha de pago). */
+  collectedThisMonth: number;
+  /** Abono adeudado por los clientes vencidos (meses × precio del plan). */
+  overdue: number;
+  overdueCount: number;
+  /** Lo que falta cobrar para que todos queden pagos hasta fin de mes (incluye lo vencido). */
+  dueThisMonth: number;
+  dueThisMonthCount: number;
+}
+
+/** Números de plata del panel. `priceOf` = abono mensual del plan de esa empresa
+ * (0 si no se sabe); `payments` = pagos registrados (cualquier mes, se filtra acá). */
+export function revenueSummary<T extends BillingInfo>(
+  companies: T[],
+  priceOf: (c: T) => number,
+  payments: { paymentDate: string; amount: number | null }[],
+  todayIso: string
+): RevenueSummary {
+  const month = todayIso.slice(0, 7);
+  let monthly = 0;
+  let overdue = 0;
+  let overdueCount = 0;
+  let dueThisMonth = 0;
+  let dueThisMonthCount = 0;
+  for (const c of companies) {
+    if (!c.paidUntil) continue;
+    const price = priceOf(c);
+    monthly += price;
+    const owed = monthsOwed(c, todayIso);
+    if (owed > 0) {
+      overdue += owed * price;
+      overdueCount += 1;
+    }
+    if (c.paidUntil.slice(0, 7) <= month) {
+      dueThisMonth += Math.max(1, owed) * price;
+      dueThisMonthCount += 1;
+    }
+  }
+  const collectedThisMonth = payments
+    .filter((p) => p.paymentDate.slice(0, 7) === month)
+    .reduce((sum, p) => sum + (p.amount ?? 0), 0);
+  return { monthly, collectedThisMonth, overdue, overdueCount, dueThisMonth, dueThisMonthCount };
+}
+
+function firstName(fullName: string | null | undefined) {
+  return fullName?.trim().split(/\s+/)[0] ?? "";
+}
+
+function money(value: number) {
+  return `$${Math.round(value).toLocaleString("es-AR")}`;
+}
+
+/** Mensaje de WhatsApp para cobrar el abono o la prueba vencida. null si no hay nada que cobrar. */
+export function billingReminderMessage(info: BillingInfo, price: number, todayIso: string, now: number = Date.now()): string | null {
+  const status = billingStatus(info, todayIso, now);
+  const hola = `¡Hola${firstName(info.ownerFullName) ? ` ${firstName(info.ownerFullName)}` : ""}!`;
+  const precio = price > 0 ? ` (${money(price)} por mes)` : "";
+  switch (status) {
+    case "overdue": {
+      const months = monthsOwed(info, todayIso);
+      const total = price > 0 && months > 1 ? ` Son ${months} meses, ${money(price * months)} en total.` : "";
+      return `${hola} Te escribo de Patagonia OS. El abono de ${info.name} venció el ${formatDayMonth(info.paidUntil!)}${precio}.${total} ¿Me avisás cuando puedas hacer la transferencia? ¡Gracias!`;
+    }
+    case "due_soon":
+      return `${hola} Te escribo de Patagonia OS. Te recuerdo que el abono de ${info.name} vence el ${formatDayMonth(info.paidUntil!)}${precio}. Cuando hagas la transferencia avisame así lo registro. ¡Gracias!`;
+    case "trial_expired":
+      return `${hola} Te escribo de Patagonia OS. Terminó la prueba gratis de ${info.name}. ¿Cómo te fue? Si querés seguir usándolo, el abono es${precio || " mensual"} y lo podés pagar por transferencia. Cualquier duda te ayudo.`;
+    default:
+      return null;
+  }
+}

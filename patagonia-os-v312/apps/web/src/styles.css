@@ -455,6 +455,9 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .admin-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 .admin-kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
 .admin-kpis .kpi-card { padding: 16px 20px; }
+.admin-kpis .kpi-card small { display: block; margin-top: 2px; font-size: 12px; }
+.admin-tab-badge { display: inline-block; margin-left: 6px; min-width: 18px; padding: 0 6px; border-radius: 9px; background: #c92a2a; color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
+.admin-card .sales-wa-button { align-self: flex-start; }
 .admin-form-panel { max-width: 720px; }
 .admin-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
 .admin-form label { display: grid; gap: 6px; font-weight: 800; font-size: 13px; }
