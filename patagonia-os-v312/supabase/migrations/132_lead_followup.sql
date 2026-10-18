@@ -104,7 +104,10 @@ $$;
 revoke all on function public.list_platform_leads() from public, anon;
 grant execute on function public.list_platform_leads() to authenticated;
 
--- Carga masiva. p_rows = [{"name": "...", "phone": "..."}]. Devuelve {inserted, skipped}.
+-- Carga masiva. p_rows = [{"name", "phone", y opcionales: "attempts" (mensajes que
+-- ya se le mandaron), "replied" (true = ya contestó), "lost_reason" (dijo que no),
+-- "note"}]. Devuelve {inserted, skipped}. Los que ya contestaron quedan para hoy;
+-- los perdidos, sin fecha; el resto se reparte de a p_per_day por día.
 create or replace function public.import_platform_leads(p_rows jsonb, p_source text, p_per_day integer default 20)
 returns jsonb
 language plpgsql
@@ -118,6 +121,10 @@ declare
   v_digits text;
   v_inserted integer := 0;
   v_skipped integer := 0;
+  v_spread integer := 0;
+  v_attempts integer;
+  v_replied boolean;
+  v_lost text;
   v_per_day integer := greatest(1, least(coalesce(p_per_day, 20), 200));
   v_today date := public.today_ar();
 begin
@@ -145,16 +152,35 @@ begin
       continue;
     end if;
 
-    insert into public.platform_leads (business_name, contact_name, phone, stage, source, next_contact_on, created_by)
+    v_attempts := greatest(0, least(coalesce((v_row->>'attempts')::integer, 0), 4));
+    v_replied := coalesce((v_row->>'replied')::boolean, false);
+    v_lost := nullif(trim(coalesce(v_row->>'lost_reason', '')), '');
+
+    insert into public.platform_leads (
+      business_name, contact_name, phone, stage, source, note, next_contact_on, lost_reason,
+      attempts, last_contacted_at, replied_at, created_by
+    )
     values (
       coalesce(v_name, 'Sin nombre'),
       v_name,
       v_phone,
-      'contacto',
+      case when v_lost is not null then 'perdido' else 'contacto' end,
       nullif(trim(coalesce(p_source, '')), ''),
-      v_today + (v_inserted / v_per_day),
+      nullif(trim(coalesce(v_row->>'note', '')), ''),
+      case
+        when v_lost is not null then null
+        when v_replied then v_today
+        else v_today + (v_spread / v_per_day)
+      end,
+      v_lost,
+      v_attempts,
+      case when v_attempts > 0 then now() end,
+      case when v_replied then now() end,
       auth.uid()
     );
+    if v_lost is null and not v_replied then
+      v_spread := v_spread + 1;
+    end if;
     v_inserted := v_inserted + 1;
   end loop;
 

@@ -547,7 +547,7 @@ export async function listPaymentsForAdmin(from: string, to: string): Promise<Ad
 }
 
 /** Carga muchos interesados de una vez (migración 132). Saltea los que ya están. */
-export async function importLeads(rows: { name: string | null; phone: string }[], source: string, perDay: number): Promise<{ inserted: number; skipped: number }> {
+export async function importLeads(rows: { name: string | null; phone: string; attempts?: number; replied?: boolean; lost_reason?: string; note?: string }[], source: string, perDay: number): Promise<{ inserted: number; skipped: number }> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { data, error } = await supabase.rpc("import_platform_leads", { p_rows: rows, p_source: source, p_per_day: perDay });

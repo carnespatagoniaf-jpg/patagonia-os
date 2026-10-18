@@ -10,6 +10,7 @@ export function LeadImport({ onDone, onClose }: { onDone: (message: string) => v
   const [text, setText] = useState("");
   const [source, setSource] = useState(SOURCES[0]);
   const [perDay, setPerDay] = useState(20);
+  const [alreadyWrote, setAlreadyWrote] = useState(true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -24,7 +25,7 @@ export function LeadImport({ onDone, onClose }: { onDone: (message: string) => v
     setBusy(true);
     setError("");
     try {
-      const r = await importLeads(contacts, source, perDay);
+      const r = await importLeads(contacts.map((c) => ({ ...c, attempts: alreadyWrote ? 1 : 0 })), source, perDay);
       const days = Math.ceil(r.inserted / perDay);
       onDone(
         `Se cargaron ${r.inserted} ${r.inserted === 1 ? "contacto" : "contactos"}` +
@@ -69,6 +70,10 @@ export function LeadImport({ onDone, onClose }: { onDone: (message: string) => v
           </select>
         </label>
       </div>
+      <label style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 14 }}>
+        <input type="checkbox" checked={alreadyWrote} onChange={(e) => setAlreadyWrote(e.target.checked)} />
+        Ya les escribí una vez (arrancan por el mensaje 2)
+      </label>
       <p className="muted" style={{ margin: 0, fontSize: 13 }}>
         De a pocos por día: si WhatsApp ve muchos mensajes iguales juntos a gente que no te tiene agendado, puede bloquear el número.
       </p>
