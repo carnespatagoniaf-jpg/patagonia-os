@@ -30,6 +30,7 @@ import { canAccessPage, firstAccessiblePage } from "./features/auth/permissions"
 import { BranchProvider } from "./features/branches/BranchProvider";
 import { isSupabaseConfigured } from "./lib/supabase";
 import { setSerialTabPage } from "./features/inventory/kretz/serial-tabs";
+import { trackPageVisit } from "./lib/page-usage";
 
 export default function App() {
   const [page, setPage] = useState<Page>("dashboard");
@@ -38,6 +39,11 @@ export default function App() {
   useEffect(() => {
     setSerialTabPage(page);
   }, [page]);
+
+  // Qué pantallas usa cada empresa (pestaña Resumen del panel de plataforma).
+  useEffect(() => {
+    if (profile && canAccessPage(profile, page)) trackPageVisit(page);
+  }, [profile, page]);
 
   useEffect(() => {
     if (profile && !canAccessPage(profile, page)) {

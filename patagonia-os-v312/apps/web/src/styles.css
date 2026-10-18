@@ -737,3 +737,25 @@ a.button-link:hover { background: #731818; }
 .scale-drawer-close:hover { background: #f2f4f7; color: #18202b; }
 .scale-drawer-body { padding: 18px; overflow-y: auto; display: grid; gap: 12px; align-content: start; }
 @media (max-width: 720px) { .scale-drawer-body { padding: 12px; } }
+
+/* Panel de plataforma: pestaña Resumen (migración 130) */
+.admin-sum { display: grid; gap: 14px; }
+.admin-sum-export { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; }
+.admin-sum-export-pay { display: inline-flex; gap: 6px; }
+.admin-sum .kpi-card small { display: block; margin-top: 4px; font-size: 12px; font-weight: 600; }
+.admin-sum-up { color: #2b8a3e; }
+.admin-sum-down { color: #c92a2a; }
+.admin-sum-grid { display: grid; grid-template-columns: 1.35fr 1fr; gap: 14px; align-items: start; }
+.admin-sum-stack { display: grid; gap: 14px; }
+.admin-sum-card { display: grid; gap: 6px; }
+.admin-sum-card h2 { margin: 0; font-size: 16px; }
+.admin-sum-sub { margin: 0 0 6px; font-size: 13px; }
+.admin-sum-chart svg { display: block; }
+.admin-sum-hint { margin: 4px 0 0; font-size: 13px; }
+.admin-sum-bar { display: grid; grid-template-columns: 130px 1fr 54px; align-items: center; gap: 10px; font-size: 14px; }
+.admin-sum-track { height: 12px; background: #f1f3f5; border-radius: 6px; overflow: hidden; }
+.admin-sum-track > div { height: 100%; background: #8b1e1e; border-radius: 6px; }
+.admin-sum-count { color: #8b1e1e; white-space: nowrap; }
+.admin-sum .admin-mp-row { flex-wrap: nowrap; }
+.admin-sum .admin-mp-row > span { flex: 1; min-width: 0; }
+@media (max-width: 900px) { .admin-sum-grid { grid-template-columns: 1fr; } }

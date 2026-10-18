@@ -15,6 +15,7 @@ import { AdminSalesPipeline } from "./AdminSalesPipeline";
 import { whatsappLink, type Lead } from "./sales-pipeline";
 import { AdminScaleReports } from "./AdminScaleReports";
 import { AdminMercadoPago } from "./AdminMercadoPago";
+import { AdminSummary } from "./AdminSummary";
 import { mpFailedChargeMessage, mpProblem, toArDate, type MpSubscription } from "./mercadopago";
 
 const PLAN_OPTIONS: Plan[] = ["basico", "estandar", "full"];
@@ -32,7 +33,7 @@ const BILLING_TONE: Record<BillingStatus, string> = {
 };
 
 type SortMode = "status" | "number" | "province";
-type AdminTab = "clientes" | "ventas" | "soporte";
+type AdminTab = "resumen" | "clientes" | "ventas" | "soporte";
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
@@ -119,7 +120,7 @@ export function AdminCreateClient() {
   const [copied, setCopied] = useState(false);
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch] = useState("");
-  const [tab, setTab] = useState<AdminTab>("clientes");
+  const [tab, setTab] = useState<AdminTab>("resumen");
   /** Interesado del embudo de ventas que se está dando de alta con el formulario. */
   const [leadForForm, setLeadForForm] = useState<Lead | null>(null);
   const [pipelineReloadKey, setPipelineReloadKey] = useState(0);
@@ -778,7 +779,7 @@ export function AdminCreateClient() {
           <div className="login-logo" style={{ margin: 0 }}><LockKeyhole /></div>
           <div>
             <p className="eyebrow">PATAGONIA OS · ADMIN</p>
-            <h1>Clientes</h1>
+            <h1>{tab === "resumen" ? "Resumen" : tab === "ventas" ? "Ventas" : tab === "soporte" ? "Soporte" : "Clientes"}</h1>
           </div>
         </div>
         <div className="admin-actions">
@@ -790,6 +791,7 @@ export function AdminCreateClient() {
       </header>
 
       <div className="admin-tabs">
+        <button className={tab === "resumen" ? "active" : ""} onClick={() => setTab("resumen")}>Resumen</button>
         <button className={tab === "clientes" ? "active" : ""} onClick={() => setTab("clientes")}>Clientes</button>
         <button className={tab === "ventas" ? "active" : ""} onClick={() => setTab("ventas")}>Ventas</button>
         <button className={tab === "soporte" ? "active" : ""} onClick={() => setTab("soporte")}>
@@ -872,6 +874,24 @@ export function AdminCreateClient() {
 
       {tab === "soporte" && <AdminScaleReports onChange={reloadPendingReports} />}
 
+      {tab === "resumen" && (
+        <AdminSummary
+          companies={companies}
+          plans={plans}
+          planPrice={planPrice}
+          monthlyFee={revenue.monthly}
+          isAutoCharged={(id) => {
+            const mp = mpByCompany[id];
+            return !!mp && mp.status === "authorized" && !mpProblem(mp);
+          }}
+          today={today}
+        />
+      )}
+
+      <div style={tab === "clientes" ? undefined : { display: "none" }}>
+        <AdminMercadoPago companies={companies} onPaymentsChanged={() => void reloadCompanies()} onSubscriptions={handleMpSubscriptions} />
+      </div>
+
       {tab === "ventas" && <AdminSalesPipeline companies={companies} onCreateFromLead={createFromLead} reloadKey={pipelineReloadKey} />}
 
       {tab === "clientes" && <>
@@ -892,7 +912,6 @@ export function AdminCreateClient() {
       )}
 
 
-      <AdminMercadoPago companies={companies} onPaymentsChanged={() => void reloadCompanies()} onSubscriptions={handleMpSubscriptions} />
 
       <div className="admin-search">
         <Search size={16} />

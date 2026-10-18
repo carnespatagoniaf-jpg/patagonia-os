@@ -481,3 +481,63 @@ export async function resetUserPassword(userId: string): Promise<string> {
   if (!result?.tempPassword) throw new Error(result?.error ?? "No se pudo cambiar la contraseña.");
   return result.tempPassword;
 }
+
+// --- Resumen (migración 130) ---
+
+export interface PlatformSummary {
+  monthly: { month: string; amount: number; count: number }[];
+  newThisMonth: number;
+  lostThisMonth: string[];
+  trials60d: number;
+  trials60dPaid: number;
+  /** Desde qué día se registra el uso de pantallas (null = todavía nada). */
+  usageSince: string | null;
+  usage30d: { page: string; companies: number }[];
+  unanswered7d: { question: string; count: number; companies: string[] }[];
+}
+
+export async function getPlatformSummary(): Promise<PlatformSummary> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.rpc("get_platform_summary");
+  if (error) throw error;
+  const d = (data ?? {}) as Record<string, unknown>;
+  const arr = <T,>(v: unknown) => (Array.isArray(v) ? (v as T[]) : []);
+  return {
+    monthly: arr<{ month: string; amount: number; count: number }>(d.monthly).map((m) => ({ month: m.month, amount: Number(m.amount), count: Number(m.count) })),
+    newThisMonth: Number(d.new_this_month ?? 0),
+    lostThisMonth: arr<string>(d.lost_this_month),
+    trials60d: Number(d.trials_60d ?? 0),
+    trials60dPaid: Number(d.trials_60d_paid ?? 0),
+    usageSince: (d.usage_since as string | null) ?? null,
+    usage30d: arr<{ page: string; companies: number }>(d.usage_30d).map((u) => ({ page: u.page, companies: Number(u.companies) })),
+    unanswered7d: arr<{ question: string; count: number; companies: string[] | null }>(d.unanswered_7d).map((q) => ({ question: q.question, count: Number(q.count), companies: q.companies ?? [] }))
+  };
+}
+
+export interface AdminPaymentRow {
+  clientNumber: number | null;
+  companyName: string;
+  paymentDate: string;
+  amount: number | null;
+  months: number;
+  paidUntil: string;
+  note: string | null;
+}
+
+export async function listPaymentsForAdmin(from: string, to: string): Promise<AdminPaymentRow[]> {
+  if (!supabase) return [];
+
+  const { data, error } = await supabase.rpc("list_payments_for_admin", { p_from: from, p_to: to });
+  if (error) throw error;
+  interface Row { client_number: number | null; company_name: string; payment_date: string; amount: number | null; months: number; paid_until: string; note: string | null }
+  return ((data ?? []) as Row[]).map((r) => ({
+    clientNumber: r.client_number,
+    companyName: r.company_name,
+    paymentDate: r.payment_date,
+    amount: r.amount === null ? null : Number(r.amount),
+    months: r.months,
+    paidUntil: r.paid_until,
+    note: r.note
+  }));
+}
