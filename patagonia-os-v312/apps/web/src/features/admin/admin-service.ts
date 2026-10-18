@@ -339,6 +339,7 @@ export async function listLeads(): Promise<Lead[]> {
   interface Row {
     id: string; business_name: string; contact_name: string | null; phone: string | null; province: string | null; city: string | null;
     stage: LeadStage; source: string | null; note: string | null; next_contact_on: string | null; lost_reason: string | null; company_id: string | null; created_at: string;
+    attempts?: number | null; last_contacted_at?: string | null; replied_at?: string | null;
   }
   return ((data ?? []) as Row[]).map((row) => ({
     id: row.id,
@@ -353,7 +354,10 @@ export async function listLeads(): Promise<Lead[]> {
     nextContactOn: row.next_contact_on,
     lostReason: row.lost_reason,
     companyId: row.company_id,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    attempts: row.attempts ?? 0,
+    lastContactedAt: row.last_contacted_at ?? null,
+    repliedAt: row.replied_at ?? null
   }));
 }
 
@@ -540,4 +544,30 @@ export async function listPaymentsForAdmin(from: string, to: string): Promise<Ad
     paidUntil: r.paid_until,
     note: r.note
   }));
+}
+
+/** Carga muchos interesados de una vez (migración 132). Saltea los que ya están. */
+export async function importLeads(rows: { name: string | null; phone: string }[], source: string, perDay: number): Promise<{ inserted: number; skipped: number }> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.rpc("import_platform_leads", { p_rows: rows, p_source: source, p_per_day: perDay });
+  if (error) throw error;
+  const r = (data ?? {}) as { inserted?: number; skipped?: number };
+  return { inserted: Number(r.inserted ?? 0), skipped: Number(r.skipped ?? 0) };
+}
+
+/** "Ya le escribí": suma un intento y agenda el próximo. Devuelve "perdido" al 4.º sin respuesta. */
+export async function markLeadContacted(id: string): Promise<"agendado" | "perdido"> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.rpc("mark_lead_contacted", { p_id: id });
+  if (error) throw error;
+  return data === "perdido" ? "perdido" : "agendado";
+}
+
+export async function markLeadReplied(id: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("mark_lead_replied", { p_id: id });
+  if (error) throw error;
 }

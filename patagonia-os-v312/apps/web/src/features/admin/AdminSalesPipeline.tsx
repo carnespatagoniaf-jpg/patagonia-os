@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { MessageCircle, Plus } from "lucide-react";
-import { PROVINCES, deleteLead, listLeads, listSalesPipeline, saveLead, setCompanySalesFollowup, type CompanySummary, type LeadInput } from "./admin-service";
+import { PROVINCES, deleteLead, listLeads, listSalesPipeline, markLeadContacted, markLeadReplied, saveLead, setCompanySalesFollowup, type CompanySummary, type LeadInput } from "./admin-service";
+import { LeadImport } from "./LeadImport";
+import { FollowUpRound } from "./FollowUpRound";
 import {
-  PIPELINE_STAGES, companyStage, followUpsForToday, funnelCounts, whatsappLink,
+  LEAD_MAX_ATTEMPTS, PIPELINE_STAGES, companyStage, followUpsForToday, funnelCounts, whatsappLink,
   type CompanyUsage, type FollowUp, type Lead, type PipelineCompany, type PipelineStage
 } from "./sales-pipeline";
 import { formatDayMonth } from "./company-billing";
 import { todayIso } from "../shifts/format";
 
-const SOURCES = ["Instagram", "Facebook", "WhatsApp", "Recomendación", "Visita al local", "Otro"];
+const SOURCES = ["Instagram (publicidad)", "Facebook (publicidad)", "Instagram", "Facebook", "WhatsApp", "Recomendación", "Visita al local", "Otro"];
 const LOST_REASONS = ["Le pareció caro", "Usa otro sistema", "No tiene tiempo ahora", "No le sirve", "No contestó más", "Otro"];
 
 function addDays(iso: string, days: number) {
@@ -54,6 +56,8 @@ export function AdminSalesPipeline({ companies, onCreateFromLead, reloadKey }: P
   const [noteDraft, setNoteDraft] = useState("");
   const [lostDraft, setLostDraft] = useState("");
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [showImport, setShowImport] = useState(false);
+  const [roundOpen, setRoundOpen] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -113,14 +117,24 @@ export function AdminSalesPipeline({ companies, onCreateFromLead, reloadKey }: P
     return rest;
   }
 
-  function markContacted(f: FollowUp) {
+  async function markContactedNow(f: FollowUp) {
     if (f.companyId) {
       const u = usage[f.companyId];
-      void run(f.companyId, () => setCompanySalesFollowup({ companyId: f.companyId!, note: u?.salesNote ?? null, lostReason: u?.salesLostReason ?? null, markContacted: true }));
+      await run(f.companyId, () => setCompanySalesFollowup({ companyId: f.companyId!, note: u?.salesNote ?? null, lostReason: u?.salesLostReason ?? null, markContacted: true }));
     } else if (f.leadId) {
-      const lead = leads.find((l) => l.id === f.leadId);
-      if (lead) void run(lead.id, async () => { await saveLead({ ...leadToInput(lead), nextContactOn: addDays(today, 3) }); });
+      const id = f.leadId;
+      await run(id, async () => { await markLeadContacted(id); });
     }
+  }
+
+  function markContacted(f: FollowUp) {
+    void markContactedNow(f);
+  }
+
+  async function markReplied(f: FollowUp) {
+    if (!f.leadId) return;
+    const id = f.leadId;
+    await run(id, () => markLeadReplied(id));
   }
 
   function copy(key: string, text: string) {
@@ -170,6 +184,7 @@ export function AdminSalesPipeline({ companies, onCreateFromLead, reloadKey }: P
           ) : null}
           <button className="secondary" onClick={() => copy(key, f.message)}>{copiedKey === key ? "¡Copiado!" : "Copiar mensaje"}</button>
           <button className="secondary" disabled={busyId === key} onClick={() => markContacted(f)}>{busyId === key ? "…" : "Ya le escribí"}</button>
+          {f.leadId && <button className="secondary" disabled={busyId === key} onClick={() => void markReplied(f)}>Ya me contestó</button>}
         </div>
       </article>
     );
@@ -188,6 +203,8 @@ export function AdminSalesPipeline({ companies, onCreateFromLead, reloadKey }: P
         {lead.note && <p className="sales-message">{lead.note}</p>}
         <div className="admin-chips">
           {lead.source && <span>{lead.source}</span>}
+          {(lead.attempts ?? 0) > 0 && <span>Mensajes: {Math.min(lead.attempts ?? 0, LEAD_MAX_ATTEMPTS)} de {LEAD_MAX_ATTEMPTS}</span>}
+          {lead.repliedAt && <span>Contestó {daysAgoLabel(lead.repliedAt)}</span>}
           {lead.nextContactOn && lead.stage !== "perdido" && <span>Escribirle el {formatDayMonth(lead.nextContactOn)}</span>}
           {lead.lostReason && <span>{lead.lostReason}</span>}
           <span>Cargado {daysAgoLabel(lead.createdAt)}</span>
@@ -315,20 +332,40 @@ export function AdminSalesPipeline({ companies, onCreateFromLead, reloadKey }: P
       {message && <div className="message warning">{message}</div>}
 
       <section className="sales-today">
-        <h2 className="admin-group-title">Para escribir hoy <span>{followUps.length}</span></h2>
+        <div className="admin-header">
+          <h2 className="admin-group-title" style={{ margin: 0 }}>Para escribir hoy <span>{followUps.length}</span></h2>
+          {followUps.length > 0 && !roundOpen && (
+            <button onClick={() => setRoundOpen(true)}><MessageCircle size={16} style={{ verticalAlign: "-3px" }} /> Escribir uno por uno</button>
+          )}
+        </div>
         {loading && followUps.length === 0 && <p className="muted">Cargando…</p>}
         {!loading && followUps.length === 0 && <p className="muted">Nadie pendiente por hoy. 👌</p>}
-        <div className="admin-grid">{followUps.map(renderFollowUp)}</div>
+        {roundOpen ? (
+          <FollowUpRound items={followUps} onContacted={markContactedNow} onReplied={markReplied} onClose={() => setRoundOpen(false)} />
+        ) : (
+          <div className="admin-grid">{followUps.map(renderFollowUp)}</div>
+        )}
       </section>
 
       <div className="admin-header">
         <h2 className="admin-group-title" style={{ margin: 0 }}>Etapas</h2>
         <div className="admin-actions">
+          <button className="secondary" onClick={() => setShowImport((v) => !v)}>{showImport ? "Cerrar carga" : "Cargar contactos"}</button>
           <button onClick={() => setLeadDraft(leadDraft ? null : emptyLead())}>
             <Plus size={16} style={{ verticalAlign: "-3px" }} /> {leadDraft ? "Cerrar" : "Nuevo interesado"}
           </button>
         </div>
       </div>
+
+      {showImport && (
+        <LeadImport
+          onClose={() => setShowImport(false)}
+          onDone={(text) => {
+            setShowImport(false);
+            void reload().then(() => setMessage(text));
+          }}
+        />
+      )}
 
       {leadDraft && (
         <section className="panel admin-form-panel">

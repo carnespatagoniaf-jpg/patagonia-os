@@ -59,6 +59,34 @@ export interface Lead {
   lostReason: string | null;
   companyId: string | null;
   createdAt: string;
+  /** Mensajes de seguimiento mandados (migración 132). */
+  attempts?: number;
+  lastContactedAt?: string | null;
+  /** Cuándo contestó por última vez (null = nunca). */
+  repliedAt?: string | null;
+}
+
+/** Mensajes de seguimiento para quien escribió por la publicidad y no siguió:
+ * cortos y con UNA pregunta fácil de contestar. El 4.º es la despedida (suele
+ * ser el que más respuestas trae). */
+export const LEAD_MAX_ATTEMPTS = 4;
+
+const BUSINESS_WORD = /^(carnicer|poller|frigor|almac|granja|autoserv|super|distrib|despensa|mercad|avicol|fiambrer|la |el |los |las |don |dist)/i;
+
+export function leadAttemptMessage(attempt: number, name: string | null): string {
+  // Si está agendado con el nombre del negocio ("Carnicería Don Julio"), saludar sin nombre.
+  const clean = name && name !== "Sin nombre" && !BUSINESS_WORD.test(name.trim()) ? name : null;
+  const hi = `¡Hola${firstName(clean)}!`;
+  switch (Math.min(Math.max(attempt, 1), LEAD_MAX_ATTEMPTS)) {
+    case 1:
+      return `${hi} 👋 Te escribo de Patagonia System: vimos que te interesó nuestra publicidad del sistema para carnicerías. ¿Tenés carnicería, pollería o algo parecido? Así te cuento lo que más te sirve.`;
+    case 2:
+      return `${hi} ¿Cómo va? Con Patagonia System cobrás con la balanza, controlás la caja y el stock desde el celular. ¿Querés que te lo muestre en 10 minutos? Te dejo 7 días gratis para probarlo.`;
+    case 3:
+      return `${hi} ¿Te viene bien que te llame 5 minutos para mostrarte el sistema? Respondeme 1 si te llamo hoy o 2 si mejor mañana.`;
+    default:
+      return `${hi} No te quiero llenar de mensajes 🙂 Si más adelante querés probar el sistema en tu negocio, escribime y te lo dejo andando en el día. ¡Éxitos!`;
+  }
 }
 
 const DAY_MS = 86_400_000;
@@ -208,12 +236,21 @@ export function leadFollowUp(lead: Lead, todayIso: string): FollowUp | null {
   if (lead.stage === "alta" || lead.stage === "perdido") return null;
   if (!lead.nextContactOn || lead.nextContactOn > todayIso) return null;
   const late = Math.round((Date.parse(`${todayIso}T00:00:00Z`) - Date.parse(`${lead.nextContactOn}T00:00:00Z`)) / DAY_MS);
-  return make("lead_due", late === 0 ? "Quedaste en escribirle hoy." : `Quedaste en escribirle hace ${late} ${late === 1 ? "día" : "días"}.`, {
-    name: lead.businessName,
-    owner: lead.contactName,
-    phone: lead.phone,
-    leadId: lead.id
-  });
+  const base = { name: lead.businessName, owner: lead.contactName, phone: lead.phone, leadId: lead.id };
+  const when = late === 0 ? "Quedaste en escribirle hoy." : `Quedaste en escribirle hace ${late} ${late === 1 ? "día" : "días"}.`;
+  const f = make("lead_due", when, base);
+  // Interesado nuevo que nunca contestó: mensaje N de 4.
+  if (lead.stage === "contacto" && !lead.repliedAt) {
+    const next = (lead.attempts ?? 0) + 1;
+    return {
+      ...f,
+      title: next === 1 ? "Interesado nuevo: primer mensaje" : `Interesado sin respuesta: mensaje ${Math.min(next, LEAD_MAX_ATTEMPTS)} de ${LEAD_MAX_ATTEMPTS}`,
+      reason: lead.source ? `${when} Vino por ${lead.source}.` : when,
+      message: leadAttemptMessage(next, lead.contactName)
+    };
+  }
+  if (lead.repliedAt) return { ...f, title: "Contestó: seguí la charla" };
+  return f;
 }
 
 export function followUpsForToday(companies: PipelineCompany[], leads: Lead[], todayIso: string, now: number = Date.now()): FollowUp[] {
