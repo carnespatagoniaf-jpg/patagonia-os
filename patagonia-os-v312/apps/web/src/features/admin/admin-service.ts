@@ -1,6 +1,7 @@
 import { supabase } from "../../lib/supabase";
 import type { Plan } from "../auth/permissions";
 import type { CompanyUsage, Lead, LeadStage } from "./sales-pipeline";
+import type { MpSubscription } from "./mercadopago";
 
 export interface CreateClientInput {
   companyName: string;
@@ -381,4 +382,76 @@ export async function deleteLead(id: string): Promise<void> {
 
   const { error } = await supabase.rpc("delete_platform_lead", { p_id: id });
   if (error) throw error;
+}
+
+// --- Suscripciones de Mercado Pago (migración 129, Edge Function mp-sync) ---
+
+export interface MpSyncResult {
+  /** false = falta cargar el secreto MP_ACCESS_TOKEN en Supabase. */
+  connected: boolean;
+  subscriptions?: number;
+  charges?: number;
+  applied?: number;
+}
+
+export async function syncMercadoPago(): Promise<MpSyncResult> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.functions.invoke("mp-sync", { body: {} });
+  if (error) {
+    let message = error.message;
+    const context = (error as { context?: Response }).context;
+    if (context) {
+      try {
+        const body = await context.json();
+        if (body?.error) message = body.error;
+      } catch {
+        // keep default message
+      }
+    }
+    throw new Error(message);
+  }
+  if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
+  return data as MpSyncResult;
+}
+
+export async function listMpSubscriptions(): Promise<MpSubscription[]> {
+  if (!supabase) return [];
+
+  const { data, error } = await supabase.rpc("list_mp_subscriptions_for_admin");
+  if (error) throw error;
+  interface Row {
+    id: string; company_id: string | null; company_name: string | null; status: string | null; reason: string | null;
+    payer_name: string | null; payer_email: string | null; amount: number | null; date_created: string | null; next_payment_date: string | null;
+    last_charge_date: string | null; last_charge_status: string | null; last_payment_status: string | null; last_payment_status_detail: string | null;
+    last_retry_attempt: number | null; approved_count: number; synced_at: string | null;
+  }
+  return ((data ?? []) as Row[]).map((r) => ({
+    id: r.id,
+    companyId: r.company_id,
+    companyName: r.company_name,
+    status: r.status,
+    reason: r.reason,
+    payerName: r.payer_name,
+    payerEmail: r.payer_email,
+    amount: r.amount === null ? null : Number(r.amount),
+    dateCreated: r.date_created,
+    nextPaymentDate: r.next_payment_date,
+    lastChargeDate: r.last_charge_date,
+    lastChargeStatus: r.last_charge_status,
+    lastPaymentStatus: r.last_payment_status,
+    lastPaymentStatusDetail: r.last_payment_status_detail,
+    lastRetryAttempt: r.last_retry_attempt,
+    approvedCount: Number(r.approved_count),
+    syncedAt: r.synced_at
+  }));
+}
+
+/** Devuelve cuántos cobros sumó al asignar. companyId null = desasignar. */
+export async function assignMpSubscription(subscriptionId: string, companyId: string | null): Promise<number> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.rpc("assign_mp_subscription", { p_subscription_id: subscriptionId, p_company_id: companyId });
+  if (error) throw error;
+  return Number(data ?? 0);
 }

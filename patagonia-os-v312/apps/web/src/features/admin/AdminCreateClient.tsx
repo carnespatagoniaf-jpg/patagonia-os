@@ -14,6 +14,8 @@ import { parseAmount } from "../../lib/money";
 import { AdminSalesPipeline } from "./AdminSalesPipeline";
 import { whatsappLink, type Lead } from "./sales-pipeline";
 import { AdminScaleReports } from "./AdminScaleReports";
+import { AdminMercadoPago } from "./AdminMercadoPago";
+import { mpProblem, mpStatusLabel, type MpSubscription } from "./mercadopago";
 
 const PLAN_OPTIONS: Plan[] = ["basico", "estandar", "full"];
 const PLAN_PRICES: Record<Plan, string> = { basico: "$20.000", estandar: "$39.000", full: "$69.000" };
@@ -163,6 +165,14 @@ export function AdminCreateClient() {
   /** Pagos del mes en curso de todos los clientes, para "Cobrado este mes". */
   const [monthPayments, setMonthPayments] = useState<CompanyPayment[]>([]);
   const [pendingReports, setPendingReports] = useState(0);
+  /** Suscripción de Mercado Pago de cada cliente (la última asignada). */
+  const [mpByCompany, setMpByCompany] = useState<Record<string, MpSubscription>>({});
+  const handleMpSubscriptions = useCallback((list: MpSubscription[]) => {
+    const map: Record<string, MpSubscription> = {};
+    // Si un cliente tiene más de una, gana la activa.
+    for (const sub of list) if (sub.companyId && (!map[sub.companyId] || sub.status === "authorized")) map[sub.companyId] = sub;
+    setMpByCompany(map);
+  }, []);
 
   const reloadPendingReports = useCallback(() => {
     listScaleSupportReports()
@@ -515,6 +525,9 @@ export function AdminCreateClient() {
           </div>
         </div>
         {(() => {
+          // Con la suscripción activa y cobrando bien, Mercado Pago cobra solo: no hace falta escribirle.
+          const mp = mpByCompany[company.id];
+          if (mp && mp.status === "authorized" && !mpProblem(mp)) return null;
           const reminder = company.active ? billingReminderMessage(company, planPrice(company.id), today) : null;
           if (!reminder) return null;
           const link = whatsappLink(company.contactPhone, reminder);
@@ -524,6 +537,11 @@ export function AdminCreateClient() {
             <span className="muted" style={{ fontSize: 12 }}>Para cobrar por WhatsApp falta el teléfono de este cliente.</span>
           );
         })()}
+        {mpByCompany[company.id] && (
+          <span className={mpProblem(mpByCompany[company.id]) ? "admin-mp-badge admin-mp-badge-bad" : "admin-mp-badge"}>
+            Suscripción Mercado Pago: {mpProblem(mpByCompany[company.id]) ?? mpStatusLabel(mpByCompany[company.id].status)}
+          </span>
+        )}
         {company.lastPaymentDate && (
           <span className="muted" style={{ fontSize: 12 }}>
             Último pago: {formatDayMonth(company.lastPaymentDate)}
@@ -784,6 +802,8 @@ export function AdminCreateClient() {
         </section>
       )}
 
+
+      <AdminMercadoPago companies={companies} onPaymentsChanged={() => void reloadCompanies()} onSubscriptions={handleMpSubscriptions} />
 
       <div className="admin-search">
         <Search size={16} />

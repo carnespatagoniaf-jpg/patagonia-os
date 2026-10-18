@@ -458,6 +458,18 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .admin-kpis .kpi-card small { display: block; margin-top: 2px; font-size: 12px; }
 .admin-tab-badge { display: inline-block; margin-left: 6px; min-width: 18px; padding: 0 6px; border-radius: 9px; background: #c92a2a; color: #fff; font-size: 11px; line-height: 18px; text-align: center; }
 .admin-card .sales-wa-button { align-self: flex-start; }
+.admin-mp { display: grid; gap: 10px; padding: 14px 16px; border: 1px solid #e5e7eb; border-radius: 10px; background: #fff; }
+.admin-mp-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; }
+.admin-mp-head .muted { flex: 1; font-size: 13px; }
+.admin-mp-list { display: grid; gap: 6px; }
+.admin-mp-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 10px; border-radius: 8px; background: #f7f7f8; font-size: 14px; }
+.admin-mp-row select { max-width: 240px; }
+.admin-mp-problem { background: #fff5f5; }
+.admin-mp-ok { margin: 0; color: #2b8a3e; font-weight: 600; }
+.admin-mp-assigned summary { cursor: pointer; font-size: 14px; }
+.admin-mp-assigned .admin-mp-row { margin-top: 6px; }
+.admin-mp-badge { align-self: flex-start; font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #e7f5ff; color: #1864ab; }
+.admin-mp-badge-bad { background: #fff5f5; color: #c92a2a; }
 .admin-form-panel { max-width: 720px; }
 .admin-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
 .admin-form label { display: grid; gap: 6px; font-weight: 800; font-size: 13px; }
