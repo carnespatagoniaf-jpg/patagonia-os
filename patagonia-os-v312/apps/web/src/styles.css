@@ -502,6 +502,14 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .admin-link:hover { text-decoration: underline; }
 .admin-edit-location { display: grid; gap: 8px; }
 .admin-card-data { margin: 0; display: grid; gap: 6px; }
+.admin-card-owner { display: block; font-size: 13px; color: #697386; }
+.admin-card-status { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.admin-plan-chip { font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: #f1f3f5; color: #495057; }
+.admin-card-actions { align-items: center; }
+.admin-card-actions .sales-wa-button { margin: 0; }
+.admin-page .admin-actions button.admin-more-toggle { margin-left: auto; background: transparent; border: 0; padding: 6px 2px; color: #697386; font-size: 13px; font-weight: 600; box-shadow: none; }
+.admin-page .admin-actions button.admin-more-toggle:hover { color: #8b1e1e; filter: none; }
+.admin-card-more { display: grid; gap: 10px; padding-top: 10px; border-top: 1px dashed #dee2e6; }
 .admin-card-data > div { display: grid; grid-template-columns: 70px 1fr; gap: 8px; font-size: 13px; }
 .admin-card-data dt { color: #697386; }
 .admin-card-data dd { margin: 0; font-weight: 600; overflow-wrap: anywhere; }

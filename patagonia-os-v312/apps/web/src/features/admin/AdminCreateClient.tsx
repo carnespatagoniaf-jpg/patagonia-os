@@ -15,7 +15,7 @@ import { AdminSalesPipeline } from "./AdminSalesPipeline";
 import { whatsappLink, type Lead } from "./sales-pipeline";
 import { AdminScaleReports } from "./AdminScaleReports";
 import { AdminMercadoPago } from "./AdminMercadoPago";
-import { mpProblem, mpStatusLabel, type MpSubscription } from "./mercadopago";
+import { mpFailedChargeMessage, mpProblem, toArDate, type MpSubscription } from "./mercadopago";
 
 const PLAN_OPTIONS: Plan[] = ["basico", "estandar", "full"];
 const PLAN_PRICES: Record<Plan, string> = { basico: "$20.000", estandar: "$39.000", full: "$69.000" };
@@ -162,6 +162,8 @@ export function AdminCreateClient() {
   const [history, setHistory] = useState<CompanyPayment[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [editPaidUntil, setEditPaidUntil] = useState("");
+  /** Tarjeta con "Más opciones" abierto. */
+  const [moreId, setMoreId] = useState<string | null>(null);
   /** Pagos del mes en curso de todos los clientes, para "Cobrado este mes". */
   const [monthPayments, setMonthPayments] = useState<CompanyPayment[]>([]);
   const [pendingReports, setPendingReports] = useState(0);
@@ -480,74 +482,64 @@ export function AdminCreateClient() {
 
   function renderCard(company: CompanySummary) {
     const editing = editingLocationId === company.id;
+    const moreOpen = moreId === company.id;
+    const status = statusOf(company);
+    const mp = mpByCompany[company.id];
+    const mpIssue = mp ? mpProblem(mp) : null;
+    // Suscripción activa y cobrando bien: Mercado Pago cobra solo, no hay que perseguirlo.
+    const mpOk = !!mp && mp.status === "authorized" && !mpIssue;
+    const needsCollect = !mpOk && (mpIssue !== null || status === "overdue" || status === "trial_expired" || status === "due_soon");
+    const nextCharge = mp?.nextPaymentDate ? toArDate(mp.nextPaymentDate) : company.paidUntil;
+    const reminder = !company.active
+      ? null
+      : mpIssue
+        ? mpFailedChargeMessage(company.name, company.ownerFullName)
+        : needsCollect
+          ? billingReminderMessage(company, planPrice(company.id), today)
+          : null;
+    const waLink = reminder ? whatsappLink(company.contactPhone, reminder) : null;
+    const planInfo = plans[company.id];
     return (
-      <article key={company.id} className={`admin-card admin-card-${statusOf(company)}${company.active ? "" : " admin-card-off"}`}>
+      <article key={company.id} className={`admin-card admin-card-${mpOk ? "paid" : mpIssue ? "overdue" : status}${company.active ? "" : " admin-card-off"}`}>
         <header className="admin-card-head">
           <h3>
             {company.clientNumber !== undefined && <span className="admin-client-number">N.º {company.clientNumber}</span>}
             {company.name}
           </h3>
-          {editing ? null : (
-            <button className="admin-link" onClick={() => startEditLocation(company)}>
-              <MapPin size={13} />
-              {[company.city, company.province].filter(Boolean).join(", ") || "Agregar ubicación"}
-            </button>
-          )}
+          <span className="admin-card-owner">{[company.ownerFullName, company.contactPhone].filter(Boolean).join(" · ") || "Sin dueño cargado"}</span>
         </header>
 
-        {editing && (
-          <div className="admin-edit-location">
-            <select value={editProvince} onChange={(e) => setEditProvince(e.target.value)}>
-              <option value="">Provincia…</option>
-              {PROVINCES.map((p) => <option key={p} value={p}>{p}</option>)}
-            </select>
-            <input placeholder="Ciudad" value={editCity} onChange={(e) => setEditCity(e.target.value)} />
-            <div className="admin-actions">
-              <button disabled={savingLocation} onClick={() => void saveLocation(company)}>{savingLocation ? "…" : "Guardar"}</button>
-              <button className="secondary" onClick={() => setEditingLocationId(null)}>Cancelar</button>
-            </div>
-          </div>
-        )}
-
-        <dl className="admin-card-data">
-          <div><dt>Dueño</dt><dd>{company.ownerFullName ?? "-"}</dd></div>
-          <div><dt>Email</dt><dd>{company.ownerEmail ?? "-"}</dd></div>
-          <div><dt>Teléfono</dt><dd>{company.contactPhone ?? "-"}</dd></div>
-        </dl>
-
-        <div className="admin-trial-row">
-          <span className={`admin-trial ${BILLING_TONE[statusOf(company)]}`}>{billingLabel(company, today)}</span>
-          <div className="admin-actions">
-            <button disabled={payBusy} onClick={() => (payingId === company.id ? setPayingId(null) : openPayment(company))}>
-              {payingId === company.id ? "Cancelar" : "Registrar pago"}
-            </button>
-            <button className="secondary" onClick={() => void openHistory(company)}>{historyId === company.id ? "Cerrar" : "Pagos"}</button>
-          </div>
-        </div>
-        {(() => {
-          // Con la suscripción activa y cobrando bien, Mercado Pago cobra solo: no hace falta escribirle.
-          const mp = mpByCompany[company.id];
-          if (mp && mp.status === "authorized" && !mpProblem(mp)) return null;
-          const reminder = company.active ? billingReminderMessage(company, planPrice(company.id), today) : null;
-          if (!reminder) return null;
-          const link = whatsappLink(company.contactPhone, reminder);
-          return link ? (
-            <a className="sales-wa-button" href={link} target="_blank" rel="noreferrer"><MessageCircle size={14} /> Cobrar por WhatsApp</a>
+        <div className="admin-card-status">
+          {mpOk ? (
+            <span className="admin-trial admin-trial-ok">Se cobra solo por Mercado Pago{nextCharge ? ` · ${formatDayMonth(nextCharge)}` : ""}</span>
+          ) : mpIssue ? (
+            <span className="admin-trial admin-trial-expired">{mpIssue}</span>
           ) : (
-            <span className="muted" style={{ fontSize: 12 }}>Para cobrar por WhatsApp falta el teléfono de este cliente.</span>
-          );
-        })()}
-        {mpByCompany[company.id] && (
-          <span className={mpProblem(mpByCompany[company.id]) ? "admin-mp-badge admin-mp-badge-bad" : "admin-mp-badge"}>
-            Suscripción Mercado Pago: {mpProblem(mpByCompany[company.id]) ?? mpStatusLabel(mpByCompany[company.id].status)}
-          </span>
-        )}
+            <span className={`admin-trial ${BILLING_TONE[status]}`}>{billingLabel(company, today)}</span>
+          )}
+          {planInfo && <span className="admin-plan-chip">{PLAN_LABELS[planInfo.plan]}</span>}
+        </div>
         {company.lastPaymentDate && (
           <span className="muted" style={{ fontSize: 12 }}>
             Último pago: {formatDayMonth(company.lastPaymentDate)}
             {company.lastPaymentAmount !== null ? ` · ${formatMoney(company.lastPaymentAmount)}` : ""}
           </span>
         )}
+
+        <div className="admin-actions admin-card-actions">
+          {waLink && (
+            <a className="sales-wa-button" href={waLink} target="_blank" rel="noreferrer"><MessageCircle size={14} /> {mpIssue ? "Avisarle" : "Cobrar por WhatsApp"}</a>
+          )}
+          {!mpOk && (
+            <button className={needsCollect ? "" : "secondary"} disabled={payBusy} onClick={() => (payingId === company.id ? setPayingId(null) : openPayment(company))}>
+              {payingId === company.id ? "Cancelar" : "Registrar pago"}
+            </button>
+          )}
+          <button className="admin-link admin-more-toggle" onClick={() => setMoreId(moreOpen ? null : company.id)}>
+            {moreOpen ? "Menos opciones ▴" : "Más opciones ▾"}
+          </button>
+        </div>
+        {reminder && !waLink && <span className="muted" style={{ fontSize: 12 }}>Para escribirle por WhatsApp falta su teléfono (se carga al crear el cliente).</span>}
 
         {payingId === company.id && (
           <div className="admin-edit-location">
@@ -605,79 +597,119 @@ export function AdminCreateClient() {
           </div>
         )}
 
-        {!company.paidUntil && (() => {
-          const days = trialDaysLeft(company);
-          const busy = trialBusyId === company.id;
-          return (
-            <div className="admin-trial-row">
-              <span className="muted" style={{ fontSize: 13 }}>Prueba gratuita</span>
-              <div className="admin-actions">
-                {days === null ? (
-                  <button className="secondary" disabled={busy} onClick={() => void changeTrial(company, new Date(Date.now() + TRIAL_DAYS * DAY_MS))}>
-                    Iniciar prueba de {TRIAL_DAYS} días
-                  </button>
-                ) : (
-                  <>
-                    <button
-                      className="secondary"
-                      disabled={busy}
-                      onClick={() => void changeTrial(company, new Date(Math.max(Date.now(), new Date(company.trialEndsAt!).getTime()) + TRIAL_DAYS * DAY_MS))}
-                    >
-                      +{TRIAL_DAYS} días
+        {moreOpen && (
+          <div className="admin-card-more">
+            <dl className="admin-card-data">
+              <div><dt>Email</dt><dd>{company.ownerEmail ?? "-"}</dd></div>
+              <div>
+                <dt>Ubicación</dt>
+                <dd>
+                  {editing ? null : (
+                    <button className="admin-link" onClick={() => startEditLocation(company)}>
+                      <MapPin size={13} />
+                      {[company.city, company.province].filter(Boolean).join(", ") || "Agregar ubicación"}
                     </button>
-                    <button className="secondary" disabled={busy} onClick={() => void changeTrial(company, null)}>Quitar prueba</button>
-                  </>
-                )}
+                  )}
+                </dd>
+              </div>
+            </dl>
+          {editing && (
+            <div className="admin-edit-location">
+              <select value={editProvince} onChange={(e) => setEditProvince(e.target.value)}>
+                <option value="">Provincia…</option>
+                {PROVINCES.map((p) => <option key={p} value={p}>{p}</option>)}
+              </select>
+              <input placeholder="Ciudad" value={editCity} onChange={(e) => setEditCity(e.target.value)} />
+              <div className="admin-actions">
+                <button disabled={savingLocation} onClick={() => void saveLocation(company)}>{savingLocation ? "…" : "Guardar"}</button>
+                <button className="secondary" onClick={() => setEditingLocationId(null)}>Cancelar</button>
               </div>
             </div>
-          );
-        })()}
+          )}
 
-        {plans[company.id] && (() => {
-          const info = plans[company.id];
-          const limits = PLAN_LIMITS[info.plan];
-          const limitText = (count: number, max: number | null, one: string, many: string) =>
-            `${count}${max !== null ? `/${max}` : ""} ${count === 1 && max === null ? one : many}`;
-          return (
-            <div className="admin-trial-row">
-              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                <strong>Plan</strong>
-                <select value={info.plan} disabled={planBusyId === company.id} onChange={(e) => void changePlan(company, e.target.value as Plan)}>
-                  {PLAN_OPTIONS.map((p) => <option key={p} value={p}>{PLAN_LABELS[p]} ({PLAN_PRICES[p]})</option>)}
-                </select>
-              </label>
-              <span className="muted" style={{ fontSize: 13 }}>
-                {limitText(info.activeBranches, limits.maxBranches, "sucursal", "sucursales")} · {limitText(info.activeUsers, limits.maxUsers, "usuario", "usuarios")}
-              </span>
+            <div className="admin-actions">
+              <button className="secondary" onClick={() => void openHistory(company)}>{historyId === company.id ? "Cerrar pagos" : "Ver pagos"}</button>
+              {mpOk && (
+                <button className="secondary" disabled={payBusy} onClick={() => (payingId === company.id ? setPayingId(null) : openPayment(company))}>
+                  {payingId === company.id ? "Cancelar" : "Registrar pago a mano"}
+                </button>
+              )}
             </div>
-          );
-        })()}
+          {!company.paidUntil && (() => {
+            const days = trialDaysLeft(company);
+            const busy = trialBusyId === company.id;
+            return (
+              <div className="admin-trial-row">
+                <span className="muted" style={{ fontSize: 13 }}>Prueba gratuita</span>
+                <div className="admin-actions">
+                  {days === null ? (
+                    <button className="secondary" disabled={busy} onClick={() => void changeTrial(company, new Date(Date.now() + TRIAL_DAYS * DAY_MS))}>
+                      Iniciar prueba de {TRIAL_DAYS} días
+                    </button>
+                  ) : (
+                    <>
+                      <button
+                        className="secondary"
+                        disabled={busy}
+                        onClick={() => void changeTrial(company, new Date(Math.max(Date.now(), new Date(company.trialEndsAt!).getTime()) + TRIAL_DAYS * DAY_MS))}
+                      >
+                        +{TRIAL_DAYS} días
+                      </button>
+                      <button className="secondary" disabled={busy} onClick={() => void changeTrial(company, null)}>Quitar prueba</button>
+                    </>
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
-        <div className="admin-chips">
-          <span>{company.branchCount} {company.branchCount === 1 ? "sucursal" : "sucursales"}</span>
-          <span>{company.userCount} {company.userCount === 1 ? "usuario" : "usuarios"}</span>
-          <span>Alta {formatDate(company.createdAt)}</span>
-        </div>
+          {plans[company.id] && (() => {
+            const info = plans[company.id];
+            const limits = PLAN_LIMITS[info.plan];
+            const limitText = (count: number, max: number | null, one: string, many: string) =>
+              `${count}${max !== null ? `/${max}` : ""} ${count === 1 && max === null ? one : many}`;
+            return (
+              <div className="admin-trial-row">
+                <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <strong>Plan</strong>
+                  <select value={info.plan} disabled={planBusyId === company.id} onChange={(e) => void changePlan(company, e.target.value as Plan)}>
+                    {PLAN_OPTIONS.map((p) => <option key={p} value={p}>{PLAN_LABELS[p]} ({PLAN_PRICES[p]})</option>)}
+                  </select>
+                </label>
+                <span className="muted" style={{ fontSize: 13 }}>
+                  {limitText(info.activeBranches, limits.maxBranches, "sucursal", "sucursales")} · {limitText(info.activeUsers, limits.maxUsers, "usuario", "usuarios")}
+                </span>
+              </div>
+            );
+          })()}
 
-        <div className="admin-trial-row">
-          <span className="muted" style={{ fontSize: 13 }}>
-            {supportAccess[company.id]
-              ? `Herramientas técnicas de balanza abiertas hasta las ${new Date(supportAccess[company.id]).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}`
-              : "Herramientas técnicas de balanza: cerradas"}
-          </span>
-          <button className="secondary" disabled={supportBusyId === company.id} onClick={() => void toggleSupportAccess(company)}>
-            {supportBusyId === company.id ? "…" : supportAccess[company.id] ? "Cerrar" : "Abrir por 2 horas"}
-          </button>
-        </div>
+          <div className="admin-chips">
+            <span>{company.branchCount} {company.branchCount === 1 ? "sucursal" : "sucursales"}</span>
+            <span>{company.userCount} {company.userCount === 1 ? "usuario" : "usuarios"}</span>
+            <span>Alta {formatDate(company.createdAt)}</span>
+          </div>
 
-        <div className="admin-actions">
-          <button className="secondary" disabled={togglingId === company.id} onClick={() => void toggleActive(company)}>
-            {togglingId === company.id ? "…" : company.active ? "Desactivar" : "Activar"}
-          </button>
-          <button className="danger" disabled={deletingId === company.id} onClick={() => void handleDeleteClient(company)}>
-            {deletingId === company.id ? "…" : "Borrar"}
-          </button>
-        </div>
+          <div className="admin-trial-row">
+            <span className="muted" style={{ fontSize: 13 }}>
+              {supportAccess[company.id]
+                ? `Herramientas técnicas de balanza abiertas hasta las ${new Date(supportAccess[company.id]).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}`
+                : "Herramientas técnicas de balanza: cerradas"}
+            </span>
+            <button className="secondary" disabled={supportBusyId === company.id} onClick={() => void toggleSupportAccess(company)}>
+              {supportBusyId === company.id ? "…" : supportAccess[company.id] ? "Cerrar" : "Abrir por 2 horas"}
+            </button>
+          </div>
+
+          <div className="admin-actions">
+            <button className="secondary" disabled={togglingId === company.id} onClick={() => void toggleActive(company)}>
+              {togglingId === company.id ? "…" : company.active ? "Desactivar" : "Activar"}
+            </button>
+            <button className="danger" disabled={deletingId === company.id} onClick={() => void handleDeleteClient(company)}>
+              {deletingId === company.id ? "…" : "Borrar"}
+            </button>
+          </div>
+          </div>
+        )}
       </article>
     );
   }
