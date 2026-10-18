@@ -53,6 +53,8 @@ export interface CompanySummary {
    * algún motivo no tiene ningún perfil con ese rol. A diferencia del
    * cartel de "cliente creado" (que solo se ve una vez), esto queda
    * disponible siempre en la tabla de Clientes. */
+  /** Usuario (auth) del dueño, para cambiarle la contraseña. null si no tiene. */
+  ownerId: string | null;
   ownerFullName: string | null;
   ownerEmail: string | null;
   /** Teléfono de contacto guardado a mano al crear el cliente -- uso interno
@@ -98,7 +100,7 @@ export async function listCompanies(): Promise<CompanySummary[]> {
 
   interface Row {
     id: string; name: string; active: boolean; created_at: string; branch_count: number; user_count: number;
-    owner_full_name: string | null; owner_email: string | null; contact_phone: string | null;
+    owner_id?: string | null; owner_full_name: string | null; owner_email: string | null; contact_phone: string | null;
     province: string | null; city: string | null; trial_ends_at: string | null;
     client_number?: number | null; paid_until?: string | null; last_payment_date?: string | null; last_payment_amount?: number | null;
   }
@@ -109,6 +111,7 @@ export async function listCompanies(): Promise<CompanySummary[]> {
     createdAt: row.created_at,
     branchCount: Number(row.branch_count),
     userCount: Number(row.user_count),
+    ownerId: row.owner_id ?? null,
     ownerFullName: row.owner_full_name,
     ownerEmail: row.owner_email,
     contactPhone: row.contact_phone,
@@ -454,4 +457,27 @@ export async function assignMpSubscription(subscriptionId: string, companyId: st
   const { data, error } = await supabase.rpc("assign_mp_subscription", { p_subscription_id: subscriptionId, p_company_id: companyId });
   if (error) throw error;
   return Number(data ?? 0);
+}
+
+/** Le pone una contraseña temporal nueva a un usuario (Edge Function admin-reset-password). */
+export async function resetUserPassword(userId: string): Promise<string> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.functions.invoke("admin-reset-password", { body: { userId } });
+  if (error) {
+    let message = error.message;
+    const context = (error as { context?: Response }).context;
+    if (context) {
+      try {
+        const body = await context.json();
+        if (body?.error) message = body.error;
+      } catch {
+        // keep default message
+      }
+    }
+    throw new Error(message);
+  }
+  const result = data as { tempPassword?: string; error?: string } | null;
+  if (!result?.tempPassword) throw new Error(result?.error ?? "No se pudo cambiar la contraseña.");
+  return result.tempPassword;
 }

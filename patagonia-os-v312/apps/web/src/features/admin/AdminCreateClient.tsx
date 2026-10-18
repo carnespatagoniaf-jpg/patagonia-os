@@ -4,7 +4,7 @@ import { useAuth } from "../auth/AuthProvider";
 import {
   PROVINCES, createClient, deleteClient, deleteCompanyPayment, listCompanies, listCompanyPayments, listCompanyPlans, registerCompanyPayment,
   setCompanyActive, setCompanyLocation, setCompanyPaidUntil, setCompanyPlan, setCompanyTrial,
-  listScaleSupportReports, saveLead, type CompanyPayment, type CompanyPlanInfo, type CompanySummary, type CreateClientResult
+  listScaleSupportReports, resetUserPassword, saveLead, type CompanyPayment, type CompanyPlanInfo, type CompanySummary, type CreateClientResult
 } from "./admin-service";
 import { PLAN_LABELS, PLAN_LIMITS, type Plan } from "../auth/permissions";
 import { billingLabel, billingReminderMessage, billingStatus, formatDayMonth, revenueSummary, matchesBillingFilter, matchesCompanySearch, sortByBilling, type BillingFilter, type BillingStatus } from "./company-billing";
@@ -48,6 +48,18 @@ Usuario: ${result.email}
 Contraseña temporal: ${result.tempPassword}
 
 Te recomendamos cambiarla la primera vez que entres (arriba a la izquierda, "Cambiar contraseña").`;
+}
+
+/** Mensaje para mandarle al dueño su contraseña nueva. */
+function passwordMessage(company: CompanySummary, password: string) {
+  const name = company.ownerFullName?.trim().split(/s+/)[0];
+  return `¡Hola${name ? ` ${name}` : ""}! Te dejo una contraseña nueva para entrar a Patagonia OS.
+
+Entrá en: https://app.patagoniasystem.com.ar
+Usuario: ${company.ownerEmail ?? ""}
+Contraseña: ${password}
+
+Cuando entres cambiala por una tuya (arriba a la izquierda, "Cambiar contraseña").`;
 }
 
 function formatDate(iso: string) {
@@ -164,6 +176,26 @@ export function AdminCreateClient() {
   const [editPaidUntil, setEditPaidUntil] = useState("");
   /** Tarjeta con "Más opciones" abierto. */
   const [moreId, setMoreId] = useState<string | null>(null);
+  /** Contraseña temporal recién generada (se muestra una sola vez). */
+  const [newPassword, setNewPassword] = useState<{ companyId: string; password: string } | null>(null);
+  const [passwordBusyId, setPasswordBusyId] = useState<string | null>(null);
+  const [passwordCopied, setPasswordCopied] = useState(false);
+
+  async function resetOwnerPassword(company: CompanySummary) {
+    if (!company.ownerId) return;
+    if (!window.confirm(`¿Cambiar la contraseña de ${company.ownerFullName ?? "el dueño"} (${company.name})? La que tiene ahora deja de andar.`)) return;
+    setPasswordBusyId(company.id);
+    setMessage("");
+    try {
+      const password = await resetUserPassword(company.ownerId);
+      setNewPassword({ companyId: company.id, password });
+      setPasswordCopied(false);
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo cambiar la contraseña.");
+    } finally {
+      setPasswordBusyId(null);
+    }
+  }
   /** Pagos del mes en curso de todos los clientes, para "Cobrado este mes". */
   const [monthPayments, setMonthPayments] = useState<CompanyPayment[]>([]);
   const [pendingReports, setPendingReports] = useState(0);
@@ -627,6 +659,31 @@ export function AdminCreateClient() {
             </div>
           )}
 
+            {company.ownerId && (
+              <div className="admin-trial-row">
+                <span className="muted" style={{ fontSize: 13 }}>¿Se olvidó la contraseña?</span>
+                <button className="secondary" disabled={passwordBusyId === company.id} onClick={() => void resetOwnerPassword(company)}>
+                  {passwordBusyId === company.id ? "…" : "Cambiar contraseña del dueño"}
+                </button>
+              </div>
+            )}
+            {newPassword?.companyId === company.id && (() => {
+              const text = passwordMessage(company, newPassword.password);
+              const link = whatsappLink(company.contactPhone, text);
+              return (
+                <div className="message" style={{ borderColor: "#2f9e44" }}>
+                  Contraseña nueva de <strong>{company.ownerEmail}</strong> (copiala ahora, no se vuelve a mostrar):{" "}
+                  <code style={{ fontSize: 16, fontWeight: 700 }}>{newPassword.password}</code>
+                  <div className="admin-actions" style={{ marginTop: 10 }}>
+                    {link && <a className="sales-wa-button" href={link} target="_blank" rel="noreferrer"><MessageCircle size={14} /> Mandársela por WhatsApp</a>}
+                    <button className="secondary" onClick={() => { void navigator.clipboard.writeText(text); setPasswordCopied(true); }}>
+                      {passwordCopied ? "¡Copiado!" : "Copiar mensaje"}
+                    </button>
+                    <button className="secondary" onClick={() => setNewPassword(null)}>Listo</button>
+                  </div>
+                </div>
+              );
+            })()}
             <div className="admin-actions">
               <button className="secondary" onClick={() => void openHistory(company)}>{historyId === company.id ? "Cerrar pagos" : "Ver pagos"}</button>
               {mpOk && (
