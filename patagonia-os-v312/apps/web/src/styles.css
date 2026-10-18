@@ -468,7 +468,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .admin-mp-ok { margin: 0; color: #2b8a3e; font-weight: 600; }
 .admin-mp-assigned summary { cursor: pointer; font-size: 14px; }
 .admin-mp-assigned .admin-mp-row { margin-top: 6px; }
-.admin-mp-badge { align-self: flex-start; font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #e7f5ff; color: #1864ab; }
+.admin-mp-badge { align-self: flex-start; justify-self: start; width: fit-content; font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #e7f5ff; color: #1864ab; }
 .admin-mp-badge-bad { background: #fff5f5; color: #c92a2a; }
 .admin-form-panel { max-width: 720px; }
 .admin-form { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 16px; }
