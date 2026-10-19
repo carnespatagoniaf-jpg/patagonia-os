@@ -1,7 +1,7 @@
 // Cartel de precio A4 para el mostrador (botón "Cartel A4" de Preparar
 // etiqueta). Mismo tamaño y armado que los carteles que el dueño imprimió el
-// 16/10 (2 por hoja, se corta por la línea punteada), pero en negro y con el
-// nombre del local en la franja de arriba. Lógica pura (sin supabase).
+// 16/10 (2 por hoja, se corta por la línea punteada), pero en negro: "OFERTA"
+// en la franja de arriba y el nombre del local chico abajo. Lógica pura.
 
 export interface PricePoster {
   business: string;
@@ -41,14 +41,6 @@ export function priceSizeMm(priceText: string): number {
   return 40;
 }
 
-/** La franja con el nombre del local: los nombres largos van más chicos. */
-export function businessSizeMm(business: string): number {
-  const length = business.trim().length;
-  if (length > 24) return 7;
-  if (length > 16) return 9;
-  return 12;
-}
-
 function escapeHtml(text: string): string {
   return text
     .replace(/&/g, "&amp;")
@@ -62,10 +54,11 @@ const POSTER_CSS = `@page{size:A4;margin:0}*{box-sizing:border-box}html,body{mar
 .page{width:210mm;height:297mm;display:flex;flex-direction:column;overflow:hidden;background:#fff}
 .c{flex:1;margin:8mm;border:2.5mm solid #1a1a1a;border-radius:6mm;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;padding:4mm 8mm;position:relative;overflow:hidden}
 .blank{border-color:transparent}
-.top{position:absolute;top:0;left:0;right:0;background:#1a1a1a;color:#fff;font-weight:900;letter-spacing:2mm;padding:1.5mm 2mm;white-space:nowrap;overflow:hidden}
+.top{position:absolute;top:0;left:0;right:0;background:#1a1a1a;color:#fff;font-weight:900;font-size:13mm;letter-spacing:3mm;padding:1.5mm 0}
 .n{font-weight:900;color:#1a1a1a;margin-top:14mm;line-height:1.05}
 .p{font-weight:900;color:#1a1a1a;line-height:1;margin:4mm 0;letter-spacing:-1mm;white-space:nowrap}
 .s{font-size:9mm;font-weight:700;color:#333;max-width:170mm;margin-bottom:6mm}
+.b{position:absolute;bottom:3mm;left:0;right:0;font-size:5mm;color:#888;letter-spacing:1mm;white-space:nowrap;overflow:hidden}
 .cut{height:0;border-top:1mm dashed #bbb;margin:0 6mm}`;
 
 /** Hoja A4 con el cartel en la mitad de arriba (la de abajo queda libre, se corta). */
@@ -75,10 +68,11 @@ export function buildPosterHtml(poster: PricePoster): string {
   const price = formatPosterPrice(poster.price);
   const card =
     `<div class="c">` +
-    (business ? `<div class="top" style="font-size:${businessSizeMm(business)}mm">${escapeHtml(business)}</div>` : "") +
+    `<div class="top">OFERTA</div>` +
     `<div class="n" style="font-size:${nameSizeMm(name)}mm">${escapeHtml(name)}</div>` +
     `<div class="p" style="font-size:${priceSizeMm(price)}mm">${escapeHtml(price)}</div>` +
     (poster.detail.trim() ? `<div class="s">${escapeHtml(poster.detail.trim())}</div>` : "") +
+    (business ? `<div class="b">${escapeHtml(business)}</div>` : "") +
     `</div>`;
   return `<!doctype html><html><head><meta charset="utf-8"><title>Cartel</title><style>${POSTER_CSS}</style></head><body><div class="page">${card}<div class="cut"></div><div class="c blank"></div></div></body></html>`;
 }

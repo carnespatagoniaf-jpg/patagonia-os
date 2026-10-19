@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildPosterHtml, businessSizeMm, defaultDetail, formatPosterPrice, nameSizeMm, priceSizeMm } from "./price-poster";
+import { buildPosterHtml, defaultDetail, formatPosterPrice, nameSizeMm, priceSizeMm } from "./price-poster";
 
 test("precio como en el cartel real", () => {
   assert.equal(formatPosterPrice(14400), "$14.400");
@@ -17,16 +17,15 @@ test("tamaños: nombre, precio y local largos se achican", () => {
   assert.equal(priceSizeMm("$14.400"), 40);
   assert.equal(priceSizeMm("$140.000"), 34);
   assert.equal(priceSizeMm("$1.400.000"), 28);
-  assert.equal(businessSizeMm("CARNES PATAGONIA"), 12);
-  assert.equal(businessSizeMm("CARNICERIA LOS GRINGOS"), 9);
   assert.equal(defaultDetail("kg"), "el kilo");
   assert.equal(defaultDetail("unit"), "la unidad");
 });
 
-test("una hoja A4: local arriba, nombre, precio y 'el kilo'; mitad de abajo libre", () => {
+test("una hoja A4: OFERTA arriba, nombre, precio, 'el kilo' y el local chico abajo; mitad de abajo libre", () => {
   const html = buildPosterHtml({ business: "Carnes Patagonia", name: "Cuadril", price: 21700, detail: "el kilo" });
   assert.equal((html.match(/class="page"/g) ?? []).length, 1);
-  assert.match(html, /class="top"[^>]*>CARNES PATAGONIA</);
+  assert.match(html, /class="top">OFERTA</);
+  assert.match(html, /class="b">CARNES PATAGONIA</);
   assert.match(html, />CUADRIL</);
   assert.match(html, />\$21\.700</);
   assert.match(html, />el kilo</);
@@ -34,9 +33,10 @@ test("una hoja A4: local arriba, nombre, precio y 'el kilo'; mitad de abajo libr
   assert.match(html, /@page\{size:A4;margin:0\}/);
 });
 
-test("sin nombre de local no hay franja; el texto se escapa", () => {
+test("sin nombre de local no hay pie (la franja OFERTA sigue); el texto se escapa", () => {
   const html = buildPosterHtml({ business: "", name: "<b>x</b>", price: 100, detail: "a & b" });
-  assert.ok(!html.includes('class="top"'));
+  assert.ok(!html.includes('class="b"'));
+  assert.match(html, /class="top">OFERTA</);
   assert.ok(!html.includes("<b>x</b>"));
   assert.match(html, /a &amp; b/);
 });

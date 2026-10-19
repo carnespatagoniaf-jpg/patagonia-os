@@ -20,7 +20,7 @@ const LABEL_SIZE_OPTIONS: { value: LabelSize; label: string; hint: string }[] = 
   { value: "chica", label: "Chica", hint: "para frascos y paquetes chicos (ej. mayonesa)" },
   { value: "mediana", label: "Mediana", hint: "tamaño normal" },
   { value: "grande", label: "Grande", hint: "para cortes o carteles bien visibles" },
-  { value: "cartel", label: "Cartel A4", hint: "cartel grande para el mostrador, media hoja A4" }
+  { value: "cartel", label: "Cartel A4", hint: "cartel de oferta para el mostrador, media hoja A4" }
 ];
 
 const LABEL_SIZE_STYLES: Record<Exclude<LabelSize, "cartel">, { box: string; name: number; price: number; padding: string }> = {
