@@ -9,6 +9,9 @@ import type { CustomerChargeItem } from "./customers-service";
 import { countByStatus, customerStatus, filterAndSortCustomers, type CustomerFilter, type CustomerStatus } from "./customer-list";
 import { QuantityInput } from "../../components/QuantityInput";
 import { parseQuantity } from "../sale/quantity";
+import { useAuth } from "../auth/AuthProvider";
+import { getCompanyName } from "../products/products-service";
+import { downloadCustomerStatementPdf } from "./customer-statement-pdf";
 
 const STATUS_BADGE: Record<CustomerStatus, { label: string; bg: string; color: string }> = {
   overdue: { label: "Atrasado", bg: "#fdecea", color: "#b3261e" },
@@ -144,6 +147,8 @@ export function Customers() {
   const chargeTotal = chargeCart.reduce((sum, l) => sum + l.quantity * l.unitPrice, 0);
 
   const [message, setMessage] = useState("");
+  const [pdfBusy, setPdfBusy] = useState(false);
+  const { profile } = useAuth();
   const [busy, setBusy] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -444,6 +449,28 @@ export function Customers() {
 
   function handlePrint() {
     window.print();
+  }
+
+  async function handleDownloadPdf() {
+    if (!selectedCustomer || pdfBusy) return;
+    setPdfBusy(true);
+    setMessage("");
+    try {
+      const business = await getCompanyName(profile?.company_id).catch(() => "");
+      await downloadCustomerStatementPdf({
+        business,
+        customerName: selectedCustomer.name,
+        customerNumber: selectedCustomer.number,
+        phone: selectedCustomer.phone,
+        location: [selectedCustomer.locality, selectedCustomer.province].filter(Boolean).join(", "),
+        issuedAt: todayIso(),
+        rows: ledger
+      });
+    } catch {
+      setMessage("No se pudo armar el PDF. Probá de nuevo.");
+    } finally {
+      setPdfBusy(false);
+    }
   }
 
   return (
@@ -755,7 +782,12 @@ export function Customers() {
           <section className={`panel${printCharge ? "" : " print-area"}`} style={{ marginTop: 18 }}>
             <div className="panel-title">
               <h2>Detalle de cuenta corriente</h2>
-              <button className="secondary no-print" onClick={handlePrint}>Imprimir</button>
+              <div className="no-print" style={{ display: "flex", gap: 8 }}>
+                <button className="secondary" disabled={pdfBusy || ledger.length === 0} onClick={handleDownloadPdf}>
+                  {pdfBusy ? "Armando PDF…" : "Descargar PDF"}
+                </button>
+                <button className="secondary" onClick={handlePrint}>Imprimir</button>
+              </div>
             </div>
             <p className="muted print-only-header">{selectedCustomer.name}</p>
             <table className="data-table">

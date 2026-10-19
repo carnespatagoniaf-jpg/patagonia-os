@@ -120,7 +120,7 @@ CLIENTES (cuenta corriente / fiado)
 - Arriba de la lista hay un buscador (por número, nombre, teléfono o localidad) y botones para filtrar: Todos, Deben, Atrasados (deben y pasó el plazo de pago) y Al día (saldo cero o a favor). La lista muestra primero los atrasados, después los que deben (la deuda más grande arriba) y al final los que están al día. Cada cliente tiene una etiqueta de color (Atrasado / Debe / Al día) y la fecha de su último movimiento.
 - "Nueva venta (fiado)": se buscan los productos, se ponen cantidades y se toca "Registrar venta". Descuenta stock y suma al saldo del cliente. Se puede imprimir el remito. Un producto por kilo se puede agregar varias veces en la misma venta, cada vez en un renglón nuevo con su propio peso (ej. dos medias reses de 106 kg y 98 kg): se lo vuelve a buscar y elegir, y se pone el peso de cada uno. Los productos por unidad, en cambio, suman 1 a la cantidad del renglón que ya estaba.
 - "Registrar pago": se pone fecha, monto y a qué cuenta entra la plata. Baja el saldo del cliente.
-- Al final está el "Detalle de cuenta corriente" con todos los movimientos (se puede imprimir, editar o borrar movimientos).
+- Al final está el "Detalle de cuenta corriente" con todos los movimientos (se puede imprimir, editar o borrar movimientos). "Descargar PDF" baja un archivo con el nombre del local, los datos del cliente, el saldo y todos los movimientos (se llama "Cuenta corriente - NOMBRE DEL CLIENTE - fecha.pdf" y queda en Descargas), para mandárselo al cliente por WhatsApp o guardarlo.
 
 COMPRAS Y PROVEEDORES
 - En Compras se cargan los proveedores ("Agregar proveedor" con nombre, rubro y teléfono). Para trabajar con uno se toca "Ver cuenta".
