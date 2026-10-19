@@ -166,15 +166,13 @@ describe("[SIMULADO, registros REALES] Mi balanza con una Systel Cuora Max: Pata
     assert.equal(f.plus.get(1)!.slice(23, 29), "099000");
   });
 
-  it("sin la prueba controlada en una balanza real, no escribe: avisa que lo habilita soporte", async () => {
+  it("Cuora Max reconocida (firma 0060, formato max60) y leída completa: se puede escribir sin el build de laboratorio (habilitado 19/10)", async () => {
     const f = cuora();
     const { deps } = fakeDb();
     const s = new SystelSession(f, 20, ctx(PRODUCTS), deps);
     const prep = await s.prepare(noop);
-    assert.equal(prep.canWrite, false);
-    assert.match(prep.blocker!, /lo hace soporte/);
-    await assert.rejects(() => s.sync(prep, noop));
-    assert.equal(f.received.filter((r) => r.fn === 61).length, 0);
+    assert.equal(prep.canWrite, true);
+    assert.equal(prep.blocker, undefined);
   });
 
   it("Systel con otra firma: nunca escribe, aunque sea el build de laboratorio", async () => {
@@ -433,5 +431,23 @@ describe("[SIMULADO] Conectar balanza", () => {
     assert.deepEqual(familyOrder("0403:6001", loadRememberedScale()), ["kretz", "systel"]);
     assert.equal(friendlyKind(new Error("The port is already open.")), "puerto_ocupado");
     assert.ok(!/Error|undefined|properties/.test(friendlyMessage(new TypeError("Cannot read properties of undefined"))));
+  });
+});
+
+describe("[SIMULADO, registros REALES] Systel que solo atiende pedidos al general (0): igual pasa productos y releé", () => {
+  it("lee, sincroniza y verifica usando el número que atiende; la balanza queda con nombre y precio de Patagonia", async () => {
+    const f = new FakeCuora("max60", { address: 20, protocol: "0060", typeByteAccepted: "ascii", loteNulOnWrite: true, deafToOwnNumber: true });
+    for (const [n, raw] of GRINGOS) f.plus.set(n, raw);
+    const { deps } = fakeDb();
+    const products = [P("p4", "4", "POLLO ENTEROxKG", "kg", 5400), P("p78", "78", "ARABES", "unit", 1000)];
+    const s = new SystelSession(f, 20, ctx(products), deps);
+    const prep = await s.prepare(noop);
+    assert.equal(prep.model, "systel-cuora-max");
+    assert.equal(prep.canWrite, true);
+    const out = await s.sync(prep, noop);
+    assert.equal(out.ok, true, out.message);
+    assert.equal(f.plus.get(4)!.slice(23, 29), "005400", "precio nuevo en la balanza");
+    assert.equal(f.plus.get(78)!.slice(5, 23), "ARABES            ", "producto nuevo creado");
+    assert.equal((s.supportInfo() as { direccion_pedidos: number }).direccion_pedidos, 0);
   });
 });

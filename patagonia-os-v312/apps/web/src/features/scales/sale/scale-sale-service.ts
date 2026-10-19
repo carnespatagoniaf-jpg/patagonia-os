@@ -40,27 +40,57 @@ interface ItemRow {
 
 const CACHE = (branchId: string) => `patagonia-scale-setup-${branchId}`;
 
+const hasCodes = (p: ProfileRow) => !!(p.weighed_format || p.unit_format || p.total_format);
+
 /**
- * La balanza de venta de la sucursal, o null si no tiene (o la base todavía no tiene la migración 119).
+ * Las balanzas de venta de la sucursal ("artículos + TOTAL"): las que tienen formatos de código guardados. Una
+ * sucursal puede tener varias (migración 134); una Kretz registrada sin formatos no cuenta. Apagadas no cuentan.
  * Si no hay conexión, usa la última copia guardada en esta computadora (para seguir cobrando).
  */
-export async function loadScaleSetup(branchId: string, opts: { includeInactive?: boolean } = {}): Promise<ScaleSetup | null> {
+export async function loadScaleSetups(branchId: string): Promise<ScaleSetup[]> {
+  if (!supabase) return [];
+  try {
+    const { data: profiles, error } = await supabase.from("scale_profiles").select("scale_key, brand, weighed_format, unit_format, total_format, amount_decimals, generic_codes, read_at, repeat_window_minutes, active").eq("branch_id", branchId);
+    if (error) throw error;
+    const usable = ((profiles ?? []) as ProfileRow[]).filter((p) => hasCodes(p) && p.active !== false);
+    const setups: ScaleSetup[] = [];
+    for (const p of usable) setups.push(await setupOf(branchId, p));
+    saveCache(branchId, setups);
+    return setups;
+  } catch (err) {
+    // Sin la tabla (42P01) = esta base no tiene la función todavía.
+    if (typeof err === "object" && err && "code" in err && (err as { code?: string }).code) return [];
+    return loadCache(branchId);
+  }
+}
+
+/**
+ * Una balanza de venta de la sucursal (la de `scaleKey`, o la única que haya), o null. Para Stock y para la
+ * sincronización de la Systel; Mostrador usa loadScaleSetups.
+ */
+export async function loadScaleSetup(branchId: string, opts: { includeInactive?: boolean; scaleKey?: string } = {}): Promise<ScaleSetup | null> {
   if (!supabase) return null;
   try {
-    const { data: profiles, error } = await supabase.from("scale_profiles").select("scale_key, brand, weighed_format, unit_format, total_format, amount_decimals, generic_codes, read_at, repeat_window_minutes, active").eq("branch_id", branchId).limit(2);
+    let q = supabase.from("scale_profiles").select("scale_key, brand, weighed_format, unit_format, total_format, amount_decimals, generic_codes, read_at, repeat_window_minutes, active").eq("branch_id", branchId);
+    if (opts.scaleKey) q = q.eq("scale_key", opts.scaleKey);
+    const { data: profiles, error } = await q;
     if (error) throw error;
-    if (!profiles || profiles.length === 0) {
-      saveCache(branchId, null);
-      return null;
-    }
-    // Una sola balanza de venta por sucursal en esta versión: con dos, no se adivina cuál es.
-    if (profiles.length > 1) return null;
-    const p = profiles[0] as ProfileRow;
-    // Apagada: Mostrador no la usa (la pantalla de Stock sí la ve, para volver a encenderla).
-    if (p.active === false && !opts.includeInactive) {
-      saveCache(branchId, null);
-      return null;
-    }
+    const list = ((profiles ?? []) as ProfileRow[]).filter((p) => opts.scaleKey || hasCodes(p));
+    // Sin clave y con varias: no se adivina cuál es.
+    if (list.length !== 1) return null;
+    const p = list[0];
+    if (p.active === false && !opts.includeInactive) return null;
+    return await setupOf(branchId, p);
+  } catch (err) {
+    if (typeof err === "object" && err && "code" in err && (err as { code?: string }).code) return null;
+    const cached = loadCache(branchId);
+    return cached.find((s) => !opts.scaleKey || s.profile.scaleKey === opts.scaleKey) ?? null;
+  }
+}
+
+async function setupOf(branchId: string, p: ProfileRow): Promise<ScaleSetup> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  {
     const { data: items, error: e2 } = await supabase.from("scale_catalog_items").select("code, name, sale_type, prices, ean_type, ean_config, link_kind, product_id").eq("branch_id", branchId).eq("scale_key", p.scale_key);
     if (e2) throw e2;
     const rows = (items ?? []) as ItemRow[];
@@ -80,30 +110,28 @@ export async function loadScaleSetup(branchId: string, opts: { includeInactive?:
       repeatWindowMinutes: p.repeat_window_minutes,
       active: p.active !== false
     };
-    if (setup.active) saveCache(branchId, setup);
     return setup;
-  } catch (err) {
-    // Sin la tabla (42P01) = esta base no tiene la función todavía.
-    if (typeof err === "object" && err && "code" in err && (err as { code?: string }).code) return null;
-    return loadCache(branchId);
   }
 }
 
-function saveCache(branchId: string, setup: ScaleSetup | null) {
+function saveCache(branchId: string, setups: ScaleSetup[]) {
   try {
-    if (setup) localStorage.setItem(CACHE(branchId), JSON.stringify(setup));
+    if (setups.length) localStorage.setItem(CACHE(branchId), JSON.stringify(setups));
     else localStorage.removeItem(CACHE(branchId));
   } catch {
     // sin localStorage: sin copia para cuando no haya conexión
   }
 }
 
-function loadCache(branchId: string): ScaleSetup | null {
+/** Copia sin conexión. Antes de la 133 se guardaba UNA balanza (objeto); ahora una lista. */
+function loadCache(branchId: string): ScaleSetup[] {
   try {
     const raw = localStorage.getItem(CACHE(branchId));
-    return raw ? (JSON.parse(raw) as ScaleSetup) : null;
+    if (!raw) return [];
+    const v = JSON.parse(raw) as ScaleSetup | ScaleSetup[];
+    return Array.isArray(v) ? v : [v];
   } catch {
-    return null;
+    return [];
   }
 }
 

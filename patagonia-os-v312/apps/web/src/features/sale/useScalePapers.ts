@@ -2,9 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import type { Product } from "@patagonia/domain";
 import { parseAmount } from "../../lib/money";
 import { formatMoney, localDateIso } from "../shifts/format";
-import { decodeScaleCode, type DecodedScan } from "../scales/sale/profile";
+import type { DecodedScan } from "../scales/sale/profile";
+import { decodeAcross } from "../scales/sale/multi-decode";
 import { addLibreFromPaper, addScannedItem, closePaper, describeItem, emptyPaper, paperFingerprint, setLibreAmount, type Paper } from "../scales/sale/paper";
-import { loadScaleSetup, type ScaleSetup } from "../scales/sale/scale-sale-service";
+import { loadScaleSetups, type ScaleSetup } from "../scales/sale/scale-sale-service";
 import type { CreatePosSaleInput } from "./sale-service";
 import type { TicketLine } from "./sale-model";
 
@@ -21,13 +22,16 @@ import type { TicketLine } from "./sale-model";
  * - los importes del papel si hubo precio a mano;
  * - "¿es otro ticket igual?".
  *
- * Solo se activa si la sucursal tiene una balanza de venta configurada (scale_profiles).
+ * Solo se activa si la sucursal tiene una balanza de venta configurada (scale_profiles). Con varias (migración
+ * 133), cada código se lee con la balanza que lo imprimió (multi-decode.ts) y un papel es siempre de UNA balanza.
  */
 
 interface OpenPaper {
   id: string;
   paper: Paper;
   keys: string[];
+  /** Balanza del papel (la del primer artículo escaneado). */
+  scaleKey: string | null;
 }
 interface ConfirmedPaper {
   id: string;
@@ -37,9 +41,10 @@ interface ConfirmedPaper {
   articles: number | null;
   keys: string[];
   repeatConfirmed: boolean;
+  scaleKey: string;
 }
 
-const newPaper = (): OpenPaper => ({ id: `papel-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, paper: emptyPaper(), keys: [] });
+const newPaper = (): OpenPaper => ({ id: `papel-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`, paper: emptyPaper(), keys: [], scaleKey: null });
 
 export function useScalePapers(deps: {
   enabled: boolean;
@@ -50,18 +55,18 @@ export function useScalePapers(deps: {
   setMessage: (m: string) => void;
 }) {
   const { enabled, branchId, products, cart, setCart, setMessage } = deps;
-  const [setup, setSetup] = useState<ScaleSetup | null>(null);
+  const [setups, setSetups] = useState<ScaleSetup[]>([]);
   const [open, setOpen] = useState<OpenPaper>(newPaper);
   const [confirmed, setConfirmed] = useState<ConfirmedPaper[]>([]);
   const seq = useRef(0);
 
   useEffect(() => {
     if (!enabled || !branchId) {
-      setSetup(null);
+      setSetups([]);
       return;
     }
     let alive = true;
-    const load = () => void loadScaleSetup(branchId).then((s) => alive && setSetup(s));
+    const load = () => void loadScaleSetups(branchId).then((s) => alive && setSetups(s));
     load();
     // Si el dueño cambió un vínculo en Stock, la caja lo toma al volver a esta pestaña.
     const onVisible = () => document.visibilityState === "visible" && load();
@@ -76,15 +81,25 @@ export function useScalePapers(deps: {
 
   /** true si el código era de la balanza (se agregó, o se explicó por qué no). false = sigue el camino normal. */
   function handleScan(raw: string): boolean {
-    if (!setup) return false;
-    const d = decodeScaleCode(raw, setup.profile);
+    if (setups.length === 0) return false;
+    const m = decodeAcross(raw, setups, open.paper.items.length ? open.scaleKey : null);
+    if (m.kind === "not_scale") return false;
+    if (m.kind === "ambiguous") {
+      setMessage("No se agregó: dos balanzas de esta sucursal imprimen ese mismo código y no se puede saber de cuál es. Avisale a soporte de Patagonia.");
+      return true;
+    }
+    const { setup, decoded: d } = m;
+    if (open.paper.items.length > 0 && open.scaleKey && open.scaleKey !== setup.profile.scaleKey) {
+      setMessage("Ese código es de otra balanza. Primero terminá el ticket que estás cargando: escaneá su TOTAL.");
+      return true;
+    }
     if (d.kind === "not_scale") return false;
     if (d.kind === "error") {
       setMessage(`No se agregó: ${d.reason}.`);
       return true;
     }
     if (d.kind === "total") {
-      closeOpen(d);
+      closeOpen(d, setup);
       return true;
     }
     const r = addScannedItem(open.paper, d, setup.links, products);
@@ -94,12 +109,12 @@ export function useScalePapers(deps: {
     }
     const key = lineKey();
     setCart((c) => [...c, lineFor(r.item, key, open.id)]);
-    setOpen({ ...open, paper: r.paper, keys: [...open.keys, key] });
+    setOpen({ ...open, paper: r.paper, keys: [...open.keys, key], scaleKey: setup.profile.scaleKey });
     setMessage(`Agregado: ${describeItem(r.item)}. Seguí con los demás productos de ese ticket y al final escaneá el TOTAL.`);
     return true;
   }
 
-  function closeOpen(total: Extract<DecodedScan, { kind: "total" }>) {
+  function closeOpen(total: Extract<DecodedScan, { kind: "total" }>, setup: ScaleSetup) {
     if (open.paper.items.length === 0) {
       setMessage("Ese es el TOTAL del ticket. Primero escaneá el código de cada producto (el que está debajo de cada uno) y al final el TOTAL.");
       return;
@@ -162,7 +177,7 @@ export function useScalePapers(deps: {
     const fingerprint = paperFingerprint(total.barcode, paper);
     // ¿El mismo papel se cobró recién en ESTA caja, o ya está en esta venta? Se pregunta solo dentro de la ventana
     // (real: con 3 minutos, 6 avisos por semana en vez de 94). Las otras cajas las controla el servidor al cobrar.
-    const windowMs = (setup?.repeatWindowMinutes ?? 3) * 60_000;
+    const windowMs = (setup.repeatWindowMinutes ?? 3) * 60_000;
     const recentHere = loadRecentPapers().find((x) => x.fp === fingerprint && Date.now() - x.at < windowMs);
     const inThisSale = confirmed.some((p) => p.fingerprint === fingerprint);
     let repeatConfirmed = false;
@@ -188,7 +203,7 @@ export function useScalePapers(deps: {
           : { ...l, scalePending: false, unitPrice: amounts[i] };
       })
     );
-    setConfirmed((c) => [...c, { id: open.id, fingerprint, ticketDate: localDateIso(), total: total.amount, articles: total.articles, keys, repeatConfirmed }]);
+    setConfirmed((c) => [...c, { id: open.id, fingerprint, ticketDate: localDateIso(), total: total.amount, articles: total.articles, keys, repeatConfirmed, scaleKey: setup.profile.scaleKey }]);
     setOpen(newPaper());
     setMessage(`Ticket de la balanza confirmado: ${formatMoney(total.amount)} (${r.detail}).`);
   }
@@ -202,7 +217,10 @@ export function useScalePapers(deps: {
       return paper.keys;
     }
     const idx = open.keys.indexOf(key);
-    if (idx >= 0) setOpen({ ...open, paper: { items: open.paper.items.filter((_, i) => i !== idx) }, keys: open.keys.filter((k) => k !== key) });
+    if (idx >= 0) {
+      const keys = open.keys.filter((k) => k !== key);
+      setOpen({ ...open, paper: { items: open.paper.items.filter((_, i) => i !== idx) }, keys, scaleKey: keys.length ? open.scaleKey : null });
+    }
     return [key];
   }
 
@@ -213,13 +231,16 @@ export function useScalePapers(deps: {
 
   /** Datos para create_pos_scale_sale, o un motivo para no cobrar todavía. */
   function payload(lines: TicketLine[]): { scale?: CreatePosSaleInput["scale"]; error?: string } {
-    if (!setup || lines.every((l) => !l.scalePaper)) return {};
+    if (setups.length === 0 || lines.every((l) => !l.scalePaper)) return {};
     if (lines.some((l) => l.scalePending)) return { error: "Falta escanear el código del TOTAL del ticket de la balanza." };
     const papers = confirmed.map((p) => ({ fingerprint: p.fingerprint, ticketDate: p.ticketDate, total: p.total, articles: p.articles, repeatConfirmed: p.repeatConfirmed, items: p.keys.map((k) => lines.findIndex((l) => l.key === k)) }));
     if (papers.some((p) => p.items.some((i) => i < 0)) || lines.some((l) => l.scalePaper && !confirmed.some((p) => p.keys.includes(l.key)))) {
       return { error: "Un ticket de la balanza quedó incompleto: sacalo y escanealo de nuevo." };
     }
-    return { scale: { scaleKey: setup.profile.scaleKey, papers } };
+    // create_pos_scale_sale recibe UNA balanza: los tickets de dos balanzas distintas van en ventas separadas.
+    const keysUsed = [...new Set(confirmed.map((p) => p.scaleKey))];
+    if (keysUsed.length > 1) return { error: "Esta venta tiene tickets de dos balanzas distintas. Cobrá los de cada balanza en una venta aparte." };
+    return { scale: { scaleKey: keysUsed[0], papers } };
   }
 
   /** Venta cobrada (o guardada sin conexión): sus papeles quedan como "recién cobrados en esta caja". */
@@ -232,7 +253,7 @@ export function useScalePapers(deps: {
   }
 
   const pendingCount = cart.filter((l) => l.scalePending).length;
-  return { setup, active: !!setup, handleScan, keysToRemove, reset, payload, confirmRepeat, commit, pendingCount };
+  return { setups, active: setups.length > 0, handleScan, keysToRemove, reset, payload, confirmRepeat, commit, pendingCount };
 }
 
 const RECENT_KEY = "patagonia-scale-papers-recent";

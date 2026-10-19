@@ -166,6 +166,11 @@ export class KretzSession implements ScaleSession {
     // El puerto lo maneja scale-serial (lo cierra solo cuando queda quieto).
   }
 
+  identity(): Record<string, unknown> {
+    const c = (this.diagnostic.configuracion ?? null) as { deviceType?: string; equipmentId?: string } | null;
+    return c ? { letter: c.deviceType ?? null, equipment: c.equipmentId ?? null } : {};
+  }
+
   supportInfo(): Record<string, unknown> {
     return { marca: "kretz", modelo: this.model, modo: this.mode, ...this.diagnostic };
   }
@@ -212,7 +217,9 @@ export function makeKretzAdapter(io: KretzIO, storedModel: () => string | null =
           return new KretzSession(model, ctx, "datos", io, info);
         }
         tried.push({ buscado_como: modelId, verdict: d.verdict, detalle: d.message });
+        ctx.diag?.steps.push(`kretz ${modelId}: ${d.verdict}`);
       }
+      ctx.diag?.log.push({ kretz: tried });
       throw new Error(`kretz no contestó: ${JSON.stringify(tried)}`);
     }
   };

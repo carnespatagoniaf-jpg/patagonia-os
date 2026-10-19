@@ -68,6 +68,43 @@ export async function inspectAndRelease(ports: PortLike[], release: boolean): Pr
   return { openPorts, released, busy };
 }
 
+/**
+ * Módulos que dejan un puerto abierto CON el lector tomado (Mostrador ↔ Systel: lee los tickets por cable) y por
+ * eso no se pueden cerrar desde afuera. Se anotan acá con una función que suelta el puerto cuando no están en
+ * medio de una operación; la próxima vez lo vuelven a abrir solos. Real (Los gringos, 19/10/2026): con Mostrador
+ * abierto en otra ventana, "Mi balanza" daba siempre "la balanza está abierta en otra pestaña".
+ */
+const holders = new Set<() => Promise<number>>();
+
+/** Anota quién tiene un puerto tomado. `release` suelta (cuando termina lo que esté haciendo) y dice cuántos cerró. */
+export function registerSerialHolder(release: () => Promise<number>): () => void {
+  holders.add(release);
+  return () => holders.delete(release);
+}
+
+/** Pide a los módulos de ESTA pestaña que suelten sus puertos. */
+export async function releaseLocalHolders(): Promise<number> {
+  let released = 0;
+  for (const h of [...holders]) {
+    try {
+      released += await h();
+    } catch {
+      // si uno no puede soltar, siguen los demás
+    }
+  }
+  return released;
+}
+
+/**
+ * Antes de abrir un puerto para conectar una balanza: que lo suelten esta pestaña y las demás de Patagonia.
+ * Devuelve lo que contestaron las otras pestañas (para el reporte y para saber si el puerto lo tiene OTRO programa).
+ */
+export async function releaseSerialEverywhere(waitMs = 700): Promise<{ localReleased: number; otherTabs: TabAnswer[] }> {
+  const localReleased = await releaseLocalHolders();
+  const otherTabs = await askOtherTabs("release", waitMs);
+  return { localReleased, otherTabs };
+}
+
 let installed = false;
 
 /** Se instala una vez al cargar la app (main.tsx). */
@@ -79,9 +116,10 @@ export function installSerialTabResponder(): void {
     const msg = event.data;
     if (!msg || (msg.type !== "who" && msg.type !== "release")) return;
     try {
+      const fromHolders = msg.type === "release" ? await releaseLocalHolders() : 0;
       const ports = (await navigator.serial.getPorts()) as unknown as PortLike[];
       const result = await inspectAndRelease(ports, msg.type === "release");
-      const answer: Answer = { type: "answer", id: msg.id, tab: TAB_ID, page: pageLabel || "?", ...result };
+      const answer: Answer = { type: "answer", id: msg.id, tab: TAB_ID, page: pageLabel || "?", ...result, released: result.released + fromHolders };
       channel.postMessage(answer);
     } catch {
       // sin respuesta de esta pestaña

@@ -4,6 +4,7 @@ import { loadSavedSystelLink } from "./systel-discovery";
 import { FTDI_VENDOR_ID, SerialSystelLink, type SystelLinkEvent } from "./systel-serial";
 import { readTicketDetail, type PluCache, type TicketDetailResult } from "./systel-ticket-detail";
 import { saveSystelLabelTemplates } from "../../sale/systel-label-format";
+import { registerSerialHolder } from "../kretz/serial-tabs";
 
 /**
  * Mostrador ↔ balanza Systel por cable, para leer el detalle de los tickets de TOTAL.
@@ -105,6 +106,22 @@ export async function closeSystelTicketSession(): Promise<void> {
   session = null;
   if (s) await s.link.close();
 }
+
+/**
+ * Otra pantalla (Mi balanza, en esta pestaña o en otra) necesita el cable: se suelta cuando termina la lectura que
+ * esté en curso. El próximo TOTAL lo vuelve a abrir solo.
+ */
+export function releaseSystelTicketSession(): Promise<number> {
+  const run = busy.then(async () => {
+    if (!session) return 0;
+    await closeSystelTicketSession();
+    return 1;
+  });
+  busy = run.catch(() => {});
+  return run.catch(() => 0);
+}
+
+registerSerialHolder(releaseSystelTicketSession);
 
 if (typeof navigator !== "undefined" && "serial" in navigator) {
   navigator.serial.addEventListener("disconnect", (e) => {

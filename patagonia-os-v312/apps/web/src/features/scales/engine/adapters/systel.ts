@@ -1,13 +1,15 @@
 import { SystelClient, type SystelLink } from "../../../inventory/systel/systel-client";
 import { takeSystelBackup, type SystelBackup } from "../../../inventory/systel/systel-backup";
-import { discoverSystelLink, loadSavedSystelLink, saveSystelLink } from "../../../inventory/systel/systel-discovery";
+import type { SystelExchangeLog } from "../../../inventory/systel/systel-client";
+import { discoverSystelLink, loadSavedSystelLink, saveSystelLink, type SystelFoundLink } from "../../../inventory/systel/systel-discovery";
+import type { SystelLinkEvent } from "../../../inventory/systel/systel-serial";
 import type { SystelLayout } from "../../../inventory/systel/systel-plu";
 import { takeProductBackup } from "../../../inventory/systel/systel-product-barcode";
 import { saveSystelLabelTemplates, saveSystelPluBarcodes } from "../../../sale/systel-label-format";
 import type { ScaleCatalogItem, ScaleLink, ScaleSaleProfile } from "../../sale/profile";
 import type { ScaleSetup } from "../../sale/scale-sale-service";
 import { canWrite, SCALE_CAPABILITIES, type ScaleModelId } from "../capabilities";
-import { FRIENDLY_MESSAGES } from "../friendly";
+import { FRIENDLY_MESSAGES, FriendlyError } from "../friendly";
 import type { EngineContext, PendingItem, PreparedSync, ProgressFn, ScaleAdapter, ScaleSession, SyncOutcome } from "../types";
 import { planSystelPush, runSystelPush, scaleOnly, type PushItem, type PushProduct } from "./systel-push";
 
@@ -30,7 +32,7 @@ export function systelModelFor(b: Pick<SystelBackup, "signature" | "layout">): S
 }
 
 export interface SystelDeps {
-  loadSetup: (branchId: string) => Promise<ScaleSetup | null>;
+  loadSetup: (branchId: string, scaleKey: string) => Promise<ScaleSetup | null>;
   saveCatalog: (branchId: string, profile: Omit<ScaleSaleProfile, "catalog"> & { model?: string }, catalog: ScaleCatalogItem[]) => Promise<unknown>;
   setLinks: (branchId: string, scaleKey: string, links: ScaleLink[]) => Promise<unknown>;
   setActive: (branchId: string, scaleKey: string, active: boolean) => Promise<unknown>;
@@ -48,7 +50,8 @@ export function saveProductBackupLocally(backup: unknown): void {
   }
 }
 
-const SCALE_KEY = "systel";
+/** Clave de la balanza de antes de la migración 134 (una sola Systel por sucursal). */
+export const LEGACY_SYSTEL_KEY = "systel";
 
 interface State {
   backup: SystelBackup;
@@ -61,31 +64,78 @@ export class SystelSession implements ScaleSession {
   model: ScaleModelId = "systel-otra";
   label = SCALE_CAPABILITIES["systel-otra"].label;
   private state: State | null = null;
+  /** Todo lo que se le mandó y contestó en esta sesión (para soporte). */
+  private readonly log: SystelExchangeLog[] = [];
+  /** La última lectura, aunque haya fallado (antes se perdía y el reporte decía solo "no contestó"). */
+  private lastBackup: SystelBackup | null = null;
+
+  /** Número de la balanza (el que contestó en la búsqueda): la identifica. */
+  private readonly number: number;
+  /** A qué número se le hacen los pedidos: el suyo, el 1 o el general (0), el primero que atienda (ver pickAddress). */
+  private address: number;
+  /** Cómo quedó elegido el número de los pedidos (para soporte). */
+  private addressNote = "";
 
   constructor(
     private readonly link: SystelLink & { close?: () => Promise<void> },
-    private readonly address: number,
+    address: number,
     private readonly ctx: EngineContext,
     private readonly deps: SystelDeps
-  ) {}
+  ) {
+    this.number = address;
+    this.address = address;
+  }
+
+  private get scaleKey(): string {
+    return this.ctx.scaleKey ?? LEGACY_SYSTEL_KEY;
+  }
 
   private client(write = false): SystelClient {
-    return new SystelClient(this.link, { address: this.address, ...(write ? { writes: { products: true, productBarcode: true } } : {}) });
+    return new SystelClient(this.link, { address: this.address, log: this.log, ...(write ? { writes: { products: true, productBarcode: true } } : {}) });
   }
 
   private pushProducts(): PushProduct[] {
     return this.ctx.products.filter((p) => p.active ?? true).map((p) => ({ id: p.id, code: p.code, name: p.name, byWeight: p.unit === "kg", price: p.priceRetail }));
   }
 
+  /**
+   * A qué número le hace caso para los pedidos. Real: la Cuora Max de Los gringos (N.º 20) atendió todo pedido hecho
+   * al 1 (sesiones buenas del 14/10, "dirección 1"), y una balanza NUEVA del mismo cliente (19/10) contestó la búsqueda
+   * como N.º 20 y después no atendió la firma ni el ping hechos a su número. El documento no fija cuál debe usarse
+   * (V6.0 págs. 2-3: "Unicast", 0 = "Broadcast"). En vez de suponer, se pide la firma (función 2, solo lectura) a su
+   * número, al 1 y al general, y se usa el primero que la entrega. Con el general (0) se acepta UNA sola respuesta por
+   * pedido (SystelClient descarta las ambiguas), así que no se confunde con otra balanza en el mismo cable.
+   */
+  private async pickAddress(onProgress: ProgressFn): Promise<boolean> {
+    for (const a of [...new Set([this.number, 1, 0])]) {
+      onProgress("leer", "Leyendo tu balanza…");
+      const c = new SystelClient(this.link, { address: a, log: this.log, busyRetryMs: [300, 800, 1500] });
+      const sig = await c.signature();
+      if (sig) {
+        this.address = a;
+        this.addressNote = a === this.number ? "su número" : a === 0 ? "general (0): no atendió a su número ni al 1" : "el 1: no atendió a su número";
+        return true;
+      }
+    }
+    this.addressNote = "ninguno atendió la firma (su número, 1 y general)";
+    return false;
+  }
+
   async prepare(onProgress: ProgressFn): Promise<PreparedSync> {
     onProgress("leer", "Leyendo tu balanza…");
+    await this.pickAddress(onProgress);
     const backup = await takeSystelBackup(this.client(), () => onProgress("leer", "Leyendo tu balanza…"));
-    if (!backup.signature && !backup.ping) throw new Error("la balanza no contestó");
+    this.lastBackup = backup;
+    if (!backup.signature && !backup.ping) {
+      // E1/E2/E3 = la balanza contestó por el cable pero no hizo la orden (la Cuora de Los gringos lo hizo 13 veces del
+      // 09 al 14/10; el 19/10, otra balanza, no se sabe: se perdió el registro). No es lo mismo que el silencio.
+      throw new FriendlyError(systelRefused(this.log) ? "balanza_ocupada" : "no_contesta", `${backup.detail} · pedidos: ${this.addressNote}`);
+    }
     this.model = systelModelFor(backup);
     this.label = SCALE_CAPABILITIES[this.model].label;
 
     onProgress("comparar", "Comparando con los productos de Patagonia…");
-    const setup = this.ctx.online && this.ctx.branchId ? await this.deps.loadSetup(this.ctx.branchId) : null;
+    const setup = this.ctx.online && this.ctx.branchId ? await this.deps.loadSetup(this.ctx.branchId, this.scaleKey) : null;
     const products = this.pushProducts();
     const layout = backup.layout;
     const plan = layout ? planSystelPush(backup.plus, layout, backup.signature?.priceDecimals ?? 0, products) : [];
@@ -103,6 +153,8 @@ export class SystelSession implements ScaleSession {
     if (!backup.complete) notes.push("No se pudo leer toda la balanza. Probá de nuevo; si sigue, avisá a soporte.");
     if (noPrice) notes.push(noPrice === 1 ? "1 producto no tiene precio en Patagonia: no se manda hasta que lo tenga." : `${noPrice} productos no tienen precio en Patagonia: no se mandan hasta que lo tengan.`);
     if (badCode) notes.push(`${badCode === 1 ? "1 producto tiene" : `${badCode} productos tienen`} un código que no sirve como número de balanza (tiene que ser un número de hasta 4 cifras, sin repetir).`);
+    const changing = count("actualizar");
+    if (changing) notes.push(`${changing === 1 ? "1 producto que ya está" : `${changing} productos que ya están`} en la balanza cambia de precio o nombre. Los totales de venta que guarda la balanza para ${changing === 1 ? "ese producto" : "esos productos"} podrían volver a cero (no está comprobado). Las ventas de Patagonia no cambian.`);
     if (extra) notes.push(extra === 1 ? "La balanza tiene 1 producto que no está en Patagonia: no se toca." : `La balanza tiene ${extra} productos que no están en Patagonia: no se tocan.`);
     const allowed = canWrite(this.model, "sendProducts") || (this.deps.forceWritable === true && this.model === "systel-cuora-max");
     const writable = allowed && !!layout && backup.complete;
@@ -163,11 +215,11 @@ export class SystelSession implements ScaleSession {
     if (this.ctx.online && this.ctx.branchId) {
       await this.deps.saveCatalog(
         this.ctx.branchId,
-        { scaleKey: SCALE_KEY, brand: "systel", model: this.label, weighedFormat: values.E_P ?? null, unitFormat: values.E_U ?? null, totalFormat: values.E_S ?? null, amountDecimals: st.backup.signature?.priceDecimals ?? 0, genericCodes: [] },
+        { scaleKey: this.scaleKey, brand: "systel", model: this.label, weighedFormat: values.E_P ?? null, unitFormat: values.E_U ?? null, totalFormat: values.E_S ?? null, amountDecimals: st.backup.signature?.priceDecimals ?? 0, genericCodes: [] },
         catalog
       );
-      await this.deps.setLinks(this.ctx.branchId, SCALE_KEY, sent.map((x) => ({ code: x.number!, kind: "product" as const, productId: x.product.id })));
-      await this.deps.setActive(this.ctx.branchId, SCALE_KEY, true);
+      await this.deps.setLinks(this.ctx.branchId, this.scaleKey, sent.map((x) => ({ code: x.number!, kind: "product" as const, productId: x.product.id })));
+      await this.deps.setActive(this.ctx.branchId, this.scaleKey, true);
     }
     saveSystelLabelTemplates(values);
     saveSystelPluBarcodes(Object.fromEntries(catalog.map((c) => [String(c.code), { type: c.eanType, config: c.eanConfig, p1: c.prices[0], p2: 0, name: c.name, saleType: c.saleType }])));
@@ -185,10 +237,33 @@ export class SystelSession implements ScaleSession {
     await this.link.close?.();
   }
 
-  supportInfo(): Record<string, unknown> {
-    const b = this.state?.backup;
-    return { marca: "systel", modelo: this.model, direccion: this.address, firma: b?.signature ?? null, formato: b?.layout ?? null, productos: b?.plus.length ?? 0, completo: b?.complete ?? null, detalle: b?.detail ?? null };
+  identity(): Record<string, unknown> {
+    return { address: this.number };
   }
+
+  supportInfo(): Record<string, unknown> {
+    const b = this.state?.backup ?? this.lastBackup;
+    return {
+      marca: "systel",
+      modelo: this.model,
+      numero: this.number,
+      direccion_pedidos: this.address,
+      como_se_eligio: this.addressNote,
+      firma: b?.signature ?? null,
+      formato: b?.layout ?? null,
+      productos: b?.plus.length ?? 0,
+      completo: b?.complete ?? null,
+      detalle: b?.detail ?? null,
+      contesto_ocupada: systelRefused(this.log),
+      intercambio_sesion: this.log.slice(-200)
+    };
+  }
+}
+
+/** ¿La balanza contestó con un error de "no hice la orden" (E1/E2/E3)? Es una respuesta, no silencio. */
+export function systelRefused(log: SystelExchangeLog[]): boolean {
+  // Contestada a otro número (se le habló al 1 y respondió la 20) también cuenta: la trama trae el E3 igual.
+  return log.some((l) => /^E[123]$/.test(l.rxText) && !l.result.startsWith("sin respuesta"));
 }
 
 /** El adaptador, con la base que le pase quien lo arma (systel-live.ts en la app; dobles en las pruebas). */
@@ -197,7 +272,19 @@ export function makeSystelAdapter(deps: SystelDeps): ScaleAdapter {
     family: "systel",
     async identify(port: SerialPort, ctx: EngineContext, onProgress: ProgressFn): Promise<ScaleSession | null> {
       onProgress("buscar", "Buscando tu balanza…");
-      const found = await discoverSystelLink(port, [], () => onProgress("buscar", "Buscando tu balanza…"), loadSavedSystelLink(), 350);
+      // El intercambio va al reporte de soporte: sin esto, "no contestó" llegaba sin un solo byte (Los gringos, 19/10).
+      const log: SystelExchangeLog[] = [];
+      const events: SystelLinkEvent[] = [];
+      let found: SystelFoundLink | null = null;
+      try {
+        found = await discoverSystelLink(port, log, () => onProgress("buscar", "Buscando tu balanza…"), loadSavedSystelLink(), 350, events);
+      } finally {
+        if (ctx.diag) {
+          ctx.diag.log.push(...log.slice(-300));
+          ctx.diag.events.push(...events.slice(-300));
+          ctx.diag.steps.push(found ? `systel: contestó el N.º ${found.address}${systelRefused(log) ? " (con E1/E2/E3: está, pero no atiende)" : ""}` : `systel: sin respuesta (${log.length} intentos)`);
+        }
+      }
       if (!found) return null;
       saveSystelLink({ settings: found.settings, address: found.address });
       return new SystelSession(found.link, found.address, ctx, deps);

@@ -213,6 +213,16 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
               <small>
                 {line.kind === "manual" ? "Manual · " : ""}{line.scalePending ? "Esperando el TOTAL del ticket · " : line.scaleTicket ? "Ticket de la balanza · " : ""}{formatMoney(line.unitPrice)}{line.unit === "kg" ? " /kg" : ` /${UNIT_LABELS[line.unit]}`}
               </small>
+              {line.kind === "manual" && line.source === "scale_total" && (
+                ticket.detailing === line.key ? (
+                  <small className="pos-detail-hint">
+                    Falta detallar este importe: buscá cada producto del papel.{" "}
+                    <button type="button" className="link-button" onClick={ticket.stopTicketDetail}>Terminar después</button>
+                  </small>
+                ) : (
+                  <button type="button" className="link-button" onClick={() => ticket.startTicketDetail(line.key)}>Detallar productos (descuenta stock)</button>
+                )
+              )}
             </div>
             <input
               type="text"

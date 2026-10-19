@@ -19,9 +19,11 @@ import { submitScaleSupportReport } from "../scales/support-service";
 import type { PosShift } from "./pos-shift-service";
 import { lineGross, type PaymentRow, type TicketLine } from "./sale-model";
 import { isSupabaseConfigured } from "../../lib/supabase";
-import { findScaleTicketVoid, undoScaleTicketVoid } from "./scale-control-service";
+import { findScaleTicketSale, findScaleTicketVoid, undoScaleTicketVoid } from "./scale-control-service";
+import { chargedTicketQuestion, detailedTotalKey, SAME_SALE_LABEL_QUESTION, type ChargedHit } from "./scale-repeat";
 import { hourAr, undoVoidQuestion, voidedTicketQuestion } from "./scale-void-warning";
 import { parseQuantity } from "./quantity";
+import { addDetailLine, detailGroupKeys, detailRemaining } from "./ticket-detail";
 
 // Estado y acciones del ticket que se está armando en Mostrador: búsqueda,
 // carrito, descuentos y recargos, medios de pago y sus totales. Es la parte
@@ -55,6 +57,10 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
   // Cualquier sucursal con una balanza "artículos + TOTAL" sincronizada desde Mi balanza (scale_profiles activo).
   // Sin perfil (todas las Kretz y quien no tiene balanza), useScalePapers no hace nada: Mostrador sigue igual.
   const papers = useScalePapers({ enabled: !!scaleBranchId, branchId: scaleBranchId, products, cart, setCart, setMessage });
+  /** Clave del TOTAL de balanza que se está detallando (ticket-detail.ts), o null. */
+  const [detailing, setDetailing] = useState<string | null>(null);
+  /** Etiquetas de balanza escaneadas en ESTA venta (para avisar si se escanea dos veces la misma). */
+  const scannedLabels = useRef<Set<string>>(new Set());
   const [itemDiscounts, setItemDiscounts] = useState<Record<string, string>>({});
   const [saleDiscount, setSaleDiscount] = useState("");
   const [saleDiscountMode, setSaleDiscountMode] = useState<"amount" | "percent" | "final">("amount");
@@ -165,6 +171,11 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
   })();
 
   function quickAdd(product: Product, quantity = 1, source?: "scale") {
+    // Detallando un TOTAL de la balanza: el producto elegido sale de ese total (con su importe del papel).
+    if (detailing && !source) {
+      detailProduct(product);
+      return;
+    }
     setMessage("");
     if (!Number.isFinite(quantity) || quantity <= 0) {
       setMessage("La cantidad debe ser mayor que cero.");
@@ -197,6 +208,10 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
    * activada y el producto es por kg, el peso lo trae la balanza; si no se
    * puede leer, NO se agrega nada (mejor que vender 1 kg por error). */
   async function addProductFromSearch(product: Product) {
+    if (detailing) {
+      detailProduct(product);
+      return;
+    }
     if (product.unit !== "kg" || !isWeightScaleEnabled()) {
       quickAdd(product);
       return;
@@ -339,12 +354,18 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
         // Decisión del dueño (15/10): con varios productos se cobra el TOTAL directo, sin pedir el detalle (no baja
         // stock). Un ticket de UN producto trae el código del producto y sí baja stock (etiqueta con importe).
         setCart((current) => [...current, { key: resolved.key, kind: "manual", name: "Ticket de balanza", unit: "unit", quantity: 1, unitPrice: ticketTotal, source: "scale_total", scaleTickets: 1 }]);
-        setMessage(`Ticket de balanza cargado: ${formatMoney(ticketTotal)}. Como trae varios productos, no descuenta stock.`);
+        setMessage(`Ticket de balanza cargado: ${formatMoney(ticketTotal)}. Trae varios productos: para que descuente stock, tocá "Detallar productos" en esa línea (es opcional).`);
       }
       done();
       return;
     }
     if (resolved.type === "label") {
+      if (scannedLabels.current.has(raw) && !window.confirm(SAME_SALE_LABEL_QUESTION)) {
+        setMessage("No se agregó: esa etiqueta ya estaba en esta venta.");
+        done();
+        return;
+      }
+      scannedLabels.current.add(raw);
       if (
         cart.some((l) => l.source === "scale_total") &&
         !window.confirm("En esta venta ya está cargado el TOTAL de un ticket de la balanza. Si este producto es de ese mismo ticket, se cobraría dos veces. ¿Agregarlo igual?")
@@ -389,7 +410,9 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       return;
     }
     done();
-    void scanUnlessVoided(shift.id, raw, applyScaleScan);
+    // Las dos consultas (¿anulado? ¿ya cobrado?) salen juntas: escanear no se hace más lento.
+    const charged = findAlreadyCharged(shift.id, scan);
+    void scanUnlessVoided(shift.id, raw, () => void unlessAlreadyCharged(charged, applyScaleScan));
     return;
     }
     if (resolved.type === "product") {
@@ -404,6 +427,39 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     }
 
     setMessage("No se encontró ningún producto con ese código.");
+  }
+
+  /**
+   * ¿Ese papel de la balanza ya se cobró en los turnos del control (otra venta, otra caja)? Se pregunta, nunca se
+   * bloquea (find_scale_ticket_sale, migración 125). Sin conexión o con error, no frena la venta.
+   */
+  async function findAlreadyCharged(shiftId: string, scan: { type: "label"; product: Product; quantity: number; amount?: number } | { type: "ticket_total"; amount: number; key: string }): Promise<ChargedHit | null> {
+    let hit: ChargedHit | null = null;
+    try {
+      if (scan.type === "label") {
+        hit = await findScaleTicketSale(shiftId, { productId: scan.product.id, weightKg: scan.quantity, amount: scan.amount ?? scan.quantity * scan.product.priceRetail });
+      } else {
+        hit = await findScaleTicketSale(shiftId, { productId: null, weightKg: null, amount: scan.amount });
+        // Un TOTAL que se detalló se guarda como productos: se busca por su clave.
+        if (!hit) {
+          const charged = await chargedScaleTickets([detailedTotalKey(scan.key)]);
+          if (charged?.size) hit = { createdAt: null, amount: scan.amount, by: null };
+        }
+      }
+    } catch {
+      hit = null;
+    }
+    return hit;
+  }
+
+  async function unlessAlreadyCharged(found: Promise<ChargedHit | null>, apply: () => void) {
+    const hit = await found;
+    if (hit && !window.confirm(chargedTicketQuestion(hit))) {
+      setMessage("No se agregó: ese ticket de la balanza ya estaba cobrado.");
+      searchInputRef.current?.focus();
+      return;
+    }
+    apply();
   }
 
   /** Si el papel ya está anulado en los turnos del control: "¿Cobrarlo igual?" y, si sí, ofrece deshacer
@@ -432,7 +488,8 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
 
   function removeFromCart(key: string) {
     // Un ticket de la balanza ya confirmado se saca entero (sus artículos van juntos).
-    const keys = new Set(cart.find((l) => l.key === key)?.scalePaper ? papers.keysToRemove(key) : [key]);
+    const keys = new Set(cart.find((l) => l.key === key)?.scalePaper ? papers.keysToRemove(key) : detailGroupKeys(cart, key));
+    if (detailing && keys.has(detailing)) setDetailing(null);
     setCart((current) => current.filter((l) => !keys.has(l.key)));
     setItemDiscounts((current) => {
       const next = { ...current };
@@ -620,7 +677,50 @@ ${l.name} ${qty}`);
     if (keys.length) saveChargedSystelTickets([...loadChargedSystelTickets(), ...new Set(keys)]);
   }
 
+  /** Empezar a detallar un TOTAL de balanza: los próximos productos que se elijan salen de ese total. */
+  function startTicketDetail(key: string) {
+    const left = detailRemaining(cart, key);
+    if (left === null) return;
+    setDetailing(key);
+    setMessage(`Detallando el ticket: buscá cada producto del papel y escribí el importe impreso. Faltan ${formatMoney(left)}.`);
+    searchInputRef.current?.focus();
+  }
+
+  function stopTicketDetail() {
+    setDetailing(null);
+    setMessage("Lo que no se detalló se cobra igual dentro del TOTAL, sin descontar stock.");
+  }
+
+  function detailProduct(product: Product) {
+    if (!detailing) return;
+    const left = detailRemaining(cart, detailing);
+    if (left === null) {
+      setDetailing(null);
+      return;
+    }
+    const typed = window.prompt(`Importe de "${product.name}" impreso en el ticket de la balanza.\nFaltan ${formatMoney(left)}.`);
+    setSearch("");
+    setHighlightedIndex(-1);
+    if (typed === null) return;
+    const r = addDetailLine(cart, detailing, product, parseAmount(typed) || 0);
+    if (!r.ok) {
+      setMessage(`No se agregó: ${r.reason}.`);
+      return;
+    }
+    setCart(r.cart);
+    if (r.done) {
+      const n = r.cart.filter((l) => l.detailOf === detailing).length;
+      setDetailing(null);
+      setMessage(`Ticket detallado: ${n} ${n === 1 ? "producto" : "productos"}. Descuentan stock al cobrar.`);
+    } else {
+      setMessage(`Agregado: ${product.name}, ${formatMoney(r.line.scaleAmount ?? 0)}. Faltan ${formatMoney(r.remaining)}.`);
+    }
+    searchInputRef.current?.focus();
+  }
+
   function clearTicket() {
+    setDetailing(null);
+    scannedLabels.current = new Set();
     setScaleTicketChoices(null);
     papers.reset();
     setCart([]);
@@ -709,7 +809,7 @@ ${l.name} ${qty}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSplit, busy, cart.length, shift, accounts, confirmCharge]);
 
-  return { search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, commitScaleTickets, papers, readingScaleTicket, scaleTicketChoices, setScaleTicketChoices, addScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
+  return { search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, detailing, startTicketDetail, stopTicketDetail, commitScaleTickets, papers, readingScaleTicket, scaleTicketChoices, setScaleTicketChoices, addScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
 }
 
 export type SaleTicket = ReturnType<typeof useSaleTicket>;

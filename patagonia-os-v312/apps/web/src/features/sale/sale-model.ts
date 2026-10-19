@@ -28,6 +28,8 @@ export interface TicketLine {
   scalePaper?: string;
   /** Código de la balanza que se escaneó (null = venta libre agregada a mano). */
   scaleCode?: number | null;
+  /** Producto detallado de un ticket de TOTAL (ticket-detail.ts): la clave de la línea de ese TOTAL. */
+  detailOf?: string;
 }
 
 /** Importe de una línea antes de descuentos: el de la balanza si vino de un ticket leído de ella. */

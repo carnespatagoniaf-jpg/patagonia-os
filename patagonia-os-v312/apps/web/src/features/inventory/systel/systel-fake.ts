@@ -42,7 +42,7 @@ export class FakeCuora implements SystelLink {
 
   constructor(
     readonly layout: SystelLayout,
-    readonly options: { address?: number; decimals?: number; capacity?: number; writeChecksum?: boolean; typeByteAccepted?: "binario" | "ascii"; typeHighBits?: number; loteNulOnWrite?: boolean; protocol?: string } = {}
+    readonly options: { address?: number; decimals?: number; capacity?: number; writeChecksum?: boolean; typeByteAccepted?: "binario" | "ascii"; typeHighBits?: number; loteNulOnWrite?: boolean; protocol?: string; /** Solo pruebas: no atiende pedidos hechos a su número (sí al general 0). Caso a cubrir: balanza nueva de Los gringos, 19/10. */ deafToOwnNumber?: boolean } = {}
   ) {}
 
   get address(): number {
@@ -69,6 +69,7 @@ export class FakeCuora implements SystelLink {
       return this.reply(fn, "E3");
     }
     if (addr !== this.address && addr !== 0) return null;
+    if (this.options.deafToOwnNumber && addr === this.address) return null;
     if (expectsCheck && xorChecksum(frame.subarray(0, frame.length - 1)) !== frame[frame.length - 1]) {
       return isPluWrite ? this.reply(fn, "E5") : this.reply(fn, "E1");
     }

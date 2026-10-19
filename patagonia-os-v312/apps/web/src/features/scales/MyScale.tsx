@@ -1,44 +1,75 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { CheckCircle2, Scale, TriangleAlert } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { CheckCircle2, Plus, Scale, TriangleAlert } from "lucide-react";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
-import { connectScale, markSynced } from "./engine/engine";
+import { releaseSerialEverywhere } from "../inventory/kretz/serial-tabs";
+import { connectBranchScale, type BranchConnectResult } from "./engine/connect-branch";
+import { markSynced } from "./engine/engine";
 import { adaptersForChoice } from "./engine/live";
 import { friendlyKind, friendlyMessage } from "./engine/friendly";
-import { choiceLabel, loadScaleChoice, SCALE_CHOICES, saveScaleChoice, type ScaleChoice } from "./engine/choice";
-import { forgetRememberedScale, loadRememberedScale } from "./engine/memory";
-import type { EngineProduct, EngineStep, PendingItem, PreparedSync, ScaleSession } from "./engine/types";
+import { choiceLabel, SCALE_CHOICES, type ScaleChoice } from "./engine/choice";
+import { loadRememberedScale, rememberScale } from "./engine/memory";
+import { emptyDiag, type ConnectDiag, type EngineProduct, type EngineStep, type PendingItem, type PreparedSync, type ScaleSession } from "./engine/types";
+import { choiceForScale, defaultScaleName, listBranchScales, registerBranchScale, removeBranchScale, renameBranchScale, scaleStatus, type BranchScale } from "./registry/branch-scales";
+import { bindingFor, forgetBinding, saveBinding } from "./registry/local-bindings";
 import { setScaleLinks } from "./sale/scale-sale-service";
 import { submitScaleSupportReport } from "./support-service";
 
 /**
- * "Mi balanza": la única pantalla de balanza que ve el cliente.
+ * "Mis balanzas": la única pantalla de balanza que ve el cliente.
  *
- *   1. Conectar      → permiso, buscar, identificar, leer y comparar (sin un solo dato técnico)
- *   2. Sincronizar   → respaldo, escritura comprobada, relectura, guardado en Patagonia
- *   3. Vender        → Mostrador lee los tickets
+ *   Agregar balanza → ¿qué balanza es? → elegir el cable → Patagonia la reconoce → pasar productos
  *
- * Todo lo técnico (puertos, velocidades, diagnósticos, escritura experimental, restauraciones) está en
- * "Herramientas técnicas" (ScaleSupportTools), solo para soporte.
+ * Cada balanza de la sucursal es una fila (migración 134) con su nombre; en cada computadora se recuerda su cable
+ * (local-bindings). Agregar otra nunca pisa ni desconecta la primera. Puertos, velocidades, protocolos y
+ * diagnósticos quedan en "Herramientas técnicas" (ScaleSupportTools), solo para soporte.
  */
 
 type Phase =
   | { kind: "inicio" }
+  | { kind: "elegir_marca" }
   | { kind: "trabajando"; stage: "conectar" | "sincronizar"; step: EngineStep; text: string; done?: number; total?: number }
   | { kind: "listo_para_sincronizar"; prepared: PreparedSync }
   | { kind: "listo"; message: string; pending: PendingItem[]; model: string }
   | { kind: "bloqueado"; prepared: PreparedSync }
-  | { kind: "error"; message: string };
+  | { kind: "error"; message: string; canPick: boolean };
+
+/** Balanza que esta computadora usaba antes de "Mis balanzas" y que todavía no está registrada en la sucursal. */
+const LOCAL_KEY = "__esta-computadora";
+
+const CHOICE_FOR_TARGET: Record<ReturnType<typeof choiceForScale>, ScaleChoice> = { systel: "systel", "kretz-aura": "kretz-aura", "kretz-report": "kretz-report", "kretz-auto": "auto" };
 
 export function MyScale({ products, branchId }: { products: EngineProduct[]; branchId: string | null }) {
   const { profile } = useAuth();
+  const canManage = profile?.role === "owner" || profile?.role === "admin";
+  const [scales, setScales] = useState<BranchScale[]>([]);
+  const [loaded, setLoaded] = useState(false);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
   const [phase, setPhase] = useState<Phase>({ kind: "inicio" });
   const [replace, setReplace] = useState(false);
+  const [newChoice, setNewChoice] = useState<ScaleChoice | null>(null);
+  /** Al agregar: otra balanza registrada con el mismo número (solo se avisa). */
+  const [lookalike, setLookalike] = useState<BranchScale | null>(null);
   const session = useRef<ScaleSession | null>(null);
-  const remembered = loadRememberedScale();
-  const [choice, setChoice] = useState<ScaleChoice | null>(() => loadScaleChoice(remembered));
-  const canReport = profile?.role === "owner" || profile?.role === "admin";
-  const ctx = useMemo(() => ({ branchId, products, online: isSupabaseConfigured, canManageLinks: canReport }), [branchId, products, canReport]);
+  const ctxRef = useRef<BranchConnectResult | null>(null);
+
+  const reload = useCallback(async () => {
+    if (!branchId || !isSupabaseConfigured) {
+      setLoaded(true);
+      return;
+    }
+    try {
+      setScales(await listBranchScales(branchId));
+    } catch {
+      // sin conexión: se muestra lo que se recuerda en esta computadora
+    } finally {
+      setLoaded(true);
+    }
+  }, [branchId]);
+
+  useEffect(() => {
+    void reload();
+  }, [reload]);
 
   useEffect(
     () => () => {
@@ -47,14 +78,36 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     []
   );
 
+  // La balanza que esta PC ya usaba con "Mi balanza" (antes de la 133) y no está registrada: se muestra igual y se
+  // registra sola la primera vez que pasa productos. Así los clientes que ya andan no tienen que hacer nada.
+  const legacy = useMemo<BranchScale | null>(() => {
+    const r = loadRememberedScale();
+    if (!r || !loaded || scales.some((s) => s.family === r.family)) return null;
+    return { key: LOCAL_KEY, name: r.label, family: r.family, brand: r.family, model: r.label, identity: {}, active: true, lastSeenAt: r.connectedAt, sellsWithCodes: false };
+  }, [scales, loaded]);
+  const list = legacy ? [...scales, legacy] : scales;
+  const active = list.find((s) => s.key === activeKey) ?? null;
+
   // Los errores llegan a soporte con cualquier usuario: en el local suele estar abierta la sesión del cajero.
-  async function report(stage: string, technical: unknown, extra: Record<string, unknown> = {}) {
+  async function report(stage: string, technical: unknown, diag: ConnectDiag | null, extra: Record<string, unknown> = {}) {
     if (!profile || !isSupabaseConfigured) return;
     try {
       const info = session.current?.supportInfo() ?? {};
+      const target = active ? { clave: active.key, nombre: active.name, marca: active.family, identidad: active.identity } : { nueva: newChoice };
       await submitScaleSupportReport({
-        note: `Mi balanza (${choice ?? "sin elegir"}) · ${stage}: ${technical instanceof Error ? technical.message : String(technical)}`.slice(0, 500),
-        logText: JSON.stringify({ eligio: choice, ...info, ...extra, tecnico: (technical as { technical?: string })?.technical ?? null }).slice(0, 20000),
+        note: `Mis balanzas (${active?.name ?? `nueva: ${newChoice ?? "?"}`}) · ${stage}: ${technical instanceof Error ? technical.message : String(technical)}`.slice(0, 500),
+        logText: JSON.stringify({
+          balanza: target,
+          ...info,
+          ...extra,
+          tecnico: (technical as { technical?: string })?.technical ?? null,
+          cable: diag?.usb ?? null,
+          autorizados: diag?.authorized ?? [],
+          pasos: diag?.steps ?? [],
+          otras_pestanas: diag?.otherTabs ?? null,
+          intercambio: diag?.log.slice(-200) ?? [],
+          eventos: diag?.events.slice(-300) ?? []
+        }).slice(0, 20000),
         connections: [],
         branchId
       });
@@ -63,23 +116,81 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     }
   }
 
-  async function handleConnect() {
-    setReplace(false);
-    await session.current?.close();
+  async function closeSession() {
+    await session.current?.close().catch(() => {});
     session.current = null;
+  }
+
+  /** target = balanza registrada (o la de esta PC); null = agregar una nueva con la marca elegida. */
+  async function handleConnect(target: BranchScale | null, pick: boolean, choiceForNew: ScaleChoice | null = newChoice) {
+    setReplace(false);
+    await closeSession();
+    setActiveKey(target?.key ?? null);
     const progress = (step: EngineStep, text: string, done?: number, total?: number) => setPhase({ kind: "trabajando", stage: "conectar", step, text, done, total });
     progress("permiso", "Preparando…");
+    const diag = emptyDiag();
+    const choice: ScaleChoice = target ? CHOICE_FOR_TARGET[choiceForScale(target)] : choiceForNew ?? "auto";
+    const isLegacy = target?.key === LOCAL_KEY;
+    const remembered = loadRememberedScale();
     try {
-      const s = await connectScale(ctx, progress, { adapters: adaptersForChoice(choice ?? "auto") });
-      session.current = s;
-      const prepared = await s.prepare(progress);
+      const result = await connectBranchScale(
+        { branchId, products, online: isSupabaseConfigured, canManageLinks: canManage, diag },
+        progress,
+        { target: isLegacy ? { ...target!, identity: {} } : target, known: scales, pick },
+        {
+          adapters: adaptersForChoice(choice),
+          release: releaseSerialEverywhere,
+          // La balanza de antes no tiene cable recordado por clave: se usa el que recordaba "Mi balanza".
+          binding: isLegacy ? () => (remembered ? { branchId: branchId ?? "", family: remembered.family, usb: remembered.usb, snapshot: {}, lastOkAt: remembered.connectedAt } : null) : undefined
+        }
+      );
+      session.current = result.session;
+      ctxRef.current = result;
+      setLookalike(result.lookalike);
+      const key = await remember(result, target);
+      if (key) setActiveKey(key);
+      const prepared = await result.session.prepare(progress);
       if (prepared.blocker) setPhase({ kind: "bloqueado", prepared });
       else if (prepared.upToDate) setPhase({ kind: "listo", message: "¡Listo! Tu balanza está conectada y ya podés vender.", pending: prepared.pending, model: prepared.label });
       else setPhase({ kind: "listo_para_sincronizar", prepared });
     } catch (err) {
-      setPhase({ kind: "error", message: connectErrorMessage(err, choice) });
-      void report("conectar", err);
+      const kind = friendlyKind(err);
+      setPhase({ kind: "error", message: connectErrorMessage(err, choice), canPick: kind === "elegir_cable" || kind === "no_contesta" || kind === "otra_balanza" });
+      void report("conectar", err, diag);
     }
+  }
+
+  /**
+   * Después de conectar: registra la balanza en la sucursal (o actualiza su última conexión) y recuerda su cable en
+   * esta computadora. Devuelve la clave registrada.
+   */
+  async function remember(result: BranchConnectResult, target: BranchScale | null): Promise<string | null> {
+    const label = result.session.label;
+    const realTarget = target && target.key !== LOCAL_KEY ? target : null;
+    let key = realTarget?.key ?? (result.matched && result.matched.key !== LOCAL_KEY ? result.matched.key : null);
+    if (branchId && isSupabaseConfigured && canManage) {
+      try {
+        key = await registerBranchScale(branchId, {
+          key,
+          name: key ? null : defaultScaleName(label, scales),
+          family: result.family,
+          brand: result.family,
+          model: label,
+          identity: result.identity
+        });
+      } catch {
+        // sin la migración 134 o sin conexión: la balanza funciona igual; se registra la próxima vez
+      }
+    }
+    // Las sesiones Systel guardan catálogo y vínculos con esta clave (antes era siempre "systel").
+    if (key) {
+      result.diag.steps.push(`registrada como ${key}`);
+      result.ctx.scaleKey = key;
+    }
+    if (branchId) saveBinding(key ?? `${LOCAL_KEY}-${result.family}`, { branchId, family: result.family, usb: result.usb });
+    rememberScale({ model: result.session.model, label, family: result.family, usb: result.usb, connectedAt: new Date().toISOString(), syncedAt: null });
+    void reload();
+    return key;
   }
 
   async function handleSync(prepared: PreparedSync) {
@@ -88,7 +199,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     const writes = prepared.writes + (replace ? prepared.pending.filter((p) => p.reason === "ocupado_en_balanza").length : 0);
     if (writes > 0) {
       const ok = window.confirm(
-        `Patagonia va a actualizar ${writes} ${writes === 1 ? "producto" : "productos"} en tu balanza.\n\n` +
+        `Patagonia va a actualizar ${writes} ${writes === 1 ? "producto" : "productos"} en ${active ? `"${active.name}"` : "tu balanza"}.\n\n` +
           "Antes guarda una copia de lo que tiene, y después comprueba cada producto uno por uno. No se borra nada.\n\n" +
           "Hacelo sin clientes esperando y no desenchufes la balanza hasta que termine. ¿Seguir?"
       );
@@ -99,81 +210,121 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     try {
       const out = await s.sync(prepared, progress, { allowReplace: replace });
       if (!out.ok) {
-        setPhase({ kind: "error", message: out.message });
-        void report("sincronizar (frenado)", out.message, out.support ?? {});
+        setPhase({ kind: "error", message: out.message, canPick: false });
+        void report("sincronizar (frenado)", out.message, ctxRef.current?.diag ?? null, out.support ?? {});
         return;
       }
       markSynced();
       setPhase({ kind: "listo", message: out.message, pending: out.pending, model: prepared.label });
+      void reload();
     } catch (err) {
-      setPhase({ kind: "error", message: friendlyMessage(err) });
-      void report("sincronizar", err);
+      setPhase({ kind: "error", message: friendlyMessage(err), canPick: false });
+      void report("sincronizar", err, ctxRef.current?.diag ?? null);
     }
   }
 
-  function pickChoice(c: ScaleChoice) {
-    saveScaleChoice(c);
-    setChoice(c);
+  async function handleRename(s: BranchScale) {
+    if (!branchId) return;
+    const name = window.prompt("Nombre de la balanza (por ejemplo \"Mostrador\" o \"Balanza del fondo\"):", s.name)?.trim();
+    if (!name || name === s.name) return;
+    try {
+      await renameBranchScale(branchId, s.key, name);
+      await reload();
+    } catch {
+      window.alert("No se pudo cambiar el nombre. Revisá la conexión y probá de nuevo.");
+    }
+  }
+
+  async function handleRemove(s: BranchScale) {
+    if (!branchId) return;
+    if (!window.confirm(`¿Quitar "${s.name}" de esta sucursal?\n\nMostrador deja de leer sus tickets. Las ventas ya hechas no cambian, y en la balanza no se borra nada. Si la volvés a agregar, se configura de nuevo.`)) return;
+    try {
+      await removeBranchScale(branchId, s.key);
+      forgetBinding(s.key, branchId);
+      if (activeKey === s.key) backToList();
+      await reload();
+    } catch {
+      window.alert("No se pudo quitar la balanza. Revisá la conexión y probá de nuevo.");
+    }
+  }
+
+  function backToList() {
+    void closeSession();
+    setActiveKey(null);
+    setNewChoice(null);
     setPhase({ kind: "inicio" });
   }
 
-  function useAnother() {
-    saveScaleChoice(null);
-    setChoice(null);
-    forgetRememberedScale();
-    void session.current?.close();
-    session.current = null;
-    setPhase({ kind: "inicio" });
-  }
-
-  const stepIndex = !choice ? 0 : phase.kind === "listo" ? 2 : 1;
+  const working = phase.kind === "trabajando";
+  const showList = phase.kind === "inicio";
 
   return (
     <section className="my-scale">
       <div className="my-scale-head">
         <div className="my-scale-icon"><Scale size={22} /></div>
         <div>
-          <h2>Mi balanza</h2>
-          <p className="muted">{remembered && phase.kind === "inicio" ? `${remembered.label}${remembered.syncedAt ? " · ya configurada en esta computadora" : ""}` : "Conectala una vez y vendé escaneando el ticket."}</p>
+          <h2>{showList ? "Mis balanzas" : active ? active.name : newChoice ? `Agregar ${choiceLabel(newChoice)}` : "Agregar balanza"}</h2>
+          <p className="muted">{showList ? "Conectá cada balanza una vez y vendé escaneando el ticket." : "Seguí los pasos en pantalla."}</p>
         </div>
       </div>
 
-      <ol className="my-scale-steps" aria-label="Pasos">
-        {["Elegí tu balanza", "Pasá los productos"].map((label, i) => (
-          <li key={label} className={i < stepIndex ? "done" : i === stepIndex ? "current" : ""}>
-            <span>{i < stepIndex ? "✓" : i + 1}</span>
-            {label}
-          </li>
-        ))}
-      </ol>
-
-      {phase.kind === "inicio" && !choice && (
+      {showList && (
         <div className="my-scale-body">
-          <p className="my-scale-status">¿Qué balanza tenés?</p>
-          <p className="muted">La marca está adelante o en la etiqueta de atrás de la balanza.</p>
+          {loaded && list.length === 0 && <p className="my-scale-status">Todavía no agregaste ninguna balanza.</p>}
+          {list.length > 0 && (
+            <ul className="my-scale-list">
+              {list.map((s) => {
+                const local = s.key === LOCAL_KEY ? (loadRememberedScale()?.connectedAt ?? null) : branchId ? (bindingFor(s.key, branchId)?.lastOkAt ?? null) : null;
+                const st = scaleStatus({ active: s.active, sellsWithCodes: s.sellsWithCodes, localOkAt: local });
+                return (
+                  <li key={s.key} className="my-scale-item">
+                    <div>
+                      <strong>{s.name}</strong>
+                      <span className="muted"> · {s.model ?? (s.family === "kretz" ? "Kretz" : "Systel")}</span>
+                      <p className={`my-scale-item-status ${st.tone}`}>{st.text}</p>
+                    </div>
+                    <div className="my-scale-actions">
+                      <button className="my-scale-primary" onClick={() => void handleConnect(s, false)}>PASAR PRODUCTOS</button>
+                      {canManage && s.key !== LOCAL_KEY && <button className="secondary" onClick={() => void handleRename(s)}>Cambiar nombre</button>}
+                      {canManage && s.key !== LOCAL_KEY && <button className="secondary" onClick={() => void handleRemove(s)}>Quitar</button>}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+          {canManage ? (
+            <button className={list.length === 0 ? "my-scale-primary" : "secondary"} onClick={() => setPhase({ kind: "elegir_marca" })}>
+              <Plus size={16} /> AGREGAR BALANZA
+            </button>
+          ) : (
+            list.length === 0 && <p className="muted">Para agregar una balanza tiene que entrar el dueño o un administrador.</p>
+          )}
+        </div>
+      )}
+
+      {phase.kind === "elegir_marca" && (
+        <div className="my-scale-body">
+          <p className="my-scale-status">¿Qué balanza vas a agregar?</p>
+          <p className="muted">La marca está adelante o en la etiqueta de atrás de la balanza. Enchufala a esta computadora por el cable USB y prendela.</p>
           <div className="my-scale-choices">
             {SCALE_CHOICES.map((c) => (
-              <button key={c.id} className="my-scale-choice" onClick={() => pickChoice(c.id)}>
+              <button
+                key={c.id}
+                className="my-scale-choice"
+                // La lista de cables de Chrome se abre con este mismo click.
+                onClick={() => handleConnectNew(c.id)}
+              >
                 <strong>{c.label}</strong>
                 <span>{c.hint}</span>
               </button>
             ))}
           </div>
+          <button className="secondary" onClick={backToList}>Volver</button>
         </div>
       )}
 
-      {phase.kind === "inicio" && choice && (
-        <div className="my-scale-body">
-          <p className="my-scale-status">Tu balanza: {choice === "auto" ? "la busca Patagonia" : choiceLabel(choice)}</p>
-          <p className="muted">Enchufala a esta computadora por el cable USB y prendela.</p>
-          <button className="my-scale-primary" onClick={() => void handleConnect()}>PASAR PRODUCTOS A LA BALANZA</button>
-          <div className="my-scale-actions">
-            <button className="secondary" onClick={useAnother}>Es otra balanza</button>
-          </div>
-        </div>
-      )}
-
-      {phase.kind === "trabajando" && (
+      {working && (
         <div className="my-scale-body" aria-live="polite">
           <p className="my-scale-status">{phase.stage === "conectar" ? "Conectando tu balanza…" : "Sincronizando…"}</p>
           <div className="my-scale-bar" role="progressbar" aria-valuemin={0} aria-valuemax={phase.total ?? 100} aria-valuenow={phase.done ?? undefined}>
@@ -204,7 +355,15 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
             </label>
           )}
           <Notes notes={phase.prepared.notes} />
-          <button className="my-scale-primary" onClick={() => void handleSync(phase.prepared)}>SINCRONIZAR PRODUCTOS</button>
+          {lookalike && (
+            <p className="my-scale-warning">
+              Se agregó como una balanza nueva. En esta sucursal ya está "{lookalike.name}", que contesta con el mismo número. Si las dos se conectan a la misma computadora, cambiale el número a una en su menú; si no, no hace falta nada.
+            </p>
+          )}
+          <div className="my-scale-actions">
+            <button className="my-scale-primary" onClick={() => void handleSync(phase.prepared)}>SINCRONIZAR PRODUCTOS</button>
+            <button className="secondary" onClick={backToList}>Volver a mis balanzas</button>
+          </div>
         </div>
       )}
 
@@ -212,7 +371,10 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
         <div className="my-scale-body">
           <p className="my-scale-status"><TriangleAlert size={20} /> Falta un paso en la balanza</p>
           <p>{phase.prepared.blocker}</p>
-          <button className="secondary" onClick={() => void handleConnect()}>Conectar balanza otra vez</button>
+          <div className="my-scale-actions">
+            <button className="secondary" onClick={() => void handleConnect(active, false)}>Conectar otra vez</button>
+            <button className="secondary" onClick={backToList}>Volver a mis balanzas</button>
+          </div>
         </div>
       )}
 
@@ -220,9 +382,10 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
         <div className="my-scale-body">
           <p className="my-scale-status ok"><CheckCircle2 size={22} /> {phase.message}</p>
           <p className="muted">Pesá, imprimí el ticket y escanealo en Mostrador.</p>
-          {phase.pending.length > 0 && <PendingReview items={phase.pending} products={products} branchId={branchId} />}
+          {phase.pending.length > 0 && active && <PendingReview items={phase.pending} products={products} branchId={branchId} scaleKey={active.key} />}
           <div className="my-scale-actions">
-            <button className="secondary" onClick={() => void handleConnect()}>Volver a sincronizar</button>
+            <button className="secondary" onClick={() => void handleConnect(active, false)}>Volver a sincronizar</button>
+            <button className="secondary" onClick={backToList}>Volver a mis balanzas</button>
           </div>
         </div>
       )}
@@ -231,13 +394,26 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
         <div className="my-scale-body">
           <p className="my-scale-status bad"><TriangleAlert size={20} /> {phase.message}</p>
           <div className="my-scale-actions">
-            <button className="my-scale-primary" onClick={() => void handleConnect()}>PROBAR DE NUEVO</button>
-            <button className="secondary" onClick={useAnother}>Es otra balanza</button>
+            {active ? (
+              <>
+                <button className="my-scale-primary" onClick={() => void handleConnect(active, false)}>PROBAR DE NUEVO</button>
+                {phase.canPick && <button className="secondary" onClick={() => void handleConnect(active, true)}>Elegir el cable</button>}
+              </>
+            ) : (
+              newChoice && <button className="my-scale-primary" onClick={() => void handleConnectNew(newChoice)}>PROBAR DE NUEVO</button>
+            )}
+            <button className="secondary" onClick={backToList}>Volver a mis balanzas</button>
           </div>
+          <p className="muted">El detalle técnico ya le llegó a soporte de Patagonia.</p>
         </div>
       )}
     </section>
   );
+
+  function handleConnectNew(choice: ScaleChoice) {
+    setNewChoice(choice);
+    void handleConnect(null, true, choice);
+  }
 }
 
 /** El error al conectar, nombrando la balanza que eligió el cliente y qué revisar en ESA balanza. */
@@ -245,7 +421,7 @@ function connectErrorMessage(err: unknown, choice: ScaleChoice | null): string {
   if (friendlyKind(err) !== "no_contesta" || !choice || choice === "auto") return friendlyMessage(err);
   const label = choiceLabel(choice);
   const check = choice === "kretz-aura" ? "el cable enchufado y, en el menú de la balanza, COMUNI → MODO \"Datos\"" : "el cable USB enchufado y que no esté abierto el programa de la balanza";
-  return `Tu ${label} no contestó. Revisá que esté prendida, ${check}, y probá de nuevo. Si no es una ${label}, tocá "Es otra balanza".`;
+  return `Tu ${label} no contestó. Revisá que esté prendida, ${check}, y probá de nuevo.`;
 }
 
 function Fact({ value, label, tone }: { value: number; label: string; tone?: "warn" }) {
@@ -281,7 +457,7 @@ const REASON_TEXT: Record<PendingItem["reason"], string> = {
  * Lo que no se pudo reconocer solo. Se decide acá una vez (nunca en la caja): qué producto de Patagonia es,
  * cobrarlo sin descontar stock, o no venderlo. Solo para las balanzas que imprimen su propio número (Systel).
  */
-function PendingReview({ items, products, branchId }: { items: PendingItem[]; products: EngineProduct[]; branchId: string | null }) {
+function PendingReview({ items, products, branchId, scaleKey }: { items: PendingItem[]; products: EngineProduct[]; branchId: string | null; scaleKey: string }) {
   const reviewable = items.filter((i) => i.reason !== "ocupado_en_balanza");
   const [choice, setChoice] = useState<Record<number, string>>(() => Object.fromEntries(reviewable.filter((i) => i.suggestionId).map((i) => [i.code, i.suggestionId!])));
   const [saved, setSaved] = useState<Record<number, boolean>>({});
@@ -296,7 +472,7 @@ function PendingReview({ items, products, branchId }: { items: PendingItem[]; pr
     setBusy(true);
     setError("");
     try {
-      await setScaleLinks(branchId, "systel", [v === "libre" ? { code: item.code, kind: "libre", productId: null } : v === "none" ? { code: item.code, kind: "none", productId: null } : { code: item.code, kind: "product", productId: v }]);
+      await setScaleLinks(branchId, scaleKey, [v === "libre" ? { code: item.code, kind: "libre", productId: null } : v === "none" ? { code: item.code, kind: "none", productId: null } : { code: item.code, kind: "product", productId: v }]);
       setSaved({ ...saved, [item.code]: true });
     } catch {
       setError("No se pudo guardar. Revisá la conexión y probá de nuevo.");

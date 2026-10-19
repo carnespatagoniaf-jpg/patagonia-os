@@ -78,6 +78,27 @@ export interface ScaleSession {
   close(): Promise<void>;
   /** Datos técnicos de la conexión para soporte. */
   supportInfo(): Record<string, unknown>;
+  /** Lo que contestó la balanza y la distingue de otra igual (número de balanza, letra de equipo). */
+  identity?(): Record<string, unknown>;
+}
+
+/** Lo técnico de un intento de conexión, para el reporte a soporte (nunca se muestra al cliente). */
+export interface ConnectDiag {
+  /** "0403:6001" del cable elegido. */
+  usb: string | null;
+  /** Puertos autorizados en esta computadora (fabricante:producto). */
+  authorized: (string | null)[];
+  /** Intercambio de bytes con la balanza (de cada marca, lo último). */
+  log: unknown[];
+  events: unknown[];
+  /** Qué pasó en cada paso, en palabras cortas. */
+  steps: string[];
+  /** Respuesta de las otras pestañas al pedirles que suelten el cable. */
+  otherTabs?: unknown;
+}
+
+export function emptyDiag(): ConnectDiag {
+  return { usb: null, authorized: [], log: [], events: [], steps: [] };
 }
 
 export interface EngineContext {
@@ -87,6 +108,10 @@ export interface EngineContext {
   online: boolean;
   /** Dueño o administrador: puede guardar en Patagonia qué producto es cada uno de la balanza. */
   canManageLinks?: boolean;
+  /** La balanza registrada a la que se le habla (clave en scale_profiles). Sin esto, la de siempre. */
+  scaleKey?: string;
+  /** Si viene, cada marca deja acá lo que mandó y recibió (para soporte). */
+  diag?: ConnectDiag;
 }
 
 export interface ScaleAdapter {
