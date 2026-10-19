@@ -98,11 +98,15 @@ export function Customers() {
 
   function addProductToCharge(product: Product) {
     setChargeCart((current) => {
-      const existing = current.find((l) => l.productId === product.id);
+      // Por kilo, cada vez es un renglón nuevo con su propio peso (ej. dos
+      // medias reses de 106 y 98 kg en la misma venta, real Martinez 19/10):
+      // sumarle 1 kg al renglón que ya estaba hacía imposible cargar la segunda.
+      const existing = product.unit === "kg" ? undefined : current.find((l) => l.productId === product.id);
       if (existing) {
-        return current.map((l) => (l.productId === product.id ? { ...l, quantity: l.quantity + 1 } : l));
+        return current.map((l) => (l.key === existing.key ? { ...l, quantity: l.quantity + 1 } : l));
       }
-      return [...current, { key: product.id, productId: product.id, name: product.name, unit: product.unit, quantity: 1, unitPrice: product.priceRetail }];
+      const key = current.some((l) => l.key === product.id) ? `${product.id}-${Date.now()}` : product.id;
+      return [...current, { key, productId: product.id, name: product.name, unit: product.unit, quantity: 1, unitPrice: product.priceRetail }];
     });
     setChargeSearch("");
   }
