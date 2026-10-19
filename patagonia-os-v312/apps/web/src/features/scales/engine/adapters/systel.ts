@@ -79,6 +79,10 @@ export class SystelSession implements ScaleSession {
   private addressNote = "";
   /** Señales con las que atendió, si no fueron las de siempre (DTR y RTS encendidas). */
   private lines: { dtr: boolean; rts: boolean } | null = null;
+  /** Se mandó la 25 y contestó ACK. */
+  private released = false;
+  /** La balanza esperaba sincronización al encender y quedó en "no esperar" (comprobado releyendo la 39). */
+  private syncWaitFixed: boolean | null = null;
 
   constructor(
     private readonly link: SystelLink & { close?: () => Promise<void> },
@@ -185,6 +189,43 @@ export class SystelSession implements ScaleSession {
     }
   }
 
+  /**
+   * Último paso documentado ante "E3 a todo": la función 25 (liberar el equipo), una vez a su número y una al general,
+   * y se vuelve a pedir la firma. HIPÓTESIS, no causa comprobada: el protocolo dice que una balanza bloqueada esperando
+   * sincronización contesta el ping con estado "S" (no E3). Lo que conteste la 25 (ACK, E3, nada) queda en el reporte.
+   */
+  private async tryReleaseSync(onProgress: ProgressFn): Promise<boolean> {
+    const link = this.link as SystelLink & { setLines?: (dtr: boolean, rts: boolean) => Promise<void> };
+    await link.setLines?.(true, true);
+    this.mark("liberar el equipo (función 25, documentada): una vez a su número y una al general");
+    for (const a of [...new Set([this.number, 0])]) {
+      onProgress("leer", "Probando otra forma de hablarle a tu balanza…");
+      const c = new SystelClient(this.link, { address: a, log: this.log, busyRetryMs: [] });
+      const r = await c.releaseSync();
+      if (r && r.kind === "ack") {
+        this.released = true;
+        if (await this.pickAddress(onProgress)) {
+          this.addressNote = `atendió después de la función 25 (liberar el equipo), pedidos al ${this.address === this.number ? "suyo" : this.address}`;
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Si la configuración dice que espera sincronización al encender (";Sinc=1"), se la apaga con la 35 "N" y se relee la
+   * 39 para comprobarlo. Así esa balanza no vuelve a quedar trabada al prenderse. Solo si la 39 se pudo leer.
+   */
+  private async ensureNoStartupWait(config: { values: Record<string, string> } | null): Promise<void> {
+    if (!config || config.values.Sinc !== "1") return;
+    this.mark("la balanza espera sincronización al encender (Sinc=1): se apaga con la función 35 N y se relee");
+    const c = new SystelClient(this.link, { address: this.address, log: this.log, busyRetryMs: [] });
+    const r = await c.disableStartupSyncWait();
+    const after = await c.config();
+    this.syncWaitFixed = !!(r && r.kind === "ack" && after?.values.Sinc === "0");
+  }
+
   /** Señales y número con los que atendió esta balanza (se guardan con la conexión). */
   connectionHints(): { lines?: { dtr: boolean; rts: boolean }; requestAddress?: number } {
     return { ...(this.lines ? { lines: this.lines } : {}), ...(this.address !== this.number ? { requestAddress: this.address } : {}) };
@@ -192,10 +233,14 @@ export class SystelSession implements ScaleSession {
 
   async prepare(onProgress: ProgressFn): Promise<PreparedSync> {
     onProgress("leer", "Leyendo tu balanza…");
-    if (!(await this.pickAddress(onProgress)) && systelRefused(this.log) && !(await this.recoverLines(onProgress))) await this.probeOtherReads(onProgress);
+    if (!(await this.pickAddress(onProgress)) && systelRefused(this.log) && !(await this.recoverLines(onProgress))) {
+      await this.probeOtherReads(onProgress);
+      await this.tryReleaseSync(onProgress);
+    }
     this.deps.onConnectionHints?.(this.connectionHints());
     const backup = await takeSystelBackup(this.client(), () => onProgress("leer", "Leyendo tu balanza…"));
     this.lastBackup = backup;
+    if (backup.signature) await this.ensureNoStartupWait(backup.config);
     if (!backup.signature && !backup.ping) {
       // E1/E2/E3 = la balanza contestó por el cable pero no hizo la orden (la Cuora de Los gringos lo hizo 13 veces del
       // 09 al 14/10; el 19/10, otra balanza, no se sabe: se perdió el registro). No es lo mismo que el silencio.
@@ -220,6 +265,7 @@ export class SystelSession implements ScaleSession {
     const badCode = plan.filter((x) => x.action === "omitir" && !/precio/.test(x.reason)).length;
     const extra = scaleOnly(backup.plus, products).length;
     const notes: string[] = [];
+    if (this.syncWaitFixed) notes.push("La balanza estaba configurada para esperar a la PC al encender: Patagonia la dejó en \"iniciar sin esperar\" (y lo comprobó releyendo su configuración).");
     if (!backup.complete) notes.push("No se pudo leer toda la balanza. Probá de nuevo; si sigue, avisá a soporte.");
     if (noPrice) notes.push(noPrice === 1 ? "1 producto no tiene precio en Patagonia: no se manda hasta que lo tenga." : `${noPrice} productos no tienen precio en Patagonia: no se mandan hasta que lo tengan.`);
     if (badCode) notes.push(`${badCode === 1 ? "1 producto tiene" : `${badCode} productos tienen`} un código que no sirve como número de balanza (tiene que ser un número de hasta 4 cifras, sin repetir).`);
@@ -319,6 +365,9 @@ export class SystelSession implements ScaleSession {
       numero: this.number,
       direccion_pedidos: this.address,
       senales: this.lines ?? "DTR y RTS encendidas",
+      liberada_con_25: this.released,
+      espera_sincronizacion_apagada: this.syncWaitFixed,
+      sincronizacion_inicial: b?.config?.values.Sinc ?? null,
       como_se_eligio: this.addressNote,
       firma: b?.signature ?? null,
       formato: b?.layout ?? null,

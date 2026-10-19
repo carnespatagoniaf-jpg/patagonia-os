@@ -412,3 +412,40 @@ describe("[SIMULADO] Balanza que contesta E3 mientras DTR y RTS están encendida
     await r.session.close();
   });
 });
+
+describe("[SIMULADO, protocolo DOCUMENTADO] Funciones 25 (liberar) y 35 (no esperar sincronización)", () => {
+  const settings: SystelSerialSettings = { baudRate: 115200, stopBits: 1, parity: "none" };
+
+  it("si contesta E3 a todo, manda la 25 una vez, y si después atiende, lee completa", async () => {
+    const cuora = new FakeCuora("max60", { address: 20, protocol: "0060" });
+    cuora.e3UntilRelease = true;
+    const port = new FakeSerialPort(cuora, settings, FTDI) as unknown as SerialPort;
+    const r = await connectBranchScale(ctx(), noop, { target: null, known: [], pick: true }, { serial: serialOf([port], port).api, adapters: [makeSystelAdapter(nullDeps)] });
+    await r.session.prepare(noop);
+    const info = r.session.supportInfo() as { firma: { protocolVersion: string } | null; liberada_con_25: boolean };
+    assert.equal(info.liberada_con_25, true);
+    assert.equal(info.firma?.protocolVersion, "0060");
+    assert.equal(cuora.received.filter((x) => x.fn === 25).length, 1, "la 25 se manda una sola vez si contestó ACK");
+    await r.session.close();
+  });
+
+  it("si la configuración dice Sinc=1, la deja en 0 con la 35 N y lo comprueba releyendo; con Sinc=0 no manda nada", async () => {
+    const cuora = new FakeCuora("max60", { address: 20, protocol: "0060" });
+    cuora.config = "Ton=2;Gris=0;Pap=0;APa=0;Vel=5;CPr=0;CAdm=01234;CCon=01234;Sinc=1;E_P=20PPPPCCCCII;E_U=21PPPPCCCCII;E_S=22AAIIIIIIII;CImp=2;SEt=S;ETi=S";
+    const port = new FakeSerialPort(cuora, settings, FTDI) as unknown as SerialPort;
+    const r = await connectBranchScale(ctx(), noop, { target: null, known: [], pick: true }, { serial: serialOf([port], port).api, adapters: [makeSystelAdapter(nullDeps)] });
+    const prep = await r.session.prepare(noop);
+    assert.match(cuora.config!, /;Sinc=0;/);
+    assert.deepEqual(cuora.received.filter((x) => x.fn === 35).map((x) => x.data), ["N"]);
+    assert.ok(prep.notes.some((n) => /iniciar sin esperar/.test(n)));
+    await r.session.close();
+
+    const ok = new FakeCuora("max60", { address: 20, protocol: "0060" });
+    ok.config = cuora.config;
+    const port2 = new FakeSerialPort(ok, settings, FTDI) as unknown as SerialPort;
+    const r2 = await connectBranchScale(ctx(), noop, { target: null, known: [], pick: true }, { serial: serialOf([port2], port2).api, adapters: [makeSystelAdapter(nullDeps)] });
+    await r2.session.prepare(noop);
+    assert.equal(ok.received.filter((x) => x.fn === 35 || x.fn === 25).length, 0, "una balanza que ya atiende no recibe ni la 25 ni la 35");
+    await r2.session.close();
+  });
+});

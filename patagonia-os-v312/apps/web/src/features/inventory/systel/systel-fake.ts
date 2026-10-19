@@ -39,6 +39,8 @@ export class FakeCuora implements SystelLink {
   salesEndExclusive = true;
   /** Fecha y hora de la balanza (función 28). */
   clock = "12:00:00 13/10/26";
+  /** Solo pruebas (HIPÓTESIS Los gringos 19/10): contesta E3 a todo hasta recibir la función 25 (liberar el equipo). */
+  e3UntilRelease = false;
 
   constructor(
     readonly layout: SystelLayout,
@@ -70,6 +72,7 @@ export class FakeCuora implements SystelLink {
     }
     if (addr !== this.address && addr !== 0) return null;
     if (this.options.deafToOwnNumber && addr === this.address) return null;
+    if (this.e3UntilRelease && fn !== 25) return this.reply(fn, "E3");
     if (expectsCheck && xorChecksum(frame.subarray(0, frame.length - 1)) !== frame[frame.length - 1]) {
       return isPluWrite ? this.reply(fn, "E5") : this.reply(fn, "E1");
     }
@@ -81,6 +84,16 @@ export class FakeCuora implements SystelLink {
       }
       case 28:
         return this.reply(fn, this.clock);
+      case 25:
+        // DOCUMENTADO (V6.0 pág. 7): finalización de sincronización / liberar el equipo. IP + 25 + CRC, responde ACK.
+        this.e3UntilRelease = false;
+        return this.reply(fn, "ACK");
+      case 35: {
+        // DOCUMENTADO (V6.0 pág. 17): esperar sincronización al inicio, 1 letra S/N. En la 39 es "Sinc" (1/0).
+        if (data !== "S" && data !== "N") return this.reply(fn, "E6");
+        if (this.config !== null) this.config = this.config.replace(/(^|;)Sinc=[^;]*/, "$1Sinc=" + (data === "S" ? "1" : "0"));
+        return this.reply(fn, "ACK");
+      }
       case 23:
         return this.reply(fn, "00T");
       case 39:

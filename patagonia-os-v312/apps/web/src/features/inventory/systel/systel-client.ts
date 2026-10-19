@@ -64,8 +64,16 @@ export const SYSTEL_READ_FUNCTIONS = [1, 2, 3, 23, 28, 31, 39, 62, 72] as const;
  * 33 cambio de precio, 61/4 alta, 7 SOLO para "imprimir el código de barras en los tickets"
  * (setTicketBarcodes: el otro parámetro de la 7 va con "X" = "el parámetro permanece sin cambio").
  */
-export const SYSTEL_WRITE_FUNCTIONS = [4, 7, 33, 61] as const;
-export const SYSTEL_FORBIDDEN_FUNCTIONS = [5, 6, 8, 9, 10, 12, 13, 15, 16, 17, 18, 22, 24, 25, 26, 32, 34, 35, 38, 40, 41, 42, 45, 46, 47, 64, 65, 68, 69, 70, 71, 74, 87];
+export const SYSTEL_WRITE_FUNCTIONS = [4, 7, 25, 33, 35, 61] as const;
+/**
+ * 25 y 35 salieron de la lista prohibida el 19/10/2026 (protocolo Cuora Max V6.0 págs. 7 y 16-17, V7 igual):
+ * - 25 "Indicación de finalización de sincronización. Solicitud de liberar el equipo": IP + 25 + CRC, responde ACK.
+ *   Solo marca la base de datos como sincronizada (el ping pasa a estado "T") y libera la balanza si quedó bloqueada al
+ *   encender esperando a la PC. No cambia productos, precios ni configuración.
+ * - 35 "Esperar sincronización de datos al inicio": IP + 35 + "S"/"N". Patagonia solo manda "N" (que NO espere), y solo
+ *   si la configuración (39) dice ";Sinc=1"; después relee la 39 para comprobarlo.
+ */
+export const SYSTEL_FORBIDDEN_FUNCTIONS = [5, 6, 8, 9, 10, 12, 13, 15, 16, 17, 18, 22, 24, 26, 32, 34, 38, 40, 41, 42, 45, 46, 47, 64, 65, 68, 69, 70, 71, 74, 87];
 
 const WRITE_TOKEN = Symbol("systel-write");
 
@@ -301,6 +309,16 @@ export class SystelClient {
    * Se manda "X" en la primera (no se toca) y S/N en la segunda. Devuelve la respuesta tal cual
    * (ACK, En o null): esto solo no confirma nada, quien llama relee la configuración (39) y compara.
    */
+  /** Función 25: "los datos ya están sincronizados, liberá el equipo" (documentada, ver arriba). Devuelve la respuesta. */
+  async releaseSync(): Promise<SystelReply | null> {
+    return this.callOnce("finalización de sincronización / liberar el equipo (función 25)", 25, "", { token: WRITE_TOKEN });
+  }
+
+  /** Función 35 con "N": que la balanza NO espere sincronización al encender. Solo esa opción. */
+  async disableStartupSyncWait(): Promise<SystelReply | null> {
+    return this.callOnce("no esperar sincronización al encender (función 35, N)", 35, "N", { token: WRITE_TOKEN });
+  }
+
   async setTicketBarcodes(on: boolean): Promise<SystelReply | null | "bloqueado"> {
     if (!this.writes.ticketBarcodes) return "bloqueado";
     return this.call(`imprimir código por producto en tickets = ${on ? "SI" : "NO"} (función 7)`, 7, `X${on ? "S" : "N"}`, { token: WRITE_TOKEN });
