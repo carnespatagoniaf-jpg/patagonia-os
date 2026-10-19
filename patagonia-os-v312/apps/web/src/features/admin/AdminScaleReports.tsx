@@ -40,6 +40,21 @@ export function AdminScaleReports({ onChange }: { onChange?: () => void } = {}) 
     }
   }
 
+  async function resolveAll() {
+    const open = reports.filter((r) => !r.resolvedAt);
+    if (!window.confirm(`¿Marcar los ${open.length} reportes como resueltos?`)) return;
+    setBusyId("all");
+    try {
+      for (const r of open) await setScaleSupportReportResolved(r.id, true);
+      await reload();
+      onChange?.();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudieron marcar los reportes.");
+    } finally {
+      setBusyId(null);
+    }
+  }
+
   function fullText(report: ScaleSupportReport) {
     return [
       `Cliente: ${report.companyName}${report.branchName ? ` · ${report.branchName}` : ""}`,
@@ -60,6 +75,13 @@ export function AdminScaleReports({ onChange }: { onChange?: () => void } = {}) 
       <strong>
         <Scale size={16} style={{ verticalAlign: "-3px" }} /> Reportes de balanzas {pending.length > 0 ? `· ${pending.length} sin resolver` : "· todos resueltos"}
       </strong>
+      {pending.length > 1 && (
+        <div className="admin-actions" style={{ marginTop: 8 }}>
+          <button className="secondary" disabled={busyId === "all"} onClick={() => void resolveAll()}>
+            {busyId === "all" ? "Marcando…" : `Marcar los ${pending.length} como resueltos`}
+          </button>
+        </div>
+      )}
       {error && <p className="message warning">{error}</p>}
       <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
         {reports.map((report) => (
