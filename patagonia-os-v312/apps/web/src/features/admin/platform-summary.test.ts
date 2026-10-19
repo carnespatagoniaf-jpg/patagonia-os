@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { dueSoonList, monthChangePct, pageLabel, riskList, upgradeCandidates } from "./platform-summary";
+import { dueSoonList, monthChangePct, pageLabel, upgradeCandidates } from "./platform-summary";
 
 const TODAY = "2026-10-18";
 
@@ -13,22 +13,6 @@ describe("resumen de plataforma", () => {
   it("nombre de pantalla", () => {
     assert.equal(pageLabel("sale"), "Mostrador");
     assert.equal(pageLabel("nueva"), "nueva");
-  });
-
-  it("clientes en riesgo", () => {
-    const companies = [
-      { id: "a", active: true }, { id: "b", active: true }, { id: "c", active: true }, { id: "d", active: false }, { id: "e", active: true }
-    ];
-    const usage = {
-      a: { lastSignInAt: "2026-10-09T12:00:00Z", lastSaleAt: null, saleCount: 0 },
-      b: { lastSignInAt: "2026-10-17T12:00:00Z", lastSaleAt: "2026-10-06T12:00:00Z", saleCount: 40 },
-      c: { lastSignInAt: "2026-10-17T12:00:00Z", lastSaleAt: "2026-10-17T12:00:00Z", saleCount: 40 },
-      d: { lastSignInAt: "2026-01-01T12:00:00Z", lastSaleAt: null, saleCount: 0 }
-    };
-    assert.deepEqual(riskList(companies, usage, TODAY), [
-      { companyId: "b", reason: "no vende hace 12 días", days: 12 },
-      { companyId: "a", reason: "no entra hace 9 días", days: 9 }
-    ]);
   });
 
   it("candidatos a subir de plan", () => {

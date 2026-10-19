@@ -43,46 +43,6 @@ function daysBetween(fromIso: string, toIso: string) {
   return Math.round((Date.parse(`${toIso.slice(0, 10)}T00:00:00Z`) - Date.parse(`${fromIso.slice(0, 10)}T00:00:00Z`)) / 86_400_000);
 }
 
-export interface UsageLike {
-  lastSignInAt: string | null;
-  lastSaleAt: string | null;
-  saleCount: number;
-}
-
-export interface RiskItem {
-  companyId: string;
-  reason: string;
-  days: number;
-}
-
-/** Días sin uso a partir de los cuales un cliente aparece "en riesgo". */
-export const RISK_DAYS = 7;
-
-/** Clientes activos que dejaron de usar el sistema: no entran hace RISK_DAYS días,
- * o vendían y dejaron de vender. Los que nunca usaron nada no cuentan acá
- * (eso es la pestaña Ventas). Los más abandonados primero. */
-export function riskList<T extends { id: string; active: boolean }>(
-  companies: T[],
-  usage: Record<string, UsageLike | undefined>,
-  todayIso: string,
-  limit = 5
-): RiskItem[] {
-  const out: RiskItem[] = [];
-  for (const c of companies) {
-    if (!c.active) continue;
-    const u = usage[c.id];
-    if (!u) continue;
-    const signIn = u.lastSignInAt ? daysBetween(u.lastSignInAt, todayIso) : null;
-    const sale = u.saleCount > 0 && u.lastSaleAt ? daysBetween(u.lastSaleAt, todayIso) : null;
-    if (signIn !== null && signIn >= RISK_DAYS) {
-      out.push({ companyId: c.id, reason: `no entra hace ${signIn} días`, days: signIn });
-    } else if (sale !== null && sale >= RISK_DAYS) {
-      out.push({ companyId: c.id, reason: `no vende hace ${sale} días`, days: sale });
-    }
-  }
-  return out.sort((a, b) => b.days - a.days).slice(0, limit);
-}
-
 export interface PlanUsage {
   plan: "basico" | "estandar" | "full";
   activeBranches: number;

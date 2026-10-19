@@ -1,11 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import { Download, MessageCircle } from "lucide-react";
+import { Download } from "lucide-react";
 import { PLAN_LABELS, PLAN_LIMITS, type Plan } from "../auth/permissions";
-import { getPlatformSummary, listPaymentsForAdmin, listSalesPipeline, type CompanyPlanInfo, type CompanySummary, type PlatformSummary } from "./admin-service";
+import { getPlatformSummary, listPaymentsForAdmin, type CompanyPlanInfo, type CompanySummary, type PlatformSummary } from "./admin-service";
 import { billingLabel, formatDayMonth } from "./company-billing";
-import { dueSoonList, monthChangePct, pageLabel, riskList, upgradeCandidates } from "./platform-summary";
-import type { CompanyUsage } from "./sales-pipeline";
-import { whatsappLink } from "./sales-pipeline";
+import { dueSoonList, monthChangePct, pageLabel, upgradeCandidates } from "./platform-summary";
 import { downloadCsv, toCsv } from "../../lib/csv";
 
 const MONTHS = ["ene", "feb", "mar", "abr", "may", "jun", "jul", "ago", "sep", "oct", "nov", "dic"];
@@ -23,10 +21,6 @@ function shortMoney(value: number) {
 
 function monthIndex(month: string) {
   return Number(month.slice(5, 7)) - 1;
-}
-
-function firstName(full: string | null) {
-  return full?.trim().split(/\s+/)[0] ?? "";
 }
 
 /** Gráfico de barras de lo cobrado por mes (una sola serie: el mes actual más oscuro). */
@@ -88,20 +82,17 @@ export function AdminSummary({
   today: string;
 }) {
   const [summary, setSummary] = useState<PlatformSummary | null>(null);
-  const [usage, setUsage] = useState<Record<string, CompanyUsage>>({});
   const [error, setError] = useState("");
   const [exportMonth, setExportMonth] = useState(today.slice(0, 7));
   const [exporting, setExporting] = useState(false);
 
   useEffect(() => {
     getPlatformSummary().then(setSummary).catch((err) => setError(err instanceof Error ? err.message : "No se pudo cargar el resumen."));
-    listSalesPipeline().then(setUsage).catch(() => setUsage({}));
   }, []);
 
   const byId = useMemo(() => new Map(companies.map((c) => [c.id, c])), [companies]);
   const active = companies.filter((c) => c.active);
   const paying = active.filter((c) => (c.paidUntil && c.paidUntil >= today) || isAutoCharged(c.id));
-  const risks = riskList(companies, usage, today);
   const upgrades = upgradeCandidates(active.map((c) => c.id), plans, PLAN_LIMITS as Record<string, { maxBranches: number | null; maxUsers: number | null }>);
   const dueSoon = dueSoonList(companies, today, (c) => isAutoCharged(c.id));
   const nextMonthIdx = (Number(today.slice(5, 7)) % 12);
@@ -215,25 +206,6 @@ export function AdminSummary({
                   <span><b>{company.name}</b> · {days === 0 ? "vence hoy" : days === 1 ? "vence mañana" : `vence en ${days} días`} · {formatMoney(planPrice(company.id))}</span>
                 </div>
               ))
-            )}
-          </section>
-
-          <section className="panel admin-sum-card">
-            <h2>Clientes en riesgo</h2>
-            {risks.length === 0 ? (
-              <p className="muted admin-sum-sub">Todos usan el sistema. 👍</p>
-            ) : (
-              risks.map((r) => {
-                const c = byId.get(r.companyId);
-                if (!c) return null;
-                const link = whatsappLink(c.contactPhone, `¡Hola${firstName(c.ownerFullName) ? ` ${firstName(c.ownerFullName)}` : ""}! Te escribo de Patagonia OS. Vi que hace unos días no usás el sistema, ¿está todo bien? ¿Te puedo ayudar con algo?`);
-                return (
-                  <div key={r.companyId} className="admin-mp-row admin-mp-problem">
-                    <span><b>{c.name}</b> · {r.reason}</span>
-                    {link && <a className="sales-wa-button" href={link} target="_blank" rel="noreferrer"><MessageCircle size={14} /> Escribirle</a>}
-                  </div>
-                );
-              })
             )}
           </section>
 
