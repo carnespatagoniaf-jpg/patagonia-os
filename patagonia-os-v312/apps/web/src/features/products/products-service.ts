@@ -38,3 +38,11 @@ export async function listProductPrices(): Promise<ProductPriceRow[]> {
     }))
     .sort((a, b) => compareByCode(a.code, b.code));
 }
+
+/** Nombre del negocio, para el pie de los carteles. Vacío si no se puede leer. */
+export async function getCompanyName(companyId: string | undefined): Promise<string> {
+  if (!supabase || !companyId) return "";
+  const { data, error } = await supabase.from("companies").select("name").eq("id", companyId).maybeSingle();
+  if (error || !data) return "";
+  return String(data.name ?? "");
+}
