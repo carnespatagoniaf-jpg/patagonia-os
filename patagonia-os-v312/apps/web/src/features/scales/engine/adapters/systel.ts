@@ -363,6 +363,11 @@ export class SystelSession implements ScaleSession {
     return { address: this.number };
   }
 
+  codeFormats(): { weighed: string | null; unit: string | null; total: string | null } | null {
+    const v = (this.state?.backup ?? this.lastBackup)?.config?.values;
+    return v ? { weighed: v.E_P ?? null, unit: v.E_U ?? null, total: v.E_S ?? null } : null;
+  }
+
   supportInfo(): Record<string, unknown> {
     const b = this.state?.backup ?? this.lastBackup;
     return {

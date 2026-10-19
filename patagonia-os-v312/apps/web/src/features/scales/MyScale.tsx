@@ -10,7 +10,7 @@ import { friendlyKind, friendlyMessage } from "./engine/friendly";
 import { choiceLabel, SCALE_CHOICES, type ScaleChoice } from "./engine/choice";
 import { loadRememberedScale, rememberScale } from "./engine/memory";
 import { emptyDiag, type ConnectDiag, type EngineProduct, type EngineStep, type PendingItem, type PreparedSync, type ScaleSession } from "./engine/types";
-import { choiceForScale, defaultScaleName, listBranchScales, registerBranchScale, removeBranchScale, renameBranchScale, scaleStatus, type BranchScale } from "./registry/branch-scales";
+import { checkScaleFormats, choiceForScale, defaultScaleName, listBranchScales, registerBranchScale, removeBranchScale, renameBranchScale, scaleStatus, type BranchScale } from "./registry/branch-scales";
 import { bindingFor, forgetBinding, saveBinding } from "./registry/local-bindings";
 import { setScaleLinks } from "./sale/scale-sale-service";
 import { submitScaleSupportReport } from "./support-service";
@@ -171,6 +171,22 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       const key = await remember(result, target);
       if (key) setActiveKey(key);
       const prepared = await result.session.prepare(progress);
+      // Mismo número y mismo cable que otra (real Los gringos): si imprime distinto que la tarjeta elegida, no es esa.
+      const realTarget = target && target.key !== LOCAL_KEY ? target : null;
+      if (realTarget) {
+        const check = checkScaleFormats(realTarget, result.session.codeFormats?.() ?? null, scales);
+        if (check.verdict === "otra") {
+          setPhase({
+            kind: "error",
+            canPick: false,
+            message: check.same
+              ? `La balanza enchufada es "${check.same.name}", no "${realTarget.name}" (imprime los códigos como esa). Volvé a mis balanzas y tocá "PASAR PRODUCTOS" en "${check.same.name}". No se cambió nada.`
+              : `La balanza enchufada no es "${realTarget.name}": imprime los códigos distinto. Si es otra balanza, volvé a mis balanzas y tocá "AGREGAR BALANZA". No se cambió nada.`
+          });
+          reportAndShow("conectar (otra balanza)", `imprime distinto que ${realTarget.key}`, diag, { formatos_leidos: result.session.codeFormats?.() ?? null, formatos_tarjeta: realTarget.formats ?? null });
+          return;
+        }
+      }
       // La lectura pudo descubrir con qué señales o a qué número atiende la balanza: se vuelve a guardar su conexión.
       if (branchId && key) saveBinding(key, { branchId, family: result.family, usb: result.usb });
       if (prepared.blocker) setPhase({ kind: "bloqueado", prepared });

@@ -80,6 +80,8 @@ export interface ScaleSession {
   supportInfo(): Record<string, unknown>;
   /** Lo que contestó la balanza y la distingue de otra igual (número de balanza, letra de equipo). */
   identity?(): Record<string, unknown>;
+  /** Cómo imprime los códigos según su configuración leída (Systel: E_P, E_U, E_S), o null. */
+  codeFormats?(): { weighed: string | null; unit: string | null; total: string | null } | null;
 }
 
 /** Lo técnico de un intento de conexión, para el reporte a soporte (nunca se muestra al cliente). */

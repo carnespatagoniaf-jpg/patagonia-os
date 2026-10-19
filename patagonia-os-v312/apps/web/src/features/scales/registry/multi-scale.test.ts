@@ -8,7 +8,7 @@ import { busyKind, candidatePorts, connectBranchScale, portFitsFamily } from "..
 import { FriendlyError } from "../engine/friendly";
 import type { EngineContext, ScaleAdapter, ScaleSession } from "../engine/types";
 import { bindingFor, CONNECTION_KEYS, forgetBinding, restoreBinding, saveBinding } from "./local-bindings";
-import { choiceForScale, defaultScaleName, findRegistered, identityClash, legacyCandidate, sameIdentity, scaleStatus, type BranchScale } from "./scale-identity";
+import { checkScaleFormats, choiceForScale, defaultScaleName, findRegistered, identityClash, legacyCandidate, sameIdentity, scaleStatus, type BranchScale } from "./scale-identity";
 import { registerSerialHolder, releaseLocalHolders } from "../../inventory/kretz/serial-tabs";
 
 /**
@@ -461,5 +461,27 @@ describe("[SIMULADO, protocolo DOCUMENTADO] Funciones 25 (liberar) y 35 (no espe
     await r2.session.prepare(noop);
     assert.equal(ok.received.filter((x) => x.fn === 35 || x.fn === 25).length, 0, "una balanza que ya atiende no recibe ni la 25 ni la 35");
     await r2.session.close();
+  });
+});
+
+describe("[formatos REALES Los gringos] Tres Systel con el mismo número y el mismo cable, una por vez", () => {
+  const vieja = scale("systel", "systel", {}, { name: "Systel Cuora", formats: { weighed: "20PPPPCCCCII", unit: "21PPPPCCCCII", total: "22AAIIIIIIII" } });
+  const nueva = scale("systel-68afcb26", "systel", { address: 20 }, { name: "Balanza Systel", formats: { weighed: "20PPPPCCCCCC", unit: "21PPPPCCCCCC", total: "22BBIIIIIIII" } });
+  const sinLeer = scale("systel-tercera", "systel", { address: 20 }, { name: "Tercera", formats: null });
+
+  it("enchufada la nueva y tocada la tarjeta de la vieja: avisa que es la nueva y no sigue", () => {
+    const r = checkScaleFormats(vieja, nueva.formats!, [vieja, nueva, sinLeer]);
+    assert.equal(r.verdict, "otra");
+    assert.equal(r.verdict === "otra" && r.same?.key, "systel-68afcb26");
+  });
+
+  it("la tarjeta correcta, o una tarjeta nunca leída: sigue", () => {
+    assert.equal(checkScaleFormats(nueva, nueva.formats!, [vieja, nueva]).verdict, "ok");
+    assert.equal(checkScaleFormats(sinLeer, vieja.formats!, [vieja, nueva, sinLeer]).verdict, "ok");
+  });
+
+  it("imprime distinto que todas: es otra (hay que agregarla)", () => {
+    const r = checkScaleFormats(vieja, { weighed: "25PPPPCCCCCC", unit: null, total: null }, [vieja, nueva]);
+    assert.equal(r.verdict === "otra" && r.same, null);
   });
 });

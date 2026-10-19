@@ -13,6 +13,14 @@ export interface BranchScale {
   lastSeenAt: string | null;
   /** Tiene formatos de código guardados: Mostrador lee sus tickets ("artículos + TOTAL"). */
   sellsWithCodes: boolean;
+  /** Cómo imprime los códigos (pesables, unitarios, TOTAL), si ya se leyó: sirve para reconocerla. */
+  formats?: CodeFormats | null;
+}
+
+export interface CodeFormats {
+  weighed: string | null;
+  unit: string | null;
+  total: string | null;
 }
 
 export interface ScaleRow {
@@ -44,7 +52,8 @@ export function rowToScale(r: ScaleRow): BranchScale {
     identity: r.identity ?? {},
     active: r.active !== false,
     lastSeenAt: r.last_seen_at ?? null,
-    sellsWithCodes: !!(r.weighed_format || r.unit_format || r.total_format)
+    sellsWithCodes: !!(r.weighed_format || r.unit_format || r.total_format),
+    formats: r.weighed_format || r.unit_format || r.total_format ? { weighed: r.weighed_format, unit: r.unit_format, total: r.total_format } : null
   };
 }
 
@@ -86,6 +95,20 @@ export function defaultScaleName(label: string, scales: BranchScale[]): string {
  */
 export function identityClash(scales: BranchScale[], family: ScaleFamily, identity: Record<string, unknown>, exceptKey: string | null): BranchScale | null {
   return scales.find((s) => s.key !== exceptKey && s.family === family && sameIdentity(s.identity, identity)) ?? null;
+}
+
+/**
+ * ¿La balanza enchufada es la de esta tarjeta? Real, Los gringos: 3 Systel con el mismo número (20) y el mismo cable, una
+ * por vez. Lo único que las distingue desde la PC es cómo imprimen los códigos (la vieja "22AA…", la nueva "22BB…").
+ * - "otra": imprime distinto que la tarjeta elegida; `same` es la tarjeta que sí coincide (si hay una sola).
+ * - "ok": coincide, o no hay con qué comparar (la tarjeta nunca se leyó, o la balanza no informó formatos).
+ */
+export function checkScaleFormats(target: BranchScale, read: CodeFormats | null, scales: BranchScale[]): { verdict: "ok" } | { verdict: "otra"; same: BranchScale | null } {
+  const eq = (a: CodeFormats, b: CodeFormats) => a.weighed === b.weighed && a.unit === b.unit && a.total === b.total;
+  if (!read || !target.formats) return { verdict: "ok" };
+  if (eq(target.formats, read)) return { verdict: "ok" };
+  const same = scales.filter((s) => s.key !== target.key && s.family === target.family && s.formats && eq(s.formats, read));
+  return { verdict: "otra", same: same.length === 1 ? same[0] : null };
 }
 
 /** Con qué configuración buscar una balanza registrada ("¿Qué balanza tenés?" ya contestado). */
