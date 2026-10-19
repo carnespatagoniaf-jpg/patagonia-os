@@ -112,7 +112,13 @@ export class SystelSession implements ScaleSession {
    * número, al 1 y al general, y se usa el primero que la entrega. Con el general (0) se acepta UNA sola respuesta por
    * pedido (SystelClient descarta las ambiguas), así que no se confunde con otra balanza en el mismo cable.
    */
+  /** Marca en el intercambio (para leer el reporte solo): qué cambió y a qué hora. */
+  private mark(text: string): void {
+    this.log.push({ step: text, fn: 0, tx: "", rx: "", rxText: "", ms: 0, result: `marca ${new Date().toISOString()}` });
+  }
+
   private async pickAddress(onProgress: ProgressFn): Promise<boolean> {
+    this.mark(`señales: ${this.lines ? `DTR ${this.lines.dtr ? "encendida" : "apagada"}, RTS ${this.lines.rts ? "encendida" : "apagada"} (guardadas)` : "DTR y RTS encendidas (las de siempre)"}; pedidos a su número, al 1 y al general`);
     for (const a of [...new Set([this.address, this.number, 1, 0])]) {
       onProgress("leer", "Leyendo tu balanza…");
       const c = new SystelClient(this.link, { address: a, log: this.log, busyRetryMs: [300, 800, 1500] });
@@ -146,6 +152,7 @@ export class SystelSession implements ScaleSession {
     ];
     for (const v of variants) {
       onProgress("leer", "Probando otra forma de hablarle a tu balanza…");
+      this.mark(`señales: DTR ${v.dtr ? "encendida" : "apagada"}, RTS ${v.rts ? "encendida" : "apagada"}; espera ${v.waitMs} ms antes del primer pedido`);
       await link.setLines(v.dtr, v.rts);
       await new Promise((r) => setTimeout(r, v.waitMs));
       for (const a of [...new Set([this.number, 1, 0])]) {
@@ -161,6 +168,23 @@ export class SystelSession implements ScaleSession {
     return false;
   }
 
+  /**
+   * Si rechazó la firma y el ping con todas las señales: ¿rechaza TODO o solo esos pedidos? Se piden una vez, solo
+   * lectura, la fecha y hora (28) y la configuración (39). Real, Los gringos 19/10: E3 a 2 y 23. Si alguno contesta,
+   * el rechazo es selectivo y el reporte lo muestra (para seguir sin pedirle más pruebas al cliente).
+   */
+  private async probeOtherReads(onProgress: ProgressFn): Promise<void> {
+    const link = this.link as SystelLink & { setLines?: (dtr: boolean, rts: boolean) => Promise<void> };
+    await link.setLines?.(true, true);
+    this.mark("otras lecturas: fecha y hora (28) y configuración (39), una vez cada una, a su número y al general");
+    for (const a of [...new Set([this.number, 0])]) {
+      onProgress("leer", "Probando otra forma de hablarle a tu balanza…");
+      const c = new SystelClient(this.link, { address: a, log: this.log, busyRetryMs: [] });
+      await c.clock();
+      await c.config();
+    }
+  }
+
   /** Señales y número con los que atendió esta balanza (se guardan con la conexión). */
   connectionHints(): { lines?: { dtr: boolean; rts: boolean }; requestAddress?: number } {
     return { ...(this.lines ? { lines: this.lines } : {}), ...(this.address !== this.number ? { requestAddress: this.address } : {}) };
@@ -168,7 +192,7 @@ export class SystelSession implements ScaleSession {
 
   async prepare(onProgress: ProgressFn): Promise<PreparedSync> {
     onProgress("leer", "Leyendo tu balanza…");
-    if (!(await this.pickAddress(onProgress)) && systelRefused(this.log)) await this.recoverLines(onProgress);
+    if (!(await this.pickAddress(onProgress)) && systelRefused(this.log) && !(await this.recoverLines(onProgress))) await this.probeOtherReads(onProgress);
     this.deps.onConnectionHints?.(this.connectionHints());
     const backup = await takeSystelBackup(this.client(), () => onProgress("leer", "Leyendo tu balanza…"));
     this.lastBackup = backup;
@@ -302,7 +326,8 @@ export class SystelSession implements ScaleSession {
       completo: b?.complete ?? null,
       detalle: b?.detail ?? null,
       contesto_ocupada: systelRefused(this.log),
-      intercambio_sesion: this.log.slice(-200)
+      intercambio_sesion: this.log.slice(-250),
+      eventos_sesion: ((this.link as { events?: unknown[] }).events ?? []).slice(-300)
     };
   }
 }

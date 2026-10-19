@@ -52,6 +52,8 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
   const [lookalike, setLookalike] = useState<BranchScale | null>(null);
   /** El último reporte a soporte: llegó, no llegó, o todavía se está mandando (null). */
   const [reportSent, setReportSent] = useState<boolean | null>(null);
+  /** El último diagnóstico, para verlo y descargarlo aunque el reporte no haya llegado. */
+  const [lastDiagnostic, setLastDiagnostic] = useState<Record<string, unknown> | null>(null);
   const session = useRef<ScaleSession | null>(null);
   const ctxRef = useRef<BranchConnectResult | null>(null);
 
@@ -91,26 +93,36 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
   const active = list.find((s) => s.key === activeKey) ?? null;
 
   // Los errores llegan a soporte con cualquier usuario: en el local suele estar abierta la sesión del cajero.
+  /** El diagnóstico completo de un intento: lo mismo que va a soporte, y lo que se ve y se descarga en pantalla. */
+  function buildDiagnostic(stage: string, technical: unknown, diag: ConnectDiag | null, extra: Record<string, unknown> = {}): Record<string, unknown> {
+    const info = session.current?.supportInfo() ?? {};
+    const target = active ? { clave: active.key, nombre: active.name, marca: active.family, identidad: active.identity } : { nueva: newChoice };
+    return {
+      cuando: new Date().toISOString(),
+      etapa: stage,
+      mensaje: technical instanceof Error ? technical.message : String(technical),
+      balanza: target,
+      ...info,
+      ...extra,
+      tecnico: (technical as { technical?: string })?.technical ?? null,
+      cable: diag?.usb ?? null,
+      autorizados: diag?.authorized ?? [],
+      pasos: diag?.steps ?? [],
+      otras_pestanas: diag?.otherTabs ?? null,
+      intercambio: diag?.log.slice(-200) ?? [],
+      eventos: diag?.events.slice(-300) ?? []
+    };
+  }
+
   /** true si el reporte llegó (antes se decía "ya le llegó a soporte" aunque el servidor lo hubiera rechazado). */
   async function report(stage: string, technical: unknown, diag: ConnectDiag | null, extra: Record<string, unknown> = {}): Promise<boolean> {
+    const full = buildDiagnostic(stage, technical, diag, extra);
+    setLastDiagnostic(full);
     if (!profile || !isSupabaseConfigured) return false;
     try {
-      const info = session.current?.supportInfo() ?? {};
-      const target = active ? { clave: active.key, nombre: active.name, marca: active.family, identidad: active.identity } : { nueva: newChoice };
       await submitScaleSupportReport({
-        note: `Mis balanzas (${active?.name ?? `nueva: ${newChoice ?? "?"}`}) · ${stage}: ${technical instanceof Error ? technical.message : String(technical)}`.slice(0, 500),
-        logText: JSON.stringify({
-          balanza: target,
-          ...info,
-          ...extra,
-          tecnico: (technical as { technical?: string })?.technical ?? null,
-          cable: diag?.usb ?? null,
-          autorizados: diag?.authorized ?? [],
-          pasos: diag?.steps ?? [],
-          otras_pestanas: diag?.otherTabs ?? null,
-          intercambio: diag?.log.slice(-200) ?? [],
-          eventos: diag?.events.slice(-300) ?? []
-        }).slice(0, 60000),
+        note: `Mis balanzas (${active?.name ?? `nueva: ${newChoice ?? "?"}`}) · ${stage}: ${String(full.mensaje)}`.slice(0, 500),
+        logText: JSON.stringify(full).slice(0, 60000),
         connections: [],
         branchId
       });
@@ -416,8 +428,9 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
             <button className="secondary" onClick={backToList}>Volver a mis balanzas</button>
           </div>
           <p className="muted">
-            {reportSent === null ? "Mandando el detalle técnico a soporte de Patagonia…" : reportSent ? "El detalle técnico ya le llegó a soporte de Patagonia." : "No se pudo mandar el detalle técnico a soporte: avisanos por WhatsApp."}
+            {reportSent === null ? "Mandando el detalle técnico a soporte de Patagonia…" : reportSent ? "El detalle técnico ya le llegó a soporte de Patagonia." : "No se pudo mandar el detalle técnico a soporte: descargalo y mandalo por WhatsApp."}
           </p>
+          {lastDiagnostic && <DiagnosticView diagnostic={lastDiagnostic} />}
         </div>
       )}
     </section>
@@ -435,6 +448,58 @@ function connectErrorMessage(err: unknown, choice: ScaleChoice | null): string {
   const label = choiceLabel(choice);
   const check = choice === "kretz-aura" ? "el cable enchufado y, en el menú de la balanza, COMUNI → MODO \"Datos\"" : "el cable USB enchufado y que no esté abierto el programa de la balanza";
   return `Tu ${label} no contestó. Revisá que esté prendida, ${check}, y probá de nuevo.`;
+}
+
+interface ExchangeRow {
+  step: string;
+  tx: string;
+  rx: string;
+  rxText: string;
+  ms: number;
+  result: string;
+}
+
+/** "Ver diagnóstico" y "Descargar diagnóstico": lo que se mandó y lo que contestó la balanza, pedido por pedido. */
+function DiagnosticView({ diagnostic }: { diagnostic: Record<string, unknown> }) {
+  const rows = [...((diagnostic.intercambio as ExchangeRow[] | undefined) ?? []), ...((diagnostic.intercambio_sesion as ExchangeRow[] | undefined) ?? [])];
+  function download() {
+    const blob = new Blob([JSON.stringify(diagnostic, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `diagnostico-balanza-${String(diagnostic.cuando ?? "").slice(0, 16).replace(/[:T]/g, "-")}.json`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+  return (
+    <details className="my-scale-review">
+      <summary>Ver diagnóstico ({rows.length} pedidos)</summary>
+      <div className="my-scale-actions">
+        <button className="secondary" onClick={download}>Descargar diagnóstico</button>
+      </div>
+      <div className="my-scale-diag">
+        <table>
+          <thead>
+            <tr><th>Paso</th><th>Mandado</th><th>Recibido</th><th>Texto</th><th>ms</th><th>Resultado</th></tr>
+          </thead>
+          <tbody>
+            {rows.map((r, i) => (
+              <tr key={i}>
+                <td>{r.step}</td>
+                <td><code>{r.tx}</code></td>
+                <td><code>{r.rx || "—"}</code></td>
+                <td>{r.rxText}</td>
+                <td>{r.ms}</td>
+                <td>{r.result}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </details>
+  );
 }
 
 function Fact({ value, label, tone }: { value: number; label: string; tone?: "warn" }) {

@@ -795,3 +795,7 @@ a.button-link:hover { background: #731818; }
 .contacts-row > .admin-trial { justify-self: start; }
 .link-button { background: none; border: none; padding: 0; color: #8b1e1e; font-weight: 700; text-decoration: underline; cursor: pointer; font-size: 13px; text-align: left; }
 .pos-detail-hint { display: block; color: #8a4b00; font-weight: 600; }
+.my-scale-diag { max-height: 320px; overflow: auto; width: 100%; font-size: 12px; }
+.my-scale-diag table { border-collapse: collapse; width: 100%; }
+.my-scale-diag th, .my-scale-diag td { border-bottom: 1px solid #eef0f3; padding: 4px 6px; text-align: left; vertical-align: top; }
+.my-scale-diag code { font-size: 11px; word-break: break-all; }
