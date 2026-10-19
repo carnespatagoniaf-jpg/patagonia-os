@@ -77,7 +77,11 @@ export function leadAttemptMessage(attempt: number, name: string | null): string
   // Si está agendado con el nombre del negocio ("Carnicería Don Julio"), saludar sin nombre.
   const clean = name && name !== "Sin nombre" && !BUSINESS_WORD.test(name.trim()) ? name : null;
   const hi = `¡Hola${firstName(clean)}!`;
-  switch (Math.min(Math.max(attempt, 1), LEAD_MAX_ATTEMPTS)) {
+  // Después de los 4 (lo volviste a agendar desde Contactos): retomar, sin presionar.
+  if (attempt > LEAD_MAX_ATTEMPTS) {
+    return `${hi} Hace un tiempo nos escribiste por el sistema para carnicerías. ¿Cómo viene el negocio? Si te sirve, te lo muestro en 10 minutos y te dejo 7 días gratis para probarlo, sin compromiso.`;
+  }
+  switch (Math.max(attempt, 1)) {
     case 1:
       return `${hi} 👋 Te escribo de Patagonia System: vimos que te interesó nuestra publicidad del sistema para carnicerías. ¿Tenés carnicería, pollería o algo parecido? Así te cuento lo que más te sirve.`;
     case 2:
@@ -244,7 +248,7 @@ export function leadFollowUp(lead: Lead, todayIso: string): FollowUp | null {
     const next = (lead.attempts ?? 0) + 1;
     return {
       ...f,
-      title: next === 1 ? "Interesado nuevo: primer mensaje" : `Interesado sin respuesta: mensaje ${Math.min(next, LEAD_MAX_ATTEMPTS)} de ${LEAD_MAX_ATTEMPTS}`,
+      title: next === 1 ? "Interesado nuevo: primer mensaje" : next > LEAD_MAX_ATTEMPTS ? "Retomar contacto" : `Interesado sin respuesta: mensaje ${next} de ${LEAD_MAX_ATTEMPTS}`,
       reason: lead.source ? `${when} Vino por ${lead.source}.` : when,
       message: leadAttemptMessage(next, lead.contactName)
     };

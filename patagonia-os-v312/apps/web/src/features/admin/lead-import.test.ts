@@ -29,7 +29,8 @@ describe("cargar interesados", () => {
     assert.match(leadAttemptMessage(1, "Sin nombre"), /^¡Hola! 👋/);
     assert.match(leadAttemptMessage(1, "Carnicería Don Julio"), /^¡Hola! 👋/);
     assert.match(leadAttemptMessage(3, null), /Respondeme 1/);
-    assert.match(leadAttemptMessage(9, null), /No te quiero llenar de mensajes/);
+    assert.match(leadAttemptMessage(4, null), /No te quiero llenar de mensajes/);
+    assert.match(leadAttemptMessage(5, "Ana"), /^¡Hola Ana! Hace un tiempo nos escribiste/);
   });
 
   it("seguimiento según intentos", () => {

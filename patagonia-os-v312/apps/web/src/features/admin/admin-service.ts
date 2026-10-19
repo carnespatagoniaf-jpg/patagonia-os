@@ -571,3 +571,12 @@ export async function markLeadReplied(id: string): Promise<void> {
   const { error } = await supabase.rpc("mark_lead_replied", { p_id: id });
   if (error) throw error;
 }
+
+/** Vuelve a poner a estos interesados en "Para escribir hoy", de a perDay por día (migración 133). */
+export async function scheduleLeads(ids: string[], perDay: number): Promise<number> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.rpc("schedule_leads", { p_ids: ids, p_per_day: perDay });
+  if (error) throw error;
+  return Number(data ?? 0);
+}

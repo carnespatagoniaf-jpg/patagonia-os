@@ -717,6 +717,13 @@ a.button-link:hover { background: #731818; }
 .my-scale-fact span { color: #697386; font-size: 13px; }
 .my-scale-fact.warn { border-color: #f1d3a6; background: #fffaf2; }
 .my-scale-notes { margin: 0; padding-left: 18px; color: #697386; font-size: 14px; display: grid; gap: 4px; }
+.my-scale-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; width: 100%; }
+.my-scale-item { display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap; border: 1px solid #e5e7eb; border-radius: 14px; padding: 14px 16px; }
+.my-scale-item strong { font-size: 17px; }
+.my-scale-item-status { margin: 4px 0 0; font-size: 14px; }
+.my-scale-item-status.ok { color: #176329; }
+.my-scale-item-status.warn { color: #8a4b00; }
+.my-scale-item-status.off { color: #697386; }
 .my-scale-check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; max-width: 620px; }
 .my-scale-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .my-scale-review { width: 100%; border-top: 1px solid #eef0f3; padding-top: 12px; }
@@ -770,3 +777,19 @@ a.button-link:hover { background: #731818; }
 .follow-round-head { display: flex; align-items: center; gap: 12px; }
 .follow-round-progress { flex: 1; height: 8px; background: #f1f3f5; border-radius: 4px; overflow: hidden; }
 .follow-round-progress > div { height: 100%; background: #1f8f4e; }
+
+/* Panel de plataforma: pestaña Contactos (migración 133) */
+.contacts { display: grid; gap: 12px; }
+.contacts-bulk { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 10px 12px; background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; font-size: 14px; }
+.contacts-list { display: grid; gap: 6px; }
+.contacts-row { display: grid; grid-template-columns: 22px minmax(150px, 1.1fr) 210px minmax(150px, 1fr) minmax(0, 1.4fr) auto; align-items: center; gap: 12px; padding: 10px 12px; background: #fff; border: 1px solid #eef0f3; border-radius: 10px; font-size: 14px; }
+.contacts-main { display: grid; }
+.contacts-main .muted { font-size: 13px; }
+.contacts-when, .contacts-note { font-size: 13px; }
+.contacts-note { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.contacts-row .sales-wa-button { margin: 0; }
+@media (max-width: 900px) {
+  .contacts-row { grid-template-columns: 22px 1fr auto; }
+  .contacts-when, .contacts-note { grid-column: 2 / -1; }
+}
+.contacts-row > .admin-trial { justify-self: start; }
