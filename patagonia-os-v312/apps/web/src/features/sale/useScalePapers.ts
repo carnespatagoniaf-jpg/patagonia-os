@@ -82,14 +82,15 @@ export function useScalePapers(deps: {
   /** true si el código era de la balanza (se agregó, o se explicó por qué no). false = sigue el camino normal. */
   function handleScan(raw: string): boolean {
     if (setups.length === 0) return false;
-    const m = decodeAcross(raw, setups, open.paper.items.length ? open.scaleKey : null);
+    const m = decodeAcross(raw, setups, open.paper.items.length ? open.scaleKey : null, undefined, open.paper.items.length || null);
     if (m.kind === "not_scale") return false;
     if (m.kind === "ambiguous") {
       setMessage("No se agregó: dos balanzas de esta sucursal imprimen ese mismo código y no se puede saber de cuál es. Avisale a soporte de Patagonia.");
       return true;
     }
     const { setup, decoded: d } = m;
-    if (open.paper.items.length > 0 && open.scaleKey && open.scaleKey !== setup.profile.scaleKey) {
+    // Un artículo que dos balanzas leen igual queda con la primera; el TOTAL dice de cuál es (no es "otra balanza").
+    if (d.kind !== "total" && open.paper.items.length > 0 && open.scaleKey && open.scaleKey !== setup.profile.scaleKey) {
       setMessage("Ese código es de otra balanza. Primero terminá el ticket que estás cargando: escaneá su TOTAL.");
       return true;
     }

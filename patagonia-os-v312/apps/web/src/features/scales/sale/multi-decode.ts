@@ -21,9 +21,19 @@ function sameMeaning(a: DecodedScan, b: DecodedScan): boolean {
   return false;
 }
 
-export function decodeAcross(raw: string, setups: ScaleSetup[], preferKey: string | null, nameOf: (key: string) => string = (k) => k): MultiDecoded {
+export function decodeAcross(raw: string, setups: ScaleSetup[], preferKey: string | null, nameOf: (key: string) => string = (k) => k, openItems: number | null = null): MultiDecoded {
   const hits = setups.map((setup) => ({ setup, decoded: decodeScaleCode(raw, setup.profile) })).filter((h) => h.decoded.kind !== "not_scale");
   if (hits.length === 0) return { kind: "not_scale" };
+  // TOTAL leído distinto por dos balanzas (real Los gringos 19/10: la anterior imprime "22AA…" = cantidad de artículos y
+  // la nueva "22BB…" = su número de balanza, 20). Se queda con la lectura que cierra con lo escaneado del papel: sin
+  // cantidad (B) o con la misma cantidad de artículos. El artículo no dice de qué balanza es; el TOTAL sí.
+  const totals = hits.filter((h) => h.decoded.kind === "total");
+  if (totals.length > 1 && openItems !== null) {
+    const fits = totals.filter((h) => h.decoded.kind === "total" && (h.decoded.articles === null || h.decoded.articles === openItems));
+    const exact = fits.filter((h) => h.decoded.kind === "total" && h.decoded.articles === openItems);
+    if (exact.length === 1) return { kind: "match", ...exact[0] };
+    if (fits.length === 1) return { kind: "match", ...fits[0] };
+  }
   if (preferKey) {
     const pref = hits.find((h) => h.setup.profile.scaleKey === preferKey);
     if (pref) return { kind: "match", ...pref };

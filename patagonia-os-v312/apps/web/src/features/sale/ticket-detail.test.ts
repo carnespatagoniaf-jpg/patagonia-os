@@ -123,3 +123,28 @@ describe("[SIMULADO] Mostrador lee con todas las balanzas de la sucursal", () =>
     assert.ok(r.kind === "match" && r.decoded.kind === "total" && r.decoded.amount === 780);
   });
 });
+
+describe("[SIMULADO, formatos REALES Los gringos 19/10] Dos Systel: TOTAL con artículos (AA) y con número de balanza (BB)", () => {
+  const vieja = setup(profile("systel", "20PPPPCCCCII", "22AAIIIIIIII", [4]));
+  const nueva = setup(profile("systel-68afcb26", "20PPPPCCCCCC", "22BBIIIIIIII", [4]));
+  // Real: los dos catálogos imprimen el producto 4 con su propio formato 20PPPPCCCCCC.
+  for (const s of [vieja, nueva]) s.profile.catalog[0] = { ...s.profile.catalog[0], eanType: 1, eanConfig: "20PPPPCCCCCC" };
+
+  it("la etiqueta del producto se lee igual en las dos (mismo producto y kilos)", () => {
+    const r = decodeAcross(code("20PPPPCCCCCC", { P: 4, C: 1250 }), [vieja, nueva], null);
+    assert.equal(r.kind, "match");
+  });
+
+  it("el TOTAL de la nueva (22 + 20 + importe) no se confunde con '20 artículos' de la vieja", () => {
+    const total = code("22BBIIIIIIII", { B: 20, I: 6500 });
+    const r = decodeAcross(total, [vieja, nueva], "systel", undefined, 1);
+    assert.equal(r.kind === "match" && r.setup.profile.scaleKey, "systel-68afcb26", "con 1 artículo escaneado, es el TOTAL de la nueva");
+    assert.ok(r.kind === "match" && r.decoded.kind === "total" && r.decoded.amount === 6500);
+  });
+
+  it("el TOTAL de la vieja con 20 artículos sigue siendo de la vieja", () => {
+    const total = code("22AAIIIIIIII", { A: 20, I: 6500 });
+    const r = decodeAcross(total, [vieja, nueva], null, undefined, 20);
+    assert.equal(r.kind === "match" && r.setup.profile.scaleKey, "systel");
+  });
+});
