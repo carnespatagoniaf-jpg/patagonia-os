@@ -50,6 +50,8 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
   const [newChoice, setNewChoice] = useState<ScaleChoice | null>(null);
   /** Al agregar: otra balanza registrada con el mismo número (solo se avisa). */
   const [lookalike, setLookalike] = useState<BranchScale | null>(null);
+  /** El último reporte a soporte: llegó, no llegó, o todavía se está mandando (null). */
+  const [reportSent, setReportSent] = useState<boolean | null>(null);
   const session = useRef<ScaleSession | null>(null);
   const ctxRef = useRef<BranchConnectResult | null>(null);
 
@@ -89,8 +91,9 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
   const active = list.find((s) => s.key === activeKey) ?? null;
 
   // Los errores llegan a soporte con cualquier usuario: en el local suele estar abierta la sesión del cajero.
-  async function report(stage: string, technical: unknown, diag: ConnectDiag | null, extra: Record<string, unknown> = {}) {
-    if (!profile || !isSupabaseConfigured) return;
+  /** true si el reporte llegó (antes se decía "ya le llegó a soporte" aunque el servidor lo hubiera rechazado). */
+  async function report(stage: string, technical: unknown, diag: ConnectDiag | null, extra: Record<string, unknown> = {}): Promise<boolean> {
+    if (!profile || !isSupabaseConfigured) return false;
     try {
       const info = session.current?.supportInfo() ?? {};
       const target = active ? { clave: active.key, nombre: active.name, marca: active.family, identidad: active.identity } : { nueva: newChoice };
@@ -107,13 +110,19 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
           otras_pestanas: diag?.otherTabs ?? null,
           intercambio: diag?.log.slice(-200) ?? [],
           eventos: diag?.events.slice(-300) ?? []
-        }).slice(0, 20000),
+        }).slice(0, 60000),
         connections: [],
         branchId
       });
+      return true;
     } catch {
-      // si no llega, el cliente igual ve un mensaje claro
+      return false;
     }
+  }
+
+  function reportAndShow(...args: Parameters<typeof report>) {
+    setReportSent(null);
+    void report(...args).then(setReportSent);
   }
 
   async function closeSession() {
@@ -158,7 +167,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     } catch (err) {
       const kind = friendlyKind(err);
       setPhase({ kind: "error", message: connectErrorMessage(err, choice), canPick: kind === "elegir_cable" || kind === "no_contesta" || kind === "otra_balanza" });
-      void report("conectar", err, diag);
+      reportAndShow("conectar", err, diag);
     }
   }
 
@@ -213,7 +222,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       const out = await s.sync(prepared, progress, { allowReplace: replace });
       if (!out.ok) {
         setPhase({ kind: "error", message: out.message, canPick: false });
-        void report("sincronizar (frenado)", out.message, ctxRef.current?.diag ?? null, out.support ?? {});
+        reportAndShow("sincronizar (frenado)", out.message, ctxRef.current?.diag ?? null, out.support ?? {});
         return;
       }
       markSynced();
@@ -221,7 +230,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       void reload();
     } catch (err) {
       setPhase({ kind: "error", message: friendlyMessage(err), canPick: false });
-      void report("sincronizar", err, ctxRef.current?.diag ?? null);
+      reportAndShow("sincronizar", err, ctxRef.current?.diag ?? null);
     }
   }
 
@@ -406,7 +415,9 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
             )}
             <button className="secondary" onClick={backToList}>Volver a mis balanzas</button>
           </div>
-          <p className="muted">El detalle técnico ya le llegó a soporte de Patagonia.</p>
+          <p className="muted">
+            {reportSent === null ? "Mandando el detalle técnico a soporte de Patagonia…" : reportSent ? "El detalle técnico ya le llegó a soporte de Patagonia." : "No se pudo mandar el detalle técnico a soporte: avisanos por WhatsApp."}
+          </p>
         </div>
       )}
     </section>
