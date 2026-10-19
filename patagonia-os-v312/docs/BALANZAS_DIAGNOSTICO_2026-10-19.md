@@ -135,3 +135,20 @@ Fuente: `scale_support_reports` de producción, 18 reportes de ese día, compara
    - Si Qendra tampoco puede, el problema es de configuración de la balanza (soporte de Systel).
    - Si Qendra puede, el problema está en cómo le habla Patagonia.
 3. Consultar a Systel postventa (0810-888-7978, postventa@systel.com.ar) con las tramas exactas de arriba.
+
+### 7.2 14:43: las señales y la pausa, descartadas
+
+Primer intento con la versión de las 14:20, que ante E3 prueba sola cuatro combinaciones (DTR/RTS apagadas como en el ejemplo oficial, solo DTR, solo RTS y las dos), con 1,5 a 3 s de pausa antes del primer pedido. Resultado: 45 respuestas E3, ninguna de otro tipo y 22 sin respuesta (las del número 1).
+
+Comparado con el ejemplo oficial de Systel (`Protocolo-Cuora-2-y-Cuora-MAX.zip`, `Form1.vb`):
+- La trama es idéntica (firma `14 02 16`).
+- Las únicas diferencias eran las señales DTR/RTS y la pausa, y las dos quedaron probadas sin cambio en el resultado.
+
+Publicado a las 15:12:
+- "Ver diagnóstico" y "Descargar diagnóstico" en la pantalla del error.
+- Marcas con las señales y la hora de cada bloque.
+- Si la balanza rechaza todo, se pide una vez, solo lectura, la fecha (28) y la configuración (39), para saber si el rechazo es total o selectivo.
+
+Siguiente paso, en una sola sesión:
+1. Correr "Prueba Protocolo Cuora Systel.exe" (el oficial) con Patagonia cerrada: ID 20, funciones 2 y 23.
+2. Consultar a Systel postventa qué es E3 y qué se configura en la balanza.
