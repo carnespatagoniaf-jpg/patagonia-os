@@ -118,3 +118,20 @@ Fuente: `scale_support_reports` de producción, 18 reportes de ese día, compara
 1. Que la versión corregida informe E3 (o silencio) con los bytes.
 2. Leer la firma (modelo y protocolo) y compararla con la del 14/10 (protocolo 0060, max60, 103 productos, huella b8c2d441).
 3. Pasar los productos y comprobar en la balanza que quedaron los precios (relectura automática + mirar 2 productos en el visor + 1 ticket escaneado en Mostrador).
+
+### 7.1 Comprobado a las 13:55 con la versión publicada (balanza NUEVA de Los gringos, no la del 14/10)
+
+- Cable FT232R (0403:6001), puerto abierto a 115200 8N1 con DTR/RTS encendidas.
+- La balanza contesta con su número (0x14 = 20) en 11 ms y con verificación correcta: la línea funciona.
+- **Contesta E3 a todo.** 54 pedidos de solo lectura: ping (23) y firma (2), a su número (20) y al general (0). Por ejemplo, la firma `14 02 16` → `14 02 45 33 60`. Al número 1 no contesta nada. No se escribió nada.
+- La balanza quedó registrada aparte de la anterior: `systel-68afcb26`, "parecida a systel".
+- Queda descartada la hipótesis de que el E3 se destraba hablándole antes al 1 y al general: se hizo antes de cada reintento y siguió igual.
+
+**Impedimento:** la balanza no atiende ningún pedido de una PC. Desde Patagonia ya no queda nada para probar por el cable, porque se probaron todas las direcciones documentadas. Falta saber qué estado o configuración de ESA balanza provoca el E3. Systel no lo documenta (protocolo V6.0, pág. 4: "E3 = se desatendieron datos").
+
+**Cómo se resuelve (en orden):**
+1. Probar con la balanza quieta varios minutos en la pantalla de peso, sin venta ni menú (la guía de Systel insiste en volver a la pantalla de peso). La balanza del 14/10 atendió de tarde.
+2. Probar con Qendra, el programa oficial de Systel: Equipos → buscar equipos.
+   - Si Qendra tampoco puede, el problema es de configuración de la balanza (soporte de Systel).
+   - Si Qendra puede, el problema está en cómo le habla Patagonia.
+3. Consultar a Systel postventa (0810-888-7978, postventa@systel.com.ar) con las tramas exactas de arriba.
