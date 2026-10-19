@@ -39,6 +39,8 @@ export interface SystelDeps {
   saveLocalBackup: (backup: unknown) => void;
   /** Solo laboratorio y pruebas: permite escribir aunque el envío de productos no esté comprobado en una balanza real. */
   forceWritable?: boolean;
+  /** Guardar con la conexión de esta computadora las señales y el número con los que atendió la balanza. */
+  onConnectionHints?: (hints: { lines?: { dtr: boolean; rts: boolean }; requestAddress?: number }) => void;
 }
 
 /** Copia local del respaldo de productos (la misma que usa "Restaurar desde el respaldo" en el panel de soporte). */
@@ -75,15 +77,19 @@ export class SystelSession implements ScaleSession {
   private address: number;
   /** Cómo quedó elegido el número de los pedidos (para soporte). */
   private addressNote = "";
+  /** Señales con las que atendió, si no fueron las de siempre (DTR y RTS encendidas). */
+  private lines: { dtr: boolean; rts: boolean } | null = null;
 
   constructor(
     private readonly link: SystelLink & { close?: () => Promise<void> },
     address: number,
     private readonly ctx: EngineContext,
-    private readonly deps: SystelDeps
+    private readonly deps: SystelDeps,
+    known: { lines?: { dtr: boolean; rts: boolean }; requestAddress?: number } = {}
   ) {
     this.number = address;
-    this.address = address;
+    this.address = known.requestAddress ?? address;
+    this.lines = known.lines ?? null;
   }
 
   private get scaleKey(): string {
@@ -107,7 +113,7 @@ export class SystelSession implements ScaleSession {
    * pedido (SystelClient descarta las ambiguas), así que no se confunde con otra balanza en el mismo cable.
    */
   private async pickAddress(onProgress: ProgressFn): Promise<boolean> {
-    for (const a of [...new Set([this.number, 1, 0])]) {
+    for (const a of [...new Set([this.address, this.number, 1, 0])]) {
       onProgress("leer", "Leyendo tu balanza…");
       const c = new SystelClient(this.link, { address: a, log: this.log, busyRetryMs: [300, 800, 1500] });
       const sig = await c.signature();
@@ -121,9 +127,49 @@ export class SystelSession implements ScaleSession {
     return false;
   }
 
+  /**
+   * La balanza contestó E1/E2/E3 a todo (atiende el cable pero no los pedidos). Se prueba, SOLO LEYENDO la firma, lo que
+   * hace distinto el programa de ejemplo oficial de Systel: señales DTR/RTS (el ejemplo las deja apagadas) y una pausa
+   * después de configurar las señales antes del primer pedido (Patagonia hablaba a los 9 ms de abrir). Se queda con la
+   * primera combinación que atiende y la guarda para esa balanza (también la usa Mostrador al leer tickets).
+   * Real: Cuora Max nueva de Los gringos, 19/10, E3 a 54 pedidos con DTR y RTS encendidas. HIPÓTESIS: que alguna de
+   * estas variantes la destrabe; se registra cada intento para soporte.
+   */
+  private async recoverLines(onProgress: ProgressFn): Promise<boolean> {
+    const link = this.link as SystelLink & { setLines?: (dtr: boolean, rts: boolean) => Promise<void> };
+    if (!link.setLines) return false;
+    const variants = [
+      { dtr: false, rts: false, waitMs: 2000 },
+      { dtr: true, rts: false, waitMs: 1500 },
+      { dtr: false, rts: true, waitMs: 1500 },
+      { dtr: true, rts: true, waitMs: 3000 }
+    ];
+    for (const v of variants) {
+      onProgress("leer", "Probando otra forma de hablarle a tu balanza…");
+      await link.setLines(v.dtr, v.rts);
+      await new Promise((r) => setTimeout(r, v.waitMs));
+      for (const a of [...new Set([this.number, 1, 0])]) {
+        const c = new SystelClient(this.link, { address: a, log: this.log, busyRetryMs: [] });
+        if (await c.signature()) {
+          this.address = a;
+          this.lines = { dtr: v.dtr, rts: v.rts };
+          this.addressNote = `atendió con DTR ${v.dtr ? "encendida" : "apagada"} y RTS ${v.rts ? "encendida" : "apagada"}, pedidos al ${a === this.number ? "suyo" : a}`;
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  /** Señales y número con los que atendió esta balanza (se guardan con la conexión). */
+  connectionHints(): { lines?: { dtr: boolean; rts: boolean }; requestAddress?: number } {
+    return { ...(this.lines ? { lines: this.lines } : {}), ...(this.address !== this.number ? { requestAddress: this.address } : {}) };
+  }
+
   async prepare(onProgress: ProgressFn): Promise<PreparedSync> {
     onProgress("leer", "Leyendo tu balanza…");
-    await this.pickAddress(onProgress);
+    if (!(await this.pickAddress(onProgress)) && systelRefused(this.log)) await this.recoverLines(onProgress);
+    this.deps.onConnectionHints?.(this.connectionHints());
     const backup = await takeSystelBackup(this.client(), () => onProgress("leer", "Leyendo tu balanza…"));
     this.lastBackup = backup;
     if (!backup.signature && !backup.ping) {
@@ -248,6 +294,7 @@ export class SystelSession implements ScaleSession {
       modelo: this.model,
       numero: this.number,
       direccion_pedidos: this.address,
+      senales: this.lines ?? "DTR y RTS encendidas",
       como_se_eligio: this.addressNote,
       firma: b?.signature ?? null,
       formato: b?.layout ?? null,
@@ -276,8 +323,9 @@ export function makeSystelAdapter(deps: SystelDeps): ScaleAdapter {
       const log: SystelExchangeLog[] = [];
       const events: SystelLinkEvent[] = [];
       let found: SystelFoundLink | null = null;
+      const previous = loadSavedSystelLink();
       try {
-        found = await discoverSystelLink(port, log, () => onProgress("buscar", "Buscando tu balanza…"), loadSavedSystelLink(), 350, events);
+        found = await discoverSystelLink(port, log, () => onProgress("buscar", "Buscando tu balanza…"), previous, 350, events);
       } finally {
         if (ctx.diag) {
           ctx.diag.log.push(...log.slice(-300));
@@ -286,8 +334,11 @@ export function makeSystelAdapter(deps: SystelDeps): ScaleAdapter {
         }
       }
       if (!found) return null;
-      saveSystelLink({ settings: found.settings, address: found.address });
-      return new SystelSession(found.link, found.address, ctx, deps);
+      // Lo que se aprendió de ESTA balanza (señales, número al que atiende) se conserva si es la misma conexión.
+      const same = previous && previous.address === found.address && previous.settings.baudRate === found.settings.baudRate;
+      const hints = same ? { ...(previous.lines ? { lines: previous.lines } : {}), ...(previous.requestAddress !== undefined ? { requestAddress: previous.requestAddress } : {}) } : {};
+      saveSystelLink({ settings: found.settings, address: found.address, ...hints });
+      return new SystelSession(found.link, found.address, ctx, deps, hints);
     }
   };
 }

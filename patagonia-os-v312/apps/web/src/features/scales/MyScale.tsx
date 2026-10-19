@@ -150,6 +150,8 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       const key = await remember(result, target);
       if (key) setActiveKey(key);
       const prepared = await result.session.prepare(progress);
+      // La lectura pudo descubrir con qué señales o a qué número atiende la balanza: se vuelve a guardar su conexión.
+      if (branchId && key) saveBinding(key, { branchId, family: result.family, usb: result.usb });
       if (prepared.blocker) setPhase({ kind: "bloqueado", prepared });
       else if (prepared.upToDate) setPhase({ kind: "listo", message: "¡Listo! Tu balanza está conectada y ya podés vender.", pending: prepared.pending, model: prepared.label });
       else setPhase({ kind: "listo_para_sincronizar", prepared });

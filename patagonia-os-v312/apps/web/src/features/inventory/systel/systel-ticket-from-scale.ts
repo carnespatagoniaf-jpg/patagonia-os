@@ -74,9 +74,10 @@ async function openSession(): Promise<{ session: Session } | { error: string }> 
     const message = err instanceof Error ? err.message : String(err);
     return { error: /already open/i.test(message) ? "el puerto de la balanza está abierto en otra pantalla o programa (por ejemplo Qendra o Stock → Balanza)" : `no se pudo abrir el puerto de la balanza (${message})` };
   }
-  // Igual que en todas las sesiones que la balanza real contestó.
-  await link.setSignals(true);
-  const client = new SystelClient(link, { address: saved.address, log });
+  // Igual que en todas las sesiones que la balanza real contestó (o con las señales y el número con los que atendió).
+  if (saved.lines) await link.setLines(saved.lines.dtr, saved.lines.rts);
+  else await link.setSignals(true);
+  const client = new SystelClient(link, { address: saved.requestAddress ?? saved.address, log });
   // Secuencia de arranque comprobada en la balanza real, una sola vez por conexión.
   await client.wake();
   return { session: { link, client, port, openedAt: Date.now(), log, events, cache: { layout: null, plus: new Map() } } };

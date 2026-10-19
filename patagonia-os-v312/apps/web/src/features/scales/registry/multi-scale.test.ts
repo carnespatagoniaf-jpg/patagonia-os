@@ -381,3 +381,34 @@ describe("[SIMULADO] Balanza que no atiende pedidos a su número (hipótesis Los
     await r.session.close();
   });
 });
+
+describe("[SIMULADO] Balanza que contesta E3 mientras DTR y RTS están encendidas (hipótesis Los gringos 19/10)", () => {
+  /** Puerto de mentira que registra las señales: con las dos encendidas, la Cuora contesta E3 a todo. */
+  class SignalPort extends FakeSerialPort {
+    dtr = false;
+    rts = false;
+    constructor(private readonly c: FakeCuora) {
+      super(c, { baudRate: 115200, stopBits: 1, parity: "none" }, FTDI);
+    }
+    override async setSignals(s?: { dataTerminalReady?: boolean; requestToSend?: boolean }) {
+      if (s?.dataTerminalReady !== undefined) this.dtr = s.dataTerminalReady;
+      if (s?.requestToSend !== undefined) this.rts = s.requestToSend;
+      this.c.busyReplies = this.dtr && this.rts ? 1_000_000 : 0;
+    }
+  }
+
+  it("prueba otras señales solo leyendo, se queda con la que atiende y la informa para guardarla", async () => {
+    const cuora = new FakeCuora("max60", { address: 20, protocol: "0060" });
+    const port = new SignalPort(cuora);
+    let hints: unknown = null;
+    const adapter = makeSystelAdapter({ ...nullDeps, onConnectionHints: (h) => void (hints = h) });
+    const r = await connectBranchScale(ctx(), noop, { target: null, known: [], pick: true }, { serial: serialOf([port as unknown as SerialPort], port as unknown as SerialPort).api, adapters: [adapter] });
+    await r.session.prepare(noop);
+    const info = r.session.supportInfo() as { firma: { protocolVersion: string } | null; senales: unknown };
+    assert.equal(info.firma?.protocolVersion, "0060", "leyó la firma");
+    assert.deepEqual(info.senales, { dtr: false, rts: false }, "atendió con las dos apagadas, como el ejemplo oficial");
+    assert.deepEqual((hints as { lines: unknown }).lines, { dtr: false, rts: false });
+    assert.ok(!cuora.received.some((x) => [4, 5, 7, 33, 61].includes(x.fn)), "solo lecturas: no se escribió nada");
+    await r.session.close();
+  });
+});

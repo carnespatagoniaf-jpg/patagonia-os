@@ -34,6 +34,10 @@ export interface SystelFoundLink {
 export interface SavedSystelLink {
   settings: SystelSerialSettings;
   address: number;
+  /** Señales con las que la balanza atendió (si no son las de siempre, DTR y RTS encendidas). */
+  lines?: { dtr: boolean; rts: boolean };
+  /** Número al que atiende los pedidos, si no es el suyo (1 o el general 0). */
+  requestAddress?: number;
 }
 
 export function loadSavedSystelLink(): SavedSystelLink | null {
@@ -100,7 +104,8 @@ export async function discoverSystelLink(
       // (real 15:59:03: "The port is already open", otra pantalla o programa lo tenía tomado).
       throw new Error(/already open/i.test(message) ? "el puerto de la balanza está abierto en otra pantalla o programa (por ejemplo Qendra)" : `no se pudo abrir el puerto de la balanza (${message})`);
     }
-    await link.setSignals(true);
+    if (preferred?.lines && step.settings === preferred.settings) await link.setLines(preferred.lines.dtr, preferred.lines.rts);
+    else await link.setSignals(true);
     for (const address of step.addresses) {
       const found = await pingAt(link, address, log, pingTimeoutMs);
       if (found !== null) return { link, settings: step.settings, address: found };

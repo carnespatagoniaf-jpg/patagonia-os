@@ -93,6 +93,21 @@ export class SerialSystelLink implements SystelLink {
     }
   }
 
+  /**
+   * DTR y RTS por separado. El programa de ejemplo oficial de Systel no las toca (valores de .NET: las dos apagadas);
+   * Patagonia las enciende desde el 09/10. Una Cuora Max nueva de Los gringos (19/10) contestó E3 a todo con las dos
+   * encendidas: se prueban las otras combinaciones (ver SystelSession.recoverLines).
+   */
+  async setLines(dtr: boolean, rts: boolean): Promise<void> {
+    try {
+      const port = this.port as SerialPort & { setSignals?: (signals: { dataTerminalReady?: boolean; requestToSend?: boolean }) => Promise<void> };
+      await port.setSignals?.({ dataTerminalReady: dtr, requestToSend: rts });
+      this.note("señales", `DTR ${dtr ? "encendida" : "apagada"}, RTS ${rts ? "encendida" : "apagada"}`);
+    } catch (err) {
+      this.note("señales", `no se pudieron cambiar: ${err instanceof Error ? err.message : String(err)}`);
+    }
+  }
+
   private startReading(): void {
     const readable = this.port.readable;
     if (!readable) return;
