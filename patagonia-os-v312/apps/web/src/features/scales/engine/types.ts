@@ -112,6 +112,11 @@ export interface EngineContext {
   scaleKey?: string;
   /** Si viene, cada marca deja acá lo que mandó y recibió (para soporte). */
   diag?: ConnectDiag;
+  /**
+   * La persona confirmó en pantalla mandar la función 25 de Systel ("liberar el equipo"). Sin esto, conectar y leer es
+   * SOLO LECTURA (pedido del dueño 19/10): la 25 cambia el estado de la balanza.
+   */
+  allowSystelRelease?: boolean;
 }
 
 export interface ScaleAdapter {

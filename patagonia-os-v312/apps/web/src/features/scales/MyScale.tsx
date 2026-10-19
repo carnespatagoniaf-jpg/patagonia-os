@@ -32,7 +32,7 @@ type Phase =
   | { kind: "listo_para_sincronizar"; prepared: PreparedSync }
   | { kind: "listo"; message: string; pending: PendingItem[]; model: string }
   | { kind: "bloqueado"; prepared: PreparedSync }
-  | { kind: "error"; message: string; canPick: boolean };
+  | { kind: "error"; message: string; canPick: boolean; canRelease?: boolean };
 
 /** Balanza que esta computadora usaba antes de "Mis balanzas" y que todavía no está registrada en la sucursal. */
 const LOCAL_KEY = "__esta-computadora";
@@ -143,7 +143,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
   }
 
   /** target = balanza registrada (o la de esta PC); null = agregar una nueva con la marca elegida. */
-  async function handleConnect(target: BranchScale | null, pick: boolean, choiceForNew: ScaleChoice | null = newChoice) {
+  async function handleConnect(target: BranchScale | null, pick: boolean, choiceForNew: ScaleChoice | null = newChoice, allowSystelRelease = false) {
     setReplace(false);
     await closeSession();
     setActiveKey(target?.key ?? null);
@@ -155,7 +155,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     const remembered = loadRememberedScale();
     try {
       const result = await connectBranchScale(
-        { branchId, products, online: isSupabaseConfigured, canManageLinks: canManage, diag },
+        { branchId, products, online: isSupabaseConfigured, canManageLinks: canManage, diag, allowSystelRelease },
         progress,
         { target: isLegacy ? { ...target!, identity: {} } : target, known: scales, pick },
         {
@@ -178,7 +178,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       else setPhase({ kind: "listo_para_sincronizar", prepared });
     } catch (err) {
       const kind = friendlyKind(err);
-      setPhase({ kind: "error", message: connectErrorMessage(err, choice), canPick: kind === "elegir_cable" || kind === "no_contesta" || kind === "otra_balanza" });
+      setPhase({ kind: "error", message: connectErrorMessage(err, choice), canPick: kind === "elegir_cable" || kind === "no_contesta" || kind === "otra_balanza", canRelease: kind === "balanza_ocupada" && !allowSystelRelease && canManage });
       reportAndShow("conectar", err, diag);
     }
   }
@@ -421,6 +421,20 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
               <>
                 <button className="my-scale-primary" onClick={() => void handleConnect(active, false)}>PROBAR DE NUEVO</button>
                 {phase.canPick && <button className="secondary" onClick={() => void handleConnect(active, true)}>Elegir el cable</button>}
+                {phase.canRelease && (
+                  <button
+                    className="secondary"
+                    onClick={() => {
+                      const ok = window.confirm(
+                        "Patagonia va a mandarle a la balanza el comando oficial de Systel \"liberar el equipo\" (función 25).\n\n" +
+                          "Según Systel, solo marca sus datos como sincronizados y la libera si quedó esperando a la PC al prenderse. No cambia productos, precios ni configuración.\n\n¿Seguir?"
+                      );
+                      if (ok) void handleConnect(active, false, newChoice, true);
+                    }}
+                  >
+                    Intentar liberar la balanza
+                  </button>
+                )}
               </>
             ) : (
               newChoice && <button className="my-scale-primary" onClick={() => void handleConnectNew(newChoice)}>PROBAR DE NUEVO</button>

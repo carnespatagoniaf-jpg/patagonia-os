@@ -416,11 +416,21 @@ describe("[SIMULADO] Balanza que contesta E3 mientras DTR y RTS están encendida
 describe("[SIMULADO, protocolo DOCUMENTADO] Funciones 25 (liberar) y 35 (no esperar sincronización)", () => {
   const settings: SystelSerialSettings = { baudRate: 115200, stopBits: 1, parity: "none" };
 
-  it("si contesta E3 a todo, manda la 25 una vez, y si después atiende, lee completa", async () => {
+  it("sin confirmación es SOLO LECTURA: con E3 a todo no manda la 25", async () => {
     const cuora = new FakeCuora("max60", { address: 20, protocol: "0060" });
     cuora.e3UntilRelease = true;
     const port = new FakeSerialPort(cuora, settings, FTDI) as unknown as SerialPort;
     const r = await connectBranchScale(ctx(), noop, { target: null, known: [], pick: true }, { serial: serialOf([port], port).api, adapters: [makeSystelAdapter(nullDeps)] });
+    await assert.rejects(() => r.session.prepare(noop), (e: unknown) => e instanceof FriendlyError && e.kind === "balanza_ocupada");
+    assert.equal(cuora.received.filter((x) => [4, 5, 7, 25, 33, 35, 61].includes(x.fn)).length, 0, "ni la 25 ni ninguna escritura");
+    await r.session.close();
+  });
+
+  it("con la confirmación en pantalla, manda la 25 una vez, y si después atiende, lee completa", async () => {
+    const cuora = new FakeCuora("max60", { address: 20, protocol: "0060" });
+    cuora.e3UntilRelease = true;
+    const port = new FakeSerialPort(cuora, settings, FTDI) as unknown as SerialPort;
+    const r = await connectBranchScale({ ...ctx(), allowSystelRelease: true }, noop, { target: null, known: [], pick: true }, { serial: serialOf([port], port).api, adapters: [makeSystelAdapter(nullDeps)] });
     await r.session.prepare(noop);
     const info = r.session.supportInfo() as { firma: { protocolVersion: string } | null; liberada_con_25: boolean };
     assert.equal(info.liberada_con_25, true);
@@ -429,15 +439,19 @@ describe("[SIMULADO, protocolo DOCUMENTADO] Funciones 25 (liberar) y 35 (no espe
     await r.session.close();
   });
 
-  it("si la configuración dice Sinc=1, la deja en 0 con la 35 N y lo comprueba releyendo; con Sinc=0 no manda nada", async () => {
+  it("Sinc=1: al leer solo avisa (no cambia nada); al sincronizar manda 35 N y lo comprueba releyendo", async () => {
     const cuora = new FakeCuora("max60", { address: 20, protocol: "0060" });
     cuora.config = "Ton=2;Gris=0;Pap=0;APa=0;Vel=5;CPr=0;CAdm=01234;CCon=01234;Sinc=1;E_P=20PPPPCCCCII;E_U=21PPPPCCCCII;E_S=22AAIIIIIIII;CImp=2;SEt=S;ETi=S";
     const port = new FakeSerialPort(cuora, settings, FTDI) as unknown as SerialPort;
     const r = await connectBranchScale(ctx(), noop, { target: null, known: [], pick: true }, { serial: serialOf([port], port).api, adapters: [makeSystelAdapter(nullDeps)] });
     const prep = await r.session.prepare(noop);
+    assert.equal(cuora.received.filter((x) => x.fn === 35).length, 0, "leer no cambia la configuración");
+    assert.match(cuora.config!, /;Sinc=1;/);
+    assert.ok(prep.notes.some((n) => /iniciar sin esperar/.test(n)), "se avisa antes de confirmar la sincronización");
+    // Lo que hace sync() antes de escribir productos (acá se llama directo: la balanza simulada no tiene productos).
+    await (r.session as unknown as { ensureNoStartupWait(c: { values: Record<string, string> }): Promise<void> }).ensureNoStartupWait({ values: { Sinc: "1" } });
     assert.match(cuora.config!, /;Sinc=0;/);
     assert.deepEqual(cuora.received.filter((x) => x.fn === 35).map((x) => x.data), ["N"]);
-    assert.ok(prep.notes.some((n) => /iniciar sin esperar/.test(n)));
     await r.session.close();
 
     const ok = new FakeCuora("max60", { address: 20, protocol: "0060" });

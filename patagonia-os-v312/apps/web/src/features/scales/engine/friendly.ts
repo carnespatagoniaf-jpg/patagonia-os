@@ -13,7 +13,7 @@ export const FRIENDLY_MESSAGES: Record<FriendlyKind, string> = {
   otra_balanza: "La balanza que contestó no es la que elegiste. Revisá que el cable sea el de esa balanza.",
   elegir_cable: "Esta computadora todavía no conoce el cable de esta balanza. Tocá \"Elegir el cable\" y elegila en la lista (la que dice USB).",
   // Lo único comprobado es el código E3; Systel no documenta su causa (V6.0 pág. 4). No se le pide nada al cliente.
-  balanza_ocupada: "La balanza respondió con el código E3 (\"se desatendieron datos\", según Systel) y no atendió el pedido. Todavía no sabemos qué lo causa.",
+  balanza_ocupada: "La balanza respondió con el código E3 y no atendió el pedido. Según Systel, E3 es \"equipo ocupado, orden desatendida\" (por ejemplo, una venta o un menú abierto en la balanza).",
   no_contesta: "No pudimos conectar tu balanza. Revisá que esté prendida y el cable enchufado, o contactá a soporte.",
   frenado: "Frenamos para cuidar tus productos: no se cambió nada más en la balanza. Ya le avisamos a soporte.",
   sin_internet: "No hay conexión a internet. Revisala y probá de nuevo.",

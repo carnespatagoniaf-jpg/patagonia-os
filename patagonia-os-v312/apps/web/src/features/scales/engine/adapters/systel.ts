@@ -83,6 +83,8 @@ export class SystelSession implements ScaleSession {
   private released = false;
   /** La balanza esperaba sincronización al encender y quedó en "no esperar" (comprobado releyendo la 39). */
   private syncWaitFixed: boolean | null = null;
+  /** La configuración leída dice que espera sincronización al encender (Sinc=1). */
+  private startupWaitOn = false;
 
   constructor(
     private readonly link: SystelLink & { close?: () => Promise<void> },
@@ -235,12 +237,14 @@ export class SystelSession implements ScaleSession {
     onProgress("leer", "Leyendo tu balanza…");
     if (!(await this.pickAddress(onProgress)) && systelRefused(this.log) && !(await this.recoverLines(onProgress))) {
       await this.probeOtherReads(onProgress);
-      await this.tryReleaseSync(onProgress);
+      // La 25 cambia el estado de la balanza: solo si la persona lo confirmó en pantalla ("Intentar liberar la balanza").
+      if (this.ctx.allowSystelRelease) await this.tryReleaseSync(onProgress);
     }
     this.deps.onConnectionHints?.(this.connectionHints());
     const backup = await takeSystelBackup(this.client(), () => onProgress("leer", "Leyendo tu balanza…"));
     this.lastBackup = backup;
-    if (backup.signature) await this.ensureNoStartupWait(backup.config);
+    // La 35 cambia la configuración: se manda recién al sincronizar (la persona confirma), no al leer.
+    this.startupWaitOn = backup.config?.values.Sinc === "1";
     if (!backup.signature && !backup.ping) {
       // E1/E2/E3 = la balanza contestó por el cable pero no hizo la orden (la Cuora de Los gringos lo hizo 13 veces del
       // 09 al 14/10; el 19/10, otra balanza, no se sabe: se perdió el registro). No es lo mismo que el silencio.
@@ -265,7 +269,7 @@ export class SystelSession implements ScaleSession {
     const badCode = plan.filter((x) => x.action === "omitir" && !/precio/.test(x.reason)).length;
     const extra = scaleOnly(backup.plus, products).length;
     const notes: string[] = [];
-    if (this.syncWaitFixed) notes.push("La balanza estaba configurada para esperar a la PC al encender: Patagonia la dejó en \"iniciar sin esperar\" (y lo comprobó releyendo su configuración).");
+    if (this.startupWaitOn) notes.push("La balanza está configurada para esperar a la PC cada vez que se prende. Al sincronizar, Patagonia además la deja en \"iniciar sin esperar\" (comando oficial de Systel, función 35) y lo comprueba releyendo su configuración.");
     if (!backup.complete) notes.push("No se pudo leer toda la balanza. Probá de nuevo; si sigue, avisá a soporte.");
     if (noPrice) notes.push(noPrice === 1 ? "1 producto no tiene precio en Patagonia: no se manda hasta que lo tenga." : `${noPrice} productos no tienen precio en Patagonia: no se mandan hasta que lo tengan.`);
     if (badCode) notes.push(`${badCode === 1 ? "1 producto tiene" : `${badCode} productos tienen`} un código que no sirve como número de balanza (tiene que ser un número de hasta 4 cifras, sin repetir).`);
@@ -299,6 +303,8 @@ export class SystelSession implements ScaleSession {
   async sync(prepared: PreparedSync, onProgress: ProgressFn, opts: { allowReplace?: boolean } = {}): Promise<SyncOutcome> {
     const st = this.state;
     if (!st || !st.backup.layout || prepared.blocker || !prepared.canWrite) throw new Error("primero hay que leer la balanza");
+    // Avisado en las notas antes de confirmar "Sincronizar productos".
+    if (this.startupWaitOn) await this.ensureNoStartupWait(st.backup.config);
     const layout = st.backup.layout;
     const plan = opts.allowReplace ? planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: true }) : st.plan;
     const toWrite = plan.filter((x) => x.action === "crear" || x.action === "actualizar" || x.action === "reemplazar");
