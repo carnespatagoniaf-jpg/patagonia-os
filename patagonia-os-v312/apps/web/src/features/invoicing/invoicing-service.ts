@@ -342,3 +342,30 @@ export async function getCustomerTaxData(customerId: string): Promise<{ taxId: s
   if (error || !data) return { taxId: "", taxCondition: null };
   return { taxId: data.tax_id ?? "", taxCondition: data.tax_condition ?? null };
 }
+
+export interface ArcaCertificateStatus {
+  env: "homo" | "prod";
+  /** Alias con el que se da de alta en ARCA (siempre "patagonia"). */
+  alias: string;
+  /** Carnes Patagonia: factura con el certificado de Patagonia OS, que es de su propio CUIT. */
+  usesShared: boolean;
+  hasRequest: boolean;
+  csrPem: string | null;
+  hasCertificate: boolean;
+  certExpiresAt: string | null;
+}
+
+/** Estado del certificado propio del negocio (migración 137). */
+export async function getArcaCertificateStatus(): Promise<ArcaCertificateStatus> {
+  return invokeArca({ action: "cert_status" });
+}
+
+/** Genera (o devuelve el que ya estaba) el pedido de certificado para subir en ARCA. */
+export async function requestArcaCertificate(regenerate = false): Promise<{ csrPem: string; alias: string }> {
+  return invokeArca({ action: "cert_request", regenerate });
+}
+
+/** Guarda el certificado que el negocio bajó de ARCA (el servidor lo valida contra su pedido). */
+export async function uploadArcaCertificate(pem: string): Promise<{ ok: boolean; certExpiresAt: string }> {
+  return invokeArca({ action: "cert_upload", pem });
+}

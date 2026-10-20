@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   arDate,
   caeRequestInner,
+  certificateProblem,
   creditNoteTypeFor,
   friendlyArcaMessage,
   isNumberRaceError,
@@ -139,7 +140,7 @@ describe("respuestas de ARCA", () => {
   it("CUIT que no delegó la facturación", () => {
     const r = parseLastAuthorized("<Errors><Err><Code>600</Code><Msg>ValidacionDeToken: No aparecio CUIT en lista de relaciones: 20123456786</Msg></Err></Errors>");
     assert.equal(r.number, null);
-    assert.match(friendlyArcaMessage(r.errors), /no le delegó la facturación a Patagonia OS/);
+    assert.match(friendlyArcaMessage(r.errors), /falta la relación "Facturación Electrónica"/);
     assert.equal(parseLastAuthorized("<PtoVta>5</PtoVta><CbteTipo>11</CbteTipo><CbteNro>123</CbteNro>").number, 123);
   });
 
@@ -211,5 +212,28 @@ describe("QR y ticket fiscal", () => {
     assert.doesNotMatch(text, /NO VALIDO COMO FACTURA/);
     // Comando de QR (GS ( k ... 49 80 48) seguido de la URL.
     assert.ok(text.includes("1P0https://www.afip.gob.ar/fe/qr/?p=abc"));
+  });
+});
+
+describe("certificado propio del negocio (migración 137)", () => {
+  const ok = {
+    env: "prod" as const,
+    issuerCommonName: "Computadores",
+    subjectCuit: "20123456786",
+    expectedCuit: "20123456786",
+    notAfter: new Date("2028-10-18T00:00:00Z"),
+    now: new Date("2026-10-20T00:00:00Z"),
+    keyMatches: true
+  };
+  it("un certificado de producción del mismo CUIT y del último pedido sirve", () => {
+    assert.equal(certificateProblem(ok), null);
+    assert.equal(certificateProblem({ ...ok, env: "homo", issuerCommonName: "Computadores Test" }), null);
+  });
+  it("rechaza con el motivo en palabras", () => {
+    assert.match(certificateProblem({ ...ok, keyMatches: false }) ?? "", /no corresponde al último pedido/);
+    assert.match(certificateProblem({ ...ok, subjectCuit: "27182448902" }) ?? "", /es del CUIT 27182448902/);
+    assert.match(certificateProblem({ ...ok, issuerCommonName: "Computadores Test" }) ?? "", /PRUEBA/);
+    assert.match(certificateProblem({ ...ok, env: "homo" }) ?? "", /de producción/);
+    assert.match(certificateProblem({ ...ok, notAfter: new Date("2026-01-01T00:00:00Z") }) ?? "", /vencido/);
   });
 });

@@ -1,23 +1,31 @@
-// Factura electrónica ARCA, parte 2: pide el CAE de cada factura o nota de
-// crédito pendiente (tabla invoices, migraciones 113 y 136).
+// Factura electrónica ARCA: pide el CAE de cada factura o nota de crédito
+// pendiente (tabla invoices, migraciones 113, 136 y 137).
 //
-// Modelo de delegación: cada carnicería le delega en ARCA "Facturación
-// Electrónica" al CUIT de Patagonia OS (27-18244890-2). Esta función se
-// autentica con EL certificado de Patagonia (alias patagoniaos) y factura
-// indicando el CUIT de la carnicería en <Auth><Cuit>. Un solo ticket de acceso
-// del WSAA sirve para todas las carnicerías (es por certificado + servicio).
+// Con qué certificado se factura (migración 137, como TusFacturas):
+// - Cada negocio tiene SU certificado (arca_company_certificates). La función
+//   genera la clave y el pedido (CSR) para el CUIT del negocio; el negocio lo
+//   sube en su ARCA, baja el certificado, lo sube en Facturas y le da a ese
+//   certificado la relación "Facturación Electrónica". Ningún CUIT de Patagonia
+//   queda en el ARCA del cliente. La clave privada se guarda cifrada (AES-GCM,
+//   secreto ARCA_VAULT_KEY).
+// - Carnes Patagonia (CUIT del certificado de los secretos ARCA_KEY/ARCA_CERT)
+//   factura con ese certificado compartido, que es de su propio CUIT.
+// El ticket del WSAA (12 h) es por certificado: se guarda por huella del certificado.
 //
 // Acciones (POST JSON):
 //   { action: "check" }                    dueño/administrador: prueba la conexión
-//                                          con ARCA con los datos fiscales y, si da
-//                                          bien, activa la factura (enabled).
+//                                          y, si da bien, activa la factura (enabled).
 //   { action: "authorize", invoiceId? }    cualquiera de la empresa: pide el CAE de
 //                                          esa factura, o de las pendientes (hasta 10).
+//   { action: "cert_status" }              dueño/administrador: estado del certificado.
+//   { action: "cert_request", regenerate? } dueño/administrador: genera clave + pedido (CSR).
+//   { action: "cert_upload", pem }         dueño/administrador: guarda el certificado bajado de ARCA.
 //
 // Secretos (Supabase → Edge Functions → Secrets), nunca llegan al navegador:
-//   ARCA_ENV   "homo" (staging, ARCA de prueba) o "prod" (producción)
-//   ARCA_KEY   clave privada PEM (C:\Users\g\patagonia-arca\patagoniaos.key)
-//   ARCA_CERT  certificado PEM: prueba.crt en homo, real.crt en prod
+//   ARCA_ENV        "homo" (staging, ARCA de prueba) o "prod" (producción)
+//   ARCA_KEY        clave privada PEM del certificado compartido (C:\Users\g\patagonia-arca)
+//   ARCA_CERT       certificado compartido PEM (homo: prueba2.crt, prod: real.crt)
+//   ARCA_VAULT_KEY  32 bytes en base64 para cifrar las claves de cada negocio
 //
 // Nunca se duplica un número: antes de pedir se guarda el número en
 // pending_number; si la respuesta se pierde, el reintento primero le pregunta a
@@ -31,6 +39,7 @@ import {
   ARCA_ENDPOINTS,
   arDate,
   caeRequestInner,
+  certificateProblem,
   consultInner,
   friendlyArcaMessage,
   isNumberRaceError,
@@ -54,7 +63,10 @@ const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ARCA_ENV: ArcaEnv = Deno.env.get("ARCA_ENV") === "prod" ? "prod" : "homo";
 const ARCA_KEY = (Deno.env.get("ARCA_KEY") ?? "").replace(/\\n/g, "\n");
 const ARCA_CERT = (Deno.env.get("ARCA_CERT") ?? "").replace(/\\n/g, "\n");
+const ARCA_VAULT_KEY = Deno.env.get("ARCA_VAULT_KEY") ?? "";
 const ENDPOINTS = ARCA_ENDPOINTS[ARCA_ENV];
+/** Alias con el que el negocio da de alta el certificado en su ARCA. */
+const COMPANY_CERT_ALIAS = "patagonia";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -70,15 +82,103 @@ class UserError extends Error {}
 // deno-lint-ignore no-explicit-any
 type Row = any;
 
+// ---------- certificados ----------
+
+interface Credentials {
+  keyPem: string;
+  certPem: string;
+  /** Huella SHA-256 del certificado: el ticket del WSAA se guarda por certificado. */
+  fingerprint: string;
+  /** true = certificado compartido (Carnes Patagonia); false = el del negocio. */
+  shared: boolean;
+}
+
+function fingerprintOf(cert: forge.pki.Certificate): string {
+  const der = forge.asn1.toDer(forge.pki.certificateToAsn1(cert)).getBytes();
+  return forge.md.sha256.create().update(der).digest().toHex();
+}
+
+/** "CUIT 27182448902" → "27182448902" (atributo serialNumber del sujeto). */
+function cuitOf(cert: forge.pki.Certificate): string {
+  const field = cert.subject.attributes.find((a) => a.type === "2.5.4.5");
+  return String(field?.value ?? "").replace(/\D/g, "");
+}
+
+let sharedCache: { cert: forge.pki.Certificate; fingerprint: string; cuit: string } | null = null;
+function sharedCertificate() {
+  if (!ARCA_CERT) return null;
+  if (!sharedCache) {
+    const cert = forge.pki.certificateFromPem(ARCA_CERT);
+    sharedCache = { cert, fingerprint: fingerprintOf(cert), cuit: cuitOf(cert) };
+  }
+  return sharedCache;
+}
+
+async function vaultKey(): Promise<CryptoKey> {
+  if (!ARCA_VAULT_KEY) throw new Error("Falta el secreto ARCA_VAULT_KEY en la Edge Function.");
+  const raw = Uint8Array.from(atob(ARCA_VAULT_KEY), (c) => c.charCodeAt(0));
+  return crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
+}
+
+const toB64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes));
+const fromB64 = (text: string) => Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+
+async function encryptKey(pem: string): Promise<{ cipher: string; iv: string }> {
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await vaultKey(), new TextEncoder().encode(pem)));
+  return { cipher: toB64(cipher), iv: toB64(iv) };
+}
+
+async function decryptKey(cipher: string, iv: string): Promise<string> {
+  const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromB64(iv) }, await vaultKey(), fromB64(cipher));
+  return new TextDecoder().decode(plain);
+}
+
+/** Con qué certificado factura este negocio: el suyo; si no tiene y es el CUIT del compartido, el compartido. */
+async function credentialsFor(admin: SupabaseClient, companyId: string, cuit: string): Promise<Credentials> {
+  const { data: own } = await admin.from("arca_company_certificates").select("*").eq("company_id", companyId).maybeSingle();
+  if (own?.cert_pem) {
+    if (own.cuit !== cuit) throw new UserError("El certificado cargado es de otro CUIT. Generá uno nuevo en Facturas → Conectar con ARCA.");
+    return { keyPem: await decryptKey(own.key_cipher, own.key_iv), certPem: own.cert_pem, fingerprint: own.cert_fingerprint, shared: false };
+  }
+  const shared = sharedCertificate();
+  if (shared && shared.cuit === cuit && ARCA_KEY) {
+    return { keyPem: ARCA_KEY, certPem: ARCA_CERT, fingerprint: shared.fingerprint, shared: true };
+  }
+  throw new UserError("Falta el certificado de ARCA de este negocio: hacé los pasos de Facturas → Conectar con ARCA.");
+}
+
+async function generateCsr(cuit: string, businessName: string): Promise<{ csrPem: string; keyPem: string }> {
+  // La clave se genera con WebCrypto (rápido, fuera del límite de CPU) y se firma el pedido con forge.
+  const pair = await crypto.subtle.generateKey(
+    { name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" },
+    true,
+    ["sign", "verify"]
+  );
+  const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", pair.privateKey));
+  const privateKey = forge.pki.privateKeyFromAsn1(forge.asn1.fromDer(forge.util.binary.raw.encode(pkcs8))) as forge.pki.rsa.PrivateKey;
+  const publicKey = forge.pki.setRsaPublicKey(privateKey.n, privateKey.e);
+  const csr = forge.pki.createCertificationRequest();
+  csr.publicKey = publicKey;
+  csr.setSubject([
+    { name: "countryName", value: "AR" },
+    { name: "organizationName", value: businessName.slice(0, 60) || "Patagonia OS" },
+    { name: "commonName", value: COMPANY_CERT_ALIAS },
+    { type: "2.5.4.5", value: `CUIT ${cuit}` }
+  ]);
+  csr.sign(privateKey, forge.md.sha256.create());
+  return { csrPem: forge.pki.certificationRequestToPem(csr), keyPem: forge.pki.privateKeyToPem(privateKey) };
+}
+
 // ---------- WSAA: ticket de acceso (12 h), guardado en arca_access_tickets ----------
 
-function signLoginRequest(tra: string): string {
-  const cert = forge.pki.certificateFromPem(ARCA_CERT);
+function signLoginRequest(tra: string, creds: Credentials): string {
+  const cert = forge.pki.certificateFromPem(creds.certPem);
   const p7 = forge.pkcs7.createSignedData();
   p7.content = forge.util.createBuffer(tra, "utf8");
   p7.addCertificate(cert);
   p7.addSigner({
-    key: forge.pki.privateKeyFromPem(ARCA_KEY),
+    key: forge.pki.privateKeyFromPem(creds.keyPem),
     certificate: cert,
     digestAlgorithm: forge.pki.oids.sha256,
     authenticatedAttributes: [
@@ -91,23 +191,28 @@ function signLoginRequest(tra: string): string {
   return forge.util.encode64(forge.asn1.toDer(p7.toAsn1()).getBytes());
 }
 
-async function readTicket(admin: SupabaseClient): Promise<{ token: string; sign: string } | null> {
-  const { data } = await admin.from("arca_access_tickets").select("token,sign,expires_at").eq("env", ARCA_ENV).eq("service", "wsfe").maybeSingle();
+async function readTicket(admin: SupabaseClient, creds: Credentials): Promise<{ token: string; sign: string } | null> {
+  const { data } = await admin
+    .from("arca_access_tickets")
+    .select("token,sign,expires_at")
+    .eq("env", ARCA_ENV)
+    .eq("service", "wsfe")
+    .eq("cert_key", creds.fingerprint)
+    .maybeSingle();
   if (!data) return null;
   // Margen de 5 minutos para no usar uno que vence en el medio de un pedido.
   if (new Date(data.expires_at).getTime() - Date.now() < 5 * 60_000) return null;
   return { token: data.token, sign: data.sign };
 }
 
-async function accessTicket(admin: SupabaseClient): Promise<{ token: string; sign: string }> {
-  const cached = await readTicket(admin);
+async function accessTicket(admin: SupabaseClient, creds: Credentials): Promise<{ token: string; sign: string }> {
+  const cached = await readTicket(admin, creds);
   if (cached) return cached;
-  if (!ARCA_KEY || !ARCA_CERT) throw new Error("Faltan los secretos ARCA_KEY / ARCA_CERT en la Edge Function.");
 
   const res = await fetch(ENDPOINTS.wsaa, {
     method: "POST",
     headers: { "Content-Type": "text/xml; charset=utf-8", SOAPAction: '""' },
-    body: wsaaLoginEnvelope(signLoginRequest(loginTicketRequestXml(new Date()))),
+    body: wsaaLoginEnvelope(signLoginRequest(loginTicketRequestXml(new Date()), creds)),
     signal: AbortSignal.timeout(20_000)
   });
   const parsed = parseLoginResponse(await res.text());
@@ -115,13 +220,24 @@ async function accessTicket(admin: SupabaseClient): Promise<{ token: string; sig
     // Otro pedido (otra caja) sacó el ticket recién: ARCA no da otro hasta que venza.
     if (/ya posee un TA valido/i.test(parsed.fault)) {
       await new Promise((r) => setTimeout(r, 1500));
-      const again = await readTicket(admin);
+      const again = await readTicket(admin, creds);
       if (again) return again;
       throw new Error("ARCA ya entregó un permiso de conexión que todavía no venció (dura 12 horas) y no quedó guardado acá. Se libera solo; probá más tarde.");
     }
-    throw new Error(`ARCA no aceptó el certificado de Patagonia OS: ${parsed.fault}`);
+    if (/no autorizado|not authorized|computador/i.test(parsed.fault) && !creds.shared) {
+      throw new UserError(`ARCA no deja usar el certificado para facturar: falta darle la relación "Facturación Electrónica" en tu ARCA (paso 4). Detalle: ${parsed.fault}`);
+    }
+    throw new Error(`ARCA no aceptó el certificado: ${parsed.fault}`);
   }
-  await admin.from("arca_access_tickets").upsert({ env: ARCA_ENV, service: "wsfe", token: parsed.token, sign: parsed.sign, expires_at: parsed.expiresAt, updated_at: new Date().toISOString() });
+  await admin.from("arca_access_tickets").upsert({
+    env: ARCA_ENV,
+    service: "wsfe",
+    cert_key: creds.fingerprint,
+    token: parsed.token,
+    sign: parsed.sign,
+    expires_at: parsed.expiresAt,
+    updated_at: new Date().toISOString()
+  });
   return { token: parsed.token, sign: parsed.sign };
 }
 
@@ -181,7 +297,7 @@ async function checkConnection(admin: SupabaseClient, companyId: string, userId:
   };
 
   try {
-    const ticket = await accessTicket(admin);
+    const ticket = await accessTicket(admin, await credentialsFor(admin, companyId, settings.cuit));
     const auth: ArcaAuth = { ...ticket, cuit: settings.cuit };
     // En el ARCA de prueba no hay puntos de venta reales: se salta ese control.
     if (ARCA_ENV === "prod") {
@@ -265,7 +381,7 @@ async function authorizeOne(admin: SupabaseClient, settings: Row, invoiceId: str
   if (!claimed) return [outcome(current, "Se está pidiendo en este momento desde otra caja.")];
   let inv: Row = claimed;
 
-  const ticket = await accessTicket(admin);
+  const ticket = await accessTicket(admin, await credentialsFor(admin, settings.company_id, settings.cuit));
   const auth: ArcaAuth = { ...ticket, cuit: settings.cuit };
   const pv = Number(inv.point_of_sale);
   const type = Number(inv.voucher_type);
@@ -407,6 +523,94 @@ async function authorize(admin: SupabaseClient, companyId: string, invoiceId: st
   return { env: ARCA_ENV, results };
 }
 
+// ---------- certificado propio del negocio ----------
+
+async function certStatus(admin: SupabaseClient, companyId: string) {
+  const settings = await fiscalSettings(admin, companyId);
+  const shared = sharedCertificate();
+  const { data: own } = await admin
+    .from("arca_company_certificates")
+    .select("cuit,alias,csr_pem,cert_pem,cert_expires_at,updated_at")
+    .eq("company_id", companyId)
+    .maybeSingle();
+  const cuit = settings?.cuit ?? null;
+  return {
+    env: ARCA_ENV,
+    alias: COMPANY_CERT_ALIAS,
+    /** Carnes Patagonia: factura con el certificado compartido, que es de su CUIT; no tiene que hacer nada. */
+    usesShared: Boolean(cuit && shared && shared.cuit === cuit && !own?.cert_pem),
+    hasRequest: Boolean(own && own.cuit === cuit),
+    csrPem: own && own.cuit === cuit ? own.csr_pem : null,
+    hasCertificate: Boolean(own?.cert_pem && own.cuit === cuit),
+    certExpiresAt: own?.cert_pem && own.cuit === cuit ? own.cert_expires_at : null
+  };
+}
+
+async function certRequest(admin: SupabaseClient, companyId: string, userId: string, regenerate: boolean) {
+  const settings = await fiscalSettings(admin, companyId);
+  if (!settings) throw new UserError("Primero guardá los datos fiscales del negocio (el CUIT va en el certificado).");
+  const { data: own } = await admin.from("arca_company_certificates").select("cuit,csr_pem,cert_pem").eq("company_id", companyId).maybeSingle();
+  // El mismo pedido sirve hasta que se suba el certificado: así no se invalida uno que el cliente ya cargó en ARCA.
+  if (own && own.cuit === settings.cuit && !regenerate) return { csrPem: own.csr_pem, alias: COMPANY_CERT_ALIAS };
+  const { csrPem, keyPem } = await generateCsr(settings.cuit, settings.business_name ?? "");
+  const { cipher, iv } = await encryptKey(keyPem);
+  const { error } = await admin.from("arca_company_certificates").upsert({
+    company_id: companyId,
+    cuit: settings.cuit,
+    alias: COMPANY_CERT_ALIAS,
+    csr_pem: csrPem,
+    key_cipher: cipher,
+    key_iv: iv,
+    cert_pem: null,
+    cert_fingerprint: null,
+    cert_expires_at: null,
+    updated_at: new Date().toISOString()
+  });
+  if (error) throw error;
+  if (own?.cert_pem) {
+    // Había un certificado: se reemplaza por el nuevo pedido, hasta subir el nuevo no se factura.
+    await admin.from("company_fiscal_settings").update({ enabled: false }).eq("company_id", companyId);
+  }
+  await admin.from("audit_log").insert({ company_id: companyId, user_id: userId, action: "fiscal.cert_request", entity_type: "company", entity_id: companyId, new_data: { cuit: settings.cuit, env: ARCA_ENV } });
+  return { csrPem, alias: COMPANY_CERT_ALIAS };
+}
+
+async function certUpload(admin: SupabaseClient, companyId: string, userId: string, rawPem: string) {
+  const settings = await fiscalSettings(admin, companyId);
+  if (!settings) throw new UserError("Primero guardá los datos fiscales del negocio.");
+  const { data: own } = await admin.from("arca_company_certificates").select("*").eq("company_id", companyId).maybeSingle();
+  if (!own) throw new UserError("Primero generá el pedido de certificado (paso 1).");
+  let text = String(rawPem ?? "").trim();
+  if (!text.includes("BEGIN CERTIFICATE")) text = `-----BEGIN CERTIFICATE-----\n${text.replace(/\s+/g, "")}\n-----END CERTIFICATE-----`;
+  let cert: forge.pki.Certificate;
+  try {
+    cert = forge.pki.certificateFromPem(text);
+  } catch {
+    throw new UserError("Ese archivo no es un certificado. Subí el que bajaste de ARCA con el botón Descargar (termina en .crt).");
+  }
+  const key = forge.pki.privateKeyFromPem(await decryptKey(own.key_cipher, own.key_iv)) as forge.pki.rsa.PrivateKey;
+  const publicKey = cert.publicKey as forge.pki.rsa.PublicKey;
+  const issuerCn = String(cert.issuer.getField("CN")?.value ?? "");
+  const problem = certificateProblem({
+    env: ARCA_ENV,
+    issuerCommonName: issuerCn,
+    subjectCuit: cuitOf(cert),
+    expectedCuit: settings.cuit,
+    notAfter: cert.validity.notAfter,
+    now: new Date(),
+    keyMatches: publicKey.n.equals(key.n) && publicKey.e.equals(key.e)
+  });
+  if (problem) throw new UserError(problem);
+  const pem = forge.pki.certificateToPem(cert);
+  const { error } = await admin
+    .from("arca_company_certificates")
+    .update({ cert_pem: pem, cert_fingerprint: fingerprintOf(cert), cert_expires_at: cert.validity.notAfter.toISOString(), updated_at: new Date().toISOString() })
+    .eq("company_id", companyId);
+  if (error) throw error;
+  await admin.from("audit_log").insert({ company_id: companyId, user_id: userId, action: "fiscal.cert_upload", entity_type: "company", entity_id: companyId, new_data: { cuit: settings.cuit, expires: cert.validity.notAfter.toISOString(), env: ARCA_ENV } });
+  return { ok: true, certExpiresAt: cert.validity.notAfter.toISOString() };
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse({ error: "Método no permitido" }, 405);
@@ -420,6 +624,12 @@ Deno.serve(async (req) => {
     }
     if (body.action === "authorize") {
       return jsonResponse(await authorize(admin, who.companyId, typeof body.invoiceId === "string" ? body.invoiceId : undefined));
+    }
+    if (body.action === "cert_status" || body.action === "cert_request" || body.action === "cert_upload") {
+      if (who.role !== "owner" && who.role !== "admin") throw new UserError("Solo el dueño o un administrador maneja el certificado de ARCA.");
+      if (body.action === "cert_status") return jsonResponse(await certStatus(admin, who.companyId));
+      if (body.action === "cert_request") return jsonResponse(await certRequest(admin, who.companyId, who.userId, body.regenerate === true));
+      return jsonResponse(await certUpload(admin, who.companyId, who.userId, String(body.pem ?? "")));
     }
     return jsonResponse({ error: "Acción desconocida" }, 400);
   } catch (err) {

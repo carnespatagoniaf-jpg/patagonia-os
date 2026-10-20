@@ -265,11 +265,33 @@ export function friendlyArcaMessage(errors: ArcaMessage[], observations: ArcaMes
   if (all.length === 0) return "ARCA rechazó el comprobante sin decir el motivo.";
   const parts = all.map((e) => {
     if (e.code === 600 || e.code === 601 || /no aparec[ií]o cuit en lista de relaciones/i.test(e.msg)) {
-      return "Este CUIT todavía no le delegó la facturación a Patagonia OS en ARCA (Administrador de Relaciones → Facturación Electrónica).";
+      return "ARCA no tiene autorizado el certificado para facturar con este CUIT: falta la relación \"Facturación Electrónica\" en el Administrador de Relaciones de su ARCA (paso 4 de Conectar con ARCA).";
     }
     if (e.code === 602) return "ARCA no tiene datos para ese pedido.";
     if (e.code === 10015 || e.code === 10013) return `El documento del cliente no es válido para ARCA (${e.msg}).`;
     return `${e.msg} (código ${e.code})`;
   });
   return Array.from(new Set(parts)).join(" ");
+}
+
+/**
+ * Por qué un certificado subido no sirve para este negocio (null = sirve).
+ * ARCA firma los de producción como "Computadores" y los de prueba como "Computadores Test".
+ */
+export function certificateProblem(c: {
+  env: ArcaEnv;
+  issuerCommonName: string;
+  subjectCuit: string;
+  expectedCuit: string;
+  notAfter: Date;
+  now: Date;
+  keyMatches: boolean;
+}): string | null {
+  if (!c.keyMatches) return "Ese certificado no corresponde al último pedido que generaste acá. Subí el que bajaste de ARCA después de cargar ese pedido (o generá uno nuevo).";
+  if (c.subjectCuit !== c.expectedCuit) return `Ese certificado es del CUIT ${c.subjectCuit || "(sin CUIT)"}, no del ${c.expectedCuit} de los datos fiscales.`;
+  const isTest = /test/i.test(c.issuerCommonName);
+  if (c.env === "prod" && isTest) return "Ese es un certificado de PRUEBA de ARCA (homologación). Hace falta el de producción: Administración de Certificados Digitales.";
+  if (c.env === "homo" && !isTest) return "Ese certificado es de producción, pero este sistema es de prueba (homologación).";
+  if (c.notAfter.getTime() <= c.now.getTime()) return "Ese certificado está vencido. Generá un pedido nuevo y bajá otro certificado.";
+  return null;
 }

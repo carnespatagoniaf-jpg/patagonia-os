@@ -6,8 +6,12 @@ import { SettingSection } from "../../components/SettingSection";
 import {
   authorizeInvoices,
   checkArcaConnection,
+  getArcaCertificateStatus,
   getFiscalSettings,
   invoicePrintFrom,
+  requestArcaCertificate,
+  uploadArcaCertificate,
+  type ArcaCertificateStatus,
   listInvoices,
   listUninvoicedSales,
   loadInvoiceItems,
@@ -39,8 +43,6 @@ import { InvoiceRequestFields } from "./InvoiceRequestFields";
 // Pantalla del dueño: datos fiscales, conexión con ARCA, ventas sin factura y
 // facturas emitidas (reimprimir, anular con nota de crédito, reintentar pendientes).
 
-/** CUIT de Patagonia OS: a este CUIT le delega cada negocio la facturación en ARCA. */
-const PROVIDER_CUIT = "27182448902";
 
 interface Form {
   cuit: string;
@@ -86,6 +88,7 @@ export function Invoicing() {
   const [printReceipt, setPrintReceipt] = useState<ReceiptState | null>(null);
   const [thermalBusy, setThermalBusy] = useState(false);
   const retriedRef = useRef(false);
+  const [cert, setCert] = useState<ArcaCertificateStatus | null>(null);
 
   const reload = useCallback(async () => {
     if (!isSupabaseConfigured) return;
@@ -94,6 +97,8 @@ export function Invoicing() {
       const s = await getFiscalSettings();
       setSettings(s);
       setForm(formFrom(s));
+      // Certificado propio del negocio (migración 137). Si la función no responde, la pantalla sigue igual.
+      setCert(s ? await getArcaCertificateStatus().catch(() => null) : null);
       let list = await listInvoices();
       // Pendientes (ARCA no respondió al cobrar): se reintentan solas una vez al abrir.
       if (s?.enabled && !retriedRef.current && list.some((i) => i.status === "pendiente")) {
@@ -145,6 +150,44 @@ export function Invoicing() {
       await reload();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudieron guardar los datos.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Paso 1: bajar el pedido de certificado (.csr) para subirlo en ARCA. */
+  async function handleDownloadRequest(regenerate = false) {
+    if (regenerate && !window.confirm("¿Generar un certificado nuevo? El actual deja de servir hasta que subas el nuevo, y mientras tanto no se factura.")) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const { csrPem } = await requestArcaCertificate(regenerate);
+      const url = URL.createObjectURL(new Blob([csrPem], { type: "application/pkcs10" }));
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `pedido-certificado-${settings?.cuit ?? "arca"}.csr`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setMessage("Pedido de certificado descargado (está en Descargas). Seguí con el paso 2 en ARCA.");
+      setCert(await getArcaCertificateStatus().catch(() => cert));
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo generar el pedido.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Paso 3: subir el certificado que se bajó de ARCA. */
+  async function handleUploadCertificate(file: File | undefined) {
+    if (!file) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await uploadArcaCertificate(await file.text());
+      setMessage(`Certificado cargado (vence el ${new Date(result.certExpiresAt).toLocaleDateString("es-AR")}). Seguí con los pasos 4 y 5 y después Probar conexión.`);
+      setCert(await getArcaCertificateStatus().catch(() => cert));
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo cargar el certificado.");
     } finally {
       setBusy(false);
     }
@@ -343,21 +386,49 @@ export function Invoicing() {
           tone={settings?.enabled ? "ok" : "neutral"}
           actionLabel="Ver pasos"
         >
-          <ol style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 6, fontSize: 14 }}>
-            <li>
-              Entrá a <strong>arca.gob.ar</strong> con la clave fiscal del negocio (nivel 3) → <strong>Administrador de Relaciones de Clave Fiscal</strong> →{" "}
-              <strong>Nueva Relación</strong> → Servicio: ARCA → Web Services → <strong>Facturación Electrónica</strong> → Representante: el CUIT de Patagonia OS{" "}
-              <strong>{formatCuit(PROVIDER_CUIT)}</strong> → Confirmar.
-            </li>
-            <li>
-              En <strong>Administración de puntos de venta y domicilios</strong> → Agregar un punto de venta con el sistema <strong>"RECE para aplicativo y web services"</strong>. Su número es el que va arriba, en "Punto de venta".
-            </li>
-            <li>Tocá <strong>Probar conexión con ARCA</strong>. Si da bien, la factura queda activa en Mostrador.</li>
-          </ol>
+          {cert?.usesShared ? (
+            <p className="setting-help">Este negocio factura con el certificado de Patagonia OS, que es de su mismo CUIT: solo hace falta el punto de venta "Web Services" y probar la conexión.</p>
+          ) : (
+            <ol style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 8, fontSize: 14 }}>
+              <li>
+                <strong>Bajá el pedido de certificado</strong> (es de este negocio, con su CUIT).{" "}
+                <button className="secondary" disabled={busy || !settings} onClick={() => void handleDownloadRequest()}>
+                  {cert?.hasRequest ? "Volver a bajar el pedido" : "Bajar pedido de certificado"}
+                </button>
+              </li>
+              <li>
+                Entrá a <strong>arca.gob.ar</strong> con la clave fiscal del negocio (nivel 3) → <strong>Administración de Certificados Digitales</strong> (si no aparece:
+                Administrador de Relaciones → Adherir servicio → ARCA → Servicios Interactivos) → <strong>Agregar alias</strong> → Alias: <strong>{cert?.alias ?? "patagonia"}</strong> →
+                elegí el archivo del paso 1 → Agregar alias → en la lista, <strong>Ver</strong> → <strong>Descargar</strong>.
+              </li>
+              <li>
+                <strong>Subí el certificado</strong> que bajaste de ARCA:{" "}
+                <input type="file" accept=".crt,.cer,.pem,.txt" disabled={busy || !cert?.hasRequest} onChange={(e) => void handleUploadCertificate(e.target.files?.[0])} />
+                {cert?.hasCertificate && cert.certExpiresAt && (
+                  <span className="setting-status ok" style={{ marginLeft: 8 }}>Cargado · vence {new Date(cert.certExpiresAt).toLocaleDateString("es-AR")}</span>
+                )}
+              </li>
+              <li>
+                En ARCA → <strong>Administrador de Relaciones de Clave Fiscal</strong> → <strong>Nueva Relación</strong> → Servicio: ARCA → WebServices →{" "}
+                <strong>Facturación Electrónica</strong> → Representante: Buscar → <strong>Computador Fiscal "{cert?.alias ?? "patagonia"}"</strong> → Confirmar.
+              </li>
+              <li>
+                En <strong>Administración de puntos de venta y domicilios</strong> → A/B/M → Agregar un punto de venta con el sistema de <strong>Web Services</strong> (Monotributo:
+                "Factura Electrónica - Monotributo - Web Services"; Responsable inscripto: "RECE para aplicativo y web services"). No sirve el de "Factura en Línea". Su número va arriba, en "Punto de venta".
+              </li>
+              <li>Tocá <strong>Probar conexión con ARCA</strong>. Si da bien, la factura queda activa en Mostrador y en Clientes.</li>
+            </ol>
+          )}
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
             <button disabled={busy || !settings} onClick={() => void handleCheck()}>{busy ? "Probando…" : "Probar conexión con ARCA"}</button>
             {!settings && <span className="setting-help">Primero guardá los datos fiscales.</span>}
           </div>
+          {cert?.hasCertificate && !cert.usesShared && (
+            <p className="setting-help">
+              ¿Hay que renovarlo o cambió algo?{" "}
+              <button className="link-button" disabled={busy} onClick={() => void handleDownloadRequest(true)}>Generar un certificado nuevo</button>
+            </p>
+          )}
           {settings?.lastCheckAt && (
             <p className="setting-help">
               Última prueba: {new Date(settings.lastCheckAt).toLocaleString("es-AR")} — {settings.lastCheckOk ? "bien" : `falló: ${settings.lastCheckMessage ?? ""}`}
