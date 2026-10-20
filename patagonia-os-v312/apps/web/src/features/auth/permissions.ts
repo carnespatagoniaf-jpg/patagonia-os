@@ -10,6 +10,7 @@ export type Permission =
   | "inventory.adjust"
   | "purchases.manage"
   | "treasury.manage"
+  | "invoicing.manage"
   | "pos.treasury"
   | "employees.manage"
   | "profitability.view"
@@ -67,6 +68,7 @@ export const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> 
     "inventory.adjust",
     "purchases.manage",
     "treasury.manage",
+    "invoicing.manage",
     "pos.treasury",
     "employees.manage",
     "profitability.view",
@@ -97,6 +99,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   "inventory.adjust": "Ajustar stock",
   "purchases.manage": "Compras y proveedores",
   "treasury.manage": "Tesorería",
+  // Aparte de Tesorería (2026-10-20): un negocio de otro país (Martínez, Bolivia) usa Tesorería pero no factura en ARCA.
+  "invoicing.manage": "Facturas (ARCA)",
   "pos.treasury": "Movimientos de caja en Mostrador (caja, proveedor, vale)",
   "employees.manage": "Empleados",
   "profitability.view": "Rentabilidad",
@@ -179,7 +183,7 @@ export const PAGE_PERMISSIONS = {
   purchases: "purchases.manage",
   treasury: "treasury.manage",
   reconciliation: "treasury.manage",
-  invoicing: "treasury.manage",
+  invoicing: "invoicing.manage",
   employees: "employees.manage",
   profitability: "profitability.view",
   carcass: "carcass.manage",
