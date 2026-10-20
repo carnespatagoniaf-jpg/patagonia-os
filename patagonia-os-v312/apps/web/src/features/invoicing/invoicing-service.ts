@@ -9,6 +9,8 @@ import { arcaQrUrl, invoiceLabel, type CustomerCondition, type InvoiceDraft, typ
 export interface FiscalSettings {
   cuit: string;
   businessName: string;
+  /** Nombre de fantasía: va grande arriba de la factura (migración 138). La razón social sigue, más chica. */
+  tradeName: string;
   taxCondition: IssuerCondition;
   pointOfSale: number;
   address: string;
@@ -25,7 +27,7 @@ export async function getFiscalSettings(): Promise<FiscalSettings | null> {
   if (!supabase) return null;
   const { data, error } = await supabase
     .from("company_fiscal_settings")
-    .select("cuit,business_name,tax_condition,point_of_sale,address,gross_income_number,activity_start,default_vat_rate,enabled,last_check_at,last_check_ok,last_check_message")
+    .select("cuit,business_name,trade_name,tax_condition,point_of_sale,address,gross_income_number,activity_start,default_vat_rate,enabled,last_check_at,last_check_ok,last_check_message")
     .maybeSingle();
   // Antes de la migración (o en un plan sin factura) la tabla no existe o se lee vacía: es "sin configurar".
   if (error) return null;
@@ -33,6 +35,7 @@ export async function getFiscalSettings(): Promise<FiscalSettings | null> {
   return {
     cuit: data.cuit,
     businessName: data.business_name,
+    tradeName: data.trade_name ?? "",
     taxCondition: data.tax_condition,
     pointOfSale: Number(data.point_of_sale),
     address: data.address ?? "",
@@ -46,7 +49,7 @@ export async function getFiscalSettings(): Promise<FiscalSettings | null> {
   };
 }
 
-export async function saveFiscalSettings(input: Omit<FiscalSettings, "enabled" | "lastCheckAt" | "lastCheckOk" | "lastCheckMessage">): Promise<void> {
+export async function saveFiscalSettings(input: Omit<FiscalSettings, "enabled" | "lastCheckAt" | "lastCheckOk" | "lastCheckMessage" | "tradeName">): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("save_fiscal_settings", {
     p_cuit: input.cuit,
@@ -58,6 +61,13 @@ export async function saveFiscalSettings(input: Omit<FiscalSettings, "enabled" |
     p_activity_start: input.activityStart || null,
     p_default_vat_rate: input.defaultVatRate
   });
+  if (error) throw error;
+}
+
+/** Nombre de fantasía de la factura (vacío = sale solo la razón social). */
+export async function setFiscalTradeName(tradeName: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("set_fiscal_trade_name", { p_trade_name: tradeName });
   if (error) throw error;
 }
 
@@ -265,6 +275,7 @@ export function invoicePrintFrom(inv: Invoice, fiscal: FiscalSettings, related?:
     issuedOn,
     issuer: {
       businessName: fiscal.businessName,
+      tradeName: fiscal.tradeName,
       cuit: fiscal.cuit,
       taxCondition: fiscal.taxCondition,
       address: fiscal.address,

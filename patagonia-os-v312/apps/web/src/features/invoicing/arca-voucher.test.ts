@@ -237,3 +237,27 @@ describe("certificado propio del negocio (migración 137)", () => {
     assert.match(certificateProblem({ ...ok, notAfter: new Date("2026-01-01T00:00:00Z") }) ?? "", /vencido/);
   });
 });
+
+describe("nombre de fantasía en la factura (migración 138)", () => {
+  it("va grande arriba y los datos del titular en la letra chica de la impresora", () => {
+    const receipt: ReceiptState = {
+      items: [{ name: "Asado", unit: "kg", quantity: 1, unitPrice: 1, discountAmount: 0 }],
+      saleDiscount: 0, saleSurcharge: 0, total: 1, soldAt: "2026-10-20T12:33:00.000Z", paymentSummary: "Efectivo", amountTendered: null, change: null,
+      invoice: {
+        voucherType: 11, letter: "C", pointOfSale: 3, number: 1, cae: "86428558486521", caeDue: "2026-10-30", issuedOn: "2026-10-20",
+        issuer: { businessName: "NESI LAURA MARCELA ALEJANDRA", tradeName: "CARNES", cuit: "27182448902", taxCondition: "monotributo", address: "Av. Presidente Peron 1006", grossIncomeNumber: "", activityStart: "" },
+        customer: { name: null, docType: 99, docNumber: "0", taxCondition: "consumidor_final" },
+        total: 1, net: 1, vat: 0, vatRate: 0, qrUrl: "https://www.afip.gob.ar/fe/qr/?p=x"
+      }
+    };
+    const bytes = Array.from(buildReceiptTicket(receipt));
+    const text = bytes.map((b) => (b >= 32 && b < 127 ? String.fromCharCode(b) : b === 10 ? "\n" : "")).join("");
+    const trade = text.indexOf("CARNES");
+    const owner = text.indexOf("NESI LAURA MARCELA ALEJANDRA");
+    assert.ok(trade >= 0 && owner > trade, "CARNES arriba, el titular abajo");
+    // ESC M 1 (letra chica) antes del titular y ESC M 0 de vuelta antes del número.
+    const smallAt = bytes.findIndex((b, i) => b === 0x1b && bytes[i + 1] === 0x4d && bytes[i + 2] === 1);
+    assert.ok(smallAt > 0);
+    assert.match(text, /Nro 00003-00000001/);
+  });
+});

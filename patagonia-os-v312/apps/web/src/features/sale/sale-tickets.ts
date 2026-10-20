@@ -23,7 +23,7 @@ export function buildReceiptTicket(receiptToPrint: ReceiptState, branchName?: st
   if (settings.font !== "auto") t.font(settings.font);
   t.bodySize(settings, true);
   if (receiptToPrint.invoice) {
-    invoiceHeader(t, receiptToPrint.invoice, settings.lineWidth);
+    invoiceHeader(t, receiptToPrint.invoice, settings.lineWidth, settings.font === "b" ? "b" : "a");
   } else {
     t.align("center").bold(true).line("COMPROBANTE INTERNO").bold(false);
     // Sin factura, el papel lo tiene que decir (es lo que se lleva el cliente).
@@ -56,16 +56,21 @@ export function buildReceiptTicket(receiptToPrint: ReceiptState, branchName?: st
 }
 
 /** Encabezado de factura (RG 1415): tipo y código, emisor, número, fecha y cliente. */
-function invoiceHeader(t: TicketBuilder, inv: InvoicePrint, width: number) {
+function invoiceHeader(t: TicketBuilder, inv: InvoicePrint, width: number, bodyFont: "a" | "b") {
   const voucher = VOUCHER_NAME[inv.voucherType];
   t.align("center").bold(true).line(voucher?.name ?? `FACTURA ${inv.letter}`).bold(false);
   t.line(`COD. ${voucher?.code ?? ""} - ORIGINAL`);
-  t.bold(true).line(inv.issuer.businessName).bold(false);
+  if (inv.issuer.tradeName) t.doubleSize(true).bold(true).line(inv.issuer.tradeName).bold(false).doubleSize(false);
+  // Datos del titular con la letra chica de la impresora (obligatorios, pero sin ocupar el ticket).
+  t.font("b");
+  if (inv.issuer.tradeName) t.line(inv.issuer.businessName);
+  else t.bold(true).line(inv.issuer.businessName).bold(false);
   if (inv.issuer.address) t.line(inv.issuer.address);
   t.line(`CUIT ${formatCuit(inv.issuer.cuit)}`);
   t.line(inv.issuer.taxCondition === "monotributo" ? "Responsable Monotributo" : "IVA Responsable Inscripto");
   if (inv.issuer.grossIncomeNumber) t.line(`IIBB ${inv.issuer.grossIncomeNumber}`);
   if (inv.issuer.activityStart) t.line(`Inicio de actividades ${arDateLabel(inv.issuer.activityStart)}`);
+  t.font(bodyFont);
   t.align("left").separator("-", width);
   t.line(`Nro ${voucherNumberLabel(inv.pointOfSale, inv.number)}`);
   t.line(`Fecha ${arDateLabel(inv.issuedOn)}`);

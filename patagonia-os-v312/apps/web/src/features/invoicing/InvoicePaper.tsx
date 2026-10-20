@@ -40,16 +40,20 @@ export function InvoicePaperHeader({ invoice }: { invoice: InvoicePrint }) {
     <div className="ticket-header">
       <strong>{voucher?.name ?? `FACTURA ${invoice.letter}`}</strong>
       <p>Cód. {voucher?.code} · Original</p>
-      <p><strong>{invoice.issuer.businessName}</strong></p>
-      {invoice.issuer.address && <p>{invoice.issuer.address}</p>}
-      <p>CUIT {formatCuit(invoice.issuer.cuit)} · {invoice.issuer.taxCondition === "monotributo" ? "Responsable Monotributo" : "IVA Responsable Inscripto"}</p>
-      {(invoice.issuer.grossIncomeNumber || invoice.issuer.activityStart) && (
-        <p>
-          {invoice.issuer.grossIncomeNumber && `IIBB ${invoice.issuer.grossIncomeNumber}`}
-          {invoice.issuer.grossIncomeNumber && invoice.issuer.activityStart && " · "}
-          {invoice.issuer.activityStart && `Inicio de actividades ${arDateLabel(invoice.issuer.activityStart)}`}
-        </p>
-      )}
+      {invoice.issuer.tradeName && <p style={{ fontSize: 22, fontWeight: 800, margin: "4px 0 2px", lineHeight: 1.1 }}>{invoice.issuer.tradeName}</p>}
+      {/* Datos del titular: obligatorios, pero en letra chica para no ocupar el ticket. */}
+      <div style={{ fontSize: 10, lineHeight: 1.3 }}>
+        {invoice.issuer.tradeName ? <div>{invoice.issuer.businessName}</div> : <div><strong>{invoice.issuer.businessName}</strong></div>}
+        {invoice.issuer.address && <div>{invoice.issuer.address}</div>}
+        <div>CUIT {formatCuit(invoice.issuer.cuit)} · {invoice.issuer.taxCondition === "monotributo" ? "Responsable Monotributo" : "IVA Responsable Inscripto"}</div>
+        {(invoice.issuer.grossIncomeNumber || invoice.issuer.activityStart) && (
+          <div>
+            {invoice.issuer.grossIncomeNumber && `IIBB ${invoice.issuer.grossIncomeNumber}`}
+            {invoice.issuer.grossIncomeNumber && invoice.issuer.activityStart && " · "}
+            {invoice.issuer.activityStart && `Inicio de actividades ${arDateLabel(invoice.issuer.activityStart)}`}
+          </div>
+        )}
+      </div>
       <p>
         Nro {voucherNumberLabel(invoice.pointOfSale, invoice.number)} · Fecha {arDateLabel(invoice.issuedOn)}
       </p>

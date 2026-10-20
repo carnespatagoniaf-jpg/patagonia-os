@@ -108,6 +108,8 @@ export interface InvoicePrint {
   issuedOn: string;
   issuer: {
     businessName: string;
+    /** Nombre de fantasía (grande arriba); la razón social va abajo, más chica. */
+    tradeName?: string;
     cuit: string;
     taxCondition: IssuerCondition;
     address: string;

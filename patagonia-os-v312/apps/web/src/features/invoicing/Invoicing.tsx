@@ -18,6 +18,7 @@ import {
   requestCreditNote,
   requestInvoice,
   saveFiscalSettings,
+  setFiscalTradeName,
   type FiscalSettings,
   type Invoice,
   type UninvoicedSale
@@ -47,6 +48,7 @@ import { InvoiceRequestFields } from "./InvoiceRequestFields";
 interface Form {
   cuit: string;
   businessName: string;
+  tradeName: string;
   taxCondition: IssuerCondition;
   pointOfSale: string;
   address: string;
@@ -58,6 +60,7 @@ interface Form {
 const formFrom = (s: FiscalSettings | null): Form => ({
   cuit: s ? formatCuit(s.cuit) : "",
   businessName: s?.businessName ?? "",
+  tradeName: s?.tradeName ?? "",
   taxCondition: s?.taxCondition ?? "monotributo",
   pointOfSale: s ? String(s.pointOfSale) : "",
   address: s?.address ?? "",
@@ -146,6 +149,7 @@ export function Invoicing() {
         activityStart: form.activityStart,
         defaultVatRate: Number(form.defaultVatRate)
       });
+      await setFiscalTradeName(form.tradeName);
       setMessage("Datos fiscales guardados.");
       await reload();
     } catch (err) {
@@ -338,8 +342,12 @@ export function Invoicing() {
               <input name="fiscal-cuit" autoComplete="off" inputMode="numeric" placeholder="20-12345678-6" value={form.cuit} onChange={(e) => setForm({ ...form, cuit: e.target.value })} style={{ width: "100%" }} />
             </label>
             <label className="muted">
-              Razón social
+              Razón social (titular del CUIT, como figura en ARCA)
               <input name="fiscal-name" autoComplete="off" value={form.businessName} onChange={(e) => setForm({ ...form, businessName: e.target.value })} style={{ width: "100%" }} />
+            </label>
+            <label className="muted">
+              Nombre de fantasía (opcional, va grande arriba)
+              <input name="fiscal-trade-name" autoComplete="off" placeholder="CARNES" value={form.tradeName} onChange={(e) => setForm({ ...form, tradeName: e.target.value })} style={{ width: "100%" }} />
             </label>
             <label className="muted">
               Condición frente al IVA
