@@ -6,7 +6,7 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { useAuth } from "../auth/AuthProvider";
 import { planAllows } from "../auth/permissions";
-import { adjustProductStock, createProduct, listProductsForBranch, setProductStockSource, updateProduct } from "./inventory-service";
+import { adjustProductStock, createProduct, deleteProduct, listProductsForBranch, setProductActive, setProductStockSource, updateProduct } from "./inventory-service";
 import {
   createProductCategory,
   deleteProductCategory,
@@ -101,6 +101,8 @@ export function Inventory() {
   const [products, setProducts] = useState<Product[]>(isSupabaseConfigured ? [] : demoProducts);
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [message, setMessage] = useState("");
+  // Los dados de baja no se muestran salvo que se pida (siguen existiendo, con su historia).
+  const [showInactive, setShowInactive] = useState(false);
 
   const [showNewForm, setShowNewForm] = useState(false);
   const [newDraft, setNewDraft] = useState<DraftProduct>(emptyDraft());
@@ -139,6 +141,41 @@ export function Inventory() {
     }
   }
 
+  /** Los errores de la base (PostgrestError) no son instancias de Error: el motivo viene en .message. */
+  function errorText(err: unknown): string {
+    if (err instanceof Error) return err.message;
+    return typeof err === "object" && err !== null && "message" in err ? String((err as { message: unknown }).message) : "";
+  }
+
+  /** Dar de baja / reactivar desde la fila (migración 139). */
+  async function handleToggleActive(product: Product) {
+    const active = !(product.active ?? true);
+    if (!active && !window.confirm(`¿Dar de baja "${product.name}"? Deja de aparecer para vender. Su historia queda y lo podés reactivar cuando quieras.`)) return;
+    setMessage("");
+    try {
+      if (isSupabaseConfigured) await setProductActive(product.id, active);
+      else setProducts((list) => list.map((p) => (p.id === product.id ? { ...p, active } : p)));
+      setMessage(active ? `"${product.name}" vuelve a estar activo.` : `"${product.name}" quedó dado de baja.`);
+      if (isSupabaseConfigured) await reload();
+    } catch (err) {
+      setMessage(errorText(err) || "No se pudo cambiar el producto.");
+    }
+  }
+
+  /** Eliminar: solo si nunca se usó. Si tiene historia, la base lo rechaza y lo explica. */
+  async function handleDelete(product: Product) {
+    if (!window.confirm(`¿Eliminar "${product.name}"? Se borra del todo. Solo se puede si nunca se vendió, compró ni tuvo stock.`)) return;
+    setMessage("");
+    try {
+      if (isSupabaseConfigured) await deleteProduct(product.id);
+      else setProducts((list) => list.filter((p) => p.id !== product.id));
+      setMessage(`"${product.name}" eliminado.`);
+      if (isSupabaseConfigured) await reload();
+    } catch (err) {
+      setMessage(errorText(err) || "No se pudo eliminar el producto.");
+    }
+  }
+
   async function reloadCategories() {
     if (!isSupabaseConfigured) return;
     setCategories(await listProductCategories());
@@ -157,8 +194,10 @@ export function Inventory() {
 
   // Buscador: por nombre o código, sin importar acentos ni mayúsculas; se suma al filtro de categoría.
   const searchText = plainText(productSearch);
+  const inactiveCount = products.filter((p) => !(p.active ?? true)).length;
   const visibleProducts = products.filter(
     (p) =>
+      (showInactive || (p.active ?? true)) &&
       (!categoryFilter || p.categoryId === categoryFilter) &&
       (!searchText || plainText(p.name).includes(searchText) || plainText(p.code).includes(searchText))
   );
@@ -692,6 +731,12 @@ export function Inventory() {
           <button className="secondary" onClick={() => setShowCategoryManager((v) => !v)}>
             {showCategoryManager ? "Ocultar categorías" : "Gestionar categorías"}
           </button>
+          {inactiveCount > 0 && (
+            <label className="muted" style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
+              Ver dados de baja ({inactiveCount})
+            </label>
+          )}
         </div>
 
         <PriceTools products={products} categories={categories} onApplied={reload} />
@@ -799,6 +844,7 @@ export function Inventory() {
           </button>
         )}
 
+        <div style={{ overflowX: "auto" }}>
         <table className="data-table">
           <thead>
             <tr>
@@ -895,6 +941,12 @@ export function Inventory() {
                     <td>
                       <button onClick={handleUpdate}>Guardar</button>{" "}
                       <button className="secondary" onClick={() => setEditingId(null)}>Cancelar</button>
+                      <div style={{ marginTop: 8, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                        {(product.active ?? true) && (
+                          <button className="link-button" onClick={() => { setEditingId(null); void handleToggleActive(product); }}>Dar de baja</button>
+                        )}
+                        <button className="link-button" onClick={() => { setEditingId(null); void handleDelete(product); }}>Eliminar</button>
+                      </div>
                     </td>
                   </>
                 ) : adjustingId === product.id ? (
@@ -934,7 +986,8 @@ export function Inventory() {
                   <>
                     <td>{product.code}</td>
                     <td>
-                      {product.name}
+                      {/* El nombre abre Editar: en pantallas chicas la columna de botones queda a la derecha, fuera de vista. */}
+                      <button className="link-button" title="Editar este producto" onClick={() => startEdit(product)}>{product.name}</button>
                       {presentationsOf(product.id).length > 0 && (
                         <div className="muted" style={{ fontSize: 11 }}>
                           + {presentationsOf(product.id).length} {presentationsOf(product.id).length === 1 ? "presentación" : "presentaciones"} con otro precio
@@ -958,6 +1011,11 @@ export function Inventory() {
                     <td>{(product.active ?? true) ? "Activo" : "Inactivo"}</td>
                     <td>
                       <button className="secondary" onClick={() => startEdit(product)}>Editar</button>{" "}
+                      {!(product.active ?? true) && (
+                        <>
+                          <button className="secondary" onClick={() => void handleToggleActive(product)}>Reactivar</button>{" "}
+                        </>
+                      )}
                       {product.stockSourceId ? null : (
                         <>
                           <button className="secondary" onClick={() => startAdjustStock(product)}>Ajustar stock</button>
@@ -996,6 +1054,7 @@ export function Inventory() {
             ))}
           </tbody>
         </table>
+        </div>
         {visibleProducts.length === 0 && !loading && <p className="muted">{searchText ? `Ningún producto coincide con "${productSearch.trim()}".` : "No hay productos para mostrar."}</p>}
 
       </section>

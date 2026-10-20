@@ -170,3 +170,17 @@ export async function bulkUpdateProductPrices(changes: BulkPriceChange[]): Promi
   if (error) throw error;
   return { updated: Number((data as { updated?: number } | null)?.updated ?? 0) };
 }
+
+/** Elimina un producto SIN historia (migración 139). Si ya tiene ventas, compras o stock, la base lo rechaza y pide darlo de baja. */
+export async function deleteProduct(productId: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("delete_product", { p_product_id: productId });
+  if (error) throw error;
+}
+
+/** Dar de baja (no aparece para vender) o reactivar un producto, sin pasar por Editar. */
+export async function setProductActive(productId: string, active: boolean): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("set_product_active", { p_product_id: productId, p_active: active });
+  if (error) throw error;
+}
