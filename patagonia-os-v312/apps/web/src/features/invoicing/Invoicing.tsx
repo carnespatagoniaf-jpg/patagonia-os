@@ -270,7 +270,7 @@ export function Invoicing() {
         <div>
           <p className="eyebrow">FINANZAS</p>
           <h1>Facturas</h1>
-          <p className="muted">Factura electrónica de ARCA: se hace en Mostrador cuando el cliente la pide.</p>
+          <p className="muted">Factura electrónica de ARCA: se hace en Mostrador o en Clientes cuando el cliente la pide.</p>
         </div>
       </header>
 
