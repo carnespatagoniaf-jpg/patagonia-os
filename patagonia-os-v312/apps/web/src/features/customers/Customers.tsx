@@ -69,6 +69,7 @@ export function Customers() {
     customers,
     loading,
     error,
+    reload,
     create,
     update,
     charges,
@@ -76,6 +77,7 @@ export function Customers() {
     balance,
     detailLoading,
     loadDetail,
+    addCharge,
     addChargeWithItems,
     loadChargeItems,
     registerPayment,
@@ -102,6 +104,11 @@ export function Customers() {
   const [newInvoiceDraft, setNewInvoiceDraft] = useState<InvoiceDraft>(emptyInvoiceDraft());
   const [invoicingCharge, setInvoicingCharge] = useState<{ chargeId: string; draft: InvoiceDraft } | null>(null);
   const [remitoBusyId, setRemitoBusyId] = useState<string | null>(null);
+  // Saldo anterior: lo que un cliente ya debía antes de empezar a usar el sistema (no toca stock ni caja).
+  const [openingBalance, setOpeningBalance] = useState("");
+  const [showOpening, setShowOpening] = useState(false);
+  const [openingAmount, setOpeningAmount] = useState("");
+  const [openingDate, setOpeningDate] = useState(todayIso());
   const printSectionRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -318,13 +325,20 @@ export function Customers() {
         locality: locality.trim() || undefined,
         province: province.trim() || undefined
       });
+      const opening = parseAmount(openingBalance || "0") || 0;
+      if (opening > 0) {
+        await addCharge({ customerId: result.id, chargeDate: todayIso(), amount: opening, reason: "Saldo anterior" });
+        await reload();
+      }
       setName("");
       setPhone("");
       setNotes("");
       setLocality("");
       setProvince("");
+      setOpeningBalance("");
       selectCustomer(result.id);
-      setMessage(result.number !== undefined ? `Cliente creado: es el N.º ${result.number}.` : "Cliente creado.");
+      const created = result.number !== undefined ? `Cliente creado: es el N.º ${result.number}.` : "Cliente creado.";
+      setMessage(opening > 0 ? `${created} Arranca debiendo ${formatMoney(opening)} (saldo anterior).` : created);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo crear el cliente.");
     } finally {
@@ -469,6 +483,28 @@ export function Customers() {
       setMessage(`No se pudo cargar el detalle de la venta. [detalle: ${raw}${code ? ` · code ${code}` : ""}]`);
     } finally {
       setRemitoBusyId(null);
+    }
+  }
+
+  /** Lo que el cliente ya debía antes de usar el sistema: un movimiento "Saldo anterior" (sin stock ni caja). */
+  async function handleOpeningBalance() {
+    if (busy || !selectedCustomer) return;
+    const amount = parseAmount(openingAmount || "0") || 0;
+    if (amount <= 0) {
+      setMessage("Poné cuánto te debía el cliente antes de empezar con el sistema.");
+      return;
+    }
+    setBusy(true);
+    try {
+      await addCharge({ customerId: selectedCustomer.id, chargeDate: openingDate, amount, reason: "Saldo anterior" });
+      await reload();
+      setOpeningAmount("");
+      setShowOpening(false);
+      setMessage(`Saldo anterior de ${formatMoney(amount)} cargado a ${selectedCustomer.name}.`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo cargar el saldo anterior.");
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -669,6 +705,15 @@ export function Customers() {
             <input placeholder="Localidad (opcional)" value={locality} onChange={(e) => setLocality(e.target.value)} />
             <input placeholder="Provincia (opcional)" value={province} onChange={(e) => setProvince(e.target.value)} />
             <input placeholder="Nota (opcional)" value={notes} onChange={(e) => setNotes(e.target.value)} />
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder="Saldo anterior: lo que ya te debe (opcional)"
+              title="Si el cliente ya te debía antes de usar el sistema, poné cuánto. Queda como primer movimiento de su cuenta."
+              value={openingBalance}
+              onChange={(e) => setOpeningBalance(e.target.value)}
+              style={{ minWidth: 260 }}
+            />
             <button disabled={busy} onClick={handleCreateCustomer}>Agregar cliente</button>
           </div>
         </section>
@@ -898,6 +943,18 @@ export function Customers() {
                 <input placeholder="Nota (opcional)" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
                 <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
               </div>
+              <div style={{ marginTop: 12 }}>
+                {!showOpening ? (
+                  <button className="link-button" onClick={() => setShowOpening(true)}>Cargar saldo anterior (lo que ya debía antes del sistema)</button>
+                ) : (
+                  <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
+                    <input type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} />
+                    <input type="text" inputMode="decimal" placeholder="Cuánto te debía" value={openingAmount} onChange={(e) => setOpeningAmount(e.target.value)} />
+                    <button disabled={busy} onClick={handleOpeningBalance}>Cargar saldo anterior</button>
+                    <button className="secondary" onClick={() => setShowOpening(false)}>Cancelar</button>
+                  </div>
+                )}
+              </div>
             </section>
           </div>
 
@@ -974,7 +1031,8 @@ export function Customers() {
                       <td className="num">{row.credit > 0 ? formatMoney(row.credit) : "-"}</td>
                       <td className="num">{formatMoney(row.balance)}</td>
                       <td className="no-print">
-                        {row.type === "charge" && (
+                        {/* El saldo anterior no tiene productos: sin remito ni factura. */}
+                        {row.type === "charge" && !/Saldo anterior$/.test(row.detail) && (
                           <>
                             <button className="secondary" disabled={remitoBusyId === row.id} onClick={() => handleShowRemito(row)}>
                               {remitoBusyId === row.id ? "…" : "Remito"}

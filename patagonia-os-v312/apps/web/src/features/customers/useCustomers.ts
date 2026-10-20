@@ -284,6 +284,7 @@ export function useCustomers() {
     customers,
     loading,
     error,
+    reload,
     create,
     update,
     charges,
