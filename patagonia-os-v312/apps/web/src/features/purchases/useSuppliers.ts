@@ -64,14 +64,15 @@ export function useSuppliers() {
   );
 
   const remove = useCallback(
-    async (id: string) => {
+    async (id: string): Promise<"deleted" | "deactivated"> => {
       if (!isSupabaseConfigured) {
         setSuppliers((current) => current.filter((s) => s.id !== id));
-        return;
+        return "deleted";
       }
 
-      await deleteSupplier(id);
+      const result = await deleteSupplier(id);
       await reload();
+      return result;
     },
     [reload]
   );

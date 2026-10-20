@@ -208,12 +208,13 @@ export function Purchases() {
   async function handleConfirmDeleteSupplier(supplierId: string) {
     setDeleteSupplierBusy(true);
     try {
-      await removeSupplier(supplierId);
+      const result = await removeSupplier(supplierId);
       setConfirmDeleteSupplierId(null);
       if (selectedSupplierId === supplierId) setSelectedSupplierId(null);
-      setMessage("Proveedor eliminado.");
+      setMessage(result === "deleted" ? "Proveedor eliminado." : "Ese proveedor tenía compras o pagos: quedó dado de baja (ya no aparece en la lista) y su historia se guarda.");
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo eliminar el proveedor.");
+      const raw = err instanceof Error ? err.message : typeof err === "object" && err !== null && "message" in err ? String((err as { message: unknown }).message) : "";
+      setMessage(raw || "No se pudo eliminar el proveedor.");
     } finally {
       setDeleteSupplierBusy(false);
     }
@@ -498,7 +499,7 @@ export function Purchases() {
                     <td>
                       {confirmDeleteSupplierId === supplier.id ? (
                         <>
-                          <span className="muted" style={{ fontSize: 13, marginRight: 6 }}>¿Seguro? No se puede deshacer.</span>
+                          <span className="muted" style={{ fontSize: 13, marginRight: 6 }}>¿Seguro? Si ya tiene compras o pagos, queda dado de baja y se guarda su historia.</span>
                           <button className="danger" disabled={deleteSupplierBusy} onClick={() => handleConfirmDeleteSupplier(supplier.id)}>
                             {deleteSupplierBusy ? "Eliminando…" : "Sí, borrar"}
                           </button>{" "}
@@ -552,7 +553,7 @@ export function Purchases() {
               <input placeholder="Notas" value={editSupplierNotes} onChange={(e) => setEditSupplierNotes(e.target.value)} />
               <select value={editSupplierActive ? "1" : "0"} onChange={(e) => setEditSupplierActive(e.target.value === "1")}>
                 <option value="1">Activo</option>
-                <option value="0">Inactivo (eliminado)</option>
+                <option value="0">Dado de baja</option>
               </select>
               <button disabled={busy} onClick={handleUpdateSupplier}>Guardar</button>
               <button className="secondary" disabled={busy} onClick={() => setEditingSupplier(false)}>Cancelar</button>

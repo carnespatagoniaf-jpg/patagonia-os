@@ -80,11 +80,13 @@ export async function updateSupplier(input: UpdateSupplierInput): Promise<void> 
   if (error) throw error;
 }
 
-export async function deleteSupplier(id: string): Promise<void> {
+/** "Borrar" (migración 141): sin compras ni pagos se borra; con historia queda dado de baja. */
+export async function deleteSupplier(id: string): Promise<"deleted" | "deactivated"> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
-  const { error } = await supabase.rpc("delete_supplier", { p_supplier_id: id });
+  const { data, error } = await supabase.rpc("remove_supplier", { p_supplier_id: id });
   if (error) throw error;
+  return data as "deleted" | "deactivated";
 }
 
 export interface SupplierBalance {
