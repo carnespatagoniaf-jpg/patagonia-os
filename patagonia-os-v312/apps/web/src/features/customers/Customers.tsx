@@ -5,11 +5,12 @@ import { useTreasury } from "../shifts/useTreasury";
 import { todayIso } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
 import { listProductsForBranch } from "../inventory/inventory-service";
-import type { CustomerChargeItem } from "./customers-service";
+import { deleteCustomer, type CustomerChargeItem } from "./customers-service";
 import { countByStatus, customerStatus, filterAndSortCustomers, type CustomerFilter, type CustomerStatus } from "./customer-list";
 import { QuantityInput } from "../../components/QuantityInput";
 import { parseQuantity } from "../sale/quantity";
 import { useAuth } from "../auth/AuthProvider";
+import { isSupabaseConfigured } from "../../lib/supabase";
 import { getCompanyName } from "../products/products-service";
 import { downloadCustomerStatementPdf } from "./customer-statement-pdf";
 import {
@@ -255,6 +256,27 @@ export function Customers() {
   function selectCustomer(id: string) {
     setSelectedId(id);
     void loadDetail(id);
+  }
+
+  /** Sin ventas ni pagos se borra; con historia queda dado de baja (sale de la lista, se guarda todo). */
+  async function handleDeleteCustomer() {
+    if (busy || !selectedCustomer) return;
+    const debt = balance && Math.abs(balance.balance) >= 1 ? ` Ojo: tiene saldo de ${formatMoney(balance.balance)}.` : "";
+    if (!window.confirm(`¿Eliminar a ${selectedCustomer.name}?${debt} Si ya tuvo ventas o pagos, no se borra: queda dado de baja y se guarda su historia.`)) return;
+    setBusy(true);
+    try {
+      const name = selectedCustomer.name;
+      const result = isSupabaseConfigured ? await deleteCustomer(selectedCustomer.id) : "deleted";
+      setEditingCustomer(false);
+      setSelectedId(null);
+      await reload();
+      setMessage(result === "deleted" ? `${name} eliminado.` : `${name} tenía ventas o pagos: quedó dado de baja (ya no aparece en la lista) y su historia se guarda.`);
+    } catch (err) {
+      const raw = err instanceof Error ? err.message : typeof err === "object" && err !== null && "message" in err ? String((err as { message: unknown }).message) : "";
+      setMessage(raw || "No se pudo eliminar el cliente.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function handleUpdateCustomer() {
@@ -752,10 +774,11 @@ export function Customers() {
               />
               <select value={editActive ? "1" : "0"} onChange={(e) => setEditActive(e.target.value === "1")}>
                 <option value="1">Activo</option>
-                <option value="0">Inactivo (eliminado)</option>
+                <option value="0">Dado de baja</option>
               </select>
               <button disabled={busy} onClick={handleUpdateCustomer}>Guardar</button>
               <button className="secondary" disabled={busy} onClick={() => setEditingCustomer(false)}>Cancelar</button>
+              <button className="link-button" disabled={busy} onClick={() => void handleDeleteCustomer()}>Eliminar cliente</button>
             </div>
           )}
         </section>

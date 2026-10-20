@@ -382,3 +382,11 @@ export async function listCustomersWithBalance(includeInactive = false): Promise
   const balanceByCustomer = new Map((balanceRows ?? []).map((row) => [row.customer_id, { balance: Number(row.balance), lastActivityDate: row.last_activity_date ?? undefined }]));
   return customers.map((customer) => ({ ...customer, ...(balanceByCustomer.get(customer.id) ?? { balance: 0, lastActivityDate: undefined }) }));
 }
+
+/** "Eliminar cliente" (migración 140): sin ventas ni pagos se borra; con historia queda dado de baja. */
+export async function deleteCustomer(customerId: string): Promise<"deleted" | "deactivated"> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { data, error } = await supabase.rpc("delete_customer", { p_customer_id: customerId });
+  if (error) throw error;
+  return data as "deleted" | "deactivated";
+}
