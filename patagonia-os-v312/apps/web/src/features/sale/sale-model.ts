@@ -1,5 +1,6 @@
 import type { Product } from "@patagonia/domain";
 import { POS_LAST_RECEIPT_KEY } from "../../lib/pos-receipt-storage";
+import type { InvoicePrint } from "../invoicing/invoicing-view";
 
 // Tipos, constantes y funciones sueltas de Mostrador (sin React), separados de
 // Sale.tsx para que la pantalla no sea un solo archivo de miles de líneas.
@@ -67,6 +68,9 @@ export interface ReceiptState {
    * cobrar -- todavía no llegó al servidor, se sube sola cuando vuelva
    * internet (ver features/sale/offline-queue.ts). */
   pending?: boolean;
+  /** Factura de ARCA autorizada de esta venta: el papel sale como factura
+   * (datos del negocio, CAE y QR) en vez de "no válido como factura". */
+  invoice?: InvoicePrint;
 }
 
 /** Comprobante imprimible para movimientos que no son una venta -- caja,

@@ -1,18 +1,27 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { formatMoney } from "../shifts/format";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { SettingSection } from "../../components/SettingSection";
 import {
+  authorizeInvoices,
+  checkArcaConnection,
   getFiscalSettings,
+  invoicePrintFrom,
   listInvoices,
   listUninvoicedSales,
+  loadInvoiceItems,
+  requestCreditNote,
   requestInvoice,
   saveFiscalSettings,
   type FiscalSettings,
   type Invoice,
   type UninvoicedSale
 } from "./invoicing-service";
+import { ReceiptView } from "../sale/SaleReceipts";
+import { buildReceiptTicket } from "../sale/sale-tickets";
+import { isThermalPrinterPaired, printBytes } from "../sale/thermal-printer";
+import type { ReceiptState } from "../sale/sale-model";
 import {
   CUSTOMER_CONDITION_LABEL,
   ISSUER_CONDITION_LABEL,
@@ -26,8 +35,9 @@ import {
 } from "./invoicing-view";
 import { InvoiceRequestFields } from "./InvoiceRequestFields";
 
-// Facturas (factura electrónica ARCA, migración 113, plan Full). Pantalla del dueño:
-// datos fiscales, cómo conectarse con ARCA, ventas sin factura y facturas emitidas.
+// Facturas (factura electrónica ARCA, migraciones 113/121/136, planes Estándar y Full).
+// Pantalla del dueño: datos fiscales, conexión con ARCA, ventas sin factura y
+// facturas emitidas (reimprimir, anular con nota de crédito, reintentar pendientes).
 
 /** CUIT de Patagonia OS: a este CUIT le delega cada negocio la facturación en ARCA. */
 const PROVIDER_CUIT = "27182448902";
@@ -73,6 +83,9 @@ export function Invoicing() {
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
+  const [printReceipt, setPrintReceipt] = useState<ReceiptState | null>(null);
+  const [thermalBusy, setThermalBusy] = useState(false);
+  const retriedRef = useRef(false);
 
   const reload = useCallback(async () => {
     if (!isSupabaseConfigured) return;
@@ -81,7 +94,18 @@ export function Invoicing() {
       const s = await getFiscalSettings();
       setSettings(s);
       setForm(formFrom(s));
-      setInvoices(await listInvoices());
+      let list = await listInvoices();
+      // Pendientes (ARCA no respondió al cobrar): se reintentan solas una vez al abrir.
+      if (s?.enabled && !retriedRef.current && list.some((i) => i.status === "pendiente")) {
+        retriedRef.current = true;
+        try {
+          await authorizeInvoices();
+          list = await listInvoices();
+        } catch {
+          // queda pendiente; está el botón "Reintentar"
+        }
+      }
+      setInvoices(list);
       setSales(s?.enabled && branchId ? await listUninvoicedSales(branchId) : []);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo cargar la facturación.");
@@ -126,6 +150,88 @@ export function Invoicing() {
     }
   }
 
+  async function handleCheck() {
+    setBusy(true);
+    setMessage("");
+    try {
+      const result = await checkArcaConnection();
+      setMessage(result.message);
+      await reload();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo probar la conexión.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRetry(invoiceId?: string) {
+    setBusy(true);
+    setMessage("");
+    try {
+      const results = await authorizeInvoices(invoiceId);
+      const ok = results.filter((r) => r.status === "autorizada").length;
+      const notes = results.filter((r) => r.status !== "autorizada").map((r) => r.message).filter(Boolean);
+      setMessage(results.length === 0 ? "No había nada pendiente." : `${ok} autorizada(s) por ARCA.${notes.length ? ` ${notes.join(" ")}` : ""}`);
+      await reload();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo hablar con ARCA.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCreditNote(inv: Invoice) {
+    if (!window.confirm(`¿Anular ${invoiceLabel(inv)} por ${formatMoney(inv.total)}? Se hace una nota de crédito en ARCA y no se puede deshacer.`)) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      const id = await requestCreditNote(inv.id);
+      const result = (await authorizeInvoices(id)).find((r) => r.id === id);
+      setMessage(
+        result?.status === "autorizada"
+          ? `Nota de crédito ${result.letter} autorizada (CAE ${result.cae}).`
+          : `La nota de crédito quedó ${result?.status ?? "pendiente"}${result?.message ? `: ${result.message}` : ""}.`
+      );
+      await reload();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo anular la factura.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handlePrintInvoice(inv: Invoice) {
+    if (!settings) return;
+    setMessage("");
+    try {
+      const related = inv.relatedInvoiceId ? invoices.find((i) => i.id === inv.relatedInvoiceId) ?? null : null;
+      const print = invoicePrintFrom(inv, settings, related);
+      if (!print) return;
+      const items = await loadInvoiceItems(inv);
+      const itemsTotal = items.reduce((acc, i) => acc + i.lineTotal, 0);
+      const receipt: ReceiptState = {
+        items: items.map((i) => ({ name: i.name, unit: i.unit, quantity: i.quantity, unitPrice: i.unitPrice, discountAmount: i.quantity * i.unitPrice - i.lineTotal })),
+        // Descuento o recargo de toda la venta: la diferencia entre los renglones y el total facturado.
+        saleDiscount: Math.max(itemsTotal - inv.total, 0),
+        saleSurcharge: Math.max(inv.total - itemsTotal, 0),
+        total: inv.total,
+        soldAt: inv.createdAt,
+        paymentSummary: "",
+        amountTendered: null,
+        change: null,
+        invoice: print
+      };
+      setPrintReceipt(receipt);
+      if (await isThermalPrinterPaired()) {
+        await printBytes(buildReceiptTicket(receipt));
+      } else {
+        setTimeout(() => window.print(), 150);
+      }
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo imprimir.");
+    }
+  }
+
   async function handleInvoiceSale(sale: UninvoicedSale) {
     if (!invoicing || !settings) return;
     const error = invoiceDraftError(settings.taxCondition, invoicing.draft, sale.total);
@@ -137,7 +243,12 @@ export function Invoicing() {
     setMessage("");
     try {
       const result = await requestInvoice(sale.id, invoicing.draft);
-      setMessage(`Factura ${result.letter} pedida a ARCA por ${formatMoney(sale.total)}.`);
+      const outcome = (await authorizeInvoices(result.invoiceId)).find((r) => r.id === result.invoiceId);
+      setMessage(
+        outcome?.status === "autorizada"
+          ? `Factura ${result.letter} por ${formatMoney(sale.total)} autorizada (CAE ${outcome.cae}). Para imprimirla, tocá Imprimir en la lista de abajo.`
+          : `Factura ${result.letter} ${outcome?.status ?? "pendiente"}${outcome?.message ? `: ${outcome.message}` : ""}.`
+      );
       setInvoicing(null);
       await reload();
     } catch (err) {
@@ -244,8 +355,8 @@ export function Invoicing() {
             <li>Tocá <strong>Probar conexión con ARCA</strong>. Si da bien, la factura queda activa en Mostrador.</li>
           </ol>
           <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <button disabled title="Se habilita en cuanto Patagonia OS termine la conexión con ARCA">Probar conexión con ARCA</button>
-            <span className="setting-help">Disponible en los próximos días: la estamos terminando.</span>
+            <button disabled={busy || !settings} onClick={() => void handleCheck()}>{busy ? "Probando…" : "Probar conexión con ARCA"}</button>
+            {!settings && <span className="setting-help">Primero guardá los datos fiscales.</span>}
           </div>
           {settings?.lastCheckAt && (
             <p className="setting-help">
@@ -296,11 +407,37 @@ export function Invoicing() {
         </section>
       )}
 
+      {printReceipt && (
+        <ReceiptView
+          receipt={printReceipt}
+          branchName=""
+          thermalPrintBusy={thermalBusy}
+          onPrint={(copies = 1) => {
+            for (let i = 0; i < copies; i++) window.print();
+          }}
+          onThermalPrint={async () => {
+            setThermalBusy(true);
+            try {
+              await printBytes(buildReceiptTicket(printReceipt));
+            } catch (err) {
+              setMessage(err instanceof Error ? err.message : "No se pudo imprimir en la térmica.");
+            } finally {
+              setThermalBusy(false);
+            }
+          }}
+        />
+      )}
+
       <section className="panel">
         <div className="panel-title">
           <h2>Facturas emitidas</h2>
           <span>{invoices.length}</span>
         </div>
+        {invoices.some((i) => i.status === "pendiente") && (
+          <p>
+            <button className="secondary" disabled={busy} onClick={() => void handleRetry()}>Reintentar las pendientes</button>
+          </p>
+        )}
         {invoices.length === 0 && !loading && <p className="muted">Todavía no hay facturas.</p>}
         {invoices.length > 0 && (
           <table className="data-table">
@@ -312,6 +449,7 @@ export function Invoicing() {
                 <th className="num">Total</th>
                 <th>Estado</th>
                 <th>CAE</th>
+                <th />
               </tr>
             </thead>
             <tbody>
@@ -326,9 +464,16 @@ export function Invoicing() {
                   <td className="num">{formatMoney(inv.total)}</td>
                   <td>
                     <span className={`setting-status ${inv.status === "autorizada" ? "ok" : inv.status === "rechazada" ? "warn" : ""}`}>{STATUS_LABEL[inv.status]}</span>
-                    {inv.status === "rechazada" && inv.errorMessage && <div className="muted" style={{ fontSize: 12 }}>{inv.errorMessage}</div>}
+                    {inv.status !== "autorizada" && inv.errorMessage && <div className="muted" style={{ fontSize: 12 }}>{inv.errorMessage}</div>}
                   </td>
                   <td>{inv.cae ? `${inv.cae}${inv.caeDue ? ` (vence ${inv.caeDue})` : ""}` : "-"}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    {inv.status === "autorizada" && <button className="secondary" onClick={() => void handlePrintInvoice(inv)}>Imprimir</button>}{" "}
+                    {inv.status === "autorizada" && inv.kind === "factura" && !invoices.some((n) => n.relatedInvoiceId === inv.id && n.status !== "rechazada") && (
+                      <button className="secondary" disabled={busy} onClick={() => void handleCreditNote(inv)}>Anular</button>
+                    )}
+                    {inv.status === "pendiente" && <button className="secondary" disabled={busy} onClick={() => void handleRetry(inv.id)}>Reintentar</button>}
+                  </td>
                 </tr>
               ))}
             </tbody>

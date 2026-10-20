@@ -9,6 +9,7 @@ import { UNIT_LABELS, type MovementReceiptState, type ReceiptState } from "./sal
 import { compareScaleControl } from "./scale-control";
 import type { ScaleControlState } from "./scale-control-service";
 import { ScaleControlResult } from "./ScaleControl";
+import { InvoicePaperFooter, InvoicePaperHeader } from "../invoicing/InvoicePaper";
 
 // Comprobantes que se muestran (y se imprimen) debajo de Mostrador: el último
 // comprobante de venta, el de un movimiento de caja/pago/vale y el detalle del
@@ -36,12 +37,16 @@ export function ReceiptView({ receipt, branchName, thermalPrintBusy, onPrint, on
         </div>
       </div>
 
-      <div className="ticket-header">
-        <strong>{branchName}</strong>
-        <p>Comprobante interno · no válido como factura</p>
-        <p>{new Date(receipt.soldAt).toLocaleString("es-AR")}</p>
-        {receipt.pending && <p className="no-print" style={{ color: "#8a4b00", fontWeight: 700 }}>⏳ Guardada sin conexión, pendiente de subir</p>}
-      </div>
+      {receipt.invoice ? (
+        <InvoicePaperHeader invoice={receipt.invoice} />
+      ) : (
+        <div className="ticket-header">
+          <strong>{branchName}</strong>
+          <p>Comprobante interno · no válido como factura</p>
+          <p>{new Date(receipt.soldAt).toLocaleString("es-AR")}</p>
+          {receipt.pending && <p className="no-print" style={{ color: "#8a4b00", fontWeight: 700 }}>⏳ Guardada sin conexión, pendiente de subir</p>}
+        </div>
+      )}
 
       <div className="ticket-rule" />
       <div className="ticket-items">
@@ -64,12 +69,13 @@ export function ReceiptView({ receipt, branchName, thermalPrintBusy, onPrint, on
         </p>
       )}
       <div className="ticket-total"><span>TOTAL</span><strong>{formatMoney(receipt.total)}</strong></div>
-      <p className="ticket-line-sm">Pago: {receipt.paymentSummary}</p>
+      {receipt.paymentSummary && <p className="ticket-line-sm">Pago: {receipt.paymentSummary}</p>}
       {receipt.amountTendered !== null && (
         <p className="ticket-line-sm">
           Recibido {formatMoney(receipt.amountTendered)} · Vuelto {formatMoney(Math.max(receipt.change ?? 0, 0))}
         </p>
       )}
+      {receipt.invoice && <InvoicePaperFooter invoice={receipt.invoice} />}
       <p className="ticket-footer print-only-header">Gracias por su compra</p>
     </section>
   );

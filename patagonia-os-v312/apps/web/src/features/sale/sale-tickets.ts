@@ -4,6 +4,15 @@ import type { CloseShiftResult, PosShiftAdjustment, PosShiftSupplierPayment } fr
 import { formatMoney } from "../shifts/format";
 import { getThermalPrintSettings, TicketBuilder } from "./thermal-printer";
 import { UNIT_LABELS, type MovementReceiptState, type ReceiptState } from "./sale-model";
+import {
+  CUSTOMER_CONDITION_LABEL,
+  VOUCHER_NAME,
+  arDateLabel,
+  customerDocLabel,
+  formatCuit,
+  voucherNumberLabel,
+  type InvoicePrint
+} from "../invoicing/invoicing-view";
 
 // Armado de los tickets para la impresora térmica (bytes ESC/POS). Funciones
 // puras: reciben todo lo que necesitan, no leen el estado de la pantalla.
@@ -13,13 +22,17 @@ export function buildReceiptTicket(receiptToPrint: ReceiptState, branchName?: st
   const t = new TicketBuilder();
   if (settings.font !== "auto") t.font(settings.font);
   t.bodySize(settings, true);
-  t.align("center").bold(true).line("COMPROBANTE INTERNO").bold(false);
-  // Sin factura, el papel lo tiene que decir (es lo que se lleva el cliente).
-  t.line("NO VÁLIDO COMO FACTURA");
-  if (branchName) t.line(branchName);
-  t.align("left").separator("-", settings.lineWidth);
-  t.line(new Date(receiptToPrint.soldAt).toLocaleString("es-AR"));
-  t.separator("-", settings.lineWidth);
+  if (receiptToPrint.invoice) {
+    invoiceHeader(t, receiptToPrint.invoice, settings.lineWidth);
+  } else {
+    t.align("center").bold(true).line("COMPROBANTE INTERNO").bold(false);
+    // Sin factura, el papel lo tiene que decir (es lo que se lleva el cliente).
+    t.line("NO VÁLIDO COMO FACTURA");
+    if (branchName) t.line(branchName);
+    t.align("left").separator("-", settings.lineWidth);
+    t.line(new Date(receiptToPrint.soldAt).toLocaleString("es-AR"));
+    t.separator("-", settings.lineWidth);
+  }
   for (const item of receiptToPrint.items) {
     const lineTotal = item.quantity * item.unitPrice - item.discountAmount;
     t.line(item.name);
@@ -31,14 +44,53 @@ export function buildReceiptTicket(receiptToPrint: ReceiptState, branchName?: st
   t.bodySize(settings, false);
   t.bold(true).doubleSize(true).line(`TOTAL ${formatMoney(receiptToPrint.total)}`).doubleSize(false).bold(false);
   t.bodySize(settings, true);
-  t.line(`Pago: ${receiptToPrint.paymentSummary}`);
+  if (receiptToPrint.paymentSummary) t.line(`Pago: ${receiptToPrint.paymentSummary}`);
   if (receiptToPrint.amountTendered !== null) {
     t.line(`Recibido: ${formatMoney(receiptToPrint.amountTendered)}  Vuelto: ${formatMoney(Math.max(receiptToPrint.change ?? 0, 0))}`);
   }
+  if (receiptToPrint.invoice) invoiceFooter(t, receiptToPrint.invoice, settings.lineWidth);
   t.feed(1).align("center").line("Gracias por su compra");
   t.bodySize(settings, false);
   t.cut();
   return t.build();
+}
+
+/** Encabezado de factura (RG 1415): tipo y código, emisor, número, fecha y cliente. */
+function invoiceHeader(t: TicketBuilder, inv: InvoicePrint, width: number) {
+  const voucher = VOUCHER_NAME[inv.voucherType];
+  t.align("center").bold(true).line(voucher?.name ?? `FACTURA ${inv.letter}`).bold(false);
+  t.line(`COD. ${voucher?.code ?? ""} - ORIGINAL`);
+  t.bold(true).line(inv.issuer.businessName).bold(false);
+  if (inv.issuer.address) t.line(inv.issuer.address);
+  t.line(`CUIT ${formatCuit(inv.issuer.cuit)}`);
+  t.line(inv.issuer.taxCondition === "monotributo" ? "Responsable Monotributo" : "IVA Responsable Inscripto");
+  if (inv.issuer.grossIncomeNumber) t.line(`IIBB ${inv.issuer.grossIncomeNumber}`);
+  if (inv.issuer.activityStart) t.line(`Inicio de actividades ${arDateLabel(inv.issuer.activityStart)}`);
+  t.align("left").separator("-", width);
+  t.line(`Nro ${voucherNumberLabel(inv.pointOfSale, inv.number)}`);
+  t.line(`Fecha ${arDateLabel(inv.issuedOn)}`);
+  if (inv.relatedLabel) t.line(`Anula: ${inv.relatedLabel}`);
+  t.separator("-", width);
+  t.line(CUSTOMER_CONDITION_LABEL[inv.customer.taxCondition]);
+  const doc = customerDocLabel(inv.customer.docType, inv.customer.docNumber);
+  if (doc) t.line(doc);
+  if (inv.customer.name) t.line(inv.customer.name);
+  t.separator("-", width);
+}
+
+/** Pie de factura: IVA (A: discriminado; B: contenido, Ley 27.743), CAE y QR. */
+function invoiceFooter(t: TicketBuilder, inv: InvoicePrint, width: number) {
+  t.separator("-", width);
+  const rate = String(inv.vatRate).replace(".", ",");
+  if (inv.letter === "A") {
+    t.line(`Neto gravado: ${formatMoney(inv.net)}`);
+    t.line(`IVA ${rate}%: ${formatMoney(inv.vat)}`);
+  } else if (inv.letter === "B") {
+    t.line(`IVA contenido (${rate}%): ${formatMoney(inv.vat)}`);
+  }
+  t.line(`CAE ${inv.cae}`);
+  t.line(`Vto. CAE ${arDateLabel(inv.caeDue)}`);
+  t.align("center").qr(inv.qrUrl).line("Comprobante autorizado por ARCA");
 }
 
 /** Ticket del cierre de turno para la térmica: total, arqueo, cada cuenta,

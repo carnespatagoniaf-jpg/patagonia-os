@@ -191,6 +191,20 @@ class TicketBuilder {
     return this;
   }
 
+  /** Código QR nativo de la impresora (ESC/POS GS ( k, modelo 2). Lo traen casi
+   * todas las térmicas de 80 mm; la factura de ARCA lo exige (RG 4892). */
+  qr(data: string, moduleSize = 5) {
+    const bytes = Array.from(new TextEncoder().encode(data));
+    const len = bytes.length + 3;
+    this.bytes.push(GS, 0x28, 0x6b, 4, 0, 49, 65, 50, 0); // modelo 2
+    this.bytes.push(GS, 0x28, 0x6b, 3, 0, 49, 67, Math.max(1, Math.min(16, moduleSize))); // tamaño del punto
+    this.bytes.push(GS, 0x28, 0x6b, 3, 0, 49, 69, 48); // corrección de errores L
+    this.bytes.push(GS, 0x28, 0x6b, len & 0xff, (len >> 8) & 0xff, 49, 80, 48, ...bytes); // guardar
+    this.bytes.push(GS, 0x28, 0x6b, 3, 0, 49, 81, 48); // imprimir
+    this.bytes.push(LF);
+    return this;
+  }
+
   cut() {
     this.feed(3);
     this.bytes.push(GS, 0x56, 0x00); // GS V 0 -- corte total

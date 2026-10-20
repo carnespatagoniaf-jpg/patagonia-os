@@ -12,6 +12,19 @@ import { parseQuantity } from "../sale/quantity";
 import { useAuth } from "../auth/AuthProvider";
 import { getCompanyName } from "../products/products-service";
 import { downloadCustomerStatementPdf } from "./customer-statement-pdf";
+import {
+  authorizeInvoices,
+  getCustomerTaxData,
+  getFiscalSettings,
+  invoicePrintFrom,
+  listChargeInvoices,
+  requestChargeInvoice,
+  type FiscalSettings,
+  type Invoice
+} from "../invoicing/invoicing-service";
+import { emptyInvoiceDraft, invoiceDraftError, invoiceLabel, type InvoiceDraft, type InvoicePrint } from "../invoicing/invoicing-view";
+import { InvoiceRequestFields } from "../invoicing/InvoiceRequestFields";
+import { InvoicePaperFooter, InvoicePaperHeader } from "../invoicing/InvoicePaper";
 
 const STATUS_BADGE: Record<CustomerStatus, { label: string; bg: string; color: string }> = {
   overdue: { label: "Atrasado", bg: "#fdecea", color: "#b3261e" },
@@ -82,7 +95,12 @@ export function Customers() {
   const [manualPrice, setManualPrice] = useState("");
   const [manualQty, setManualQty] = useState("1");
   const [manualUnit, setManualUnit] = useState<Product["unit"]>("unit");
-  const [printCharge, setPrintCharge] = useState<{ date: string; reason: string; amount: number; items: CustomerChargeItem[] } | null>(null);
+  const [printCharge, setPrintCharge] = useState<{ date: string; reason: string; amount: number; items: CustomerChargeItem[]; invoice?: InvoicePrint } | null>(null);
+  // Factura ARCA (migración 136): casi todo sale con remito; si el cliente la pide, también factura.
+  const [fiscal, setFiscal] = useState<FiscalSettings | null>(null);
+  const [chargeInvoices, setChargeInvoices] = useState<Invoice[]>([]);
+  const [newInvoiceDraft, setNewInvoiceDraft] = useState<InvoiceDraft>(emptyInvoiceDraft());
+  const [invoicingCharge, setInvoicingCharge] = useState<{ chargeId: string; draft: InvoiceDraft } | null>(null);
   const [remitoBusyId, setRemitoBusyId] = useState<string | null>(null);
   const printSectionRef = useRef<HTMLDivElement | null>(null);
 
@@ -94,6 +112,19 @@ export function Customers() {
   useEffect(() => {
     if (printCharge) printSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [printCharge]);
+
+  useEffect(() => {
+    void getFiscalSettings().then(setFiscal).catch(() => setFiscal(null));
+  }, []);
+
+  useEffect(() => {
+    const ids = charges.map((c) => c.id);
+    if (ids.length === 0) {
+      setChargeInvoices([]);
+      return;
+    }
+    void listChargeInvoices(ids).then(setChargeInvoices).catch(() => setChargeInvoices([]));
+  }, [charges]);
 
   const chargeMatches = chargeSearch.trim()
     ? products.filter((p) => (p.active ?? true) && p.name.toLowerCase().includes(chargeSearch.toLowerCase())).slice(0, 8)
@@ -182,6 +213,18 @@ export function Customers() {
   const [editNotes, setEditNotes] = useState("");
 
   const selectedCustomer = customers.find((c) => c.id === selectedId) ?? null;
+
+  // Datos fiscales del cliente (los de su última factura) para no volver a escribirlos.
+  useEffect(() => {
+    setInvoicingCharge(null);
+    if (!selectedId) return;
+    const name = customers.find((c) => c.id === selectedId)?.name ?? "";
+    setNewInvoiceDraft({ ...emptyInvoiceDraft(), name });
+    void getCustomerTaxData(selectedId).then((d) =>
+      setNewInvoiceDraft((cur) => ({ ...cur, doc: d.taxId, customerCondition: d.taxCondition ?? cur.customerCondition }))
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
 
   const [search, setSearch] = useState("");
   const [listFilter, setListFilter] = useState<CustomerFilter>("all");
@@ -289,8 +332,72 @@ export function Customers() {
     }
   }
 
+  /** La factura viva (pendiente o autorizada) de una venta en cuenta corriente. */
+  function invoiceForCharge(chargeId: string): Invoice | undefined {
+    return chargeInvoices.find((i) => i.customerChargeId === chargeId && i.kind === "factura" && i.status !== "rechazada");
+  }
+
+  /** Pide la factura de una venta ya registrada y, si ARCA la autoriza, la deja lista para imprimir. */
+  async function invoiceCharge(chargeId: string, draft: InvoiceDraft, sale: { date: string; reason: string; amount: number; items: CustomerChargeItem[] }): Promise<string> {
+    const { invoiceId, letter } = await requestChargeInvoice(chargeId, draft);
+    const outcome = (await authorizeInvoices(invoiceId)).find((r) => r.id === invoiceId);
+    const list = await listChargeInvoices(charges.map((c) => c.id).concat(chargeId));
+    setChargeInvoices(list);
+    const inv = list.find((i) => i.id === invoiceId);
+    if (outcome?.status === "autorizada" && inv && fiscal) {
+      const print = invoicePrintFrom(inv, fiscal);
+      if (print) setPrintCharge({ ...sale, invoice: print });
+      return `Factura ${letter} autorizada por ARCA (CAE ${outcome.cae}). El remito sigue en el botón Remito.`;
+    }
+    if (outcome?.status === "rechazada") return `ARCA rechazó la factura: ${outcome.message ?? "sin motivo"}`;
+    return `Factura ${letter} pedida, pero ARCA todavía no respondió. Se reintenta desde Facturas.`;
+  }
+
+  async function handleInvoiceExisting(row: LedgerRow) {
+    if (!invoicingCharge || !fiscal) return;
+    const error = invoiceDraftError(fiscal.taxCondition, invoicingCharge.draft, row.debit);
+    if (error) {
+      setMessage(error);
+      return;
+    }
+    setBusy(true);
+    try {
+      const items = await loadChargeItems(row.id);
+      const text = await invoiceCharge(row.id, invoicingCharge.draft, { date: row.date, reason: row.detail, amount: row.debit, items });
+      setInvoicingCharge(null);
+      setMessage(text);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo pedir la factura.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleShowInvoice(row: LedgerRow, inv: Invoice) {
+    if (!fiscal) return;
+    setRemitoBusyId(row.id);
+    try {
+      const print = invoicePrintFrom(inv, fiscal);
+      if (!print) return;
+      const items = await loadChargeItems(row.id);
+      setPrintCharge({ date: row.date, reason: row.detail, amount: row.debit, items, invoice: print });
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo cargar la factura.");
+    } finally {
+      setRemitoBusyId(null);
+    }
+  }
+
   async function handleAddCharge() {
     if (busy) return;
+    const wantsInvoice = Boolean(fiscal?.enabled && newInvoiceDraft.wanted);
+    if (wantsInvoice && fiscal) {
+      const invoiceError = invoiceDraftError(fiscal.taxCondition, newInvoiceDraft, chargeTotal);
+      if (invoiceError) {
+        setMessage(invoiceError);
+        return;
+      }
+    }
     setBusy(true);
     try {
       if (!selectedCustomer) return;
@@ -313,7 +420,7 @@ export function Customers() {
       // Se muestra el remito de ESTA venta al toque -- la mercadería tiene
       // que salir con la boleta en el momento, no buscarla después en el
       // historial (ahí es fácil confundir la de hoy con una vieja).
-      setPrintCharge({
+      const sale = {
         date: chargeDate,
         reason: noteSnapshot || cartSnapshot.map((l) => l.name).join(", "),
         amount: result.amount,
@@ -324,7 +431,17 @@ export function Customers() {
           unitPrice: l.unitPrice,
           lineTotal: l.quantity * l.unitPrice
         }))
-      });
+      };
+      setPrintCharge(sale);
+      if (wantsInvoice) {
+        const draft = newInvoiceDraft;
+        setNewInvoiceDraft((cur) => ({ ...cur, wanted: false }));
+        try {
+          setMessage(`Venta registrada. ${await invoiceCharge(result.id, draft, sale)}`);
+        } catch (err) {
+          setMessage(`Venta registrada, pero la factura no se pudo pedir (${err instanceof Error ? err.message : "error"}). Tocá Facturar en el movimiento.`);
+        }
+      }
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo registrar la venta.");
     } finally {
@@ -602,12 +719,13 @@ export function Customers() {
       {printCharge && (
         <section ref={printSectionRef} className="panel print-area" style={{ marginTop: 18 }}>
           <div className="panel-title">
-            <h2>Remito</h2>
+            <h2>{printCharge.invoice ? "Factura" : "Remito"}</h2>
             <div className="no-print">
               <button className="secondary" onClick={handlePrint}>Imprimir</button>{" "}
               <button className="secondary" onClick={() => setPrintCharge(null)}>Cerrar</button>
             </div>
           </div>
+          {printCharge.invoice && <InvoicePaperHeader invoice={printCharge.invoice} />}
           <div className="print-only-header">
             <p className="muted">{selectedCustomer?.number !== undefined ? `Cliente N.º ${selectedCustomer.number} · ` : ""}{selectedCustomer?.name}</p>
             <p className="muted">Fecha de venta: {printCharge.date}</p>
@@ -636,6 +754,7 @@ export function Customers() {
           <div className="totals" style={{ marginTop: 12 }}>
             <strong>Total <b>{formatMoney(printCharge.amount)}</b></strong>
           </div>
+          {printCharge.invoice && <InvoicePaperFooter invoice={printCharge.invoice} />}
         </section>
       )}
 
@@ -745,6 +864,9 @@ export function Customers() {
                   <div className="cash-banner-form" style={{ marginTop: 12 }}>
                     <input placeholder="Nota (opcional, ej. nº de factura)" value={chargeNote} onChange={(e) => setChargeNote(e.target.value)} style={{ flex: 1, minWidth: 200 }} />
                   </div>
+                  {fiscal?.enabled && (
+                    <InvoiceRequestFields issuer={fiscal.taxCondition} draft={newInvoiceDraft} total={chargeTotal} onChange={setNewInvoiceDraft} />
+                  )}
                   <div className="pos-total-bar" style={{ marginTop: 12 }}>
                     <div>
                       <p className="pos-total-label">Total de la venta</p>
@@ -839,9 +961,15 @@ export function Customers() {
                       </tr>
                     </Fragment>
                   ) : (
-                    <tr key={row.key}>
+                    <Fragment key={row.key}>
+                    <tr>
                       <td>{row.date}</td>
-                      <td>{row.detail}</td>
+                      <td>
+                        {row.detail}
+                        {row.type === "charge" && invoiceForCharge(row.id) && (
+                          <span className="muted" style={{ fontSize: 12 }}> · {invoiceLabel(invoiceForCharge(row.id)!)}</span>
+                        )}
+                      </td>
                       <td className="num">{row.debit > 0 ? formatMoney(row.debit) : "-"}</td>
                       <td className="num">{row.credit > 0 ? formatMoney(row.credit) : "-"}</td>
                       <td className="num">{formatMoney(row.balance)}</td>
@@ -851,12 +979,50 @@ export function Customers() {
                             <button className="secondary" disabled={remitoBusyId === row.id} onClick={() => handleShowRemito(row)}>
                               {remitoBusyId === row.id ? "…" : "Remito"}
                             </button>{" "}
+                            {(() => {
+                              const inv = invoiceForCharge(row.id);
+                              if (inv?.status === "autorizada") {
+                                return (
+                                  <>
+                                    <button className="secondary" disabled={remitoBusyId === row.id} onClick={() => handleShowInvoice(row, inv)}>Factura</button>{" "}
+                                  </>
+                                );
+                              }
+                              if (inv) return <span className="muted" style={{ fontSize: 12 }}>Factura pendiente </span>;
+                              if (!fiscal?.enabled) return null;
+                              return (
+                                <>
+                                  <button
+                                    className="secondary"
+                                    disabled={busy}
+                                    onClick={() => setInvoicingCharge(invoicingCharge?.chargeId === row.id ? null : { chargeId: row.id, draft: { ...newInvoiceDraft, wanted: true } })}
+                                  >
+                                    Facturar
+                                  </button>{" "}
+                                </>
+                              );
+                            })()}
                           </>
                         )}
                         <button className="secondary" disabled={busy} onClick={() => startEditRow(row)}>Editar</button>{" "}
                         <button className="secondary" disabled={busy} onClick={() => handleDeleteRow(row)}>Borrar</button>
                       </td>
                     </tr>
+                    {invoicingCharge?.chargeId === row.id && fiscal && (
+                      <tr className="no-print">
+                        <td colSpan={6}>
+                          <InvoiceRequestFields
+                            issuer={fiscal.taxCondition}
+                            draft={invoicingCharge.draft}
+                            total={row.debit}
+                            onChange={(draft) => setInvoicingCharge({ chargeId: row.id, draft: { ...draft, wanted: true } })}
+                          />
+                          <button disabled={busy} onClick={() => void handleInvoiceExisting(row)}>Pedir factura a ARCA</button>{" "}
+                          <button className="secondary" onClick={() => setInvoicingCharge(null)}>Cancelar</button>
+                        </td>
+                      </tr>
+                    )}
+                    </Fragment>
                   )
                 )}
               </tbody>

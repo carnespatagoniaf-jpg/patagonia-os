@@ -84,3 +84,94 @@ export function invoiceLabel(inv: InvoiceLike): string {
   if (inv.number === null) return `${name} ${inv.letter} (sin número todavía)`;
   return `${name} ${inv.letter} ${String(inv.pointOfSale).padStart(5, "0")}-${String(inv.number).padStart(8, "0")}`;
 }
+
+/** Nombre y código ARCA de cada comprobante (lo que va arriba del papel). */
+export const VOUCHER_NAME: Record<number, { name: string; code: string }> = {
+  1: { name: "FACTURA A", code: "001" },
+  3: { name: "NOTA DE CRÉDITO A", code: "003" },
+  6: { name: "FACTURA B", code: "006" },
+  8: { name: "NOTA DE CRÉDITO B", code: "008" },
+  11: { name: "FACTURA C", code: "011" },
+  13: { name: "NOTA DE CRÉDITO C", code: "013" }
+};
+
+/** Datos del comprobante autorizado para imprimirlo (ticket térmico o papel A4). */
+export interface InvoicePrint {
+  voucherType: number;
+  letter: InvoiceLetter;
+  pointOfSale: number;
+  number: number;
+  cae: string;
+  /** AAAA-MM-DD */
+  caeDue: string;
+  /** AAAA-MM-DD */
+  issuedOn: string;
+  issuer: {
+    businessName: string;
+    cuit: string;
+    taxCondition: IssuerCondition;
+    address: string;
+    grossIncomeNumber: string;
+    activityStart: string;
+  };
+  customer: { name: string | null; docType: number; docNumber: string; taxCondition: CustomerCondition };
+  total: number;
+  net: number;
+  vat: number;
+  vatRate: number;
+  qrUrl: string;
+  /** "Factura C 00005-00000123" de la factura que anula una nota de crédito. */
+  relatedLabel?: string;
+}
+
+/**
+ * Código QR obligatorio (RG 4892): JSON en base64 en la URL de ARCA.
+ * https://www.afip.gob.ar/fe/qr/especificaciones.asp
+ */
+export function arcaQrUrl(p: {
+  issuedOn: string;
+  cuit: string;
+  pointOfSale: number;
+  voucherType: number;
+  number: number;
+  total: number;
+  docType: number;
+  docNumber: string;
+  cae: string;
+}): string {
+  const data = {
+    ver: 1,
+    fecha: p.issuedOn,
+    cuit: Number(digitsOnly(p.cuit)),
+    ptoVta: p.pointOfSale,
+    tipoCmp: p.voucherType,
+    nroCmp: p.number,
+    importe: Math.round(p.total * 100) / 100,
+    moneda: "PES",
+    ctz: 1,
+    tipoDocRec: p.docType,
+    nroDocRec: Number(digitsOnly(p.docNumber) || "0"),
+    tipoCodAut: "E",
+    codAut: Number(p.cae)
+  };
+  const json = JSON.stringify(data);
+  const b64 = typeof btoa === "function" ? btoa(json) : Buffer.from(json, "utf8").toString("base64");
+  return `https://www.afip.gob.ar/fe/qr/?p=${b64}`;
+}
+
+/** 00005-00000123 */
+export function voucherNumberLabel(pointOfSale: number, number: number): string {
+  return `${String(pointOfSale).padStart(5, "0")}-${String(number).padStart(8, "0")}`;
+}
+
+/** AAAA-MM-DD → DD/MM/AAAA */
+export function arDateLabel(iso: string): string {
+  const [y, m, d] = iso.slice(0, 10).split("-");
+  return y && m && d ? `${d}/${m}/${y}` : iso;
+}
+
+export function customerDocLabel(docType: number, docNumber: string): string {
+  if (docType === 80) return `CUIT ${formatCuit(docNumber)}`;
+  if (docType === 96) return `DNI ${docNumber}`;
+  return "";
+}

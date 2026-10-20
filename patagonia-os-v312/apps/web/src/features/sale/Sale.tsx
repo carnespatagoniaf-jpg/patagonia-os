@@ -17,7 +17,7 @@ import { useEmployees } from "../employees/useEmployees";
 import { deletePosShiftOutflow, listPosShiftVales, type PosShiftVale } from "../employees/employees-service";
 import { createPosSale, type CreatePosSaleInput } from "./sale-service";
 import { repeatedPaperTime } from "../scales/sale/scale-sale-service";
-import { getFiscalSettings, requestInvoice, type FiscalSettings } from "../invoicing/invoicing-service";
+import { authorizeInvoices, getFiscalSettings, getInvoice, invoicePrintFrom, requestInvoice, type FiscalSettings } from "../invoicing/invoicing-service";
 import { emptyInvoiceDraft, invoiceDraftError, type InvoiceDraft } from "../invoicing/invoicing-view";
 import { InvoiceRequestFields } from "../invoicing/InvoiceRequestFields";
 import { addPendingSale, getPendingSales, isRetryableError, isShiftClosedError, markPendingSaleError, removePendingSale, resetPendingSaleErrors, updatePendingSale, type PendingSale } from "./offline-queue";
@@ -683,6 +683,31 @@ Cancelar = es el mismo papel: no cobrar.`)) {
       };
       // Venta guardada (o en la cola con su clave): la próxima es otra venta, con otra clave.
       saleKeyRef.current = null;
+      // La factura se pide recién con la venta guardada (necesita su número de venta)
+      // y antes de imprimir: si ARCA la autoriza, el papel sale como factura con CAE y QR.
+      let invoiceText = "";
+      if (wantsInvoice) {
+        if (queuedOffline || !saleId) {
+          invoiceText = " La factura NO se pidió (sin conexión): cuando vuelva internet, pedila en Facturas → Ventas sin factura.";
+        } else {
+          try {
+            const inv = await requestInvoice(saleId, invoiceSnapshot);
+            const result = (await authorizeInvoices(inv.invoiceId)).find((r) => r.id === inv.invoiceId);
+            if (result?.status === "autorizada" && fiscal) {
+              const full = await getInvoice(inv.invoiceId);
+              const print = full ? invoicePrintFrom(full, fiscal) : null;
+              if (print) newReceipt.invoice = print;
+              invoiceText = ` Factura ${inv.letter} autorizada por ARCA (CAE ${result.cae}).`;
+            } else if (result?.status === "rechazada") {
+              invoiceText = ` La venta se cobró, pero ARCA rechazó la factura: ${result.message ?? "sin motivo"} Pedila de nuevo en Facturas → Ventas sin factura.`;
+            } else {
+              invoiceText = ` Factura ${inv.letter} pedida, pero ARCA todavía no respondió${result?.message ? ` (${result.message})` : ""}. Se reintenta desde Facturas; ahí la reimprimís.`;
+            }
+          } catch (err) {
+            invoiceText = ` La venta se cobró, pero la factura no se pudo pedir (${err instanceof Error ? err.message : "error"}). Pedila en Facturas → Ventas sin factura.`;
+          }
+        }
+      }
       setReceipt(newReceipt);
       // Si quedó un comprobante de caja/proveedor/vale de antes en pantalla,
       // sacarlo -- las dos secciones son .print-area, y si las dos quedan
@@ -702,20 +727,6 @@ Cancelar = es el mismo papel: no cobrar.`)) {
       // se pudo registrar la venta" sobre una venta que en realidad sí se
       // cobró.
       await autoPrintReceipt(newReceipt);
-      // La factura se pide recién con la venta guardada (necesita su número de venta).
-      let invoiceText = "";
-      if (wantsInvoice) {
-        if (queuedOffline || !saleId) {
-          invoiceText = " La factura NO se pidió (sin conexión): cuando vuelva internet, pedila en Facturas → Ventas sin factura.";
-        } else {
-          try {
-            const inv = await requestInvoice(saleId, invoiceSnapshot);
-            invoiceText = ` Factura ${inv.letter} pedida a ARCA.`;
-          } catch (err) {
-            invoiceText = ` La venta se cobró, pero la factura no se pudo pedir (${err instanceof Error ? err.message : "error"}). Pedila en Facturas → Ventas sin factura.`;
-          }
-        }
-      }
       if (queuedOffline) {
         setMessage("Sin conexión: la venta se guardó en este equipo y se sube sola apenas vuelva internet." + invoiceText);
       } else {
@@ -753,6 +764,16 @@ Cancelar = es el mismo papel: no cobrar.`)) {
         return;
       }
       await voidPosSale(saleId);
+      // Si estaba facturada, la base dejó su nota de crédito pendiente: se pide ya.
+      if (fiscal?.enabled) {
+        try {
+          const credit = (await authorizeInvoices()).find((r) => r.kind === "nota_credito");
+          if (credit?.status === "autorizada") setMessage(`Venta anulada. Nota de crédito ${credit.letter} autorizada por ARCA (CAE ${credit.cae}); se reimprime desde Facturas.`);
+          else if (credit) setMessage(`Venta anulada. La nota de crédito quedó ${credit.status}${credit.message ? `: ${credit.message}` : ""}. Revisala en Facturas.`);
+        } catch (err) {
+          setMessage(`Venta anulada. La nota de crédito no se pudo pedir todavía (${err instanceof Error ? err.message : "error"}); se reintenta desde Facturas.`);
+        }
+      }
       await reloadShift();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo anular la venta.");
