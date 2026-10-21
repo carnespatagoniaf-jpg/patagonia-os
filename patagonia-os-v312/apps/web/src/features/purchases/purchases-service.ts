@@ -290,3 +290,58 @@ export async function listSupplierPayments(supplierId: string): Promise<Supplier
   if (error) throw error;
   return (data ?? []).map(mapSupplierPayment);
 }
+
+/**
+ * Descuentos y recargos en la cuenta del proveedor (migración 142). Solo para
+ * empresas con companies.supplier_adjustments (hoy Martínez). amount > 0 =
+ * recargo (se le debe más), amount < 0 = descuento. No mueve caja ni stock.
+ */
+export interface SupplierAdjustment {
+  id: string;
+  supplierId: string;
+  adjustmentDate: string;
+  amount: number;
+  notes?: string;
+}
+
+export async function fetchSupplierAdjustmentsEnabled(companyId: string): Promise<boolean> {
+  if (!supabase) return false;
+  const { data, error } = await supabase.from("companies").select("supplier_adjustments").eq("id", companyId).maybeSingle();
+  // Base sin la migración 142: la función queda apagada, nunca rompe Compras.
+  if (error || !data) return false;
+  return Boolean((data as { supplier_adjustments?: boolean }).supplier_adjustments);
+}
+
+export async function listSupplierAdjustments(supplierId: string): Promise<SupplierAdjustment[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from("supplier_adjustments")
+    .select("id,supplier_id,adjustment_date,amount,notes")
+    .eq("supplier_id", supplierId)
+    .order("adjustment_date", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((row) => ({
+    id: row.id as string,
+    supplierId: row.supplier_id as string,
+    adjustmentDate: row.adjustment_date as string,
+    amount: Number(row.amount),
+    notes: (row.notes as string | null) ?? undefined
+  }));
+}
+
+export async function addSupplierAdjustment(input: { supplierId: string; adjustmentDate: string; amount: number; notes?: string }): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("add_supplier_adjustment", {
+    p_supplier_id: input.supplierId,
+    p_adjustment_date: input.adjustmentDate,
+    p_amount: input.amount,
+    p_notes: input.notes ?? null
+  });
+  if (error) throw error;
+}
+
+export async function deleteSupplierAdjustment(id: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("delete_supplier_adjustment", { p_adjustment_id: id });
+  if (error) throw error;
+}

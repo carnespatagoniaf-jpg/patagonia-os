@@ -8,7 +8,7 @@ import { LOW_MARGIN_ALERT, costChangesFromPurchase } from "../inventory/price-to
 import { useSuppliers } from "./useSuppliers";
 import { usePurchases } from "./usePurchases";
 import { useTreasury } from "../shifts/useTreasury";
-import type { PurchaseLineInput } from "./purchases-service";
+import { addSupplierAdjustment, deleteSupplierAdjustment, fetchSupplierAdjustmentsEnabled, type PurchaseLineInput } from "./purchases-service";
 import { parseAmount } from "../../lib/money";
 import { quantityNumber } from "../sale/quantity";
 import { useAuth } from "../auth/AuthProvider";
@@ -43,6 +43,16 @@ function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
 }
 
+function formatQuantity(value: number) {
+  return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 3 }).format(value);
+}
+
+function errorText(err: unknown, fallback: string) {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === "object" && err !== null && "message" in err) return String((err as { message: unknown }).message) || fallback;
+  return fallback;
+}
+
 const PAYMENT_METHOD_LABELS: Record<PaymentMethod, string> = {
   cash: "Efectivo",
   qr: "Mercado Pago QR",
@@ -60,6 +70,10 @@ interface LedgerRow {
   debit: number;
   credit: number;
   balance: number;
+  /** Detalle de la compra (peso, precio): solo con descuentos/recargos activos. */
+  lines?: string[];
+  /** Descuento o recargo que se puede borrar desde el detalle. */
+  adjustmentId?: string;
 }
 
 export function Purchases() {
@@ -68,6 +82,7 @@ export function Purchases() {
     purchases,
     items,
     payments,
+    adjustments,
     balance,
     loading: purchasesLoading,
     error: purchasesError,
@@ -137,6 +152,14 @@ export function Purchases() {
   const [editingDatePurchaseId, setEditingDatePurchaseId] = useState<string | null>(null);
   const [editPurchaseDateValue, setEditPurchaseDateValue] = useState("");
 
+  // Detalle de compra + descuentos/recargos en la cuenta (migración 142):
+  // solo empresas con companies.supplier_adjustments (hoy Martínez).
+  const [adjustmentsEnabled, setAdjustmentsEnabled] = useState(false);
+  const [adjustmentKind, setAdjustmentKind] = useState<"descuento" | "recargo">("descuento");
+  const [adjustmentAmount, setAdjustmentAmount] = useState("");
+  const [adjustmentDate, setAdjustmentDate] = useState(todayIso());
+  const [adjustmentNotes, setAdjustmentNotes] = useState("");
+
   const [editingSupplier, setEditingSupplier] = useState(false);
   const [editSupplierName, setEditSupplierName] = useState("");
   const [editSupplierCategory, setEditSupplierCategory] = useState("");
@@ -148,6 +171,11 @@ export function Purchases() {
     if (!isSupabaseConfigured || !branchId) return;
     listProductsForBranch(branchId).then(setProducts).catch(() => setProducts([]));
   }, [branchId]);
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !profile?.company_id) return;
+    fetchSupplierAdjustmentsEnabled(profile.company_id).then(setAdjustmentsEnabled).catch(() => setAdjustmentsEnabled(false));
+  }, [profile?.company_id]);
 
   useEffect(() => {
     if (selectedSupplierId) void loadSupplier(selectedSupplierId);
@@ -404,6 +432,47 @@ export function Purchases() {
     }
   }
 
+  async function handleAddAdjustment() {
+    if (busy) return;
+    setBusy(true);
+    try {
+      if (!selectedSupplierId) throw new Error("Elegí un proveedor primero.");
+      const amount = parseAmount(adjustmentAmount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error("Ingresá un monto válido.");
+      if (!adjustmentDate) throw new Error("Ingresá una fecha.");
+      await addSupplierAdjustment({
+        supplierId: selectedSupplierId,
+        adjustmentDate,
+        amount: adjustmentKind === "descuento" ? -amount : amount,
+        notes: adjustmentNotes.trim() || undefined
+      });
+      await loadSupplier(selectedSupplierId);
+      setAdjustmentAmount("");
+      setAdjustmentNotes("");
+      setMessage(adjustmentKind === "descuento" ? "Descuento cargado: la deuda con el proveedor bajó." : "Recargo cargado: la deuda con el proveedor subió.");
+    } catch (error) {
+      setMessage(errorText(error, "No se pudo cargar el movimiento."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDeleteAdjustment(adjustmentId: string) {
+    if (busy) return;
+    if (!window.confirm("¿Seguro que querés borrar este descuento o recargo?")) return;
+    setBusy(true);
+    try {
+      if (!selectedSupplierId) return;
+      await deleteSupplierAdjustment(adjustmentId);
+      await loadSupplier(selectedSupplierId);
+      setMessage("Movimiento borrado.");
+    } catch (error) {
+      setMessage(errorText(error, "No se pudo borrar el movimiento."));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleDeletePayment(paymentId: string) {
     if (busy) return;
     if (!window.confirm("¿Seguro que querés borrar este pago? No se puede deshacer.")) return;
@@ -439,7 +508,14 @@ export function Purchases() {
         date: purchase.purchaseDate,
         detail: purchase.invoiceNumber ? `Compra · Fact. ${purchase.invoiceNumber}` : "Compra",
         debit: purchase.total,
-        credit: 0
+        credit: 0,
+        lines: adjustmentsEnabled
+          ? (items[purchase.id] ?? []).map((item) => {
+              const name = item.description ?? products.find((p) => p.id === item.productId)?.name ?? "Producto";
+              const unit = item.unit === "kg" ? "kg" : item.quantity === 1 ? "unidad" : "unidades";
+              return `${name}: ${formatQuantity(item.quantity)} ${unit} × ${formatMoney(item.unitPrice)} = ${formatMoney(item.lineTotal)}`;
+            })
+          : undefined
       })),
       ...payments.map((payment) => ({
         key: `payment-${payment.id}`,
@@ -447,6 +523,14 @@ export function Purchases() {
         detail: `Pago · ${payment.accountName ?? PAYMENT_METHOD_LABELS[payment.paymentMethod]}${payment.notes ? ` · ${payment.notes}` : ""}`,
         debit: 0,
         credit: payment.amount
+      })),
+      ...(adjustmentsEnabled ? adjustments : []).map((adjustment) => ({
+        key: `adjustment-${adjustment.id}`,
+        date: adjustment.adjustmentDate,
+        detail: `${adjustment.amount < 0 ? "Descuento" : "Recargo"}${adjustment.notes ? ` · ${adjustment.notes}` : ""}`,
+        debit: adjustment.amount > 0 ? adjustment.amount : 0,
+        credit: adjustment.amount < 0 ? -adjustment.amount : 0,
+        adjustmentId: adjustment.id
       }))
     ].sort((a, b) => a.date.localeCompare(b.date));
 
@@ -455,7 +539,8 @@ export function Purchases() {
       running += row.debit - row.credit;
       return { ...row, balance: running };
     });
-  }, [purchases, payments]);
+  }, [purchases, payments, adjustments, adjustmentsEnabled, items, products]);
+  const adjustmentsTotal = adjustments.reduce((sum, a) => sum + a.amount, 0);
 
   function handlePrintLedger() {
     window.print();
@@ -541,6 +626,9 @@ export function Purchases() {
               <span>Proveedor <b>{selectedSupplier.name}</b></span>
               <span>Compras <b>{formatMoney(balance?.totalPurchases ?? 0)}</b></span>
               <span>Pagos <b>{formatMoney(balance?.totalPayments ?? 0)}</b></span>
+              {adjustmentsEnabled && adjustmentsTotal !== 0 && (
+                <span>{adjustmentsTotal < 0 ? "Descuentos" : "Recargos"} <b>{formatMoney(Math.abs(adjustmentsTotal))}</b></span>
+              )}
               <strong>Saldo <b>{formatMoney(balance?.balance ?? 0)}</b></strong>
               <button className="secondary" style={{ marginTop: 10 }} onClick={() => setEditingSupplier(true)}>Editar</button>
             </div>
@@ -581,6 +669,25 @@ export function Purchases() {
                 <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
               </div>
           </section>
+
+          {adjustmentsEnabled && (
+            <section className="panel no-print" style={{ marginTop: 18 }}>
+              <div className="panel-title">
+                <h2>Descuento o recargo a {selectedSupplier.name}</h2>
+              </div>
+              <p className="muted" style={{ marginTop: 0 }}>Cambia lo que le debés, sin mover caja ni stock. Descuento: le debés menos. Recargo: le debés más.</p>
+              <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
+                <select value={adjustmentKind} onChange={(e) => setAdjustmentKind(e.target.value as "descuento" | "recargo")}>
+                  <option value="descuento">Descuento</option>
+                  <option value="recargo">Recargo</option>
+                </select>
+                <input type="date" value={adjustmentDate} onChange={(e) => setAdjustmentDate(e.target.value)} />
+                <input type="text" inputMode="decimal" placeholder="Monto" value={adjustmentAmount} onChange={(e) => setAdjustmentAmount(e.target.value)} />
+                <input placeholder="Motivo (opcional)" value={adjustmentNotes} onChange={(e) => setAdjustmentNotes(e.target.value)} />
+                <button disabled={busy} onClick={handleAddAdjustment}>{busy ? "Guardando…" : adjustmentKind === "descuento" ? "Cargar descuento" : "Cargar recargo"}</button>
+              </div>
+            </section>
+          )}
 
           <section className="panel no-print" style={{ marginTop: 18 }}>
             <div className="panel-title">
@@ -922,8 +1029,8 @@ export function Purchases() {
                 <tr>
                   <th>Fecha</th>
                   <th>Comprobante</th>
-                  <th className="num">Debe (compras)</th>
-                  <th className="num">Haber (pagos)</th>
+                  <th className="num">{adjustmentsEnabled ? "Debe (compras, recargos)" : "Debe (compras)"}</th>
+                  <th className="num">{adjustmentsEnabled ? "Haber (pagos, descuentos)" : "Haber (pagos)"}</th>
                   <th className="num">Saldo</th>
                 </tr>
               </thead>
@@ -931,7 +1038,17 @@ export function Purchases() {
                 {ledger.map((row) => (
                   <tr key={row.key}>
                     <td>{row.date}</td>
-                    <td>{row.detail}</td>
+                    <td>
+                      {row.detail}
+                      {row.adjustmentId && (
+                        <button className="secondary no-print" style={{ marginLeft: 8 }} disabled={busy} onClick={() => handleDeleteAdjustment(row.adjustmentId!)}>Borrar</button>
+                      )}
+                      {row.lines && row.lines.length > 0 && (
+                        <ul style={{ margin: "4px 0 0", paddingLeft: 18, fontSize: 13 }}>
+                          {row.lines.map((line, index) => <li key={index}>{line}</li>)}
+                        </ul>
+                      )}
+                    </td>
                     <td className="num">{row.debit > 0 ? formatMoney(row.debit) : "-"}</td>
                     <td className="num">{row.credit > 0 ? formatMoney(row.credit) : "-"}</td>
                     <td className="num">{formatMoney(row.balance)}</td>

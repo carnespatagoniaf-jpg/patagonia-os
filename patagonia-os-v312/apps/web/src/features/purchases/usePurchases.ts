@@ -8,6 +8,7 @@ import {
   deleteSupplierPayment,
   listPurchaseItems,
   listPurchasesForSupplier,
+  listSupplierAdjustments,
   listSupplierPayments,
   registerSupplierPayment,
   updatePurchaseDate,
@@ -15,6 +16,7 @@ import {
   updateSupplierPayment,
   voidPurchase,
   type CreatePurchaseInput,
+  type SupplierAdjustment,
   type PurchaseLineInput,
   type RegisterSupplierPaymentInput,
   type UpdateSupplierPaymentInput
@@ -33,6 +35,7 @@ export function usePurchases() {
   const [purchases, setPurchases] = useState<Purchase[]>([]);
   const [items, setItems] = useState<Record<string, PurchaseItem[]>>({});
   const [payments, setPayments] = useState<SupplierPayment[]>([]);
+  const [adjustments, setAdjustments] = useState<SupplierAdjustment[]>([]);
   const [balance, setBalance] = useState<SupplierBalance | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -57,6 +60,7 @@ export function usePurchases() {
         setPurchases(ledger?.purchases ?? []);
         setItems(ledger?.items ?? {});
         setPayments(ledger?.payments ?? []);
+        setAdjustments([]);
         setBalance(computeDemoBalance(ledger));
         return;
       }
@@ -64,13 +68,16 @@ export function usePurchases() {
       setLoading(true);
       setError(null);
       try {
-        const [purchaseList, paymentList, supplierBalance] = await Promise.all([
+        const [purchaseList, paymentList, supplierBalance, adjustmentList] = await Promise.all([
           listPurchasesForSupplier(supplierId),
           listSupplierPayments(supplierId),
-          fetchSupplierBalance(supplierId)
+          fetchSupplierBalance(supplierId),
+          // Descuentos/recargos (migración 142): si la tabla no está, la cuenta igual carga.
+          listSupplierAdjustments(supplierId).catch(() => [] as SupplierAdjustment[])
         ]);
         setPurchases(purchaseList);
         setPayments(paymentList);
+        setAdjustments(adjustmentList);
         setBalance(supplierBalance);
 
         const itemLists = await Promise.all(purchaseList.map((p) => listPurchaseItems(p.id)));
@@ -289,5 +296,5 @@ export function usePurchases() {
     [loadSupplier]
   );
 
-  return { purchases, items, payments, balance, loading, error, branchId, loadSupplier, create, editItem, editPurchaseDate, registerPayment, updatePayment, removePayment, voidPurchase: voidPurchaseEntry };
+  return { purchases, items, payments, adjustments, balance, loading, error, branchId, loadSupplier, create, editItem, editPurchaseDate, registerPayment, updatePayment, removePayment, voidPurchase: voidPurchaseEntry };
 }
