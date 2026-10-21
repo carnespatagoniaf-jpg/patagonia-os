@@ -239,6 +239,8 @@ export function Customers() {
   const today = todayIso();
   const visibleCustomers = useMemo(() => filterAndSortCustomers(customers, search, listFilter, today), [customers, search, listFilter, today]);
   const statusCounts = useMemo(() => countByStatus(customers, today), [customers, today]);
+  // Suma de lo que deben todos (pedido de Martínez, 2026-10-21): solo saldos a cobrar, no los "a favor".
+  const totalOwed = useMemo(() => customers.reduce((sum, c) => (c.balance >= 1 ? sum + c.balance : sum), 0), [customers]);
 
   useEffect(() => {
     if (selectedCustomer) {
@@ -667,6 +669,12 @@ export function Customers() {
             <h2>Clientes</h2>
             <span>{loading ? "Cargando…" : `${visibleCustomers.length} de ${customers.length}`}</span>
           </div>
+          {!loading && statusCounts.owes > 0 && (
+            <div className="totals" style={{ marginBottom: 10 }}>
+              <strong>Te deben en total <b>{formatMoney(totalOwed)}</b></strong>
+              <span className="muted">entre {statusCounts.owes} {statusCounts.owes === 1 ? "cliente" : "clientes"}</span>
+            </div>
+          )}
           <input
             placeholder="Buscar por número, nombre, teléfono o localidad"
             value={search}

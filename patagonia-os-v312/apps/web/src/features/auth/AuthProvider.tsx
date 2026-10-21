@@ -13,6 +13,8 @@ export interface UserProfile {
   denied_permissions?: string[];
   /** Plan de la empresa (migración 101). Ver permissions.ts: profilePlan(). */
   plan?: "basico" | "estandar" | "full";
+  /** Pantallas extra a pedido de esa empresa (migración 143, companies.features). Ver permissions.ts: PAGE_REQUIRED_FEATURE. */
+  features?: string[];
 }
 
 interface AuthContextValue {
@@ -74,9 +76,17 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const PROFILE_COLUMNS = "id,company_id,branch_id,full_name,role,active,denied_permissions";
     let { data, error } = await supabase
       .from("profiles")
-      .select(`${PROFILE_COLUMNS},companies(active,plan)`)
+      .select(`${PROFILE_COLUMNS},companies(active,plan,features)`)
       .eq("id", userId)
       .maybeSingle();
+    // Base todavía sin la migración 143 (companies.features): entrar igual, sin pantallas extra.
+    if (error && error.code === "42703") {
+      ({ data, error } = await supabase
+        .from("profiles")
+        .select(`${PROFILE_COLUMNS},companies(active,plan)`)
+        .eq("id", userId)
+        .maybeSingle());
+    }
     // Base todavía sin la migración 101 (columna companies.plan): entrar igual,
     // sin plan (cuenta como Full, ver profilePlan). Nunca dejar a nadie afuera por esto.
     if (error && error.code === "42703") {
@@ -110,13 +120,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (!data.active) throw new DefinitiveProfileError("El usuario está desactivado.");
-    type CompanyRow = { active: boolean; plan?: UserProfile["plan"] };
+    type CompanyRow = { active: boolean; plan?: UserProfile["plan"]; features?: string[] | null };
     const companyRaw = data.companies as unknown as CompanyRow | CompanyRow[] | null;
     const company = Array.isArray(companyRaw) ? companyRaw[0] : companyRaw;
     const companyActive = company?.active ?? true;
     if (!companyActive) throw new DefinitiveProfileError("Esta empresa está desactivada.");
     setIsPlatformAdmin(false);
-    setProfile({ ...(data as unknown as UserProfile), plan: company?.plan });
+    setProfile({ ...(data as unknown as UserProfile), plan: company?.plan, features: company?.features ?? [] });
     loadedProfileUserIdRef.current = userId;
   }
 

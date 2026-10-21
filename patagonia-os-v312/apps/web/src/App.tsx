@@ -8,6 +8,8 @@ import { Purchases } from "./features/purchases/Purchases";
 import { Shifts } from "./features/shifts/Shifts";
 import { Treasury } from "./features/shifts/Treasury";
 import { Reports } from "./features/shifts/Reports";
+import { AccountsReport } from "./features/accounts/AccountsReport";
+import { Expenses } from "./features/accounts/Expenses";
 import { Employees } from "./features/employees/Employees";
 import { Profitability } from "./features/profitability/Profitability";
 import { Carcass } from "./features/carcass/Carcass";
@@ -91,6 +93,8 @@ export default function App() {
         {allowed && page === "creditors" && <Creditors />}
         {allowed && page === "customers" && <Customers />}
         {allowed && page === "reports" && <Reports />}
+        {allowed && page === "accounts" && <AccountsReport />}
+        {allowed && page === "expenses" && <Expenses />}
         {allowed && page === "export" && <Export />}
         {allowed && page === "import" && <ImportData />}
         {allowed && page === "users" && <Users />}
