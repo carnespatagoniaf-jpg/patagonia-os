@@ -15,21 +15,7 @@ export interface NewsItem {
   until: string;
 }
 
-export const NEWS: NewsItem[] = [
-  {
-    id: "2026-10-compras-para-despostar",
-    title: "Nuevo: la factura del proveedor se carga una sola vez, en Compras",
-    body:
-      "Si el proveedor te trae en la misma factura cosas para vender tal cual (pan rallado, bondiola) y cosas para despostar " +
-      "(cajones de pollo, media res, capón), cargá todo junto en Compras y tildá \"Para despostar\" en esa línea. " +
-      "La deuda queda una sola vez y la res aparece sola en Despiece; con plantilla de cortes, ya repartida y en el stock. " +
-      "Despiece queda para ver cuánto rindió y cuánto costó cada corte: ya no genera deuda con el proveedor.",
-    page: "purchases",
-    pageLabel: "Ir a Compras",
-    requires: ["purchases.manage", "carcass.manage"],
-    until: "2026-11-15"
-  }
-];
+export const NEWS: NewsItem[] = [];
 
 /** Novedades que esta persona tiene que ver hoy. */
 export function visibleNews(
