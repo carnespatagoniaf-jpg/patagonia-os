@@ -26,7 +26,7 @@ const cashDiff = (c: CashierActivity) => c.cashDifference ?? 0;
 const ORDER_LABELS: Record<RankingOrder, string> = { amount: "Más vendidos ($)", profit: "Más ganancia", quantity: "Más kilos" };
 
 /**
- * Reportes, plan Full (2026-10-22): ranking de productos, por cajero y por día y hora.
+ * Reportes, todos los planes (2026-10-22; migración 146): ranking de productos, por cajero y por día y hora.
  * Usa las ventas por producto que Reports.tsx ya trajo; cajeros/horarios y el stock
  * se piden acá cada vez que cambia la búsqueda (runId).
  */

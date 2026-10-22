@@ -29,7 +29,7 @@ function Row({ label, amount, sign, strong, note, children }: {
 }
 
 /**
- * Reportes, plan Full, solo dueño/admin (2026-10-22): "Resultado del período"
+ * Reportes, todos los planes, solo dueño/admin (2026-10-22; migración 146): "Resultado del período"
  * (ventas − costo − faltantes − gastos − sueldos) y "Merma" (conteos de stock y
  * desposte). Se pide cada vez que cambia la búsqueda (runId).
  */
