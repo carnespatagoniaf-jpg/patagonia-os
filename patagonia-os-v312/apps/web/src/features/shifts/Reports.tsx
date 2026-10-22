@@ -267,7 +267,7 @@ export function Reports() {
             )}
           </section>
 
-          <ReportsActivity branchId={branchId} from={from} to={to} runId={runId} productSales={productSales} />}
+          <ReportsActivity branchId={branchId} from={from} to={to} runId={runId} productSales={productSales} />
 
           <section className="panel" style={{ marginTop: 18 }}>
             <div className="panel-title">
