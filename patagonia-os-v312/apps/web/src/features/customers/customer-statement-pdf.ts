@@ -9,6 +9,8 @@ export interface StatementRow {
   debit: number;
   credit: number;
   balance: number;
+  /** Cantidad y precio de cada renglón de la venta (solo con 'ventas_detalle'). */
+  lines?: string[];
 }
 
 export interface StatementInput {
@@ -76,7 +78,9 @@ export async function buildCustomerStatementPdf(input: StatementInput) {
     head: [["Fecha", "Concepto", "Venta", "Pago", "Saldo"]],
     body: input.rows.map((row) => [
       shortDate(row.date),
-      row.detail,
+      row.lines && row.lines.length > 0
+        ? [row.detail, ...row.lines.map((line) => `  ${line.replace(/[\u00a0\u202f]/g, " ")}`)].join("\n")
+        : row.detail,
       row.debit > 0 ? money(row.debit) : "-",
       row.credit > 0 ? money(row.credit) : "-",
       money(row.balance)

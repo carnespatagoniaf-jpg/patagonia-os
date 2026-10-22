@@ -10,6 +10,7 @@ import { countByStatus, customerStatus, filterAndSortCustomers, type CustomerFil
 import { QuantityInput } from "../../components/QuantityInput";
 import { parseQuantity } from "../sale/quantity";
 import { useAuth } from "../auth/AuthProvider";
+import { listChargeItemsForCharges, type ChargeItemDetail } from "./customers-service";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { getCompanyName } from "../products/products-service";
 import { downloadCustomerStatementPdf } from "./customer-statement-pdf";
@@ -62,6 +63,25 @@ interface LedgerRow {
   debit: number;
   credit: number;
   balance: number;
+  /** Cantidad y precio de cada renglón (+ descuento o recargo): solo con 'ventas_detalle'. */
+  lines?: string[];
+}
+
+const DETAIL_UNIT: Record<string, string> = { kg: "kg", unit: "u.", box: "caja" };
+
+function formatQty(value: number) {
+  return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 3 }).format(value);
+}
+
+/** Lo que se cobró de más o de menos sobre la suma de los renglones (descuento o recargo, migración 145). */
+function chargeAdjustmentOf(amount: number, items: { lineTotal: number }[]) {
+  if (items.length === 0) return 0;
+  const diff = Math.round(amount - Math.round(items.reduce((sum, i) => sum + i.lineTotal, 0)));
+  return Math.abs(diff) >= 1 ? diff : 0;
+}
+
+function adjustmentLabel(value: number) {
+  return `${value < 0 ? "Descuento" : "Recargo"}: ${value < 0 ? "-" : "+"}${formatMoney(Math.abs(value))}`;
 }
 
 export function Customers() {
@@ -98,7 +118,11 @@ export function Customers() {
   const [manualPrice, setManualPrice] = useState("");
   const [manualQty, setManualQty] = useState("1");
   const [manualUnit, setManualUnit] = useState<Product["unit"]>("unit");
-  const [printCharge, setPrintCharge] = useState<{ date: string; reason: string; amount: number; items: CustomerChargeItem[]; invoice?: InvoicePrint } | null>(null);
+  const [printCharge, setPrintCharge] = useState<{ date: string; reason: string; amount: number; items: CustomerChargeItem[]; invoice?: InvoicePrint; adjustment?: number } | null>(null);
+  // Descuento o recargo en la venta + cantidad y precio en el detalle (migración 145, solo 'ventas_detalle': Martínez).
+  const [chargeAdjKind, setChargeAdjKind] = useState<"descuento" | "recargo">("descuento");
+  const [chargeAdjAmount, setChargeAdjAmount] = useState("");
+  const [ledgerItems, setLedgerItems] = useState<Record<string, ChargeItemDetail[]>>({});
   // Factura ARCA (migración 136): casi todo sale con remito; si el cliente la pide, también factura.
   const [fiscal, setFiscal] = useState<FiscalSettings | null>(null);
   const [chargeInvoices, setChargeInvoices] = useState<Invoice[]>([]);
@@ -188,6 +212,9 @@ export function Customers() {
   const [message, setMessage] = useState("");
   const [pdfBusy, setPdfBusy] = useState(false);
   const { profile } = useAuth();
+  const salesDetail = Boolean(profile?.features?.includes("ventas_detalle"));
+  const chargeAdjustment = salesDetail ? Math.round((chargeAdjKind === "descuento" ? -1 : 1) * (parseAmount(chargeAdjAmount || "0") || 0)) : 0;
+  const finalChargeTotal = Math.round(chargeTotal) + chargeAdjustment;
   const [busy, setBusy] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
@@ -308,17 +335,38 @@ export function Customers() {
     }
   }
 
+  useEffect(() => {
+    if (!salesDetail || charges.length === 0) {
+      setLedgerItems({});
+      return;
+    }
+    void listChargeItemsForCharges(charges.map((c) => c.id))
+      .then((list) => {
+        const grouped: Record<string, ChargeItemDetail[]> = {};
+        for (const item of list) (grouped[item.chargeId] ??= []).push(item);
+        setLedgerItems(grouped);
+      })
+      .catch(() => setLedgerItems({}));
+  }, [charges, salesDetail]);
+
   const ledger = useMemo<LedgerRow[]>(() => {
     const rows: Omit<LedgerRow, "balance">[] = [
-      ...charges.map((c) => ({
-        key: `charge-${c.id}`,
-        type: "charge" as const,
-        id: c.id,
-        date: c.chargeDate,
-        detail: `Venta · ${c.reason}`,
-        debit: c.amount,
-        credit: 0
-      })),
+      ...charges.map((c) => {
+        const items = salesDetail ? ledgerItems[c.id] ?? [] : [];
+        const adjustment = chargeAdjustmentOf(c.amount, items);
+        const lines = items.map((i) => `${i.name}: ${formatQty(i.quantity)}${i.unit ? ` ${DETAIL_UNIT[i.unit] ?? i.unit}` : ""} × ${formatMoney(i.unitPrice)} = ${formatMoney(i.lineTotal)}`);
+        if (adjustment !== 0) lines.push(adjustmentLabel(adjustment));
+        return {
+          key: `charge-${c.id}`,
+          type: "charge" as const,
+          id: c.id,
+          date: c.chargeDate,
+          detail: `Venta · ${c.reason}`,
+          debit: c.amount,
+          credit: 0,
+          lines: lines.length > 0 ? lines : undefined
+        };
+      }),
       ...payments.map((p) => ({
         key: `payment-${p.id}`,
         type: "payment" as const,
@@ -335,7 +383,7 @@ export function Customers() {
       running += row.debit - row.credit;
       return { ...row, balance: running };
     });
-  }, [charges, payments]);
+  }, [charges, payments, ledgerItems, salesDetail]);
 
   async function handleCreateCustomer() {
     if (busy) return;
@@ -440,7 +488,9 @@ export function Customers() {
     try {
       if (!selectedCustomer) return;
       if (chargeCart.length === 0) throw new Error("Agregá al menos un producto.");
+      if (salesDetail && finalChargeTotal <= 0) throw new Error("Con ese descuento la venta queda en cero o menos.");
       const cartSnapshot = chargeCart;
+      const adjustmentSnapshot = chargeAdjustment;
       const noteSnapshot = chargeNote.trim();
       const result = await addChargeWithItems({
         customerId: selectedCustomer.id,
@@ -450,10 +500,12 @@ export function Customers() {
             ? { productId: l.productId, quantity: l.quantity }
             : { description: l.name, unitPrice: l.unitPrice, quantity: l.quantity }
         ),
-        reason: noteSnapshot || undefined
+        reason: noteSnapshot || undefined,
+        adjustment: adjustmentSnapshot || undefined
       });
       setChargeCart([]);
       setChargeNote("");
+      setChargeAdjAmount("");
       setMessage("Venta registrada -- se descontó el stock, igual que en el Mostrador.");
       // Se muestra el remito de ESTA venta al toque -- la mercadería tiene
       // que salir con la boleta en el momento, no buscarla después en el
@@ -468,7 +520,8 @@ export function Customers() {
           quantity: l.quantity,
           unitPrice: l.unitPrice,
           lineTotal: l.quantity * l.unitPrice
-        }))
+        })),
+        adjustment: adjustmentSnapshot || undefined
       };
       setPrintCharge(sale);
       if (wantsInvoice) {
@@ -497,7 +550,8 @@ export function Customers() {
         setMessage("Esta venta no tiene detalle de productos (se cargó con el formulario viejo de monto + texto).");
         return;
       }
-      setPrintCharge({ date: row.date, reason: row.detail, amount: row.debit, items });
+      const adjustment = salesDetail ? chargeAdjustmentOf(row.debit, items) : 0;
+      setPrintCharge({ date: row.date, reason: row.detail, amount: row.debit, items, adjustment: adjustment || undefined });
     } catch (err) {
       // Detalle crudo del error -- para diagnosticar sin acceso a la base,
       // ya que el mensaje "lindo" de más abajo no alcanzó para ver la causa
@@ -828,6 +882,9 @@ export function Customers() {
             </tbody>
           </table>
           <div className="totals" style={{ marginTop: 12 }}>
+            {printCharge.adjustment ? (
+              <span>{printCharge.adjustment < 0 ? "Descuento" : "Recargo"} <b>{printCharge.adjustment < 0 ? "-" : "+"}{formatMoney(Math.abs(printCharge.adjustment))}</b></span>
+            ) : null}
             <strong>Total <b>{formatMoney(printCharge.amount)}</b></strong>
           </div>
           {printCharge.invoice && <InvoicePaperFooter invoice={printCharge.invoice} />}
@@ -940,13 +997,34 @@ export function Customers() {
                   <div className="cash-banner-form" style={{ marginTop: 12 }}>
                     <input placeholder="Nota (opcional, ej. nº de factura)" value={chargeNote} onChange={(e) => setChargeNote(e.target.value)} style={{ flex: 1, minWidth: 200 }} />
                   </div>
+                  {salesDetail && (
+                    <div className="cash-banner-form" style={{ marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      <select value={chargeAdjKind} onChange={(e) => setChargeAdjKind(e.target.value as "descuento" | "recargo")}>
+                        <option value="descuento">Descuento</option>
+                        <option value="recargo">Recargo</option>
+                      </select>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="Monto (opcional)"
+                        value={chargeAdjAmount}
+                        onChange={(e) => setChargeAdjAmount(e.target.value)}
+                        style={{ width: 150 }}
+                      />
+                      {chargeAdjustment !== 0 && (
+                        <span className="muted" style={{ fontSize: 13 }}>
+                          Productos {formatMoney(Math.round(chargeTotal))} {chargeAdjustment < 0 ? "−" : "+"} {formatMoney(Math.abs(chargeAdjustment))}
+                        </span>
+                      )}
+                    </div>
+                  )}
                   {fiscal?.enabled && (
                     <InvoiceRequestFields issuer={fiscal.taxCondition} draft={newInvoiceDraft} total={chargeTotal} onChange={setNewInvoiceDraft} />
                   )}
                   <div className="pos-total-bar" style={{ marginTop: 12 }}>
                     <div>
                       <p className="pos-total-label">Total de la venta</p>
-                      <strong className="pos-total-value">{formatMoney(chargeTotal)}</strong>
+                      <strong className="pos-total-value">{formatMoney(salesDetail ? finalChargeTotal : chargeTotal)}</strong>
                     </div>
                     <button className="charge-button pos-charge-btn" disabled={busy} onClick={handleAddCharge}>
                       {busy ? "Registrando…" : "Registrar venta"}
@@ -1056,6 +1134,11 @@ export function Customers() {
                         {row.detail}
                         {row.type === "charge" && invoiceForCharge(row.id) && (
                           <span className="muted" style={{ fontSize: 12 }}> · {invoiceLabel(invoiceForCharge(row.id)!)}</span>
+                        )}
+                        {row.lines && (
+                          <ul style={{ margin: "4px 0 0", paddingLeft: 18, fontSize: 13 }}>
+                            {row.lines.map((line, index) => <li key={index}>{line}</li>)}
+                          </ul>
                         )}
                       </td>
                       <td className="num">{row.debit > 0 ? formatMoney(row.debit) : "-"}</td>

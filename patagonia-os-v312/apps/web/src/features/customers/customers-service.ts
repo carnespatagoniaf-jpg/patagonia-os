@@ -204,6 +204,8 @@ export interface CreateCustomerChargeWithItemsInput {
   chargeDate: string;
   items: CreateCustomerChargeItemInput[];
   reason?: string;
+  /** Descuento (negativo) o recargo (positivo) sobre el total, migración 145. Solo empresas con 'ventas_detalle'. */
+  adjustment?: number;
 }
 
 /** A diferencia de createCustomerCharge (monto + texto libre, no toca
@@ -223,7 +225,8 @@ export async function createCustomerChargeWithItems(input: CreateCustomerChargeW
         ? { product_id: item.productId, quantity: item.quantity }
         : { description: item.description, unit_price: item.unitPrice, quantity: item.quantity }
     ),
-    p_reason: input.reason ?? null
+    p_reason: input.reason ?? null,
+    ...(input.adjustment ? { p_adjustment: input.adjustment } : {})
   });
 
   if (error) throw error;
@@ -258,6 +261,45 @@ export async function getCustomerChargeItems(chargeId: string): Promise<Customer
     unitPrice: Number(row.unit_price),
     lineTotal: Number(row.line_total)
   }));
+}
+
+/** Renglones de varias ventas a la vez, para mostrar cantidad y precio en el
+ * Detalle de cuenta corriente y el PDF (pedido de Martínez, 'ventas_detalle').
+ * La tabla ya filtra por empresa con RLS. */
+export interface ChargeItemDetail {
+  chargeId: string;
+  name: string;
+  quantity: number;
+  unit?: string;
+  unitPrice: number;
+  lineTotal: number;
+}
+
+export async function listChargeItemsForCharges(chargeIds: string[]): Promise<ChargeItemDetail[]> {
+  if (!supabase || chargeIds.length === 0) return [];
+  const result: ChargeItemDetail[] = [];
+  // De a 100 ids, para no pasarse del largo de la URL.
+  for (let i = 0; i < chargeIds.length; i += 100) {
+    const { data, error } = await supabase
+      .from("customer_charge_items")
+      .select("charge_id,description,quantity,unit_price,line_total,created_at,products(name,unit)")
+      .in("charge_id", chargeIds.slice(i, i + 100))
+      .order("created_at");
+    if (error) throw error;
+    type Row = { charge_id: string; description: string | null; quantity: number; unit_price: number; line_total: number; products: { name: string; unit: string } | { name: string; unit: string }[] | null };
+    for (const row of (data ?? []) as unknown as Row[]) {
+      const product = Array.isArray(row.products) ? row.products[0] : row.products;
+      result.push({
+        chargeId: row.charge_id,
+        name: product?.name ?? row.description ?? "Producto",
+        quantity: Number(row.quantity),
+        unit: product?.unit,
+        unitPrice: Number(row.unit_price),
+        lineTotal: Number(row.line_total)
+      });
+    }
+  }
+  return result;
 }
 
 interface CustomerPaymentRow {
