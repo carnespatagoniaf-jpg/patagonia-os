@@ -15,7 +15,19 @@ export interface NewsItem {
   until: string;
 }
 
-export const NEWS: NewsItem[] = [];
+export const NEWS: NewsItem[] = [
+  {
+    id: "2026-10-reportes-nuevos",
+    title: "Nuevo en Reportes: cuánto te quedó, la merma y qué vende cada cajero",
+    body:
+      "Elegí el período y vas a ver el resultado (lo vendido menos el costo, los gastos y los sueldos), la merma de los conteos y del desposte, " +
+      "los productos que más venden y los que no salen, cuánto cobró cada cajero y a qué hora se vende más.",
+    page: "reports",
+    pageLabel: "Ir a Reportes",
+    requires: ["reports.view"],
+    until: "2026-11-12"
+  }
+];
 
 /** Novedades que esta persona tiene que ver hoy. */
 export function visibleNews(
