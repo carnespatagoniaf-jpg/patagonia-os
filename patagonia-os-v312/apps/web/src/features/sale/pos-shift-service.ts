@@ -1,4 +1,5 @@
 import type { ProductSalesRow } from "../shifts/sales-by-category";
+import { parsePeriodResult, type PeriodResultData } from "../shifts/period-result";
 import { parseActivityReport, type CashierActivity, type HourActivity } from "../shifts/sales-activity";
 import { supabase } from "../../lib/supabase";
 import { localDateIso } from "../shifts/format";
@@ -542,4 +543,12 @@ export async function getSalesActivity(branchId: string, fromDate: string, toDat
   });
   if (error) throw error;
   return parseActivityReport(data);
+}
+
+/** Reportes → "Resultado del período" y "Merma" (period_result_report, migración 145, plan Full, dueño/admin). Fechas "AAAA-MM-DD" de Argentina. */
+export async function getPeriodResult(branchId: string, fromDate: string, toDate: string): Promise<PeriodResultData> {
+  if (!supabase) return parsePeriodResult(null);
+  const { data, error } = await supabase.rpc("period_result_report", { p_branch_id: branchId, p_from: fromDate, p_to: toDate });
+  if (error) throw error;
+  return parsePeriodResult(data);
 }
