@@ -1,4 +1,5 @@
 import type { ProductSalesRow } from "../shifts/sales-by-category";
+import { parseActivityReport, type CashierActivity, type HourActivity } from "../shifts/sales-activity";
 import { supabase } from "../../lib/supabase";
 import { localDateIso } from "../shifts/format";
 import { parseCountResult, type CountResult, type DeclaredPayload } from "./cash-close";
@@ -529,4 +530,16 @@ export async function listSalesByProduct(branchId: string, fromDate: string, toD
     estimatedCostLines: Number(r.estimated_cost_lines ?? 0),
     missingCostLines: Number(r.missing_cost_lines ?? 0)
   }));
+}
+
+/** Reportes → "Por cajero" y "Por día y hora" (sales_activity_report, migración 144, plan Full). */
+export async function getSalesActivity(branchId: string, fromDate: string, toDate: string): Promise<{ cashiers: CashierActivity[]; hours: HourActivity[] }> {
+  if (!supabase) return { cashiers: [], hours: [] };
+  const { data, error } = await supabase.rpc("sales_activity_report", {
+    p_branch_id: branchId,
+    p_from: new Date(`${fromDate}T00:00:00`).toISOString(),
+    p_to: new Date(`${toDate}T23:59:59.999`).toISOString()
+  });
+  if (error) throw error;
+  return parseActivityReport(data);
 }

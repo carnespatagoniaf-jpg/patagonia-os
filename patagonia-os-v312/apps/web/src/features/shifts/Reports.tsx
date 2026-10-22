@@ -4,6 +4,9 @@ import { useTreasury } from "./useTreasury";
 import { addDaysIso, formatMoney, todayIso } from "./format";
 import type { ShiftRangeRow } from "./shifts-service";
 import { listPosSalesInRange, listSalesByProduct, type MostradorSaleEntry } from "../sale/pos-shift-service";
+import { ReportsActivity } from "./ReportsActivity";
+import { useAuth } from "../auth/AuthProvider";
+import { planAllows } from "../auth/permissions";
 import { changePct, groupSalesByCategory, marginOnCost, previousPeriod, type ProductSalesRow } from "./sales-by-category";
 
 const kgText = (n: number) => `${n.toLocaleString("es-AR", { maximumFractionDigits: 1 })} kg`;
@@ -25,6 +28,10 @@ const unitsText = (n: number) => `${n.toLocaleString("es-AR", { maximumFractionD
 export function Reports() {
   const { branchId, loadRange } = useShifts();
   const { accounts } = useTreasury();
+  const { profile } = useAuth();
+  // Ranking, cajeros y horarios: plan Full (lo nuevo arranca en Full).
+  const fullPlan = planAllows(profile, "full");
+  const [runId, setRunId] = useState(0);
 
   const [from, setFrom] = useState(todayIso());
   const [to, setTo] = useState(todayIso());
@@ -55,6 +62,7 @@ export function Reports() {
       setPreviousSales(byProductBefore);
       setOpenCategory(null);
       setRanOnce(true);
+      setRunId((n) => n + 1);
     } finally {
       setLoading(false);
     }
@@ -118,7 +126,7 @@ export function Reports() {
         <div>
           <p className="eyebrow">REPORTES</p>
           <h1>Reportes</h1>
-          <p className="muted">Ventas y salidas por rango de fechas: por categoría (carne, pollo…), por fecha y por cuenta.</p>
+          <p className="muted">Ventas y salidas por rango de fechas: por categoría (carne, pollo…), por fecha y por cuenta{fullPlan ? ", ranking de productos, por cajero y por día y hora" : ""}.</p>
         </div>
       </header>
 
@@ -255,6 +263,8 @@ export function Reports() {
               </p>
             )}
           </section>
+
+          {fullPlan && <ReportsActivity branchId={branchId} from={from} to={to} runId={runId} productSales={productSales} />}
 
           <section className="panel" style={{ marginTop: 18 }}>
             <div className="panel-title">
