@@ -27,6 +27,8 @@ import {
 import { emptyInvoiceDraft, invoiceDraftError, invoiceLabel, type InvoiceDraft, type InvoicePrint } from "../invoicing/invoicing-view";
 import { InvoiceRequestFields } from "../invoicing/InvoiceRequestFields";
 import { InvoicePaperFooter, InvoicePaperHeader } from "../invoicing/InvoicePaper";
+import { RemitoRButton, useRemitoREnabled } from "../invoicing/RemitoRButton";
+import { planAllows } from "../auth/permissions";
 
 const STATUS_BADGE: Record<CustomerStatus, { label: string; bg: string; color: string }> = {
   overdue: { label: "Atrasado", bg: "#fdecea", color: "#b3261e" },
@@ -212,6 +214,8 @@ export function Customers() {
   const [message, setMessage] = useState("");
   const [pdfBusy, setPdfBusy] = useState(false);
   const { profile } = useAuth();
+  // Remito R con CAI (migración 147): plan Full y un CAI cargado en Facturas.
+  const remitoR = useRemitoREnabled(planAllows(profile, "full"));
   const salesDetail = Boolean(profile?.features?.includes("ventas_detalle"));
   const chargeAdjustment = salesDetail ? Math.round((chargeAdjKind === "descuento" ? -1 : 1) * (parseAmount(chargeAdjAmount || "0") || 0)) : 0;
   const finalChargeTotal = Math.round(chargeTotal) + chargeAdjustment;
@@ -1151,6 +1155,7 @@ export function Customers() {
                             <button className="secondary" disabled={remitoBusyId === row.id} onClick={() => handleShowRemito(row)}>
                               {remitoBusyId === row.id ? "…" : "Remito"}
                             </button>{" "}
+                            {remitoR && <RemitoRButton chargeId={row.id} />}
                             {(() => {
                               const inv = invoiceForCharge(row.id);
                               if (inv?.status === "autorizada") {

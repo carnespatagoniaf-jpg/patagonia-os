@@ -39,6 +39,9 @@ import {
   type IssuerCondition
 } from "./invoicing-view";
 import { InvoiceRequestFields } from "./InvoiceRequestFields";
+import { RemitoRPanel } from "./RemitoRPanel";
+import { useAuth } from "../auth/AuthProvider";
+import { planAllows } from "../auth/permissions";
 
 // Facturas (factura electrónica ARCA, migraciones 113/121/136, planes Estándar y Full).
 // Pantalla del dueño: datos fiscales, conexión con ARCA, ventas sin factura y
@@ -76,6 +79,7 @@ const STATUS_LABEL: Record<Invoice["status"], string> = { pendiente: "Pendiente"
 
 export function Invoicing() {
   const { branchId } = useActiveBranch();
+  const { profile } = useAuth();
   const [settings, setSettings] = useState<FiscalSettings | null>(null);
   const [form, setForm] = useState<Form>(formFrom(null));
   const [invoices, setInvoices] = useState<Invoice[]>([]);
@@ -506,6 +510,9 @@ export function Invoicing() {
           }}
         />
       )}
+
+      {/* Remito R con CAI (migración 147): plan Full. */}
+      {planAllows(profile, "full") && <RemitoRPanel />}
 
       <section className="panel">
         <div className="panel-title">

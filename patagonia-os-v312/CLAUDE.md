@@ -228,6 +228,15 @@ UI: "3. Mandar productos a la balanza" in `ScaleSyncPanel` when the model is Aur
 - **Printing.** Printing uses `ReceiptState.invoice` (`InvoicePrint`). The thermal ticket uses `invoiceHeader`/`invoiceFooter` in `sale-tickets.ts`, with a native ESC/POS QR (`TicketBuilder.qr`, not yet checked on a real printer). Paper uses `InvoicePaper.tsx` (SVG QR via `qrcode-generator`). The QR is `arcaQrUrl` (RG 4892).
 - **Limits.** One VAT rate per invoice (`default_vat_rate`). Concept 1 (products) only. `CondicionIVAReceptorId` is always sent; it becomes mandatory on 2026-12-01.
 
+## Remito R con CAI (migration 147, LIVE 2026-10-22, plan Full)
+
+This is the official remito (code 91, "documento no válido como factura"). It is NOT the internal "Remito" button in Clientes. Unlike the invoice, there is no ARCA call per document. The shop's accountant gets a CAI as autoimpresor in ARCA, and the shop loads it in Facturas → "Remito R (con CAI)" (`RemitoRPanel.tsx`, `save_remito_cai`). Clientes then shows a "Remito R" button on each charge once an active CAI exists (`RemitoRButton.tsx` / `useRemitoREnabled`).
+- `issue_remito(charge)` locks the active CAIs and takes the next number per point of sale (max issued + 1, voided numbers included). It snapshots issuer, receiver and items into `remitos`, and is idempotent per charge.
+- `void_remito` keeps the row, and its number is never reused.
+- Tables `remito_cai`/`remitos` are company-readable, have no write policies, and have a restrictive `plan_full` policy.
+- Printing is A4 original + duplicado (`RemitoRPaper.tsx`, portal `.print-area`). Pure logic is in `invoicing/remito-r.ts` (tested).
+- Never confirmed with a real CAI or with an accountant. The legal basis is RG 1415 as amended by RG 5678/2025 (digital remito, CAI still required).
+
 ## AI help chat (LIVE since 2026-09-28)
 
 Edge Function `supabase/functions/help-chat` (single file with the help guide embedded; Claude Haiku via the Anthropic API, secret `ANTHROPIC_API_KEY`, 150 questions/day/company via `bump_help_chat_usage`, questions it can't answer are logged in `help_chat_unanswered`) plus `features/help/HelpChat.tsx`, mounted in `Layout.tsx` only when the web build has `VITE_HELP_CHAT=1`. It answers how-to questions only and never sees company data (deliberate, to avoid cross-tenant leaks). **The GUIDE must always match the real screens — owner requirement (2026-09-29).** Any change that adds, renames or moves a screen, button or flow a client uses must update the GUIDE in `supabase/functions/help-chat/index.ts` in the same change, and redeploy it (`npx supabase functions deploy help-chat --project-ref tayylvhfmoybchutybcz`, with the Windows user env var `SUPABASE_ACCESS_TOKEN`; no linking needed). A change is not done until that is live. `apps/web/src/features/help/help-guide-sync.test.ts` fails `npm run test` when a menu item in `Layout.tsx` is missing from the GUIDE's menu line. It only catches missing screens, not stale wording inside them, so still reread the matching GUIDE section. Questions the chat could not answer are logged in `help_chat_unanswered` (prod); check it to find gaps.
