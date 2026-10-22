@@ -110,7 +110,8 @@ begin
       count(*) as shifts,
       count(difference) as counted_shifts,
       coalesce(sum(difference), 0) as cash_difference,
-      count(*) filter (where difference < 0) as short_shifts
+      -- Menos de $1 es redondeo de centavos, no faltante.
+      count(*) filter (where difference <= -1) as short_shifts
     from closes
     group by cashier_name
   )

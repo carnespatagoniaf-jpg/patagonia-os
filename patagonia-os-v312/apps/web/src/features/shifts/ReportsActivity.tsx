@@ -20,6 +20,9 @@ const unitsText = (n: number) => `${n.toLocaleString("es-AR", { maximumFractionD
 const qtyText = (unit: string | null, n: number) => (unit === "kg" ? kgText(n) : unitsText(n));
 const pctText = (n: number) => `${n.toLocaleString("es-AR", { maximumFractionDigits: 1 })}%`;
 
+/** Diferencia de caja; menos de $1 es redondeo de centavos y se muestra como "justo". */
+const cashDiff = (c: CashierActivity) => c.cashDifference ?? 0;
+
 const ORDER_LABELS: Record<RankingOrder, string> = { amount: "Más vendidos ($)", profit: "Más ganancia", quantity: "Más kilos" };
 
 /**
@@ -220,9 +223,8 @@ export function ReportsActivity({ branchId, from, to, runId, productSales }: {
                             <>
                               {c.shifts} {c.shifts === 1 ? "cierre" : "cierres"}
                               {(c.countedShifts ?? 0) > 0 && (
-                                <div style={{ fontSize: 12, fontWeight: 700, color: (c.cashDifference ?? 0) < 0 ? "#8b1e1e" : "#176329" }}>
-                                  {(c.cashDifference ?? 0) < 0 ? "faltó " : (c.cashDifference ?? 0) > 0 ? "sobró " : "justo "}
-                                  {(c.cashDifference ?? 0) !== 0 && formatMoney(Math.abs(c.cashDifference ?? 0))}
+                                <div style={{ fontSize: 12, fontWeight: 700, color: cashDiff(c) <= -1 ? "#8b1e1e" : "#176329" }}>
+                                  {cashDiff(c) <= -1 ? `faltó ${formatMoney(-cashDiff(c))}` : cashDiff(c) >= 1 ? `sobró ${formatMoney(cashDiff(c))}` : "justo"}
                                 </div>
                               )}
                               {(c.shortShifts ?? 0) > 0 && (
