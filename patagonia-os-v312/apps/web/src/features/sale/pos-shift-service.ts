@@ -346,11 +346,14 @@ export async function listPosShiftSupplierPayments(posShiftId: string): Promise<
   }));
 }
 
-export async function deletePosShiftAdjustment(movementId: string): Promise<void> {
+/** Borra un movimiento de caja (o anula un retiro a caja fuerte). Con PIN de autorización cargado lo exige (migración 153). */
+export async function deletePosShiftAdjustment(movementId: string, authPin: string | null = null): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
-  const { error } = await supabase.rpc("delete_pos_shift_adjustment", { p_movement_id: movementId });
+  const { data, error } = await supabase.rpc("delete_pos_shift_adjustment", { p_movement_id: movementId, p_auth_pin: authPin });
   if (error) throw error;
+  const result = (data ?? {}) as { ok?: boolean; error?: string };
+  if (result.ok === false) throw new Error(result.error ?? "No se pudo borrar.");
 }
 
 export interface RegisterPosShiftTransferInput {

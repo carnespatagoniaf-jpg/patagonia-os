@@ -299,11 +299,14 @@ export async function listPosShiftVales(posShiftId: string): Promise<PosShiftVal
   }));
 }
 
-export async function deletePosShiftOutflow(id: string): Promise<void> {
+/** Borra un vale de Mostrador. Con PIN de autorización cargado lo exige (migración 153). */
+export async function deletePosShiftOutflow(id: string, authPin: string | null = null): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
-  const { error } = await supabase.rpc("delete_pos_shift_outflow", { p_id: id });
+  const { data, error } = await supabase.rpc("delete_pos_shift_outflow", { p_id: id, p_auth_pin: authPin });
   if (error) throw error;
+  const result = (data ?? {}) as { ok?: boolean; error?: string };
+  if (result.ok === false) throw new Error(result.error ?? "No se pudo borrar.");
 }
 
 interface PayrollLiquidationPaymentRow {

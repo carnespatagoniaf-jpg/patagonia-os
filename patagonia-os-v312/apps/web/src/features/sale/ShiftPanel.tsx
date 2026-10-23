@@ -133,6 +133,56 @@ function PinPrompt({ pin, onSuccess, onCancel }: { pin: string | null; onSuccess
   );
 }
 
+/**
+ * Borrar un movimiento de caja o un vale: nunca con un solo toque. Pregunta, y
+ * si el dueño cargó el PIN de autorización lo pide (migración 153; el servidor
+ * lo vuelve a controlar).
+ */
+function ConfirmDelete({ label, pinRequired, busy, onConfirm }: {
+  label: string;
+  pinRequired: boolean;
+  busy: boolean;
+  onConfirm: (pin: string | null) => Promise<string | null>;
+}) {
+  const [asking, setAsking] = useState(false);
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+
+  if (!asking) {
+    return <button className="secondary" disabled={busy} onClick={() => { setAsking(true); setError(""); }}>{label}</button>;
+  }
+
+  async function confirm() {
+    if (pinRequired && !pin.trim()) { setError("Poné el PIN de autorización."); return; }
+    const result = await onConfirm(pinRequired ? pin.trim() : null);
+    if (result) { setError(result); setPin(""); } else { setAsking(false); setPin(""); }
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 4, minWidth: 150 }}>
+      <span style={{ fontSize: 12, fontWeight: 700, color: "#8b1e1e" }}>¿Seguro? No se puede deshacer.</span>
+      {pinRequired && (
+        <input
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          value={pin}
+          onChange={(e) => setPin(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void confirm(); } }}
+          placeholder="PIN de autorización"
+          autoFocus
+          style={{ padding: "5px 8px", fontSize: 13 }}
+        />
+      )}
+      <div style={{ display: "flex", gap: 4 }}>
+        <button className="danger" disabled={busy} onClick={() => void confirm()} style={{ padding: "4px 10px", fontSize: 12 }}>{busy ? "…" : "Sí, borrar"}</button>
+        <button className="secondary" disabled={busy} onClick={() => { setAsking(false); setPin(""); setError(""); }} style={{ padding: "4px 10px", fontSize: 12 }}>No</button>
+      </div>
+      {error && <span style={{ fontSize: 12, color: "#a52424" }}>{error}</span>}
+    </div>
+  );
+}
+
 /* ------------------------------ formularios ------------------------------ */
 
 interface FormCommon {
@@ -501,8 +551,9 @@ export interface ShiftPanelProps {
   cajaAdjustments: PosShiftAdjustment[];
   posShiftVales: PosShiftVale[];
   deletingMovementId: string | null;
-  onDeleteAdjustment: (id: string) => void;
-  onDeleteVale: (id: string) => void;
+  /** Devuelven el error para mostrar, o null si se borró. Piden confirmar y, si hay, el PIN de autorización. */
+  onDeleteAdjustment: (id: string, authPin: string | null) => Promise<string | null>;
+  onDeleteVale: (id: string, authPin: string | null) => Promise<string | null>;
   /** Devuelve el error para mostrar en el formulario, o null si anuló. */
   onVoidSale: (saleId: string, reason: string, authPin: string | null) => Promise<string | null>;
   /** La empresa cargó PIN de autorización para anular (migración 149). */
@@ -701,13 +752,12 @@ export function ShiftPanel(p: ShiftPanelProps) {
                     <td>{m.notes ?? "-"}</td>
                     <td className="num">{m.direction === "in" ? "+" : "-"}{formatMoney(m.amount)}</td>
                     <td>
-                      <button
-                        className="secondary"
-                        disabled={p.deletingMovementId === m.id}
-                        onClick={() => p.onDeleteAdjustment(m.id)}
-                      >
-                        {p.deletingMovementId === m.id ? "…" : "Borrar"}
-                      </button>
+                      <ConfirmDelete
+                        label={(m.notes ?? "").startsWith("Caja fuerte") ? "Anular retiro" : "Borrar"}
+                        pinRequired={p.voidPinRequired}
+                        busy={p.deletingMovementId === m.id}
+                        onConfirm={(pin) => p.onDeleteAdjustment(m.id, pin)}
+                      />
                     </td>
                   </tr>
                 ))}
@@ -732,13 +782,12 @@ export function ShiftPanel(p: ShiftPanelProps) {
                     <td className="num">{formatMoney(v.amount)}</td>
                     <td>
                       {!v.liquidated && (
-                        <button
-                          className="secondary"
-                          disabled={p.deletingMovementId === v.id}
-                          onClick={() => p.onDeleteVale(v.id)}
-                        >
-                          {p.deletingMovementId === v.id ? "…" : "Borrar"}
-                        </button>
+                        <ConfirmDelete
+                          label="Borrar"
+                          pinRequired={p.voidPinRequired}
+                          busy={p.deletingMovementId === v.id}
+                          onConfirm={(pin) => p.onDeleteVale(v.id, pin)}
+                        />
                       )}
                     </td>
                   </tr>

@@ -490,27 +490,30 @@ export function Sale() {
     reveal();
   }
 
-  async function handleDeleteAdjustment(id: string) {
+  /** Devuelve el error para mostrar al lado del botón, o null si se borró. */
+  async function handleDeleteAdjustment(id: string, authPin: string | null): Promise<string | null> {
     setDeletingMovementId(id);
     try {
-      await deletePosShiftAdjustment(id);
+      await deletePosShiftAdjustment(id, authPin);
       await reloadShiftMovements();
       setMessage("Movimiento borrado.");
+      return null;
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo borrar el movimiento.");
+      return err instanceof Error ? err.message : "No se pudo borrar el movimiento.";
     } finally {
       setDeletingMovementId(null);
     }
   }
 
-  async function handleDeleteVale(id: string) {
+  async function handleDeleteVale(id: string, authPin: string | null): Promise<string | null> {
     setDeletingMovementId(id);
     try {
-      await deletePosShiftOutflow(id);
+      await deletePosShiftOutflow(id, authPin);
       await reloadShiftMovements();
       setMessage("Vale borrado.");
+      return null;
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo borrar el vale.");
+      return err instanceof Error ? err.message : "No se pudo borrar el vale.";
     } finally {
       setDeletingMovementId(null);
     }
