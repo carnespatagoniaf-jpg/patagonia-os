@@ -11,6 +11,8 @@ import { listCustomerChargesInRange, listCustomersWithBalance } from "../custome
 import { listProductsForBranch } from "../inventory/inventory-service";
 import { listProfitabilityPeriods } from "../profitability/profitability-service";
 import { getReconReminders, getTransferAlerts, type ReconReminder } from "../reconciliation/reconciliation-service";
+import { chequeAlerts, type ChequeAlerts } from "../cheques/cheque-logic";
+import { listOpenCheques } from "../cheques/cheques-service";
 import { listPosSalesInRange } from "../sale/pos-shift-service";
 import { addDaysIso, formatMoney, todayIso } from "../shifts/format";
 import { useShifts } from "../shifts/useShifts";
@@ -35,6 +37,7 @@ export function Dashboard() {
   const [overdueCustomers, setOverdueCustomers] = useState<{ name: string; balance: number }[]>([]);
   const [transferAlerts, setTransferAlerts] = useState<{ count: number; total: number; oldest: string } | null>(null);
   const [statementReminders, setStatementReminders] = useState<ReconReminder[]>([]);
+  const [chequeWarnings, setChequeWarnings] = useState<ChequeAlerts | null>(null);
 
   useEffect(() => {
     if (!isSupabaseConfigured || !branchId) return;
@@ -114,6 +117,40 @@ export function Dashboard() {
     };
   }, [profile]);
 
+  // Cheques (plan Full): qué depositar, qué vence y cuánto te debitan esta semana.
+  useEffect(() => {
+    if (!isSupabaseConfigured || !canAccessPage(profile, "cheques")) return;
+    let cancelled = false;
+    listOpenCheques()
+      .then((list) => {
+        if (!cancelled) setChequeWarnings(chequeAlerts(list, todayIso()));
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [profile]);
+
+  const chequeRows = chequeWarnings
+    ? [
+        chequeWarnings.expiring.count > 0 && {
+          key: "expiring",
+          title: `${chequeWarnings.expiring.count} ${chequeWarnings.expiring.count === 1 ? "cheque está" : "cheques están"} por vencer`,
+          detail: `Suman ${formatMoney(chequeWarnings.expiring.total)} · un cheque se deposita hasta 30 días después de su fecha · Finanzas → Cheques`
+        },
+        chequeWarnings.toDeposit.count > chequeWarnings.expiring.count && {
+          key: "deposit",
+          title: `${chequeWarnings.toDeposit.count} ${chequeWarnings.toDeposit.count === 1 ? "cheque para depositar" : "cheques para depositar"} esta semana`,
+          detail: `Suman ${formatMoney(chequeWarnings.toDeposit.total)} · Finanzas → Cheques`
+        },
+        chequeWarnings.toDebit.count > 0 && {
+          key: "debit",
+          title: `Te debitan ${formatMoney(chequeWarnings.toDebit.total)} en cheques propios`,
+          detail: `${chequeWarnings.toDebit.count} ${chequeWarnings.toDebit.count === 1 ? "cheque" : "cheques"} en los próximos 7 días · tené la plata en el banco`
+        }
+      ].filter((r): r is { key: string; title: string; detail: string } => Boolean(r))
+    : [];
+
   const cashOnHand = balances.reduce((sum, balance) => sum + balance.balance, 0);
   const stockValue = products.reduce((sum, p) => sum + p.stock * p.cost, 0);
   const alerts = products.filter((p) => p.stock <= p.minStock);
@@ -166,10 +203,19 @@ export function Dashboard() {
             <h2>Alertas</h2>
             <AlertTriangle size={20} />
           </div>
-          {alerts.length === 0 && overdueCustomers.length === 0 && !transferAlerts && statementReminders.length === 0 ? (
+          {alerts.length === 0 && overdueCustomers.length === 0 && !transferAlerts && statementReminders.length === 0 && chequeRows.length === 0 ? (
             <p className="muted">Sin alertas.</p>
           ) : (
             <>
+              {chequeRows.map((r) => (
+                <div className="alert-row" key={`cheque-${r.key}`}>
+                  <AlertTriangle size={18} />
+                  <div>
+                    <strong>{r.title}</strong>
+                    <span>{r.detail}</span>
+                  </div>
+                </div>
+              ))}
               {transferAlerts && (
                 <div className="alert-row">
                   <AlertTriangle size={18} />

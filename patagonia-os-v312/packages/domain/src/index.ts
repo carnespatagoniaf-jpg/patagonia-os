@@ -214,6 +214,10 @@ export interface TreasuryAccount {
   /** Caja fuerte (migración 117): recibe los retiros de Mostrador y no se
    * ofrece como medio de cobro. */
   isSafe?: boolean;
+  /** Cuenta de cheques (migración 150): "Cheques en cartera" o "Cheques
+   * propios a pagar". Solo se mueve desde Cheques; no se ofrece para cobrar
+   * ni pagar. */
+  chequeRole?: "portfolio" | "payable";
 }
 
 export type TreasuryMovementDirection = "in" | "out";

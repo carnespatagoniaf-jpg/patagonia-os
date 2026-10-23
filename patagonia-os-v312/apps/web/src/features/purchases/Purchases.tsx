@@ -12,7 +12,14 @@ import { addSupplierAdjustment, deleteSupplierAdjustment, fetchSupplierAdjustmen
 import { parseAmount } from "../../lib/money";
 import { quantityNumber } from "../sale/quantity";
 import { useAuth } from "../auth/AuthProvider";
-import { can } from "../auth/permissions";
+import { can, canAccessPage } from "../auth/permissions";
+import { ChequeFields, EMPTY_CHEQUE, readChequeForm, type ChequeForm } from "../cheques/ChequeFields";
+import { endorseCheque, issueCheque, listOpenCheques } from "../cheques/cheques-service";
+import { chequeTitle, formatDay, type Cheque } from "../cheques/cheque-logic";
+
+/** Valores del selector "Pagar desde…" para pagar con cheque (migración 150). */
+const OWN_CHEQUE_OPTION = "__own_cheque";
+const ENDORSE_PREFIX = "__endorse:";
 import { useCarcassTemplates } from "../carcass/useCarcassTemplates";
 
 interface DraftLine {
@@ -98,6 +105,13 @@ export function Purchases() {
   } = usePurchases();
   const { accounts } = useTreasury();
   const { profile } = useAuth();
+  const canCheques = isSupabaseConfigured && canAccessPage(profile, "cheques");
+  useEffect(() => {
+    if (!canCheques) return;
+    listOpenCheques()
+      .then((list) => setPortfolioCheques(list.filter((c) => c.kind === "received")))
+      .catch(() => setPortfolioCheques([]));
+  }, [canCheques]);
   // Para despostar: solo quien tiene Despiece (plan Estándar o más).
   const canCarcass = can(profile, "carcass.manage");
   const { templates } = useCarcassTemplates();
@@ -136,6 +150,9 @@ export function Purchases() {
 
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentAccountId, setPaymentAccountId] = useState("");
+  const [paymentCheque, setPaymentCheque] = useState<ChequeForm>(EMPTY_CHEQUE);
+  const [chequeBankAccountId, setChequeBankAccountId] = useState("");
+  const [portfolioCheques, setPortfolioCheques] = useState<Cheque[]>([]);
   const [paymentDate, setPaymentDate] = useState(todayIso());
   const [paymentNotes, setPaymentNotes] = useState("");
 
@@ -347,6 +364,37 @@ export function Purchases() {
       const amount = parseAmount(paymentAmount);
       if (!Number.isFinite(amount) || amount <= 0) throw new Error("Ingresá un monto válido.");
       if (!paymentAccountId) throw new Error("Elegí de qué cuenta sale el pago.");
+      if (paymentAccountId.startsWith(ENDORSE_PREFIX) || paymentAccountId === OWN_CHEQUE_OPTION) {
+        if (!branchId) throw new Error("Tu usuario no tiene sucursal asignada.");
+        if (paymentAccountId === OWN_CHEQUE_OPTION) {
+          const read = readChequeForm(paymentCheque, paymentAmount);
+          if ("error" in read) throw new Error(read.error);
+          if (!chequeBankAccountId) throw new Error("Elegí de qué cuenta del banco sale el cheque.");
+          await issueCheque({
+            supplierId: selectedSupplierId,
+            branchId,
+            issuedOn: paymentDate,
+            amount: read.amount,
+            number: paymentCheque.number.trim(),
+            payDate: paymentCheque.payDate,
+            echeq: paymentCheque.echeq,
+            bankAccountId: chequeBankAccountId,
+            notes: paymentNotes.trim() || undefined
+          });
+          setMessage("Cheque propio registrado (queda en Finanzas → Cheques, para pagar).");
+        } else {
+          await endorseCheque(paymentAccountId.slice(ENDORSE_PREFIX.length), selectedSupplierId, branchId, paymentDate);
+          setMessage("Cheque endosado al proveedor.");
+        }
+        await loadSupplier(selectedSupplierId);
+        setPortfolioCheques(await listOpenCheques().then((l) => l.filter((c) => c.kind === "received")).catch(() => []));
+        setPaymentAmount("");
+        setPaymentAccountId("");
+        setPaymentNotes("");
+        setPaymentCheque(EMPTY_CHEQUE);
+        setChequeBankAccountId("");
+        return;
+      }
 
       await registerPayment({
         supplierId: selectedSupplierId,
@@ -659,15 +707,60 @@ export function Purchases() {
               <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
                 <input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
                 <input type="text" inputMode="decimal" placeholder="Monto" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
-                <select value={paymentAccountId} onChange={(e) => setPaymentAccountId(e.target.value)}>
+                <select
+                  value={paymentAccountId}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setPaymentAccountId(value);
+                    const cheque = portfolioCheques.find((c) => ENDORSE_PREFIX + c.id === value);
+                    if (cheque) setPaymentAmount(String(cheque.amount).replace(".", ","));
+                  }}
+                >
                   <option value="">Pagar desde…</option>
                   {accounts.map((a) => (
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
+                  {canCheques && <option value={OWN_CHEQUE_OPTION}>Cheque propio / eCheq</option>}
+                  {canCheques && portfolioCheques.length > 0 && (
+                    <optgroup label="Cheque de la cartera (endosar)">
+                      {portfolioCheques.map((c) => (
+                        <option key={c.id} value={ENDORSE_PREFIX + c.id}>
+                          {chequeTitle(c)} · {formatMoney(c.amount)} · cobra {formatDay(c.payDate)}{c.customerName ? ` · de ${c.customerName}` : ""}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )}
                 </select>
-                <input placeholder="Nota" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} />
-                <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
+                {!paymentAccountId.startsWith("__") && (
+                  <>
+                    <input placeholder="Nota" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} />
+                    <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
+                  </>
+                )}
               </div>
+              {paymentAccountId === OWN_CHEQUE_OPTION && (
+                <div style={{ marginTop: 10 }}>
+                  <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 8 }}>
+                    <select value={chequeBankAccountId} onChange={(e) => setChequeBankAccountId(e.target.value)}>
+                      <option value="">¿De qué cuenta del banco sale?</option>
+                      {accounts.filter((a) => !a.isSafe).map((a) => (
+                        <option key={a.id} value={a.id}>{a.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <ChequeFields value={paymentCheque} onChange={setPaymentCheque} withAmount={false} withDrawer={false} />
+                  <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>Lo que le debés baja ahora; la plata sale del banco en la fecha del cheque.</p>
+                </div>
+              )}
+              {paymentAccountId.startsWith(ENDORSE_PREFIX) && (
+                <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>Se paga con el monto del cheque. El cheque sale de la cartera y queda como endosado a este proveedor.</p>
+              )}
+              {paymentAccountId.startsWith("__") && (
+                <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 10 }}>
+                  <input placeholder="Nota" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} />
+                  <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
+                </div>
+              )}
           </section>
 
           {adjustmentsEnabled && (

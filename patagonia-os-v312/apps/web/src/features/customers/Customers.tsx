@@ -28,7 +28,13 @@ import { emptyInvoiceDraft, invoiceDraftError, invoiceLabel, type InvoiceDraft, 
 import { InvoiceRequestFields } from "../invoicing/InvoiceRequestFields";
 import { InvoicePaperFooter, InvoicePaperHeader } from "../invoicing/InvoicePaper";
 import { RemitoRButton, useRemitoREnabled } from "../invoicing/RemitoRButton";
-import { planAllows } from "../auth/permissions";
+import { canAccessPage, planAllows } from "../auth/permissions";
+import { ChequeFields, EMPTY_CHEQUE, readChequeForm, type ChequeForm } from "../cheques/ChequeFields";
+import { receiveCustomerCheque } from "../cheques/cheques-service";
+import { cleanCuit } from "../cheques/cheque-logic";
+
+/** Valor del selector "Entra a…" para cobrar con cheque (migración 150). */
+const CHEQUE_OPTION = "__cheque";
 
 const STATUS_BADGE: Record<CustomerStatus, { label: string; bg: string; color: string }> = {
   overdue: { label: "Atrasado", bg: "#fdecea", color: "#b3261e" },
@@ -217,6 +223,7 @@ export function Customers() {
   // Remito R con CAI (migración 147): plan Full y un CAI cargado en Facturas.
   const remitoR = useRemitoREnabled(planAllows(profile, "full"));
   const salesDetail = Boolean(profile?.features?.includes("ventas_detalle"));
+  const canCheques = isSupabaseConfigured && canAccessPage(profile, "cheques");
   const chargeAdjustment = salesDetail ? Math.round((chargeAdjKind === "descuento" ? -1 : 1) * (parseAmount(chargeAdjAmount || "0") || 0)) : 0;
   const finalChargeTotal = Math.round(chargeTotal) + chargeAdjustment;
   const [busy, setBusy] = useState(false);
@@ -242,6 +249,7 @@ export function Customers() {
   const [paymentDate, setPaymentDate] = useState(todayIso());
   const [paymentAmount, setPaymentAmount] = useState("");
   const [paymentAccountId, setPaymentAccountId] = useState("");
+  const [paymentCheque, setPaymentCheque] = useState<ChequeForm>(EMPTY_CHEQUE);
   const [paymentNotes, setPaymentNotes] = useState("");
 
   const [editingRowKey, setEditingRowKey] = useState<string | null>(null);
@@ -598,6 +606,31 @@ export function Customers() {
       const amount = parseAmount(paymentAmount);
       if (!Number.isFinite(amount) || amount <= 0) throw new Error("Ingresá un monto válido.");
       if (!paymentAccountId) throw new Error("Elegí a qué cuenta entra el pago.");
+      if (paymentAccountId === CHEQUE_OPTION) {
+        const read = readChequeForm(paymentCheque, paymentAmount);
+        if ("error" in read) throw new Error(read.error);
+        if (!branchId) throw new Error("Tu usuario no tiene sucursal asignada.");
+        const result = await receiveCustomerCheque({
+          customerId: selectedCustomer.id,
+          branchId,
+          receivedOn: paymentDate,
+          amount: read.amount,
+          number: paymentCheque.number.trim(),
+          bank: paymentCheque.bank.trim() || undefined,
+          payDate: paymentCheque.payDate,
+          echeq: paymentCheque.echeq,
+          drawerName: paymentCheque.drawerName.trim() || undefined,
+          drawerCuit: cleanCuit(paymentCheque.drawerCuit) || undefined,
+          notes: paymentNotes.trim() || undefined
+        });
+        await loadDetail(selectedCustomer.id);
+        setPaymentAmount("");
+        setPaymentAccountId("");
+        setPaymentNotes("");
+        setPaymentCheque(EMPTY_CHEQUE);
+        setMessage(`Cheque cargado (queda en Finanzas → Cheques).${result.balance !== null ? ` Saldo restante: ${formatMoney(result.balance)}.` : ""}`);
+        return;
+      }
       const result = await registerPayment({
         customerId: selectedCustomer.id,
         paymentDate,
@@ -1050,8 +1083,14 @@ export function Customers() {
                   {accounts.map((a) => (
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
+                  {canCheques && <option value={CHEQUE_OPTION}>Cheque / eCheq</option>}
                 </select>
               </div>
+              {paymentAccountId === CHEQUE_OPTION && (
+                <div style={{ marginBottom: 10 }}>
+                  <ChequeFields value={paymentCheque} onChange={setPaymentCheque} withAmount={false} />
+                </div>
+              )}
               <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
                 <input placeholder="Nota (opcional)" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
                 <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>

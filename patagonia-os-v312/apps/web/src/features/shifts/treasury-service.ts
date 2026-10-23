@@ -10,6 +10,7 @@ interface TreasuryAccountRow {
   branch_id: string | null;
   branches: { name: string } | null;
   is_safe?: boolean | null;
+  cheque_role?: "portfolio" | "payable" | null;
 }
 
 function mapAccount(row: TreasuryAccountRow): TreasuryAccount {
@@ -21,21 +22,24 @@ function mapAccount(row: TreasuryAccountRow): TreasuryAccount {
     active: row.active,
     branchId: row.branch_id ?? undefined,
     branchName: row.branches?.name ?? undefined,
-    isSafe: row.is_safe === true
+    isSafe: row.is_safe === true,
+    chequeRole: row.cheque_role ?? undefined
   };
 }
 
 /** `branchId` filtra a las cuentas compartidas (branch_id null) más las de
  * esa sucursal puntual -- así cada sucursal ve las suyas y las que se
  * reparten entre todas, no las de otro local. Sin `branchId` (Tesorería,
- * dueño/admin) trae todas. */
+ * dueño/admin) trae todas. Nunca trae las cuentas de cheques (150): esas
+ * solo se mueven desde Cheques, y sus saldos salen en listAllTreasuryAccounts. */
 export async function listTreasuryAccounts(branchId?: string): Promise<TreasuryAccount[]> {
   if (!supabase) return [];
 
   let query = supabase
     .from("treasury_accounts")
-    .select("id,name,payment_method,initial_balance,active,branch_id,is_safe,branches(name)")
+    .select("id,name,payment_method,initial_balance,active,branch_id,is_safe,cheque_role,branches(name)")
     .eq("active", true)
+    .is("cheque_role", null)
     .order("name");
   if (branchId) query = query.or(`branch_id.is.null,branch_id.eq.${branchId}`);
 
@@ -51,7 +55,7 @@ export async function listAllTreasuryAccounts(): Promise<TreasuryAccount[]> {
 
   const { data, error } = await supabase
     .from("treasury_accounts")
-    .select("id,name,payment_method,initial_balance,active,branch_id,is_safe,branches(name)")
+    .select("id,name,payment_method,initial_balance,active,branch_id,is_safe,cheque_role,branches(name)")
     .order("name");
 
   if (error) throw error;
