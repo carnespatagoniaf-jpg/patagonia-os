@@ -15,8 +15,6 @@ import type { Product } from "@patagonia/domain";
 import type { ScaleConfig } from "./scale-barcode";
 import { ScaleCloseControl, ScaleVoidForm } from "./ScaleControl";
 import { WasteForm } from "./WasteForm";
-import { useAuth } from "../auth/AuthProvider";
-import { planAllows } from "../auth/permissions";
 import { VOID_REASONS, isValidAuthPin, voidReasonText } from "./void-sale";
 
 // Panel "Turno" de Mostrador (columna derecha): total del turno, botones,
@@ -536,9 +534,7 @@ export function ShiftPanel(p: ShiftPanelProps) {
   const { shift, canSeeShiftTotals, canManageTreasury } = p;
   const form = { shift, accounts: p.accounts, onMessage: p.onMessage, publishReceipt: p.publishReceipt };
   const [showScaleVoid, setShowScaleVoid] = useState(false);
-  // Decomiso (migración 151): plan Full.
-  const { profile } = useAuth();
-  const canUseWastes = planAllows(profile, "full");
+  // Decomiso (migraciones 151 y 152): todos los planes.
   const [showWaste, setShowWaste] = useState(false);
   const [voidingSaleId, setVoidingSaleId] = useState<string | null>(null);
   const [showSafeForm, setShowSafeForm] = useState(false);
@@ -633,11 +629,9 @@ export function ShiftPanel(p: ShiftPanelProps) {
         <button className="pos-toolbar-btn" onClick={() => setShowScaleVoid((v) => !v)}>
           {showScaleVoid ? "Cerrar anular ticket de balanza" : "Anular ticket de balanza"}
         </button>
-        {canUseWastes && (
-          <button className="pos-toolbar-btn" onClick={() => setShowWaste((v) => !v)}>
-            {showWaste ? "Cerrar decomiso" : "Decomiso"}
-          </button>
-        )}
+        <button className="pos-toolbar-btn" onClick={() => setShowWaste((v) => !v)}>
+          {showWaste ? "Cerrar decomiso" : "Decomiso"}
+        </button>
         {!p.showCloseConfirm && (
           <button className="pos-toolbar-btn" onClick={p.onRequestClose}>
             Cerrar turno
@@ -769,17 +763,15 @@ export function ShiftPanel(p: ShiftPanelProps) {
         onClose={() => setShowScaleVoid(false)}
       />
 
-      {canUseWastes && (
-        <WasteForm
-          visible={showWaste}
-          shift={shift}
-          products={p.products}
-          scaleConfig={p.scaleConfig}
-          canVoid={canManageTreasury}
-          onMessage={p.onMessage}
-          onClose={() => setShowWaste(false)}
-        />
-      )}
+      <WasteForm
+        visible={showWaste}
+        shift={shift}
+        products={p.products}
+        scaleConfig={p.scaleConfig}
+        canVoid={canManageTreasury}
+        onMessage={p.onMessage}
+        onClose={() => setShowWaste(false)}
+      />
 
       {p.showCloseConfirm && (
         <div style={{ marginTop: 14 }}>

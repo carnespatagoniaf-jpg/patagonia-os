@@ -1,6 +1,6 @@
 import { supabase } from "../../lib/supabase";
 
-// Decomisos (migración 151, plan Full): lo que se tira (vencido, en mal estado,
+// Decomisos (migraciones 151 y 152, todos los planes): lo que se tira (vencido, en mal estado,
 // roto) se carga en Mostrador, descuenta el stock y queda en Reportes → Merma.
 
 export type WasteReason = "vencido" | "mal_estado" | "roto" | "otro";

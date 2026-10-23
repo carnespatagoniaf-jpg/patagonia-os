@@ -17,7 +17,7 @@ const qtyText = (unit: string | null, n: number) =>
 const time = (iso: string) => new Date(iso).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
 
 /**
- * Mostrador → "Decomiso" (migración 151, plan Full): lo que se tira se pesa y se
+ * Mostrador → "Decomiso" (migraciones 151 y 152, todos los planes): lo que se tira se pesa y se
  * anota en la caja. El peso sale de escanear la etiqueta de la balanza, de leer
  * la balanza por cable o se escribe. Descuenta el stock y queda en Reportes → Merma.
  */
