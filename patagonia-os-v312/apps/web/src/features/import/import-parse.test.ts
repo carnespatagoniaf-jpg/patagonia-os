@@ -5,6 +5,7 @@ import {
   buildCustomerRows,
   buildProductRows,
   buildSupplierRows,
+  convertScaleExport,
   decodeFileBytes,
   mapColumns,
   normalizeHeader,
@@ -161,5 +162,30 @@ describe("plantillas", () => {
     const t = TEMPLATES.products;
     const rows = buildProductRows([t.headers, ...t.rows], mapColumns("products", t.headers), new Set(), false);
     assert.deepEqual(summarize(rows).errors, 0);
+  });
+});
+
+describe("convertScaleExport", () => {
+  const qendra = [
+    "CARNICERIA;1;AGUJA COMUN;1;13290;0;PESO     ;60;C;0;0;0",
+    "CARNICERIA;12;BIFE ANCHO;12;15990;0;PESO     ;60;C;0;0;0",
+    "PANADERIA;1020;PAN HAMBUR X4;15;2500;0;UNIDAD   ;10;C;0;0;0"
+  ].join("\r\n");
+
+  it("reconoce el archivo de la balanza Systel (Qendra) sin encabezados", () => {
+    const scale = convertScaleExport(parseDelimited(qendra));
+    assert.ok(scale);
+    assert.deepEqual(scale.table[0], ["Categoría", "Código", "Nombre", "Precio", "Unidad"]);
+    assert.deepEqual(scale.table[3], ["Panaderia", "1020", "PAN HAMBUR X4", "2500", "UNIDAD"]);
+    const rows = buildProductRows(scale.table, mapColumns("products", scale.table[0]), new Set(), false);
+    assert.equal(rows.length, 3);
+    assert.deepEqual(rows.map((r) => r.status), ["new", "new", "new"]);
+    assert.equal(rows[0].payload?.unit, "kg");
+    assert.equal(rows[2].payload?.unit, "unit");
+    assert.equal(rows[0].payload?.price_retail, 13290);
+  });
+
+  it("no toca un archivo normal con encabezados", () => {
+    assert.equal(convertScaleExport(parseDelimited("Código;Nombre;Precio\n1;Asado;9000")), null);
   });
 });

@@ -205,6 +205,7 @@ USUARIOS (dueño o administrador)
 
 IMPORTAR (menú Reportes → Importar; solo dueño y administrador)
 - Sirve para cargar muchos productos de una vez desde Excel. 1) Bajar la plantilla y completarla (o usar un archivo propio: se reconocen columnas como Código, Nombre, Precio, Costo, Stock, Categoría). 2) Subir el archivo (.xlsx o .csv) o pegar las filas copiadas de Excel. 3) Revisar la vista previa y tocar Importar. No se guarda nada hasta ese momento.
+- Productos de la balanza Systel: el archivo que exporta el programa de las balanzas (Qendra, un .csv sin títulos que empieza con la sección, por ejemplo "CARNICERIA;1;AGUJA COMUN;…") se sube tal cual en Importar → Productos. El sistema lo reconoce solo y toma la sección como categoría, el código PLU (el mismo del código de barras de la etiqueta), el nombre, el precio y si va por peso (kg) o por unidad. El costo queda en 0 hasta cargarlo.
 
 CUENTA Y CONTRASEÑA
 - Para cambiar la contraseña: abajo a la izquierda, "Cambiar contraseña".

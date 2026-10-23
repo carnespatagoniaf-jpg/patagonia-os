@@ -14,6 +14,7 @@ import {
   buildCustomerRows,
   buildProductRows,
   buildSupplierRows,
+  convertScaleExport,
   decodeFileBytes,
   mapColumns,
   parseDelimited,
@@ -41,6 +42,8 @@ export function ImportData() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [result, setResult] = useState<{ counts: ImportCounts; kind: ImportKind } | null>(null);
+  /** Si el archivo vino de un programa de balanza (sin encabezados), cuál. */
+  const [scaleSource, setScaleSource] = useState<string | null>(null);
 
   async function loadExisting(target: ImportKind) {
     if (!isSupabaseConfigured) return setExisting(new Set());
@@ -65,6 +68,7 @@ export function ImportData() {
 
   function reset(nextKind?: ImportKind) {
     setTable(null);
+    setScaleSource(null);
     setFileName("");
     setPasteText("");
     setError("");
@@ -90,6 +94,9 @@ export function ImportData() {
       } else {
         data = parseDelimited(decodeFileBytes(await file.arrayBuffer()));
       }
+      const scale = kind === "products" ? convertScaleExport(data) : null;
+      if (scale) data = scale.table;
+      setScaleSource(scale?.source ?? null);
       if (data.length < 2) throw new Error("El archivo no tiene filas de datos (tiene que haber una fila de encabezados y al menos una fila más).");
       setFileName(file.name);
       setTable(data);
@@ -102,7 +109,10 @@ export function ImportData() {
   function handlePaste() {
     setError("");
     setResult(null);
-    const data = parseDelimited(pasteText);
+    let data: Table = parseDelimited(pasteText);
+    const scale = kind === "products" ? convertScaleExport(data) : null;
+    if (scale) data = scale.table;
+    setScaleSource(scale?.source ?? null);
     if (data.length < 2) {
       setTable(null);
       setError("Pegá la fila de encabezados y al menos una fila de datos, copiadas desde Excel.");
@@ -210,6 +220,11 @@ export function ImportData() {
             <button className="secondary" onClick={() => reset()}>Empezar de nuevo</button>
           </div>
 
+          {scaleSource && (
+            <p className="message" style={{ margin: "0 0 8px" }}>
+              Archivo del {scaleSource}: se tomaron la sección (como categoría), el código PLU, el nombre, el precio y si va por peso o por unidad.
+            </p>
+          )}
           <p style={{ margin: "0 0 6px", fontSize: 14 }}>
             <strong>Columnas reconocidas:</strong>{" "}
             {Object.keys(mapping.columns).map((f) => FIELD_LABELS[f]).join(", ") || "ninguna"}

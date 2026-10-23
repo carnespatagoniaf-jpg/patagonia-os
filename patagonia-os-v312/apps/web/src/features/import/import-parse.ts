@@ -217,6 +217,8 @@ export function parseNumberCell(cell: Cell, dotIsThousands: boolean): { value: n
 
 const UNIT_ALIASES: Record<string, "kg" | "unit" | "box"> = {
   kg: "kg", kgs: "kg", kilo: "kg", kilos: "kg", kilogramo: "kg", kilogramos: "kg",
+  // "PESO" es como lo exporta el programa de las balanzas Systel (Qendra).
+  peso: "kg", pesable: "kg",
   u: "unit", un: "unit", unid: "unit", unidad: "unit", unidades: "unit", unit: "unit", unitario: "unit",
   caja: "box", cajas: "box", cj: "box", box: "box"
 };
@@ -224,6 +226,53 @@ const UNIT_ALIASES: Record<string, "kg" | "unit" | "box"> = {
 export function parseUnit(cell: Cell): "kg" | "unit" | "box" | null {
   const key = normalizeHeader(cell);
   return UNIT_ALIASES[key] ?? null;
+}
+
+/* ------------------------- archivos de programas de balanza ------------------------- */
+
+export interface ScaleExport {
+  /** Nombre del programa, para avisarle a la persona qué se reconoció. */
+  source: string;
+  /** La misma información con una fila de encabezados que entiende mapColumns. */
+  table: Table;
+}
+
+const QENDRA_TYPES = new Set(["PESO", "UNIDAD"]);
+const isNumberText = (cell: Cell) => /^\d+([.,]\d+)?$/.test(cellText(cell));
+
+/** "CARNICERIA" -> "Carniceria" (la sección pasa a ser la categoría). */
+function sectionName(cell: Cell): string {
+  const text = cellText(cell).replace(/\s+/g, " ");
+  return text ? text.charAt(0).toUpperCase() + text.slice(1).toLowerCase() : "";
+}
+
+/**
+ * Archivo de productos del programa de las balanzas Systel (Qendra): CSV con
+ * punto y coma y SIN fila de encabezados. Columnas (docs/SYSTEL_INFORME.md):
+ * 1 sección, 2 código PLU (el del código de barras), 3 descripción, 4 número
+ * de PLU (posición en la balanza), 5 precio, 6 precio 2, 7 tipo (PESO/UNIDAD), …
+ * Si al menos 4 de cada 5 filas tienen esa forma, devuelve la tabla con
+ * encabezados (Categoría, Código, Nombre, Precio, Unidad). Si no, null.
+ */
+export function convertScaleExport(table: Table): ScaleExport | null {
+  const rows = table.filter((row) => !isEmptyRow(row));
+  if (rows.length === 0) return null;
+  const looksLikeQendra = (row: Cell[]) =>
+    row.length >= 7 &&
+    cellText(row[0]) !== "" &&
+    isNumberText(row[1]) &&
+    cellText(row[2]) !== "" &&
+    isNumberText(row[4]) &&
+    QENDRA_TYPES.has(cellText(row[6]).toUpperCase());
+  const matching = rows.filter(looksLikeQendra);
+  if (matching.length < Math.max(1, Math.ceil(rows.length * 0.8))) return null;
+  return {
+    source: "programa de las balanzas Systel (Qendra)",
+    table: [
+      ["Categoría", "Código", "Nombre", "Precio", "Unidad"],
+      ...matching.map((row) => [sectionName(row[0]), cellText(row[1]), cellText(row[2]).replace(/\s+/g, " "), cellText(row[4]), cellText(row[6])])
+    ]
+  };
 }
 
 /** El código puede venir como número de Excel (105) o texto ("105", "12.0"). */
