@@ -43,6 +43,8 @@ export interface Remito {
     number: number | null;
     taxId: string | null;
     taxCondition: string | null;
+    /** Domicilio comercial del destinatario (Anexo V, II). */
+    address: string | null;
     locality: string | null;
     province: string | null;
   };
@@ -50,10 +52,30 @@ export interface Remito {
   showValues: boolean;
   total: number;
   deliveryAddress: string | null;
-  carrier: string | null;
+  /** Transportista tercero (Anexo V, IV). null = transporte propio. */
+  carrier: RemitoCarrier | null;
   notes: string | null;
   status: "emitido" | "anulado";
   createdAt: string;
+}
+
+export interface RemitoCarrier {
+  name: string;
+  cuit: string | null;
+  address: string | null;
+}
+
+/** La 148 guarda el transportista como JSON; la 147 guardaba un texto libre. */
+export function parseCarrier(raw: unknown): RemitoCarrier | null {
+  if (raw === null || raw === undefined || raw === "") return null;
+  const text = String(raw);
+  try {
+    const o = JSON.parse(text) as Record<string, unknown>;
+    if (o && typeof o === "object" && o.name) return { name: String(o.name), cuit: str(o.cuit), address: str(o.address) };
+  } catch {
+    // Texto libre de un remito viejo.
+  }
+  return { name: text, cuit: null, address: null };
 }
 
 /** Código ARCA del Remito R. */
@@ -99,6 +121,7 @@ export function parseRemito(row: Record<string, unknown>): Remito {
       number: receiver.number === null || receiver.number === undefined ? null : Number(receiver.number),
       taxId: str(receiver.tax_id),
       taxCondition: str(receiver.tax_condition),
+      address: str(receiver.address),
       locality: str(receiver.locality),
       province: str(receiver.province)
     },
@@ -113,7 +136,7 @@ export function parseRemito(row: Record<string, unknown>): Remito {
     showValues: Boolean(row.show_values),
     total: Number(row.total ?? 0),
     deliveryAddress: str(row.delivery_address),
-    carrier: str(row.carrier),
+    carrier: parseCarrier(row.carrier),
     notes: str(row.notes),
     status: row.status === "anulado" ? "anulado" : "emitido",
     createdAt: String(row.created_at ?? "")
@@ -185,4 +208,53 @@ export function remitoQuantityLabel(item: Pick<RemitoItem, "quantity" | "unit">)
   const unit = item.unit ? UNIT_SHORT[item.unit] ?? item.unit : "";
   const qty = item.quantity.toLocaleString("es-AR", { maximumFractionDigits: 3 });
   return unit ? `${qty} ${unit}` : qty;
+}
+
+/** Leyendas literales del Anexo V de la RG 1415 (I, a, 5 y II). */
+export const ISSUER_LEGEND: Record<string, string> = {
+  responsable_inscripto: "IVA RESPONSABLE INSCRITO",
+  exento: "IVA EXENTO",
+  monotributo: "RESPONSABLE MONOTRIBUTO"
+};
+
+export const RECEIVER_LEGEND: Record<string, string> = {
+  responsable_inscripto: "IVA RESPONSABLE INSCRITO",
+  exento: "IVA EXENTO",
+  monotributo: "RESPONSABLE MONOTRIBUTO",
+  consumidor_final: "A CONSUMIDOR FINAL"
+};
+
+/** Desde este importe, a consumidor final se identifica al destinatario (Anexo V, II, d, 2). */
+export const CONSUMER_ID_THRESHOLD = 5000;
+
+export interface RemitoIssueForm {
+  condition: "consumidor_final" | "responsable_inscripto" | "monotributo" | "exento";
+  doc: string;
+  address: string;
+  thirdPartyCarrier: boolean;
+  carrierName: string;
+  carrierCuit: string;
+  carrierAddress: string;
+}
+
+/** Mismas reglas que issue_remito (migración 148). null = está bien. */
+export function validateRemitoIssue(f: RemitoIssueForm, amount: number): string | null {
+  const doc = f.doc.replace(/\D/g, "");
+  if (f.condition !== "consumidor_final") {
+    if (!f.address.trim()) return "Falta el domicilio comercial del cliente.";
+    if (doc.length !== 11) return "Falta el CUIT del cliente (11 números).";
+  } else if (amount >= CONSUMER_ID_THRESHOLD && (!f.address.trim() || !doc)) {
+    return "A consumidor final, desde $5.000 el remito lleva domicilio y CUIT, CUIL o DNI del cliente.";
+  }
+  if (f.thirdPartyCarrier) {
+    if (!f.carrierName.trim() || !f.carrierAddress.trim() || f.carrierCuit.replace(/\D/g, "").length !== 11) {
+      return "Del transportista van nombre o razón social, domicilio comercial y CUIT (11 números).";
+    }
+  }
+  return null;
+}
+
+/** ¿El remito identifica al destinatario o va solo "A CONSUMIDOR FINAL"? */
+export function receiverIdentified(r: Pick<Remito, "receiver" | "total">): boolean {
+  return r.receiver.taxCondition !== "consumidor_final" || Boolean(r.receiver.taxId) || Boolean(r.receiver.address) || r.total >= CONSUMER_ID_THRESHOLD;
 }

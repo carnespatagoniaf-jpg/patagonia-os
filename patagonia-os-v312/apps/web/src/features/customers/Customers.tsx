@@ -1155,7 +1155,7 @@ export function Customers() {
                             <button className="secondary" disabled={remitoBusyId === row.id} onClick={() => handleShowRemito(row)}>
                               {remitoBusyId === row.id ? "…" : "Remito"}
                             </button>{" "}
-                            {remitoR && <RemitoRButton chargeId={row.id} />}
+                            {remitoR && selectedCustomer && <RemitoRButton chargeId={row.id} customerId={selectedCustomer.id} amount={row.debit} />}
                             {(() => {
                               const inv = invoiceForCharge(row.id);
                               if (inv?.status === "autorizada") {

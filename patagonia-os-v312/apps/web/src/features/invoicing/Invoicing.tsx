@@ -512,7 +512,7 @@ export function Invoicing() {
       )}
 
       {/* Remito R con CAI (migración 147): plan Full. */}
-      {planAllows(profile, "full") && <RemitoRPanel />}
+      {planAllows(profile, "full") && <RemitoRPanel issuerCondition={settings?.taxCondition ?? null} />}
 
       <section className="panel">
         <div className="panel-title">

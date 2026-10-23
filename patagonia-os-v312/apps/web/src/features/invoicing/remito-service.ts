@@ -59,12 +59,28 @@ export async function setRemitoCaiActive(caiId: string, active: boolean): Promis
   if (error) throw error;
 }
 
-export async function issueRemito(input: { chargeId: string; deliveryAddress: string; carrier: string; notes: string; showValues: boolean }): Promise<Remito> {
+export interface IssueRemitoInput {
+  chargeId: string;
+  receiverCondition: string;
+  receiverDoc: string;
+  receiverAddress: string;
+  deliveryAddress: string;
+  carrier: { name: string; cuit: string; address: string } | null;
+  notes: string;
+  showValues: boolean;
+}
+
+export async function issueRemito(input: IssueRemitoInput): Promise<Remito> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("issue_remito", {
     p_charge_id: input.chargeId,
+    p_receiver_address: input.receiverAddress,
+    p_receiver_doc: input.receiverDoc,
+    p_receiver_condition: input.receiverCondition,
     p_delivery_address: input.deliveryAddress,
-    p_carrier: input.carrier,
+    p_carrier_name: input.carrier?.name ?? null,
+    p_carrier_cuit: input.carrier?.cuit ?? null,
+    p_carrier_address: input.carrier?.address ?? null,
     p_notes: input.notes,
     p_show_values: input.showValues
   });
@@ -72,6 +88,14 @@ export async function issueRemito(input: { chargeId: string; deliveryAddress: st
   const remito = await getRemito(String(data));
   if (!remito) throw new Error("El remito se emitió pero no se pudo leer. Buscalo en Facturas → Remito R.");
   return remito;
+}
+
+/** El último remito de un cliente, para proponer su domicilio comercial. */
+export async function getLastCustomerRemito(customerId: string): Promise<Remito | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.from("remitos").select("*").eq("customer_id", customerId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  if (error) throw error;
+  return data ? parseRemito(data as Record<string, unknown>) : null;
 }
 
 export async function voidRemito(id: string): Promise<void> {

@@ -13,7 +13,7 @@ const emptyForm = (): CaiForm => ({ pointOfSale: "", cai: "", caiDue: "", number
  * contador en ARCA (régimen de autoimpresores); acá se carga y se ven los
  * remitos emitidos desde Clientes.
  */
-export function RemitoRPanel() {
+export function RemitoRPanel({ issuerCondition }: { issuerCondition: string | null }) {
   const [cais, setCais] = useState<RemitoCai[]>([]);
   const [remitos, setRemitos] = useState<Remito[]>([]);
   const [form, setForm] = useState<CaiForm>(emptyForm());
@@ -106,6 +106,12 @@ export function RemitoRPanel() {
         "Remito R". El sistema numera en orden, sin saltos ni repetidos.
       </p>
 
+      {issuerCondition === "monotributo" && (
+        <p style={{ color: "#8a4b00", fontSize: 13 }}>
+          Tu negocio es monotributista: ARCA no permite que un monotributista sea autoimpresor, así que el Remito R no se puede emitir desde el sistema.
+          Lo podés pedir a una imprenta (talonario) o facturar la venta, que sí sale desde acá.
+        </p>
+      )}
       {statuses.length > 0 && (
         <div style={{ overflowX: "auto", marginBottom: 10 }}>
           <table className="data-table">

@@ -53,3 +53,25 @@ test("lee un remito guardado", () => {
   assert.equal(remitoQuantityLabel(r.items[0]), "1,5 kg");
   assert.equal(remitoQuantityLabel({ quantity: 2, unit: "unit" }), "2 u.");
 });
+
+test("Anexo V: datos del destinatario y del transportista", async () => {
+  const { validateRemitoIssue, parseCarrier, receiverIdentified, RECEIVER_LEGEND, ISSUER_LEGEND } = await import("./remito-r");
+  const base = { condition: "responsable_inscripto" as const, doc: "30-71112223-3", address: "Mitre 100", thirdPartyCarrier: false, carrierName: "", carrierCuit: "", carrierAddress: "" };
+  assert.equal(validateRemitoIssue(base, 1000), null);
+  assert.match(validateRemitoIssue({ ...base, address: "" }, 1000)!, /domicilio/);
+  assert.match(validateRemitoIssue({ ...base, doc: "1234" }, 1000)!, /CUIT/);
+  // Consumidor final: hasta $5.000 sin datos; desde ahí, domicilio y documento.
+  assert.equal(validateRemitoIssue({ ...base, condition: "consumidor_final", doc: "", address: "" }, 4999), null);
+  assert.match(validateRemitoIssue({ ...base, condition: "consumidor_final", doc: "", address: "" }, 5000)!, /5\.000/);
+  assert.equal(validateRemitoIssue({ ...base, condition: "consumidor_final", doc: "28123456", address: "Calle 1" }, 9000), null);
+  // Transportista tercero: completo o nada.
+  assert.match(validateRemitoIssue({ ...base, thirdPartyCarrier: true, carrierName: "Transportes Sur" }, 1000)!, /transportista/);
+  assert.equal(validateRemitoIssue({ ...base, thirdPartyCarrier: true, carrierName: "Transportes Sur", carrierCuit: "30700000001", carrierAddress: "Ruta 4" }, 1000), null);
+  assert.deepEqual(parseCarrier('{"name":"Transportes Sur","cuit":"30700000001","address":"Ruta 4"}'), { name: "Transportes Sur", cuit: "30700000001", address: "Ruta 4" });
+  assert.deepEqual(parseCarrier("Camioneta propia"), { name: "Camioneta propia", cuit: null, address: null });
+  assert.equal(parseCarrier(null), null);
+  const cf = { receiver: { taxCondition: "consumidor_final", taxId: null, address: null } as never, total: 3000 };
+  assert.equal(receiverIdentified(cf), false);
+  assert.equal(RECEIVER_LEGEND.consumidor_final, "A CONSUMIDOR FINAL");
+  assert.equal(ISSUER_LEGEND.responsable_inscripto, "IVA RESPONSABLE INSCRITO");
+});
