@@ -16,6 +16,8 @@ import {
   type SafeWithdrawal,
   type ShiftCloseRow
 } from "./cash-control-service";
+import { hasPosVoidPin, listPosVoidedSales, setPosVoidPin, type VoidedSale } from "./pos-shift-service";
+import { delayLabel, isValidAuthPin, minutesBetween } from "./void-sale";
 
 // "Control de caja" para el dueño/admin, abajo de Mostrador (migración 117):
 // cuánto tiene que haber en la caja fuerte según los papelitos, contarla, y
@@ -168,18 +170,161 @@ function SafeBlock({ safe, onMessage, adjust, onChanged }: { safe: SafeAccount; 
   );
 }
 
-export function CashControlPanel({ branchId, onMessage, adjust }: { branchId: string; onMessage: (m: string) => void; adjust: Adjust }) {
+// PIN de autorización para anular ventas (149). Para cambiarlo o sacarlo hay
+// que saber el actual: las cajeras suelen usar el mismo usuario que el dueño.
+function VoidPinBlock({ onMessage, onChange }: { onMessage: (m: string) => void; onChange: (hasPin: boolean) => void }) {
+  const [hasPin, setHasPin] = useState<boolean | null>(null);
+  const [editing, setEditing] = useState(false);
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    void hasPosVoidPin().then(setHasPin).catch(() => setHasPin(null));
+  }, []);
+
+  async function save(remove: boolean) {
+    setError("");
+    if (!remove && !isValidAuthPin(next)) {
+      setError("El PIN nuevo tiene que ser de 4 a 6 números.");
+      return;
+    }
+    if (hasPin && !current.trim()) {
+      setError("Poné el PIN actual.");
+      return;
+    }
+    setBusy(true);
+    try {
+      const result = await setPosVoidPin(hasPin ? current.trim() : null, remove ? null : next.trim());
+      if (!result.ok) {
+        setError(result.error ?? "No se pudo guardar.");
+        return;
+      }
+      setHasPin(!remove);
+      onChange(!remove);
+      setEditing(false);
+      setCurrent("");
+      setNext("");
+      onMessage(remove ? "PIN para anular sacado: cualquiera puede anular (con motivo)." : "PIN para anular guardado. Desde ahora anular una venta lo pide.");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "No se pudo guardar.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const pinInput = (value: string, set: (v: string) => void, placeholder: string) => (
+    <input type="password" inputMode="numeric" autoComplete="new-password" maxLength={6} placeholder={placeholder} value={value} onChange={(e) => set(e.target.value.replace(/\D/g, ""))} />
+  );
+
+  return (
+    <div className="panel" style={{ padding: "10px 14px", marginBottom: 14 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+        <span style={{ fontWeight: 700 }}>PIN para anular ventas:</span>
+        <span className={hasPin === false ? "num-negative" : "muted"} style={{ fontSize: 13, flex: 1, minWidth: 180 }}>
+          {hasPin === null ? "cargando…" : hasPin ? "activado (no se lo des a las cajeras)" : "sin PIN, cualquiera puede anular"}
+        </span>
+        {!editing && hasPin !== null && (
+          <button className="secondary" onClick={() => setEditing(true)}>{hasPin ? "Cambiar PIN" : "Poner PIN"}</button>
+        )}
+      </div>
+      {editing && (
+        <div style={{ display: "grid", gap: 8, maxWidth: 320, marginTop: 10 }}>
+          {hasPin && pinInput(current, setCurrent, "PIN actual")}
+          {pinInput(next, setNext, hasPin ? "PIN nuevo (4 a 6 números)" : "PIN (4 a 6 números)")}
+          {error && <p style={{ color: "#a52424", margin: 0 }}>{error}</p>}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button disabled={busy} onClick={() => void save(false)}>{busy ? "Guardando…" : "Guardar"}</button>
+            {hasPin && <button className="secondary" disabled={busy} onClick={() => void save(true)}>Sacar PIN</button>}
+            <button className="secondary" onClick={() => { setEditing(false); setError(""); }}>Cancelar</button>
+          </div>
+          {hasPin && <p className="muted" style={{ margin: 0, fontSize: 12 }}>¿Te lo olvidaste? Pedí a soporte que lo borre.</p>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+const VOIDED_PREVIEW = 5;
+
+function VoidedSalesBlock({ sales }: { sales: VoidedSale[] }) {
+  const [showAll, setShowAll] = useState(false);
+  const total = sales.reduce((sum, s) => sum + s.total, 0);
+  const late = sales.filter((s) => minutesBetween(s.soldAt, s.voidedAt) >= 10).length;
+  const visible = showAll ? sales : sales.slice(0, VOIDED_PREVIEW);
+  return (
+    <>
+      <p style={{ margin: "6px 0", fontWeight: 700 }}>Ventas anuladas (14 días)</p>
+      <p className="muted" style={{ margin: "0 0 8px", fontSize: 13 }}>
+        {sales.length === 0
+          ? "No se anuló ninguna venta en estos días."
+          : `${sales.length} por ${formatMoney(total)}.`}
+        {late > 0 && <span className="num-negative"> {late} se anul{late === 1 ? "ó" : "aron"} 10 minutos o más después de venderse: revisalas.</span>}
+      </p>
+      {sales.length > 0 && (
+        <div style={{ overflowX: "auto", marginBottom: 14 }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Vendida</th>
+                <th>Anulada</th>
+                <th className="num">Monto</th>
+                <th>Motivo</th>
+                <th>Cajera</th>
+                <th>Con PIN</th>
+                <th>Qué era</th>
+              </tr>
+            </thead>
+            <tbody>
+              {visible.map((s) => {
+                const late = minutesBetween(s.soldAt, s.voidedAt) >= 10;
+                return (
+                  <tr key={s.id}>
+                    <td>{fmtDate(s.soldAt)}</td>
+                    <td className={late ? "num-negative" : undefined}>{delayLabel(minutesBetween(s.soldAt, s.voidedAt))}</td>
+                    <td className="num">{formatMoney(s.total)}</td>
+                    <td>{s.reason ?? <span className="muted">sin motivo (antes del cambio)</span>}</td>
+                    <td>{s.cashierName ?? s.voidedByName ?? "-"}</td>
+                    <td>{s.authorized ? "Sí" : <span className="muted">No</span>}</td>
+                    <td style={{ maxWidth: 260, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={s.items ?? ""}>{s.items ?? "-"}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          {sales.length > VOIDED_PREVIEW && (
+            <button className="secondary" style={{ marginTop: 8 }} onClick={() => setShowAll((v) => !v)}>
+              {showAll ? "Ver menos" : `Ver las ${sales.length}`}
+            </button>
+          )}
+        </div>
+      )}
+    </>
+  );
+}
+
+export function CashControlPanel({ branchId, onMessage, adjust, onVoidPinChange, refreshKey }: {
+  branchId: string;
+  onMessage: (m: string) => void;
+  adjust: Adjust;
+  onVoidPinChange: (hasPin: boolean) => void;
+  /** Cambia cuando se anula una venta del turno, para recargar la lista. */
+  refreshKey: number;
+}) {
   const [open, setOpen] = useState(false);
   const [safes, setSafes] = useState<SafeAccount[]>([]);
   const [closes, setCloses] = useState<ShiftCloseRow[]>([]);
+  const [voided, setVoided] = useState<VoidedSale[]>([]);
   const [loading, setLoading] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, c] = await Promise.all([listSafeAccounts(), listPosShiftCloses(branchId, 14)]);
+      const [s, c, v] = await Promise.all([listSafeAccounts(), listPosShiftCloses(branchId, 14), listPosVoidedSales(branchId, 14).catch(() => [])]);
       setSafes(s);
       setCloses(c);
+      setVoided(v);
     } catch (err) {
       onMessage(err instanceof Error ? err.message : "No se pudo cargar el control de caja.");
     } finally {
@@ -189,16 +334,16 @@ export function CashControlPanel({ branchId, onMessage, adjust }: { branchId: st
 
   useEffect(() => {
     if (open) void reload();
-  }, [open, reload]);
+  }, [open, reload, refreshKey]);
 
   return (
     <section className="panel" style={{ marginTop: 18 }}>
       <div className="panel-title">
         <h2>Control de caja</h2>
-        <button className="secondary" onClick={() => setOpen((v) => !v)}>{open ? "Ocultar" : "Ver caja fuerte y cierres"}</button>
+        <button className="secondary" onClick={() => setOpen((v) => !v)}>{open ? "Ocultar" : "Ver caja fuerte, anuladas y cierres"}</button>
       </div>
       {!open ? (
-        <p className="muted" style={{ margin: 0 }}>Cuánto tiene que haber en la caja fuerte y cómo cerró cada cajera.</p>
+        <p className="muted" style={{ margin: 0 }}>Cuánto tiene que haber en la caja fuerte, las ventas anuladas y cómo cerró cada cajera.</p>
       ) : loading && closes.length === 0 ? (
         <p className="muted">Cargando…</p>
       ) : (
@@ -208,6 +353,9 @@ export function CashControlPanel({ branchId, onMessage, adjust }: { branchId: st
           ) : (
             safes.map((safe) => <SafeBlock key={safe.id} safe={safe} onMessage={onMessage} adjust={adjust} onChanged={reload} />)
           )}
+
+          <VoidPinBlock onMessage={onMessage} onChange={onVoidPinChange} />
+          <VoidedSalesBlock sales={voided} />
 
           <p style={{ margin: "6px 0", fontWeight: 700 }}>Últimos cierres (14 días)</p>
           <p className="muted" style={{ margin: "0 0 8px", fontSize: 13 }}>

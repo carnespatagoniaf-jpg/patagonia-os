@@ -21,7 +21,7 @@ import { authorizeInvoices, getFiscalSettings, getInvoice, invoicePrintFrom, req
 import { emptyInvoiceDraft, invoiceDraftError, type InvoiceDraft } from "../invoicing/invoicing-view";
 import { InvoiceRequestFields } from "../invoicing/InvoiceRequestFields";
 import { addPendingSale, getPendingSales, isRetryableError, isShiftClosedError, markPendingSaleError, removePendingSale, resetPendingSaleErrors, updatePendingSale, type PendingSale } from "./offline-queue";
-import { closePosShift, deletePosShiftAdjustment, getOpenPosShift, listPosCashiers, listPosShiftAdjustments, listPosShiftSupplierPayments, type PosShiftSupplierPayment, listPosShiftSales, openPosShift, voidPosSale, type CloseShiftResult, type PosCashier, type PosShift, type PosShiftAdjustment, type PosShiftSale, type SafeDepositResult } from "./pos-shift-service";
+import { closePosShift, deletePosShiftAdjustment, getOpenPosShift, listPosCashiers, listPosShiftAdjustments, listPosShiftSupplierPayments, type PosShiftSupplierPayment, listPosShiftSales, openPosShift, voidPosSale, hasPosVoidPin, type CloseShiftResult, type PosCashier, type PosShift, type PosShiftAdjustment, type PosShiftSale, type SafeDepositResult } from "./pos-shift-service";
 import { CashControlPanel } from "./CashControlPanel";
 import { formatMoney } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
@@ -75,6 +75,7 @@ export function Sale() {
   // company-settings-service.ts. null = todavía no se cargó o no hay
   // ninguno configurado (en ese caso no se pide nada, como antes).
   const [mostradorPin, setMostradorPinValue] = useState<string | null>(null);
+  const [voidPinRequired, setVoidPinRequired] = useState(false);
   const [pinUnlocked, setPinUnlocked] = useState(false);
   const [pinPromptFor, setPinPromptFor] = useState<null | "movements" | "caja">(null);
   // Arranca siempre oculto, incluso para quien SÍ puede verlo -- la idea no
@@ -250,6 +251,7 @@ export function Sale() {
 
   useEffect(() => {
     void getMostradorPin().then(setMostradorPinValue);
+    void hasPosVoidPin().then(setVoidPinRequired).catch(() => setVoidPinRequired(false));
   }, []);
 
   useEffect(() => {
@@ -754,16 +756,18 @@ Cancelar = es el mismo papel: no cobrar.`)) {
     }
   }
 
-  async function handleVoidSale(saleId: string) {
-    if (!window.confirm("¿Seguro que querés anular esta venta? Se revierte el stock y no se puede deshacer.")) return;
+  /** Devuelve el error para mostrar en el formulario de anular, o null si anuló. */
+  async function handleVoidSale(saleId: string, reason: string, authPin: string | null): Promise<string | null> {
     setMessage("");
     setBusy(true);
     try {
       if (!isSupabaseConfigured) {
         setShiftSales((current) => current.map((s) => (s.id === saleId ? { ...s, voidedAt: new Date().toISOString() } : s)));
-        return;
+        return null;
       }
-      await voidPosSale(saleId);
+      const result = await voidPosSale(saleId, reason, authPin);
+      if (!result.ok) return result.error ?? "No se pudo anular la venta.";
+      setMessage("Venta anulada. El stock volvió y el dueño la ve en Control de caja.");
       // Si estaba facturada, la base dejó su nota de crédito pendiente: se pide ya.
       if (fiscal?.enabled) {
         try {
@@ -775,8 +779,9 @@ Cancelar = es el mismo papel: no cobrar.`)) {
         }
       }
       await reloadShift();
+      return null;
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo anular la venta.");
+      return err instanceof Error ? err.message : "No se pudo anular la venta.";
     } finally {
       setBusy(false);
     }
@@ -1139,6 +1144,7 @@ Cancelar = es el mismo papel: no cobrar.`)) {
             onDeleteAdjustment={handleDeleteAdjustment}
             onDeleteVale={handleDeleteVale}
             onVoidSale={handleVoidSale}
+            voidPinRequired={voidPinRequired}
             onMovementsChanged={reloadShiftMovements}
             showCajaForm={showCajaForm}
             onToggleCajaForm={() => setShowCajaForm((v) => !v)}
@@ -1168,7 +1174,7 @@ Cancelar = es el mismo papel: no cobrar.`)) {
       )}
 
       {canSeeShiftTotals && isSupabaseConfigured && branchId && (
-        <CashControlPanel branchId={branchId} onMessage={setMessage} adjust={adjust} />
+        <CashControlPanel branchId={branchId} onMessage={setMessage} adjust={adjust} onVoidPinChange={setVoidPinRequired} refreshKey={shiftSales.length - activeShiftSales.length} />
       )}
 
       {receipt && (

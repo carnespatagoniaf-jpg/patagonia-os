@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { Fragment, useState } from "react";
 import type { TreasuryAccount } from "@patagonia/domain";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { parseAmount } from "../../lib/money";
@@ -14,6 +14,7 @@ import { formatShiftStart, type MovementReceiptState } from "./sale-model";
 import type { Product } from "@patagonia/domain";
 import type { ScaleConfig } from "./scale-barcode";
 import { ScaleCloseControl, ScaleVoidForm } from "./ScaleControl";
+import { VOID_REASONS, isValidAuthPin, voidReasonText } from "./void-sale";
 
 // Panel "Turno" de Mostrador (columna derecha): total del turno, botones,
 // listas de movimientos y los formularios de caja / pago a proveedor / vale /
@@ -28,6 +29,70 @@ function errorDetail(err: unknown): string {
   const raw = err instanceof Error ? err.message : typeof err === "object" && err !== null ? JSON.stringify(err) : String(err);
   const code = (err as { code?: string })?.code;
   return `[detalle: ${raw}${code ? ` · code ${code}` : ""}]`;
+}
+
+/* ------------------------- Anular venta (149) ------------------------- */
+
+function VoidSaleForm({ total, pinRequired, busy, onSubmit, onDone }: {
+  total: number;
+  pinRequired: boolean;
+  busy: boolean;
+  onSubmit: (reason: string, pin: string | null) => Promise<string | null>;
+  onDone: () => void;
+}) {
+  const [choice, setChoice] = useState("");
+  const [other, setOther] = useState("");
+  const [pin, setPin] = useState("");
+  const [error, setError] = useState("");
+
+  async function submit() {
+    const parsed = voidReasonText(choice, other);
+    if ("error" in parsed) {
+      setError(parsed.error);
+      return;
+    }
+    if (pinRequired && !isValidAuthPin(pin)) {
+      setError("Falta el PIN de autorización del encargado.");
+      return;
+    }
+    setError("");
+    const err = await onSubmit(parsed.reason, pinRequired ? pin.trim() : null);
+    if (err) {
+      setError(err);
+      setPin("");
+    } else {
+      onDone();
+    }
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 8, padding: "8px 0" }}>
+      <p style={{ margin: 0, fontWeight: 700 }}>Anular venta de {formatMoney(total)}</p>
+      <p className="muted" style={{ margin: 0, fontSize: 12 }}>El stock vuelve y la venta deja de contar en la caja. El dueño la ve en Control de caja.</p>
+      <select value={choice} onChange={(e) => setChoice(e.target.value)} autoFocus>
+        <option value="">¿Por qué se anula?</option>
+        {VOID_REASONS.map((r) => <option key={r} value={r}>{r}</option>)}
+      </select>
+      {choice === "Otro" && <input placeholder="Escribí el motivo" value={other} maxLength={180} onChange={(e) => setOther(e.target.value)} />}
+      {pinRequired && (
+        <input
+          type="password"
+          inputMode="numeric"
+          autoComplete="off"
+          placeholder="PIN de autorización"
+          value={pin}
+          maxLength={6}
+          onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))}
+          onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
+        />
+      )}
+      {error && <p style={{ color: "#a52424", margin: 0 }}>{error}</p>}
+      <div style={{ display: "flex", gap: 8 }}>
+        <button disabled={busy} onClick={() => void submit()}>{busy ? "Anulando…" : "Anular venta"}</button>
+        <button className="secondary" onClick={onDone}>Cancelar</button>
+      </div>
+    </div>
+  );
 }
 
 /* ------------------------------ PIN ------------------------------ */
@@ -437,7 +502,10 @@ export interface ShiftPanelProps {
   deletingMovementId: string | null;
   onDeleteAdjustment: (id: string) => void;
   onDeleteVale: (id: string) => void;
-  onVoidSale: (saleId: string) => void;
+  /** Devuelve el error para mostrar en el formulario, o null si anuló. */
+  onVoidSale: (saleId: string, reason: string, authPin: string | null) => Promise<string | null>;
+  /** La empresa cargó PIN de autorización para anular (migración 149). */
+  voidPinRequired: boolean;
   onMovementsChanged: () => Promise<void>;
 
   showCajaForm: boolean;
@@ -465,6 +533,7 @@ export function ShiftPanel(p: ShiftPanelProps) {
   const { shift, canSeeShiftTotals, canManageTreasury } = p;
   const form = { shift, accounts: p.accounts, onMessage: p.onMessage, publishReceipt: p.publishReceipt };
   const [showScaleVoid, setShowScaleVoid] = useState(false);
+  const [voidingSaleId, setVoidingSaleId] = useState<string | null>(null);
   const [showSafeForm, setShowSafeForm] = useState(false);
   const [scaleControlStatus, setScaleControlStatus] = useState({ needed: false, saved: false });
 
@@ -572,16 +641,31 @@ export function ShiftPanel(p: ShiftPanelProps) {
             </thead>
             <tbody>
               {p.shiftSales.map((s) => (
-                <tr key={s.id} style={s.voidedAt ? { opacity: 0.5, textDecoration: "line-through" } : undefined}>
-                  <td>{new Date(s.createdAt).toLocaleTimeString("es-AR")}</td>
-                  <td className="num">{formatMoney(s.total)}</td>
-                  <td>{s.voidedAt ? "Anulada" : ""}</td>
-                  <td>
-                    {!s.voidedAt && (
-                      <button className="secondary" disabled={p.busy} onClick={() => p.onVoidSale(s.id)}>Anular</button>
-                    )}
-                  </td>
-                </tr>
+                <Fragment key={s.id}>
+                  <tr style={s.voidedAt ? { opacity: 0.5, textDecoration: "line-through" } : undefined}>
+                    <td>{new Date(s.createdAt).toLocaleTimeString("es-AR")}</td>
+                    <td className="num">{formatMoney(s.total)}</td>
+                    <td>{s.voidedAt ? "Anulada" : ""}</td>
+                    <td>
+                      {!s.voidedAt && voidingSaleId !== s.id && (
+                        <button className="secondary" disabled={p.busy} onClick={() => setVoidingSaleId(s.id)}>Anular</button>
+                      )}
+                    </td>
+                  </tr>
+                  {voidingSaleId === s.id && !s.voidedAt && (
+                    <tr>
+                      <td colSpan={4}>
+                        <VoidSaleForm
+                          total={s.total}
+                          pinRequired={p.voidPinRequired}
+                          busy={p.busy}
+                          onSubmit={(reason, pin) => p.onVoidSale(s.id, reason, pin)}
+                          onDone={() => setVoidingSaleId(null)}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </Fragment>
               ))}
             </tbody>
           </table>

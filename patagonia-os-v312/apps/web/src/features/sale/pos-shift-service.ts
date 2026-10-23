@@ -190,11 +190,60 @@ export async function closePosShift(shiftId: string, closingCountedCash?: number
   };
 }
 
-export async function voidPosSale(saleId: string): Promise<void> {
+/** Anula con motivo y, si la empresa tiene, PIN de autorización (149). Un PIN
+ * mal puesto vuelve como { ok: false } (no como error) para que el intento
+ * quede contado en la base. */
+export async function voidPosSale(saleId: string, reason: string, authPin: string | null): Promise<{ ok: boolean; error?: string }> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
-  const { error } = await supabase.rpc("void_pos_sale", { p_sale_id: saleId });
+  const { data, error } = await supabase.rpc("void_pos_sale", { p_sale_id: saleId, p_reason: reason, p_auth_pin: authPin });
   if (error) throw error;
+  const result = (data ?? {}) as { ok?: boolean; error?: string };
+  return { ok: result.ok === true, error: result.error };
+}
+
+export async function hasPosVoidPin(): Promise<boolean> {
+  if (!supabase) return false;
+  const { data, error } = await supabase.rpc("has_pos_void_pin");
+  if (error) throw error;
+  return data === true;
+}
+
+export async function setPosVoidPin(currentPin: string | null, newPin: string | null): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { data, error } = await supabase.rpc("set_pos_void_pin", { p_current_pin: currentPin, p_new_pin: newPin });
+  if (error) throw error;
+  const result = (data ?? {}) as { ok?: boolean; error?: string };
+  return { ok: result.ok === true, error: result.error };
+}
+
+export interface VoidedSale {
+  id: string;
+  soldAt: string;
+  voidedAt: string;
+  total: number;
+  reason: string | null;
+  authorized: boolean;
+  voidedByName: string | null;
+  cashierName: string | null;
+  items: string | null;
+}
+
+export async function listPosVoidedSales(branchId: string | null, days = 14): Promise<VoidedSale[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase.rpc("list_pos_voided_sales", { p_branch_id: branchId, p_days: days });
+  if (error) throw error;
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    id: String(r.id),
+    soldAt: String(r.sold_at),
+    voidedAt: String(r.voided_at),
+    total: Number(r.total ?? 0),
+    reason: (r.reason as string | null) ?? null,
+    authorized: r.authorized === true,
+    voidedByName: (r.voided_by_name as string | null) ?? null,
+    cashierName: (r.cashier_name as string | null) ?? null,
+    items: (r.items as string | null) ?? null
+  }));
 }
 
 export interface PosShiftAdjustment {
