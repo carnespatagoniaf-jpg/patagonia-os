@@ -155,7 +155,7 @@ returns text
 language sql
 immutable
 set search_path = public
-as $
+as $$
   select (case when p_echeq then 'eCheq' else 'Cheque' end) || ' N.º ' || p_number
          || coalesce(' (' || nullif(trim(p_bank), '') || ')', '');
 $$;
@@ -166,7 +166,7 @@ returns text
 language plpgsql
 immutable
 set search_path = public
-as $
+as $$
 begin
   if nullif(trim(coalesce(p_number, '')), '') is null then raise exception 'Poné el número del cheque'; end if;
   if p_pay_date is null then raise exception 'Poné la fecha de cobro del cheque'; end if;
