@@ -9,11 +9,22 @@ import { buildAccountingSheets } from "./accounting-export";
 import {
   deletePurchaseVoucher,
   getAccountingMonth,
+  getAging,
   importPurchaseVouchers,
+  listOfficialDues,
   listSupplierTaxInfo,
+  listTaxReminders,
   type AccountingMonth,
+  type AgingRow,
   type ImportVouchersResult
 } from "./accounting-service";
+import { AgingPanel } from "./AgingPanel";
+import { computeIibb } from "./iibb";
+import { IibbPanel } from "./IibbPanel";
+import { InventoryClosePanel } from "./InventoryClosePanel";
+import { TaxCalendarPanel } from "./TaxCalendarPanel";
+import { upcomingDues, type OfficialDue, type TaxReminder } from "./tax-calendar";
+import { VoucherAttachment } from "./VoucherAttachment";
 import {
   isCreditNote,
   monotributoStatus,
@@ -51,6 +62,15 @@ function downloadBlob(name: string, data: BlobPart, type: string) {
 }
 
 const signed = (p: { voucherType: number }, n: number) => (isCreditNote(p.voucherType) ? -n : n);
+
+type Tab = "resumen" | "libros" | "iibb" | "saldos" | "inventario";
+const TABS: { key: Tab; label: string }[] = [
+  { key: "resumen", label: "Resumen" },
+  { key: "libros", label: "Libros de IVA" },
+  { key: "iibb", label: "Ingresos Brutos" },
+  { key: "saldos", label: "Quién debe" },
+  { key: "inventario", label: "Inventario al cierre" }
+];
 const pct = (rate: number) => `${String(rate).replace(".", ",")}%`;
 
 export function Accounting() {
@@ -75,11 +95,25 @@ export function Accounting() {
   const [importBusy, setImportBusy] = useState(false);
   const [importResult, setImportResult] = useState<ImportVouchersResult | null>(null);
 
+  const [tab, setTab] = useState<Tab>("resumen");
+  const [reminders, setReminders] = useState<TaxReminder[]>([]);
+  const [official, setOfficial] = useState<OfficialDue[]>([]);
+  const [aging, setAging] = useState<{ asOf: string; receivables: AgingRow[]; payables: AgingRow[] } | null>(null);
+  const [agingLoading, setAgingLoading] = useState(false);
+
   const reload = useCallback(async () => {
     if (!isSupabaseConfigured) return;
     setLoading(true);
     try {
-      setData(await getAccountingMonth(month));
+      const sixMonthsAgo = new Date(Date.now() - 183 * 86400_000).toISOString().slice(0, 8) + "01";
+      const [month_, reminders_, official_] = await Promise.all([
+        getAccountingMonth(month),
+        listTaxReminders().catch(() => []),
+        listOfficialDues(sixMonthsAgo).catch(() => [])
+      ]);
+      setData(month_);
+      setReminders(reminders_);
+      setOfficial(official_);
     } catch (err) {
       setMessage(errorText(err, "No se pudo cargar el mes."));
     } finally {
@@ -103,6 +137,56 @@ export function Accounting() {
   const ri = data?.company.taxCondition === "responsable_inscripto";
   const position = useMemo(() => (data ? vatPosition(data.sales, data.purchases) : null), [data]);
   const mono = useMemo(() => (data ? monotributoStatus(data.monotributo.invoiced12m, data.monotributo.categories) : null), [data]);
+  const today = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
+  const calendar = useMemo(
+    () =>
+      data
+        ? upcomingDues({
+            today,
+            cuit: data.company.cuit,
+            taxCondition: data.company.taxCondition,
+            obligations: data.iibb.settings?.obligations ?? null,
+            official,
+            reminders,
+            iibbDueDay: data.iibb.settings?.dueDay ?? null
+          })
+        : { items: [], missingCuit: false },
+    [data, official, reminders, today]
+  );
+  const iibbResult = useMemo(
+    () =>
+      data?.iibb.settings
+        ? computeIibb({
+            settings: data.iibb.settings,
+            sales: data.sales,
+            systemSales: data.monthSales.pos + data.monthSales.account,
+            taxCondition: data.company.taxCondition,
+            defaultVatRate: data.company.defaultVatRate,
+            perceptions: data.iibb.perceptions,
+            bankWithholdings: data.iibb.bankWithholdings,
+            credits: data.iibb.credits
+          })
+        : null,
+    [data]
+  );
+
+  const loadAging = useCallback(async () => {
+    setAgingLoading(true);
+    try {
+      const a = await getAging();
+      setAging(a);
+      return a;
+    } catch (err) {
+      setMessage(errorText(err, "No se pudo cargar quién debe."));
+      return null;
+    } finally {
+      setAgingLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (tab === "saldos" && isSupabaseConfigured) void loadAging();
+  }, [tab, loadAging]);
 
   async function handleDelete(v: PurchaseVoucher) {
     if (!window.confirm(`¿Borrar ${voucherTypeLabel(v.voucherType)} ${voucherNumber(v.pointOfSale, v.number)} de ${v.sellerName}? La compra (si tiene) no se toca.`)) return;
@@ -155,7 +239,8 @@ export function Accounting() {
     try {
       const XLSX = await import("xlsx");
       const wb = XLSX.utils.book_new();
-      for (const sheet of buildAccountingSheets(data)) {
+      const agingData = aging ?? (await loadAging());
+      for (const sheet of buildAccountingSheets(data, { iibb: iibbResult, aging: agingData, dues: calendar.items })) {
         const ws = XLSX.utils.aoa_to_sheet(sheet.rows);
         const widths = sheet.rows.reduce<number[]>((w, row) => {
           row.forEach((c, i) => (w[i] = Math.min(45, Math.max(w[i] ?? 8, String(c ?? "").length + 2))));
@@ -230,6 +315,14 @@ export function Accounting() {
             <div className="message">Faltan los datos fiscales del negocio (CUIT y condición frente al IVA). Se cargan en Facturas → "Datos fiscales del negocio".</div>
           )}
 
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+            {TABS.map((t) => (
+              <button key={t.key} className={tab === t.key ? "" : "secondary"} onClick={() => setTab(t.key)}>{t.label}</button>
+            ))}
+          </div>
+
+          {tab === "resumen" && (
+          <>
           <section className="kpi-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
             {ri && position ? (
               <>
@@ -269,7 +362,29 @@ export function Accounting() {
               }
               warn={data.purchasesWithoutVoucher.length > 0}
             />
+            {iibbResult?.applies ? (
+              <Card
+                title={iibbResult.balance >= 0 ? "Ingresos Brutos a pagar (estimado)" : "Saldo a favor de Ingresos Brutos"}
+                value={formatMoney(Math.abs(iibbResult.balance))}
+                detail={`Impuesto ${formatMoney(iibbResult.tax)} − percepciones y retenciones ${formatMoney(iibbResult.tax - iibbResult.balance)}`}
+              />
+            ) : !data.iibb.settings ? (
+              <Card title="Ingresos Brutos" value="Sin configurar" detail="Cargá tu alícuota en la pestaña Ingresos Brutos" warn />
+            ) : null}
           </section>
+
+          <TaxCalendarPanel
+            dues={calendar.items}
+            missingCuit={calendar.missingCuit}
+            taxCondition={data.company.taxCondition}
+            settings={data.iibb.settings}
+            reminders={reminders}
+            canWrite={canWrite}
+            onChanged={(msg) => {
+              setMessage(msg);
+              void reload();
+            }}
+          />
 
           <section className="panel" style={{ marginTop: 18 }}>
             <div className="panel-title">
@@ -314,7 +429,11 @@ export function Accounting() {
               </table>
             )}
           </section>
+          </>
+          )}
 
+          {tab === "libros" && (
+          <>
           <section className="panel" style={{ marginTop: 18 }}>
             <div className="panel-title">
               <h2>Libro IVA Compras</h2>
@@ -457,6 +576,15 @@ export function Accounting() {
                         <td className="num">{p.percVat + p.percIibb > 0 ? formatMoney(signed(p, p.percVat + p.percIibb)) : "—"}</td>
                         <td className="num">{formatMoney(signed(p, p.total))}</td>
                         <td>
+                          <VoucherAttachment
+                            companyId={profile?.company_id ?? null}
+                            voucher={p}
+                            canWrite={canWrite}
+                            onChanged={(msg) => {
+                              setMessage(msg);
+                              void reload();
+                            }}
+                          />{" "}
                           {canWrite && (
                             <>
                               <button className="secondary" onClick={() => setForm({ existing: p })}>Editar</button>{" "}
@@ -529,6 +657,24 @@ export function Accounting() {
               )}
             </details>
           </section>
+          </>
+          )}
+
+          {tab === "iibb" && (
+            <IibbPanel
+              data={data}
+              result={iibbResult}
+              canWrite={canWrite}
+              onChanged={(msg) => {
+                setMessage(msg);
+                void reload();
+              }}
+            />
+          )}
+
+          {tab === "saldos" && <AgingPanel aging={aging} loading={agingLoading} />}
+
+          {tab === "inventario" && <InventoryClosePanel canTake={profile ? ["owner", "admin"].includes(profile.role) : true} />}
         </>
       )}
     </>

@@ -1,6 +1,8 @@
 // Carpeta del mes para el contador: las hojas del Excel. Lógica pura (las
 // escribe Accounting.tsx con SheetJS). Las notas de crédito van en negativo.
-import type { AccountingMonth } from "./accounting-service";
+import type { AccountingMonth, AgingRow } from "./accounting-service";
+import { IIBB_CREDIT_LABELS, IIBB_REGIME_LABELS, type IibbResult } from "./iibb";
+import { dueDateLabel, type DueItem } from "./tax-calendar";
 import { isCreditNote, monotributoStatus, purchaseDiscriminatesVat, saleVatLines, vatPosition, voucherNumber, voucherTypeLabel } from "./accounting-view";
 
 export type SheetCell = string | number | null;
@@ -19,7 +21,22 @@ function rateTitle(rate: number) {
 
 const CHEQUE_STATUS: Record<string, string> = { in_portfolio: "En cartera", pending: "A debitar" };
 
-export function buildAccountingSheets(m: AccountingMonth): Sheet[] {
+/** Lo que se suma a la carpeta si está a mano (Ingresos Brutos, antigüedad, vencimientos). */
+export interface AccountingExtras {
+  iibb?: IibbResult | null;
+  aging?: { asOf: string; receivables: AgingRow[]; payables: AgingRow[] } | null;
+  dues?: DueItem[] | null;
+}
+
+function agingSheet(title: string, rows: AgingRow[]): SheetCell[][] {
+  const out: SheetCell[][] = [[title, "CUIT", "Teléfono", "Saldo", "0 a 30 días", "31 a 60", "61 a 90", "Más de 90", "Lo más viejo desde"]];
+  for (const r of rows) out.push([r.name, r.taxId ?? "", r.phone ?? "", r2(r.balance), r2(r.b0_30), r2(r.b31_60), r2(r.b61_90), r2(r.b90), r.oldest ?? ""]);
+  const sum = (k: keyof AgingRow) => r2(rows.reduce((a, r) => a + Number(r[k] || 0), 0));
+  out.push(["Total", "", "", sum("balance"), sum("b0_30"), sum("b31_60"), sum("b61_90"), sum("b90"), ""]);
+  return out;
+}
+
+export function buildAccountingSheets(m: AccountingMonth, extras: AccountingExtras = {}): Sheet[] {
   const ri = m.company.taxCondition === "responsable_inscripto";
   const position = vatPosition(m.sales, m.purchases);
   const salesRates = RATES.filter((rate) => m.sales.some((s) => saleVatLines(s).some((l) => l.rate === rate)));
@@ -140,6 +157,59 @@ export function buildAccountingSheets(m: AccountingMonth): Sheet[] {
     { name: "Proveedores", rows: payables },
     { name: "Deudas", rows: debts },
     { name: "Cheques", rows: cheques },
-    { name: "Stock", rows: stock }
+    { name: "Stock", rows: stock },
+    ...extraSheets(m, extras)
   ];
+}
+
+function extraSheets(m: AccountingMonth, extras: AccountingExtras): Sheet[] {
+  const sheets: Sheet[] = [];
+  const settings = m.iibb.settings;
+  if (extras.iibb && settings) {
+    const r = extras.iibb;
+    const rows: SheetCell[][] = [
+      ["Ingresos Brutos", m.period.slice(0, 7)],
+      ["Régimen", IIBB_REGIME_LABELS[settings.regime]],
+      ["Base imponible", r.base],
+      ["Cómo se calcula la base", r.baseNote],
+      [],
+      ["Jurisdicción", "Base", "Alícuota %", "Impuesto"],
+      ...r.lines.map((l) => [l.name, l.base, l.rate, l.tax] as SheetCell[]),
+      [],
+      ["Impuesto del mes", r.tax],
+      ["Percepciones (facturas de compra)", r.perceptions],
+      ["Retenciones del banco (SIRCREB)", r.bankWithholdings],
+      ["Otros créditos cargados", r.credits],
+      [r.balance >= 0 ? "A pagar (estimado)" : "Saldo a favor", Math.abs(r.balance)]
+    ];
+    if (m.iibb.credits.length > 0) {
+      rows.push([], ["Créditos cargados", "Jurisdicción", "Importe", "Nota"]);
+      for (const c of m.iibb.credits) rows.push([IIBB_CREDIT_LABELS[c.kind], c.jurisdiction ?? "", c.amount, c.notes ?? ""]);
+    }
+    sheets.push({ name: "Ingresos Brutos", rows });
+  }
+  if (extras.aging) {
+    sheets.push({ name: "Antigüedad clientes", rows: agingSheet(`Cliente (al ${extras.aging.asOf})`, extras.aging.receivables) });
+    sheets.push({ name: "Antigüedad proveedores", rows: agingSheet(`Proveedor (al ${extras.aging.asOf})`, extras.aging.payables) });
+  }
+  if (extras.dues && extras.dues.length > 0) {
+    sheets.push({
+      name: "Vencimientos",
+      rows: [["Fecha", "Qué", "Origen"], ...extras.dues.map((d) => [dueDateLabel(d.date), d.title, d.kind === "oficial" ? "ARCA" : d.kind === "estimada" ? "Estimada (confirmar en ARCA)" : "Recordatorio propio"] as SheetCell[])]
+    });
+  }
+  return sheets;
+}
+
+/** Inventario al cierre en una hoja (para bajar en Excel). */
+export function inventorySheet(snapshot: { takenOn: string; label: string | null; totalValue: number }, items: { branchName: string; code: string | null; name: string; category: string | null; unit: string | null; quantity: number; unitCost: number; value: number }[]): Sheet {
+  const rows: SheetCell[][] = [
+    [`Inventario al ${snapshot.takenOn}${snapshot.label ? " — " + snapshot.label : ""}`],
+    ["Valorizado al costo de cada producto. Las presentaciones están dentro de su producto principal."],
+    [],
+    ["Sucursal", "Código", "Producto", "Categoría", "Unidad", "Cantidad", "Costo", "Valor"],
+    ...items.map((i) => [i.branchName, i.code ?? "", i.name, i.category ?? "", i.unit === "unit" ? "unidad" : i.unit === "box" ? "caja" : i.unit ?? "", i.quantity, i.unitCost, i.value] as SheetCell[]),
+    ["Total", "", "", "", "", "", "", r2(snapshot.totalValue)]
+  ];
+  return { name: "Inventario", rows };
 }

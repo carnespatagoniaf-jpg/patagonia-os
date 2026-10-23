@@ -15,6 +15,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { can, canAccessPage, planAllows } from "../auth/permissions";
 import { listSupplierTaxInfo, listVouchersForPurchases, setSupplierTax } from "../accounting/accounting-service";
 import { PurchaseVoucherForm } from "../accounting/PurchaseVoucherForm";
+import { VoucherAttachment } from "../accounting/VoucherAttachment";
 import { voucherNumber, voucherTypeLabel, type PurchaseVoucher } from "../accounting/accounting-view";
 import { ChequeFields, EMPTY_CHEQUE, readChequeForm, type ChequeForm } from "../cheques/ChequeFields";
 import { endorseCheque, issueCheque, listOpenCheques } from "../cheques/cheques-service";
@@ -1060,7 +1061,16 @@ export function Purchases() {
                     <div style={{ margin: "8px 0 12px" }}>
                       {purchaseVouchers[purchase.id] && (
                         <p className="muted" style={{ margin: "0 0 6px", fontSize: 13 }}>
-                          Cargada: {voucherTypeLabel(purchaseVouchers[purchase.id].voucherType)} {voucherNumber(purchaseVouchers[purchase.id].pointOfSale, purchaseVouchers[purchase.id].number)}. Podés corregirla acá.
+                          Cargada: {voucherTypeLabel(purchaseVouchers[purchase.id].voucherType)} {voucherNumber(purchaseVouchers[purchase.id].pointOfSale, purchaseVouchers[purchase.id].number)}. Podés corregirla acá.{" "}
+                          <VoucherAttachment
+                            companyId={profile?.company_id ?? null}
+                            voucher={purchaseVouchers[purchase.id]}
+                            canWrite
+                            onChanged={(msg) => {
+                              setMessage(msg);
+                              void listVouchersForPurchases(purchases.map((p) => p.id)).then(setPurchaseVouchers);
+                            }}
+                          />
                         </p>
                       )}
                       <PurchaseVoucherForm

@@ -54,6 +54,8 @@ export interface PurchaseVoucher {
   cae: string | null;
   source: "manual" | "compras" | "arca";
   notes: string | null;
+  /** Foto o PDF de la factura (Storage purchase-docs, migración 156). */
+  attachmentPath?: string | null;
 }
 
 /** Tabla de comprobantes de ARCA (los que usa un comercio). */

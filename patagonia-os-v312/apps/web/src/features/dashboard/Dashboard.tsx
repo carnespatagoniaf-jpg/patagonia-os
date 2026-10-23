@@ -12,6 +12,8 @@ import { listProductsForBranch } from "../inventory/inventory-service";
 import { listProfitabilityPeriods } from "../profitability/profitability-service";
 import { getReconReminders, getTransferAlerts, type ReconReminder } from "../reconciliation/reconciliation-service";
 import { chequeAlerts, type ChequeAlerts } from "../cheques/cheque-logic";
+import { getTaxCalendarInputs } from "../accounting/accounting-service";
+import { daysLeftLabel, dueDateLabel, upcomingDues, type DueItem } from "../accounting/tax-calendar";
 import { listOpenCheques } from "../cheques/cheques-service";
 import { listPosSalesInRange } from "../sale/pos-shift-service";
 import { addDaysIso, formatMoney, todayIso } from "../shifts/format";
@@ -131,6 +133,33 @@ export function Dashboard() {
     };
   }, [profile]);
 
+  // Vencimientos de impuestos de los próximos 7 días (Contable, plan Full; migración 156).
+  const [taxDues, setTaxDues] = useState<DueItem[]>([]);
+  useEffect(() => {
+    if (!isSupabaseConfigured || !canAccessPage(profile, "accounting") || profile?.role === "accountant") return;
+    let cancelled = false;
+    getTaxCalendarInputs()
+      .then((inputs) => {
+        if (cancelled) return;
+        const today = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
+        const { items } = upcomingDues({
+          today,
+          cuit: inputs.cuit,
+          taxCondition: inputs.taxCondition,
+          obligations: inputs.settings?.obligations ?? null,
+          official: inputs.official,
+          reminders: inputs.reminders,
+          iibbDueDay: inputs.settings?.dueDay ?? null,
+          horizonDays: 7
+        });
+        setTaxDues(items);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [profile]);
+
   const chequeRows = chequeWarnings
     ? [
         chequeWarnings.expiring.count > 0 && {
@@ -203,10 +232,22 @@ export function Dashboard() {
             <h2>Alertas</h2>
             <AlertTriangle size={20} />
           </div>
-          {alerts.length === 0 && overdueCustomers.length === 0 && !transferAlerts && statementReminders.length === 0 && chequeRows.length === 0 ? (
+          {alerts.length === 0 && overdueCustomers.length === 0 && !transferAlerts && statementReminders.length === 0 && chequeRows.length === 0 && taxDues.length === 0 ? (
             <p className="muted">Sin alertas.</p>
           ) : (
             <>
+              {taxDues.map((d) => (
+                <div className="alert-row" key={`due-${d.date}-${d.title}`}>
+                  <AlertTriangle size={18} />
+                  <div>
+                    <strong>Vence {d.title} {daysLeftLabel(d.daysLeft)}</strong>
+                    <span>
+                      {dueDateLabel(d.date)}
+                      {d.kind === "estimada" ? " (fecha estimada, confirmala en ARCA)" : ""} · Finanzas → Contable
+                    </span>
+                  </div>
+                </div>
+              ))}
               {chequeRows.map((r) => (
                 <div className="alert-row" key={`cheque-${r.key}`}>
                   <AlertTriangle size={18} />
