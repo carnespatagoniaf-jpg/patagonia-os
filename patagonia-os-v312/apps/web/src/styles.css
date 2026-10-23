@@ -81,7 +81,9 @@ details > summary { cursor: pointer; }
 }
 .nav-item:hover, .nav-item.active { background: #8b1e1e; color: white; }
 .sidebar-footer { display: grid; gap: 6px; }
-.main-content { padding: 34px; overflow: hidden; min-width: 0; }
+/* clip (no hidden): recorta igual pero no es contenedor de scroll, así el total
+   de Mostrador y el panel Turno pueden quedar "sticky" mientras baja la página. */
+.main-content { padding: 34px; overflow: hidden; overflow: clip; min-width: 0; }
 
 .page-header { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; margin-bottom: 26px; }
 .page-header h1 { margin: 4px 0 6px; font-size: clamp(28px, 4vw, 42px); }
@@ -100,6 +102,13 @@ details > summary { cursor: pointer; }
 .kpi-icon { width: 42px; height: 42px; border-radius: 12px; display: grid; place-items: center; background: #fff1f1; color: #8b1e1e; }
 
 .content-grid { display: grid; grid-template-columns: 1.5fr 1fr; gap: 18px; }
+/* Mostrador: el cobro se lleva casi todo el ancho; el panel Turno es una columna angosta. */
+.pos-grid { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 14px; align-items: start; }
+.shift-card.panel { padding: 14px; }
+.shift-card .panel-title h2 { font-size: 17px; }
+.shift-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.shift-actions > :not(.pos-toolbar-btn), .shift-actions > .wide { grid-column: 1 / -1; }
+.shift-actions .pos-toolbar-btn { padding: 6px 8px; font-size: 12px; border-radius: 9px; line-height: 1.25; }
 .panel { padding: 22px; }
 .panel-title { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-bottom: 18px; }
 .panel-title h2 { margin: 0; }
@@ -273,6 +282,23 @@ button.danger { background: white; color: #b42318; border: 1px solid #f3d0cc; }
 .pos-payment-row select:focus, .pos-payment-row input:focus { outline: none; border-color: #8b1e1e; box-shadow: 0 0 0 3px rgba(139,30,30,.12); }
 .pos-change { font-size: 16px; }
 
+/* Sticky: con muchos productos la forma de pago, el total y "Cobrar" quedan
+   siempre a la vista abajo (SaleTicketPanel, .pos-checkout-dock). */
+.pos-checkout-dock {
+  position: sticky; bottom: 0; z-index: 6; background: #fff;
+  margin: 0 -10px; padding: 2px 10px 10px; border-radius: 16px 16px 0 0;
+  box-shadow: 0 -10px 18px -10px rgba(21,25,31,.22);
+}
+/* En la parte fija todo un poco más compacto, para que le quede lugar a la lista. */
+.pos-checkout-dock .pos-payment-card { padding: 8px 12px; margin-top: 8px; }
+.pos-checkout-dock .pos-section-label { margin-bottom: 6px; }
+.pos-checkout-dock .pos-payment-method-btn { padding: 7px 10px; }
+.pos-checkout-dock .pos-total-bar { padding: 10px 18px; margin-top: 8px; }
+.pos-checkout-dock .pos-total-value { font-size: 30px; }
+/* Título de Mostrador más bajo: la pantalla es para cobrar. */
+.pos-page-header { margin-bottom: 12px; }
+.pos-page-header h1 { font-size: 28px; margin: 0; }
+.pos-page-header .muted { margin: 2px 0 0; font-size: 13px; }
 .pos-total-bar {
   margin-top: 10px; background: #15191f; color: #fff; border-radius: 16px; padding: 14px 20px;
   display: flex; justify-content: space-between; align-items: center; gap: 20px; flex-wrap: wrap;
@@ -290,6 +316,7 @@ button.danger { background: white; color: #b42318; border: 1px solid #f3d0cc; }
 @media (max-width: 1050px) {
   .kpi-grid { grid-template-columns: repeat(2, 1fr); }
   .content-grid { grid-template-columns: 1fr; }
+  .pos-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 760px) {
   .app-shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }

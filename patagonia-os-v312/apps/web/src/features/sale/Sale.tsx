@@ -1024,7 +1024,7 @@ Cancelar = es el mismo papel: no cobrar.`)) {
 
   return (
     <>
-      <header className="page-header">
+      <header className="page-header pos-page-header">
         <div>
           <p className="eyebrow">VENTA</p>
           <h1>Mostrador</h1>
@@ -1144,7 +1144,7 @@ Cancelar = es el mismo papel: no cobrar.`)) {
           </div>
         </section>
       ) : (
-        <div className="content-grid" style={{ alignItems: "start" }}>
+        <div className="pos-grid">
           <SaleTicketPanel
             ticket={ticket}
             accounts={accounts}

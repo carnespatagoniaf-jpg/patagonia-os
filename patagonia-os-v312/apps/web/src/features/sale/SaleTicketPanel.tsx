@@ -15,7 +15,7 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
   accounts: TreasuryAccount[];
   busy: boolean;
   onCheckout: () => void;
-  /** "El cliente pide factura" (solo si la factura electrónica está activa en el negocio). */
+  /** Opción "Factura" (solo si la factura electrónica está activa en el negocio). */
   invoiceSlot?: ReactNode;
 }) {
   // Lo que se está tipeando en la cantidad de cada renglón. Sin esto, al borrar
@@ -310,6 +310,9 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
           </p>
         )}
 
+        {/* Forma de pago + factura + total quedan fijos abajo (sticky): con muchos
+            productos no hace falta bajar para elegir cómo paga ni para cobrar. */}
+        <div className="pos-checkout-dock">
         <div className="pos-payment-card">
           <p className="pos-section-label">Forma de pago</p>
           {!isSplit && (
@@ -450,6 +453,7 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
           >
             {busy ? "Cobrando…" : confirmCharge ? (<>Confirmar cobro <kbd>Enter</kbd></>) : (<>Cobrar <kbd>Enter</kbd></>)}
           </button>
+        </div>
         </div>
       </>
     )}

@@ -313,7 +313,7 @@ export function Invoicing() {
     ? { text: "Primero cargá los datos fiscales del negocio.", tone: "warn" as const }
     : !settings.enabled
       ? { text: "Datos cargados. Falta conectar con ARCA (abajo).", tone: "warn" as const }
-      : { text: "Activa: en Mostrador aparece \"El cliente pide factura\".", tone: "ok" as const };
+      : { text: "Activa: en Mostrador, al cobrar, aparece la opción \"Factura\".", tone: "ok" as const };
 
   return (
     <>

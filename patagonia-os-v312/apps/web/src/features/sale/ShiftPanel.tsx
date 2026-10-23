@@ -552,7 +552,7 @@ export function ShiftPanel(p: ShiftPanelProps) {
   }
 
   return (
-    <aside className="panel shift-card" style={{ position: "sticky", top: 18 }}>
+    <aside className="panel shift-card">
       <div className="panel-title">
         <h2>Turno</h2>
         <span className="muted" style={{ fontSize: 12 }}>desde {formatShiftStart(shift.openedAt)}</span>
@@ -574,10 +574,10 @@ export function ShiftPanel(p: ShiftPanelProps) {
         </div>
       )}
 
-      <div style={{ display: "grid", gap: 8 }}>
+      <div className="shift-actions">
         {canManageTreasury && (
           <button
-            className="pos-toolbar-btn"
+            className="pos-toolbar-btn wide"
             style={{ border: "2px solid #2563eb", color: "#1d4ed8", fontWeight: 700 }}
             onClick={() => setShowSafeForm((v) => !v)}
           >
@@ -633,7 +633,7 @@ export function ShiftPanel(p: ShiftPanelProps) {
           {showWaste ? "Cerrar decomiso" : "Decomiso"}
         </button>
         {!p.showCloseConfirm && (
-          <button className="pos-toolbar-btn" onClick={p.onRequestClose}>
+          <button className="pos-toolbar-btn wide" onClick={p.onRequestClose}>
             Cerrar turno
           </button>
         )}

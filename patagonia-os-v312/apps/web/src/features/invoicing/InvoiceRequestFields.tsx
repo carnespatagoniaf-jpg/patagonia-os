@@ -8,7 +8,7 @@ import {
 } from "./invoicing-view";
 
 /**
- * "El cliente pide factura" en Mostrador (y en Facturas → Ventas sin factura).
+ * "Factura" en Mostrador (y en Facturas → Ventas sin factura, y en Clientes).
  * Cerrado ocupa una línea; al tildarlo pide solo lo necesario y avisa qué letra sale.
  */
 export function InvoiceRequestFields({
@@ -26,9 +26,9 @@ export function InvoiceRequestFields({
   const error = invoiceDraftError(issuer, draft, total);
   return (
     <div style={{ display: "grid", gap: 8, margin: "10px 0" }}>
-      <label style={{ display: "flex", gap: 8, alignItems: "center", fontWeight: 700 }}>
+      <label style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 13, color: "#47505c" }}>
         <input type="checkbox" checked={draft.wanted} onChange={(e) => onChange({ ...draft, wanted: e.target.checked })} />
-        El cliente pide factura
+        Factura
         {draft.wanted && <span className="setting-status ok">Factura {letter}</span>}
       </label>
       {draft.wanted && (
