@@ -8,7 +8,15 @@ import { installSerialTabResponder } from "./features/inventory/kretz/serial-tab
 
 const sentryDsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
 if (sentryDsn) {
-  Sentry.init({ dsn: sentryDsn, environment: import.meta.env.MODE });
+  Sentry.init({
+    dsn: sentryDsn,
+    environment: import.meta.env.MODE,
+    // Tiempos reales de cada local (Sentry → Performance): carga de la página
+    // y cada pedido a Supabase, más "Mostrador: cobrar" (Sale.tsx). Una
+    // muestra alcanza para ver qué está lento sin gastar la cuota.
+    integrations: [Sentry.browserTracingIntegration()],
+    tracesSampleRate: 0.2
+  });
 }
 
 function ErrorFallback() {

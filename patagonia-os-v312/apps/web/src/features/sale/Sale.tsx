@@ -33,6 +33,7 @@ import { ShiftPanel } from "./ShiftPanel";
 import { SaleConfigPanel } from "./SaleConfigPanel";
 import { SaleTicketPanel } from "./SaleTicketPanel";
 import { useSaleTicket } from "./useSaleTicket";
+import { applySoldToStock } from "./sale-stock";
 import { getMostradorPin } from "./company-settings-service";
 import { buildCloseTicket as buildCloseTicketBytes, buildMovementTicket as buildMovementTicketBytes, buildReceiptTicket as buildReceiptTicketBytes } from "./sale-tickets";
 import { type ReceiptLine, type ReceiptState, type MovementReceiptState, STALE_SHIFT_HOURS, formatShiftStart, getAutoPrintEnabled, saveAutoPrintEnabled, loadStoredReceipt, saveStoredReceipt } from "./sale-model";
@@ -198,18 +199,58 @@ export function Sale() {
     setShiftLoading(true);
     try {
       const open = await getOpenPosShift(branchId);
+      // El turno se muestra aunque después falle traer sus ventas (nunca "Abrir turno" con uno abierto).
       setShift(open);
-      setShiftSales(open ? await listPosShiftSales(open.id) : []);
       if (open) {
-        const [adjustments, vales] = await Promise.all([listPosShiftAdjustments(open.id), listPosShiftVales(open.id)]);
+        const [sales, adjustments, vales] = await Promise.all([listPosShiftSales(open.id), listPosShiftAdjustments(open.id), listPosShiftVales(open.id)]);
+        setShiftSales(sales);
         setCajaAdjustments(adjustments);
         setPosShiftVales(vales);
       } else {
+        setShiftSales([]);
         setCajaAdjustments([]);
         setPosShiftVales([]);
       }
     } finally {
       setShiftLoading(false);
+    }
+  }
+
+  /**
+   * Después de cobrar: el stock ya se descontó en pantalla (applySoldToStock)
+   * y el botón ya quedó libre, así que esto corre de fondo, todo en paralelo
+   * y sin mostrar "cargando". Si mientras tanto empezó otro cobro, el
+   * resultado se descarta (traería datos de antes de esa venta); la recarga
+   * de esa otra venta lo pone al día.
+   */
+  const refreshSeqRef = useRef(0);
+  async function refreshAfterSale(shiftId: string) {
+    if (!branchId) return;
+    const seq = ++refreshSeqRef.current;
+    const span = Sentry.startInactiveSpan({ name: "Mostrador: recarga después de cobrar", op: "mostrador.recarga", forceTransaction: true });
+    try {
+      const [freshProducts, open, sales, adjustments, vales] = await Promise.all([
+        listProductsForBranch(branchId),
+        getOpenPosShift(branchId),
+        listPosShiftSales(shiftId),
+        listPosShiftAdjustments(shiftId),
+        listPosShiftVales(shiftId)
+      ]);
+      if (seq !== refreshSeqRef.current) return;
+      setProducts(freshProducts);
+      if (open?.id !== shiftId) {
+        // El turno se cerró o cambió desde otra caja: recarga completa.
+        await reloadShift();
+        return;
+      }
+      setShift(open);
+      setShiftSales(sales);
+      setCajaAdjustments(adjustments);
+      setPosShiftVales(vales);
+    } catch {
+      // no crítico -- la venta y el ticket ya están hechos; se refresca en la próxima venta.
+    } finally {
+      span.end();
     }
   }
 
@@ -564,6 +605,10 @@ export function Sale() {
 
     setBusy(true);
     setMessage("");
+    // Una recarga de fondo de la venta anterior traería datos de antes de esta: se descarta.
+    refreshSeqRef.current++;
+    // Lo que espera la cajera: de "Cobrar" a poder empezar la próxima venta (se ve en Sentry → Performance).
+    const chargeSpan = Sentry.startInactiveSpan({ name: "Mostrador: cobrar", op: "mostrador.cobro", forceTransaction: true });
     try {
       const itemDiscountsSnapshot: Record<string, number> = {};
       cart.forEach((l) => { itemDiscountsSnapshot[l.key] = parseAmount(itemDiscounts[l.key] || "0") || 0; });
@@ -729,17 +774,17 @@ Cancelar = es el mismo papel: no cobrar.`)) {
       // se pudo registrar la venta" sobre una venta que en realidad sí se
       // cobró.
       await autoPrintReceipt(newReceipt);
+      // El stock se descuenta en pantalla con lo cobrado (también si quedó en
+      // la cola sin conexión: se va a descontar cuando suba) y el botón queda
+      // libre ya. Stock y turno reales se traen de fondo, sin hacer esperar
+      // a la cajera (antes eran ~6 pedidos seguidos con "Cobrando…").
+      setProducts((current) => applySoldToStock(current, itemsPayload));
+      setBusy(false);
       if (queuedOffline) {
         setMessage("Sin conexión: la venta se guardó en este equipo y se sube sola apenas vuelva internet." + invoiceText);
       } else {
         if (invoiceText) setMessage(invoiceText.trim());
-        try {
-          await reloadProducts();
-          await reloadShift();
-        } catch {
-          // no crítico -- la venta y el ticket ya están hechos, se van a
-          // refrescar solos la próxima vez que cambie algo.
-        }
+        void refreshAfterSale(shift.id);
       }
     } catch (err) {
       // Los errores de RPC de Supabase (PostgrestError) sí son instancias de
@@ -753,6 +798,7 @@ Cancelar = es el mismo papel: no cobrar.`)) {
       setMessage(raw || "No se pudo registrar la venta.");
     } finally {
       setBusy(false);
+      chargeSpan.end();
     }
   }
 
@@ -778,7 +824,9 @@ Cancelar = es el mismo papel: no cobrar.`)) {
           setMessage(`Venta anulada. La nota de crédito no se pudo pedir todavía (${err instanceof Error ? err.message : "error"}); se reintenta desde Facturas.`);
         }
       }
-      await reloadShift();
+      // Se marca anulada en pantalla ya; turno y stock reales (el stock volvió) se traen de fondo.
+      setShiftSales((current) => current.map((s) => (s.id === saleId ? { ...s, voidedAt: new Date().toISOString() } : s)));
+      if (shift) void refreshAfterSale(shift.id);
       return null;
     } catch (err) {
       return err instanceof Error ? err.message : "No se pudo anular la venta.";
@@ -819,18 +867,13 @@ Cancelar = es el mismo papel: no cobrar.`)) {
       const closingShiftId = shift.id;
       const result = await closePosShift(shift.id, countedCash);
       setCloseSummary(result);
-      try {
-        const control = await getScaleControl(closingShiftId);
-        setCloseScaleControl(control.saved ? control : null);
-      } catch {
-        // informativo (base sin la migración 104): el cierre ya está hecho.
-        setCloseScaleControl(null);
-      }
-      try {
-        setCloseSupplierPayments(await listPosShiftSupplierPayments(closingShiftId));
-      } catch {
-        // informativo -- si falla no tapa el cierre, que ya está hecho.
-      }
+      // Los dos son informativos y van en paralelo: si fallan no tapan el cierre, que ya está hecho.
+      const [control, supplierPayments] = await Promise.all([
+        getScaleControl(closingShiftId).catch(() => null), // base sin la migración 104
+        listPosShiftSupplierPayments(closingShiftId).catch(() => null)
+      ]);
+      setCloseScaleControl(control?.saved ? control : null);
+      if (supplierPayments) setCloseSupplierPayments(supplierPayments);
       setCloseDetail(detailSnapshot);
       setCloseAdjustments(adjustmentsSnapshot);
       setCloseVales(valesSnapshot);

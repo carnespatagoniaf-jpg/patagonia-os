@@ -1,39 +1,42 @@
 import { useEffect, useState } from "react";
+import { lazyPage, PageFrame, prefetchPages } from "./components/LazyPage";
 import { Layout, type Page } from "./components/Layout";
 import { Dashboard } from "./features/dashboard/Dashboard";
-import { Inventory } from "./features/inventory/Inventory";
 import { Sale } from "./features/sale/Sale";
-import { ProductsLookup } from "./features/products/ProductsLookup";
-import { Purchases } from "./features/purchases/Purchases";
-import { Shifts } from "./features/shifts/Shifts";
-import { Treasury } from "./features/shifts/Treasury";
-import { Reports } from "./features/shifts/Reports";
-import { AccountsReport } from "./features/accounts/AccountsReport";
-import { Expenses } from "./features/accounts/Expenses";
-import { Employees } from "./features/employees/Employees";
-import { Profitability } from "./features/profitability/Profitability";
-import { Carcass } from "./features/carcass/Carcass";
-import { Branches } from "./features/branches/Branches";
-import { Recipes } from "./features/recipes/Recipes";
-import { Scales } from "./features/scales/Scales";
-import { Reconciliation } from "./features/reconciliation/Reconciliation";
-import { Cheques } from "./features/cheques/Cheques";
-import { Invoicing } from "./features/invoicing/Invoicing";
-import { Creditors } from "./features/creditors/Creditors";
-import { Customers } from "./features/customers/Customers";
-import { Export } from "./features/export/Export";
-import { ImportData } from "./features/import/ImportData";
-import { Users } from "./features/users/Users";
-import { AuditLog } from "./features/audit/AuditLog";
 import { Login } from "./features/auth/Login";
 import { ResetPassword } from "./features/auth/ResetPassword";
-import { AdminCreateClient } from "./features/admin/AdminCreateClient";
 import { useAuth } from "./features/auth/AuthProvider";
 import { canAccessPage, firstAccessiblePage } from "./features/auth/permissions";
 import { BranchProvider } from "./features/branches/BranchProvider";
 import { isSupabaseConfigured } from "./lib/supabase";
 import { setSerialTabPage } from "./features/inventory/kretz/serial-tabs";
 import { trackPageVisit } from "./lib/page-usage";
+
+// Mostrador e Inicio van en el paquete principal; el resto se baja al abrirlo (ver LazyPage.tsx).
+const Inventory = lazyPage(() => import("./features/inventory/Inventory"), "Inventory");
+const ProductsLookup = lazyPage(() => import("./features/products/ProductsLookup"), "ProductsLookup");
+const Purchases = lazyPage(() => import("./features/purchases/Purchases"), "Purchases");
+const Shifts = lazyPage(() => import("./features/shifts/Shifts"), "Shifts");
+const Treasury = lazyPage(() => import("./features/shifts/Treasury"), "Treasury");
+const Reports = lazyPage(() => import("./features/shifts/Reports"), "Reports");
+const AccountsReport = lazyPage(() => import("./features/accounts/AccountsReport"), "AccountsReport");
+const Expenses = lazyPage(() => import("./features/accounts/Expenses"), "Expenses");
+const Employees = lazyPage(() => import("./features/employees/Employees"), "Employees");
+const Profitability = lazyPage(() => import("./features/profitability/Profitability"), "Profitability");
+const Carcass = lazyPage(() => import("./features/carcass/Carcass"), "Carcass");
+const Branches = lazyPage(() => import("./features/branches/Branches"), "Branches");
+const Recipes = lazyPage(() => import("./features/recipes/Recipes"), "Recipes");
+const Scales = lazyPage(() => import("./features/scales/Scales"), "Scales");
+const Reconciliation = lazyPage(() => import("./features/reconciliation/Reconciliation"), "Reconciliation");
+const Cheques = lazyPage(() => import("./features/cheques/Cheques"), "Cheques");
+const Invoicing = lazyPage(() => import("./features/invoicing/Invoicing"), "Invoicing");
+const Creditors = lazyPage(() => import("./features/creditors/Creditors"), "Creditors");
+const Customers = lazyPage(() => import("./features/customers/Customers"), "Customers");
+const Export = lazyPage(() => import("./features/export/Export"), "Export");
+const ImportData = lazyPage(() => import("./features/import/ImportData"), "ImportData");
+const Users = lazyPage(() => import("./features/users/Users"), "Users");
+const AuditLog = lazyPage(() => import("./features/audit/AuditLog"), "AuditLog");
+const AdminCreateClient = lazyPage(() => import("./features/admin/AdminCreateClient"), "AdminCreateClient");
 
 export default function App() {
   const [page, setPage] = useState<Page>("dashboard");
@@ -42,6 +45,10 @@ export default function App() {
   useEffect(() => {
     setSerialTabPage(page);
   }, [page]);
+
+  useEffect(() => {
+    prefetchPages();
+  }, []);
 
   // Qué pantallas usa cada empresa (pestaña Resumen del panel de plataforma).
   useEffect(() => {
@@ -61,7 +68,7 @@ export default function App() {
   }
 
   if (isSupabaseConfigured && session && isPlatformAdmin && !profile) {
-    return <AdminCreateClient />;
+    return <PageFrame><AdminCreateClient /></PageFrame>;
   }
 
   if (isSupabaseConfigured && (!session || !profile)) {
@@ -76,6 +83,7 @@ export default function App() {
         {!allowed && (
           <div className="message warning">No tenés permiso para ver esta sección. Consultá con el dueño o administrador.</div>
         )}
+        <PageFrame key={page}>
         {allowed && page === "dashboard" && <Dashboard />}
         {allowed && page === "sale" && <Sale />}
         {allowed && page === "products" && <ProductsLookup />}
@@ -101,6 +109,7 @@ export default function App() {
         {allowed && page === "import" && <ImportData />}
         {allowed && page === "users" && <Users />}
         {allowed && page === "audit" && <AuditLog />}
+        </PageFrame>
       </Layout>
     </BranchProvider>
   );
