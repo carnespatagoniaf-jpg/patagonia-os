@@ -18,8 +18,9 @@ export function lazyPage<K extends string>(load: () => Promise<Record<K, Compone
 export function prefetchPages() {
   const run = () => loaders.forEach((load) => void load().catch(() => undefined));
   setTimeout(() => {
-    const idle = (window as Window & { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback;
-    if (idle) idle(run);
+    // Con tope: si la pantalla nunca queda "ociosa" (una animación, por ejemplo), igual se bajan.
+    const idle = (window as Window & { requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => void }).requestIdleCallback;
+    if (idle) idle(run, { timeout: 3000 });
     else run();
   }, 4000);
 }
