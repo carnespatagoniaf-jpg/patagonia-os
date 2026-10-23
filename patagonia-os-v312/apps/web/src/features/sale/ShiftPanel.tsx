@@ -539,6 +539,11 @@ export function ShiftPanel(p: ShiftPanelProps) {
   const [voidingSaleId, setVoidingSaleId] = useState<string | null>(null);
   const [showSafeForm, setShowSafeForm] = useState(false);
   const [scaleControlStatus, setScaleControlStatus] = useState({ needed: false, saved: false });
+  // Con una lista o un formulario abierto, el panel se ensancha (styles.css, .pos-grid:has(...)).
+  const expanded = Boolean(
+    p.showShiftMovements || p.showMovementsList || p.showCajaForm || p.showSupplierForm || p.showValeForm ||
+    p.showCloseConfirm || p.pinPromptFor || showSafeForm || showScaleVoid || showWaste || voidingSaleId
+  );
 
   function confirmCloseWithScaleCheck(countedCash: number, declaredAccounts: Record<string, string>) {
     if (
@@ -552,7 +557,7 @@ export function ShiftPanel(p: ShiftPanelProps) {
   }
 
   return (
-    <aside className="panel shift-card">
+    <aside className={`panel shift-card${expanded ? " expanded" : ""}`}>
       <div className="panel-title">
         <h2>Turno</h2>
         <span className="muted" style={{ fontSize: 12 }}>desde {formatShiftStart(shift.openedAt)}</span>

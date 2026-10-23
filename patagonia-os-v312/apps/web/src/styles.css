@@ -109,6 +109,10 @@ details > summary { cursor: pointer; }
 .shift-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .shift-actions > :not(.pos-toolbar-btn), .shift-actions > .wide { grid-column: 1 / -1; }
 .shift-actions .pos-toolbar-btn { padding: 6px 8px; font-size: 12px; border-radius: 9px; line-height: 1.25; }
+/* Con una lista o un formulario abierto en Turno (caja, vale, decomiso, cierre…), la columna se ensancha. */
+.pos-grid:has(.shift-card.expanded) { grid-template-columns: minmax(0, 1fr) 460px; }
+.shift-card.expanded { overflow-x: auto; }
+.shift-card .data-table th, .shift-card .data-table td { padding: 8px 6px; font-size: 13px; }
 .panel { padding: 22px; }
 .panel-title { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin-bottom: 18px; }
 .panel-title h2 { margin: 0; }
