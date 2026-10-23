@@ -31,6 +31,17 @@ export interface PeriodResultData {
     count: number;
     reasons: string[];
   }>;
+  /** Decomisos (migración 151): lo que se tiró, por producto y motivo, al costo de ese momento. */
+  wastes: Array<{
+    productId: string;
+    productName: string;
+    productCode: string | null;
+    unit: string | null;
+    reason: string;
+    quantity: number;
+    value: number;
+    count: number;
+  }>;
   carcass: Array<{
     id: string;
     date: string;
@@ -81,6 +92,16 @@ export function parsePeriodResult(data: unknown): PeriodResultData {
       count: num(a.count),
       reasons: Array.isArray(a.reasons) ? (a.reasons as unknown[]).map(String) : []
     })),
+    wastes: ((raw.wastes ?? []) as Array<Record<string, unknown>>).map((w) => ({
+      productId: String(w.product_id),
+      productName: String(w.product_name ?? ""),
+      productCode: (w.product_code as string | null) ?? null,
+      unit: (w.unit as string | null) ?? null,
+      reason: String(w.reason ?? "otro"),
+      quantity: num(w.quantity),
+      value: num(w.value),
+      count: num(w.count)
+    })),
     carcass: ((raw.carcass ?? []) as Array<Record<string, unknown>>).map((c) => ({
       id: String(c.id),
       date: String(c.date ?? ""),
@@ -120,6 +141,8 @@ export interface PeriodResult {
   costRatio: number | null;
   grossProfit: number;
   stockLoss: number;
+  /** Decomisos: lo que se tiró (vencido, en mal estado, roto), a costo. */
+  wasteLoss: number;
   /** Sobrantes de los conteos: se muestran, pero no se suman (pueden ser correcciones de carga). */
   stockFound: number;
   expenses: number;
@@ -132,8 +155,15 @@ export interface PeriodResult {
   grossPct: number | null;
 }
 
+export const WASTE_REASON_LABELS: Record<string, string> = {
+  vencido: "Vencido",
+  mal_estado: "En mal estado",
+  roto: "Se cayó o se rompió",
+  otro: "Otro"
+};
+
 /**
- * Ventas − costo de lo vendido − faltantes de stock − gastos − sueldos.
+ * Ventas − costo de lo vendido − faltantes de stock − decomisos − gastos − sueldos.
  * Lo vendido sin costo cargado, sin producto, a cuenta sin artículos y por Turnos
  * se costea con el mismo margen que el resto de lo vendido (estimado).
  */
@@ -148,6 +178,7 @@ export function computePeriodResult(d: PeriodResultData): PeriodResult {
   const grossProfit = sales - cost;
   const stockLoss = d.stockAdjustments.reduce((sum, a) => sum + a.lostValue, 0);
   const stockFound = d.stockAdjustments.reduce((sum, a) => sum + a.foundValue, 0);
+  const wasteLoss = d.wastes.reduce((sum, w) => sum + w.value, 0);
   const lines = (kind: "gasto" | "sueldos") =>
     d.expenses
       .filter((e) => e.kind === kind)
@@ -157,7 +188,7 @@ export function computePeriodResult(d: PeriodResultData): PeriodResult {
   const salaryLines = lines("sueldos");
   const expenses = expenseLines.reduce((sum, e) => sum + e.amount, 0);
   const salaries = salaryLines.reduce((sum, e) => sum + e.amount, 0);
-  const result = grossProfit - stockLoss - expenses - salaries;
+  const result = grossProfit - stockLoss - wasteLoss - expenses - salaries;
   const pct = (n: number) => (sales > 0 ? Math.round((n / sales) * 1000) / 10 : null);
   return {
     sales: round2(sales),
@@ -170,6 +201,7 @@ export function computePeriodResult(d: PeriodResultData): PeriodResult {
     costRatio,
     grossProfit: round2(grossProfit),
     stockLoss: round2(stockLoss),
+    wasteLoss: round2(wasteLoss),
     stockFound: round2(stockFound),
     expenses: round2(expenses),
     salaries: round2(salaries),

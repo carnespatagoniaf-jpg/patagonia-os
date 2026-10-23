@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { formatMoney } from "./format";
 import { getPeriodResult } from "../sale/pos-shift-service";
-import { carcassLosses, computePeriodResult, type PeriodResultData } from "./period-result";
+import { WASTE_REASON_LABELS, carcassLosses, computePeriodResult, type PeriodResultData } from "./period-result";
 
 const kgText = (n: number) => `${n.toLocaleString("es-AR", { maximumFractionDigits: 1 })} kg`;
 const qtyText = (unit: string | null, n: number) => (unit === "kg" ? kgText(n) : `${n.toLocaleString("es-AR", { maximumFractionDigits: 1 })} u.`);
@@ -113,6 +113,9 @@ export function ReportsResult({ branchId, from, to, runId }: { branchId: string 
                   />
                   <Row label="Ganancia bruta" amount={result.grossProfit} sign="=" strong />
                   <Row label="Faltantes de stock" amount={result.stockLoss} sign="−" note="mercadería que faltó al contar, a costo (ver Merma)" />
+                  {result.wasteLoss > 0 && (
+                    <Row label="Decomisos" amount={result.wasteLoss} sign="−" note="lo que se tiró por vencido, en mal estado o roto, a costo (ver Merma)" />
+                  )}
                   <Row label="Gastos" amount={result.expenses} sign="−" note={result.expenseLines.length === 0 ? "no se cargaron gastos en Tesorería" : undefined}>
                     {result.expenseLines.length > 0 && (
                       <button className="secondary" style={{ marginTop: 4, padding: "2px 8px", fontSize: 12 }} onClick={() => setShowExpenses(!showExpenses)}>
@@ -165,7 +168,7 @@ export function ReportsResult({ branchId, from, to, runId }: { branchId: string 
       <section className="panel" style={{ marginTop: 18 }}>
         <div className="panel-title">
           <h2>Merma</h2>
-          <span className="muted" style={{ fontSize: 12 }}>Mercadería que se pierde: al contar el stock y al despostar</span>
+          <span className="muted" style={{ fontSize: 12 }}>Mercadería que se pierde: al contar el stock, lo que se tira y al despostar</span>
         </div>
         {loading ? (
           <p className="muted">Cargando…</p>
@@ -211,6 +214,43 @@ export function ReportsResult({ branchId, from, to, runId }: { branchId: string 
                 Sobró al contar: {foundProducts.slice(0, 6).map((a) => `${a.productName} ${qtyText(a.unit, a.foundQty)}`).join(" · ")}
                 {foundProducts.length > 6 ? ` y ${foundProducts.length - 6} más` : ""}.
               </p>
+            )}
+
+            <h3 style={{ fontSize: 15, margin: "18px 0 6px" }}>Decomisos</h3>
+            {data.wastes.length === 0 ? (
+              <p className="muted">No se tiró mercadería en este período. Cuando algo se tira (vencido, en mal estado o roto), se carga en Mostrador con el botón "Decomiso" y aparece acá.</p>
+            ) : (
+              <div style={{ overflowX: "auto" }}>
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Producto</th>
+                      <th>Motivo</th>
+                      <th className="num">Se tiró</th>
+                      <th className="num">A costo</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {data.wastes.map((w) => (
+                      <tr key={`${w.productId}-${w.reason}`}>
+                        <td>{w.productCode ? `${w.productCode} · ` : ""}{w.productName}</td>
+                        <td>
+                          {WASTE_REASON_LABELS[w.reason] ?? w.reason}
+                          {w.count > 1 && <span className="muted" style={{ fontSize: 12 }}> · {w.count} veces</span>}
+                        </td>
+                        <td className="num">{qtyText(w.unit, w.quantity)}</td>
+                        <td className="num">{w.value > 0 ? formatMoney(w.value) : "sin costo"}</td>
+                      </tr>
+                    ))}
+                    <tr>
+                      <td><strong>Total</strong></td>
+                      <td />
+                      <td />
+                      <td className="num"><strong>{formatMoney(data.wastes.reduce((sum, w) => sum + w.value, 0))}</strong></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             )}
 
             <h3 style={{ fontSize: 15, margin: "18px 0 6px" }}>Desposte</h3>

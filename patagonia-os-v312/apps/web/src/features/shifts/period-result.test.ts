@@ -23,6 +23,9 @@ const base = () =>
       { product_id: "a", product_name: "Asado", product_code: "1", unit: "kg", lost_qty: 2, lost_value: 22400, found_qty: 0, found_value: 0, count: 1, reasons: ["Conteo"] },
       { product_id: "b", product_name: "Vacío", product_code: "2", unit: "kg", lost_qty: 0, lost_value: 0, found_qty: 1, found_value: 12800, count: 1, reasons: null }
     ],
+    wastes: [
+      { product_id: "a", product_name: "Asado", product_code: "1", unit: "kg", reason: "mal_estado", quantity: "1.5", value: "16800", count: 1 }
+    ],
     carcass: []
   });
 
@@ -40,8 +43,9 @@ test("resultado: ventas − costo (con lo estimado) − faltantes − gastos −
   assert.equal(r.stockFound, 12800);
   assert.equal(r.expenses, 75000);
   assert.equal(r.salaries, 250000);
-  assert.equal(r.result, 361_000 - 22400 - 75000 - 250000);
-  assert.equal(r.resultPct, 1.1);
+  assert.equal(r.wasteLoss, 16800);
+  assert.equal(r.result, 361_000 - 22400 - 16800 - 75000 - 250000);
+  assert.equal(r.resultPct, -0.3);
   assert.deepEqual(r.expenseLines.map((e) => e.label), ["Servicios (luz, gas, alquiler)", "Otros gastos"]);
   assert.deepEqual(r.salaryLines.map((e) => e.category), ["sueldo", "vale_adelanto"]);
 });
