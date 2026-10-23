@@ -12,7 +12,10 @@ import { addSupplierAdjustment, deleteSupplierAdjustment, fetchSupplierAdjustmen
 import { parseAmount } from "../../lib/money";
 import { quantityNumber } from "../sale/quantity";
 import { useAuth } from "../auth/AuthProvider";
-import { can, canAccessPage } from "../auth/permissions";
+import { can, canAccessPage, planAllows } from "../auth/permissions";
+import { listSupplierTaxInfo, listVouchersForPurchases, setSupplierTax } from "../accounting/accounting-service";
+import { PurchaseVoucherForm } from "../accounting/PurchaseVoucherForm";
+import { voucherNumber, voucherTypeLabel, type PurchaseVoucher } from "../accounting/accounting-view";
 import { ChequeFields, EMPTY_CHEQUE, readChequeForm, type ChequeForm } from "../cheques/ChequeFields";
 import { endorseCheque, issueCheque, listOpenCheques } from "../cheques/cheques-service";
 import { chequeTitle, formatDay, type Cheque } from "../cheques/cheque-logic";
@@ -184,6 +187,15 @@ export function Purchases() {
   const [editSupplierNotes, setEditSupplierNotes] = useState("");
   const [editSupplierActive, setEditSupplierActive] = useState(true);
 
+  // Datos fiscales (plan Full, migración 155): CUIT del proveedor y la factura
+  // de cada compra para el Libro IVA Compras (pantalla Contable).
+  const fiscalOn = isSupabaseConfigured && planAllows(profile, "full") && ["owner", "admin", "manager"].includes(profile?.role ?? "");
+  const [taxInfo, setTaxInfo] = useState<Record<string, { taxId: string | null; taxCondition: string | null }>>({});
+  const [editSupplierCuit, setEditSupplierCuit] = useState("");
+  const [editSupplierTaxCondition, setEditSupplierTaxCondition] = useState("");
+  const [purchaseVouchers, setPurchaseVouchers] = useState<Record<string, PurchaseVoucher>>({});
+  const [voucherFormFor, setVoucherFormFor] = useState<string | null>(null);
+
   useEffect(() => {
     if (!isSupabaseConfigured || !branchId) return;
     listProductsForBranch(branchId).then(setProducts).catch(() => setProducts([]));
@@ -197,6 +209,19 @@ export function Purchases() {
   useEffect(() => {
     if (selectedSupplierId) void loadSupplier(selectedSupplierId);
   }, [selectedSupplierId, loadSupplier]);
+
+  useEffect(() => {
+    if (!fiscalOn) return;
+    listSupplierTaxInfo().then(setTaxInfo).catch(() => setTaxInfo({}));
+  }, [fiscalOn, suppliers]);
+
+  const purchaseIdsKey = purchases.map((p) => p.id).join(",");
+  useEffect(() => {
+    if (!fiscalOn) return;
+    listVouchersForPurchases(purchaseIdsKey ? purchaseIdsKey.split(",") : [])
+      .then(setPurchaseVouchers)
+      .catch(() => setPurchaseVouchers({}));
+  }, [fiscalOn, purchaseIdsKey]);
 
   const draftTotal = useMemo(() => {
     const parsed: PurchaseLineInput[] = lines
@@ -240,6 +265,15 @@ export function Purchases() {
         notes: editSupplierNotes.trim() || undefined,
         active: editSupplierActive
       });
+      if (fiscalOn) {
+        const cuit = editSupplierCuit.replace(/\D/g, "") || null;
+        const condition = editSupplierTaxCondition || null;
+        const current = taxInfo[selectedSupplierId];
+        if (cuit !== (current?.taxId ?? null) || condition !== (current?.taxCondition ?? null)) {
+          await setSupplierTax(selectedSupplierId, cuit, condition);
+          setTaxInfo(await listSupplierTaxInfo());
+        }
+      }
       setEditingSupplier(false);
       if (!editSupplierActive) setSelectedSupplierId(null);
       setMessage(editSupplierActive ? "Proveedor actualizado." : "Proveedor eliminado.");
@@ -545,6 +579,8 @@ export function Purchases() {
       setEditSupplierPhone(selectedSupplier.phone ?? "");
       setEditSupplierNotes(selectedSupplier.notes ?? "");
       setEditSupplierActive(selectedSupplier.active);
+      setEditSupplierCuit(taxInfo[selectedSupplier.id]?.taxId ?? "");
+      setEditSupplierTaxCondition(taxInfo[selectedSupplier.id]?.taxCondition ?? "");
       setEditingSupplier(false);
     }
   }, [selectedSupplier]);
@@ -678,7 +714,22 @@ export function Purchases() {
                 <span>{adjustmentsTotal < 0 ? "Descuentos" : "Recargos"} <b>{formatMoney(Math.abs(adjustmentsTotal))}</b></span>
               )}
               <strong>Saldo <b>{formatMoney(balance?.balance ?? 0)}</b></strong>
-              <button className="secondary" style={{ marginTop: 10 }} onClick={() => setEditingSupplier(true)}>Editar</button>
+              {fiscalOn && (
+                <span className="muted" style={{ fontSize: 13 }}>
+                  {taxInfo[selectedSupplier.id]?.taxId ? `CUIT ${taxInfo[selectedSupplier.id]?.taxId}` : "Sin CUIT (cargalo con Editar, sirve para el Libro IVA)"}
+                </span>
+              )}
+              <button
+                className="secondary"
+                style={{ marginTop: 10 }}
+                onClick={() => {
+                  setEditSupplierCuit(taxInfo[selectedSupplier.id]?.taxId ?? "");
+                  setEditSupplierTaxCondition(taxInfo[selectedSupplier.id]?.taxCondition ?? "");
+                  setEditingSupplier(true);
+                }}
+              >
+                Editar
+              </button>
             </div>
           )}
           {selectedSupplier && editingSupplier && (
@@ -687,6 +738,17 @@ export function Purchases() {
               <input placeholder="Rubro (pollo, carne...)" value={editSupplierCategory} onChange={(e) => setEditSupplierCategory(e.target.value)} />
               <input placeholder="Teléfono" value={editSupplierPhone} onChange={(e) => setEditSupplierPhone(e.target.value)} />
               <input placeholder="Notas" value={editSupplierNotes} onChange={(e) => setEditSupplierNotes(e.target.value)} />
+              {fiscalOn && (
+                <>
+                  <input placeholder="CUIT" inputMode="numeric" value={editSupplierCuit} onChange={(e) => setEditSupplierCuit(e.target.value)} />
+                  <select value={editSupplierTaxCondition} onChange={(e) => setEditSupplierTaxCondition(e.target.value)}>
+                    <option value="">Condición frente al IVA…</option>
+                    <option value="responsable_inscripto">Responsable inscripto (te da Factura A)</option>
+                    <option value="monotributo">Monotributista (Factura C)</option>
+                    <option value="exento">Exento</option>
+                  </select>
+                </>
+              )}
               <select value={editSupplierActive ? "1" : "0"} onChange={(e) => setEditSupplierActive(e.target.value === "1")}>
                 <option value="1">Activo</option>
                 <option value="0">Dado de baja</option>
@@ -980,11 +1042,42 @@ export function Purchases() {
                           Editar fecha
                         </button>
                       )}
+                      {fiscalOn && purchase.status === "active" && (
+                        <button
+                          className={purchaseVouchers[purchase.id] ? "link-button" : "secondary"}
+                          title="Datos de la factura del proveedor para el Libro IVA Compras (pantalla Contable)"
+                          onClick={() => setVoucherFormFor(voucherFormFor === purchase.id ? null : purchase.id)}
+                        >
+                          {purchaseVouchers[purchase.id] ? "✓ Factura en el Libro IVA" : "Factura (Libro IVA)"}
+                        </button>
+                      )}
                       {purchase.status === "active" && (
                         <button className="secondary" disabled={busy} onClick={() => handleVoidPurchase(purchase.id)}>Anular</button>
                       )}
                     </span>
                   </div>
+                  {fiscalOn && voucherFormFor === purchase.id && selectedSupplier && (
+                    <div style={{ margin: "8px 0 12px" }}>
+                      {purchaseVouchers[purchase.id] && (
+                        <p className="muted" style={{ margin: "0 0 6px", fontSize: 13 }}>
+                          Cargada: {voucherTypeLabel(purchaseVouchers[purchase.id].voucherType)} {voucherNumber(purchaseVouchers[purchase.id].pointOfSale, purchaseVouchers[purchase.id].number)}. Podés corregirla acá.
+                        </p>
+                      )}
+                      <PurchaseVoucherForm
+                        suppliers={suppliers.map((sp) => ({ id: sp.id, name: sp.name, taxId: taxInfo[sp.id]?.taxId ?? null, taxCondition: taxInfo[sp.id]?.taxCondition ?? null }))}
+                        existing={purchaseVouchers[purchase.id] ?? null}
+                        purchase={{ purchaseId: purchase.id, date: purchase.purchaseDate, supplierId: selectedSupplier.id, invoiceNumber: purchase.invoiceNumber ?? null, total: purchase.total }}
+                        branchId={branchId}
+                        onCancel={() => setVoucherFormFor(null)}
+                        onSaved={(msg) => {
+                          setVoucherFormFor(null);
+                          setMessage(msg + " Ya está en el Libro IVA Compras (Contable).");
+                          void listVouchersForPurchases(purchases.map((p) => p.id)).then(setPurchaseVouchers);
+                          void listSupplierTaxInfo().then(setTaxInfo);
+                        }}
+                      />
+                    </div>
+                  )}
                   <table className="data-table">
                     <thead>
                       <tr>

@@ -11,6 +11,7 @@ export type Permission =
   | "purchases.manage"
   | "treasury.manage"
   | "invoicing.manage"
+  | "accounting.view"
   | "pos.treasury"
   | "employees.manage"
   | "profitability.view"
@@ -69,6 +70,7 @@ export const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> 
     "purchases.manage",
     "treasury.manage",
     "invoicing.manage",
+    "accounting.view",
     "pos.treasury",
     "employees.manage",
     "profitability.view",
@@ -85,7 +87,9 @@ export const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> 
   manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view"],
   cashier: ["pos.sell", "products.view", "sales.create", "pos.treasury"],
   production: ["dashboard.view", "inventory.view", "inventory.adjust"],
-  readonly: ["dashboard.view", "inventory.view", "reports.view"]
+  readonly: ["dashboard.view", "inventory.view", "reports.view"],
+  // El contador (migración 155): solo la pantalla Contable. La base le corta toda escritura.
+  accountant: ["accounting.view"]
 };
 
 /** Etiqueta en español para cada permiso — usada en Usuarios para armar los tildes de "qué puede ver esta persona en particular". */
@@ -101,6 +105,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   "treasury.manage": "Tesorería",
   // Aparte de Tesorería (2026-10-20): un negocio de otro país (Martínez, Bolivia) usa Tesorería pero no factura en ARCA.
   "invoicing.manage": "Facturas (ARCA)",
+  "accounting.view": "Contable (libros de IVA y carpeta del contador)",
   "pos.treasury": "Movimientos de caja en Mostrador (caja, proveedor, vale)",
   "employees.manage": "Empleados",
   "profitability.view": "Rentabilidad",
@@ -147,7 +152,7 @@ const PERMISSION_MIN_PLAN: Partial<Record<Permission, Plan>> = {
  * permiso branches.manage también maneja el selector de sucursal, que
  * Estándar necesita, pero la pantalla de resumen es de Full). */
 // Facturas (ARCA) bajó de Full a Estándar el 15/10/2026 (decisión del dueño; migración 121).
-const PAGE_MIN_PLAN: Partial<Record<string, Plan>> = { branches: "full", reconciliation: "full", cheques: "full", invoicing: "estandar" };
+const PAGE_MIN_PLAN: Partial<Record<string, Plan>> = { branches: "full", reconciliation: "full", cheques: "full", invoicing: "estandar", accounting: "full" };
 
 /** Plan de la empresa del usuario. Sin dato (modo demo, o la base todavía
  * sin la migración 101) cuenta como Full: nunca se le saca algo a nadie por
@@ -186,6 +191,8 @@ export const PAGE_PERMISSIONS = {
   // Cheques (migración 150, plan Full): la base exige dueño/admin.
   cheques: "treasury.manage",
   invoicing: "invoicing.manage",
+  // Contable (migración 155, plan Full).
+  accounting: "accounting.view",
   employees: "employees.manage",
   profitability: "profitability.view",
   carcass: "carcass.manage",

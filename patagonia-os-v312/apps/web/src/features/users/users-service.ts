@@ -1,6 +1,6 @@
 import { supabase } from "../../lib/supabase";
 
-export type StaffRole = "owner" | "admin" | "manager" | "cashier" | "production" | "readonly";
+export type StaffRole = "owner" | "admin" | "manager" | "cashier" | "production" | "readonly" | "accountant";
 
 export interface CompanyUser {
   id: string;

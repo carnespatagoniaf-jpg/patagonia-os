@@ -8,7 +8,7 @@ export interface UserProfile {
   company_id: string;
   branch_id: string | null;
   full_name: string;
-  role: "owner" | "admin" | "manager" | "cashier" | "production" | "readonly";
+  role: "owner" | "admin" | "manager" | "cashier" | "production" | "readonly" | "accountant";
   active: boolean;
   denied_permissions?: string[];
   /** Plan de la empresa (migración 101). Ver permissions.ts: profilePlan(). */

@@ -5,7 +5,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { useUsers } from "./useUsers";
 import type { CompanyUser, CreateStaffUserResult, StaffRole } from "./users-service";
 
-const ASSIGNABLE_ROLES: StaffRole[] = ["admin", "manager", "cashier", "production", "readonly"];
+const ASSIGNABLE_ROLES: StaffRole[] = ["admin", "manager", "cashier", "production", "readonly", "accountant"];
 
 const ROLE_LABELS: Record<StaffRole, string> = {
   owner: "Dueño",
@@ -13,7 +13,8 @@ const ROLE_LABELS: Record<StaffRole, string> = {
   manager: "Encargado",
   cashier: "Cajero/a",
   production: "Producción",
-  readonly: "Solo lectura"
+  readonly: "Solo lectura",
+  accountant: "Contador (solo mira lo contable)"
 };
 
 interface Draft {

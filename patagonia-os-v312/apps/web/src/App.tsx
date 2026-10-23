@@ -30,6 +30,7 @@ const Scales = lazyPage(() => import("./features/scales/Scales"), "Scales");
 const Reconciliation = lazyPage(() => import("./features/reconciliation/Reconciliation"), "Reconciliation");
 const Cheques = lazyPage(() => import("./features/cheques/Cheques"), "Cheques");
 const Invoicing = lazyPage(() => import("./features/invoicing/Invoicing"), "Invoicing");
+const Accounting = lazyPage(() => import("./features/accounting/Accounting"), "Accounting");
 const Creditors = lazyPage(() => import("./features/creditors/Creditors"), "Creditors");
 const Customers = lazyPage(() => import("./features/customers/Customers"), "Customers");
 const Export = lazyPage(() => import("./features/export/Export"), "Export");
@@ -100,6 +101,7 @@ export default function App() {
         {allowed && page === "reconciliation" && <Reconciliation />}
         {allowed && page === "cheques" && <Cheques />}
         {allowed && page === "invoicing" && <Invoicing />}
+        {allowed && page === "accounting" && <Accounting />}
         {allowed && page === "creditors" && <Creditors />}
         {allowed && page === "customers" && <Customers />}
         {allowed && page === "reports" && <Reports />}
