@@ -47,6 +47,7 @@ import {
   lastAuthorizedInner,
   loginTicketRequestXml,
   parseCaeResponse,
+  parseVatLines,
   parseConsultResponse,
   parseLastAuthorized,
   parseLoginResponse,
@@ -459,6 +460,7 @@ async function authorizeOne(admin: SupabaseClient, settings: Row, invoiceId: str
           net: Number(inv.net),
           vat: Number(inv.vat),
           vatRate: Number(inv.vat_rate),
+          vatLines: parseVatLines(inv.vat_breakdown),
           related
         })
       );

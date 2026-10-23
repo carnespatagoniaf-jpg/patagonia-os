@@ -378,11 +378,12 @@ export function Invoicing() {
             </label>
             {form.taxCondition === "responsable_inscripto" && (
               <label className="muted">
-                IVA de lo que vendés
+                IVA general
                 <select value={form.defaultVatRate} onChange={(e) => setForm({ ...form, defaultVatRate: e.target.value })} style={{ width: "100%" }}>
                   <option value="10.5">10,5% (carne fresca)</option>
                   <option value="21">21%</option>
                 </select>
+                <span style={{ fontSize: 12 }}>Para los productos que no tienen su propio IVA. Cada producto se cambia en Stock → Editar (columna IVA), o toda una categoría en "Gestionar categorías".</span>
               </label>
             )}
           </div>

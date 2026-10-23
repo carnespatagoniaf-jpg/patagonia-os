@@ -10,6 +10,8 @@ import {
   arDateLabel,
   customerDocLabel,
   formatCuit,
+  invoiceVatLines,
+  vatRateLabel,
   voucherNumberLabel,
   type InvoicePrint
 } from "../invoicing/invoicing-view";
@@ -86,12 +88,12 @@ function invoiceHeader(t: TicketBuilder, inv: InvoicePrint, width: number, bodyF
 /** Pie de factura: IVA (A: discriminado; B: contenido, Ley 27.743), CAE y QR. */
 function invoiceFooter(t: TicketBuilder, inv: InvoicePrint, width: number) {
   t.separator("-", width);
-  const rate = String(inv.vatRate).replace(".", ",");
+  const lines = invoiceVatLines(inv);
   if (inv.letter === "A") {
     t.line(`Neto gravado: ${formatMoney(inv.net)}`);
-    t.line(`IVA ${rate}%: ${formatMoney(inv.vat)}`);
+    for (const l of lines) t.line(`IVA ${vatRateLabel(l.rate)}%: ${formatMoney(l.vat)}`);
   } else if (inv.letter === "B") {
-    t.line(`IVA contenido (${rate}%): ${formatMoney(inv.vat)}`);
+    for (const l of lines) t.line(`IVA contenido (${vatRateLabel(l.rate)}%): ${formatMoney(l.vat)}`);
   }
   t.line(`CAE ${inv.cae}`);
   t.line(`Vto. CAE ${arDateLabel(inv.caeDue)}`);

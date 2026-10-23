@@ -4,7 +4,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { can } from "../auth/permissions";
 import { downloadCsv, toCsv } from "../../lib/csv";
 import { isSupabaseConfigured } from "../../lib/supabase";
-import { listProductsForBranch } from "../inventory/inventory-service";
+import { listProductsForBranch, setProductsVatRate } from "../inventory/inventory-service";
 import { listSuppliers } from "../purchases/suppliers-service";
 import { listCustomers } from "../customers/customers-service";
 import { importCustomers, importProducts, importSuppliers, type ImportCounts } from "./import-service";
@@ -22,6 +22,7 @@ import {
   type Cell,
   type ImportKind,
   type ImportRow,
+  type ProductPayload,
   type RowStatus,
   type Table
 } from "./import-parse";
@@ -145,6 +146,13 @@ export function ImportData() {
       if (kind === "products") {
         if (!branchId) throw new Error("Elegí una sucursal primero.");
         counts = await importProducts(branchId, payloads as never, updateExisting);
+        // IVA por producto (columna "IVA", opcional): se pone por código, una llamada por alícuota.
+        const byRate = new Map<number, string[]>();
+        for (const p of payloads as ProductPayload[]) {
+          if (p.vat_rate === null) continue;
+          byRate.set(p.vat_rate, [...(byRate.get(p.vat_rate) ?? []), p.code]);
+        }
+        for (const [rate, codes] of byRate) await setProductsVatRate({ codes, rate });
       } else if (kind === "suppliers") {
         counts = await importSuppliers(payloads as never);
       } else {

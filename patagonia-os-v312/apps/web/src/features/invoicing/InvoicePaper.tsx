@@ -6,6 +6,8 @@ import {
   arDateLabel,
   customerDocLabel,
   formatCuit,
+  invoiceVatLines,
+  vatRateLabel,
   voucherNumberLabel,
   type InvoicePrint
 } from "./invoicing-view";
@@ -68,7 +70,7 @@ export function InvoicePaperHeader({ invoice }: { invoice: InvoicePrint }) {
 }
 
 export function InvoicePaperFooter({ invoice }: { invoice: InvoicePrint }) {
-  const rate = String(invoice.vatRate).replace(".", ",");
+  const lines = invoiceVatLines(invoice);
   return (
     <div style={{ display: "flex", gap: 12, alignItems: "center", marginTop: 8 }}>
       <InvoiceQr url={invoice.qrUrl} />
@@ -76,10 +78,15 @@ export function InvoicePaperFooter({ invoice }: { invoice: InvoicePrint }) {
         {invoice.letter === "A" && (
           <>
             <div>Neto gravado: {formatMoney(invoice.net)}</div>
-            <div>IVA {rate}%: {formatMoney(invoice.vat)}</div>
+            {lines.map((l) => (
+              <div key={l.rate}>IVA {vatRateLabel(l.rate)}%: {formatMoney(l.vat)}</div>
+            ))}
           </>
         )}
-        {invoice.letter === "B" && <div>IVA contenido ({rate}%): {formatMoney(invoice.vat)}</div>}
+        {invoice.letter === "B" &&
+          lines.map((l) => (
+            <div key={l.rate}>IVA contenido ({vatRateLabel(l.rate)}%): {formatMoney(l.vat)}</div>
+          ))}
         <div><strong>CAE {invoice.cae}</strong></div>
         <div>Vto. CAE {arDateLabel(invoice.caeDue)}</div>
         <div>Comprobante autorizado por ARCA</div>

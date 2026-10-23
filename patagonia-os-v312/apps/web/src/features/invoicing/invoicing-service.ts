@@ -1,5 +1,5 @@
 import { supabase } from "../../lib/supabase";
-import { arcaQrUrl, invoiceLabel, type CustomerCondition, type InvoiceDraft, type InvoiceLetter, type InvoicePrint, type IssuerCondition } from "./invoicing-view";
+import { arcaQrUrl, invoiceLabel, parseInvoiceVatLines, type InvoiceVatLine, type CustomerCondition, type InvoiceDraft, type InvoiceLetter, type InvoicePrint, type IssuerCondition } from "./invoicing-view";
 
 // Factura electrónica ARCA (migración 113). Lectura directa de las tablas (la
 // política de seguridad deja ver solo las de la empresa, y solo en plan Full);
@@ -94,13 +94,14 @@ export interface Invoice {
   net: number;
   vat: number;
   vatRate: number;
+  vatLines: InvoiceVatLine[] | null;
   relatedInvoiceId: string | null;
   errorMessage: string | null;
   createdAt: string;
 }
 
 const INVOICE_COLUMNS =
-  "id,pos_sale_id,customer_charge_id,kind,letter,voucher_type,point_of_sale,number,status,cae,cae_due,issued_on,customer_doc_type,customer_doc_number,customer_name,customer_tax_condition,total,net,vat,vat_rate,related_invoice_id,error_message,created_at";
+  "id,pos_sale_id,customer_charge_id,kind,letter,voucher_type,point_of_sale,number,status,cae,cae_due,issued_on,customer_doc_type,customer_doc_number,customer_name,customer_tax_condition,total,net,vat,vat_rate,vat_breakdown,related_invoice_id,error_message,created_at";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapInvoice(row: any): Invoice {
@@ -125,6 +126,7 @@ function mapInvoice(row: any): Invoice {
     net: Number(row.net),
     vat: Number(row.vat),
     vatRate: Number(row.vat_rate),
+    vatLines: parseInvoiceVatLines(row.vat_breakdown),
     relatedInvoiceId: row.related_invoice_id ?? null,
     errorMessage: row.error_message,
     createdAt: row.created_at
@@ -287,6 +289,7 @@ export function invoicePrintFrom(inv: Invoice, fiscal: FiscalSettings, related?:
     net: inv.net,
     vat: inv.vat,
     vatRate: inv.vatRate,
+    vatLines: inv.vatLines,
     qrUrl: arcaQrUrl({
       issuedOn,
       cuit: fiscal.cuit,

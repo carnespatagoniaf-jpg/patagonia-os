@@ -184,3 +184,33 @@ export async function setProductActive(productId: string, active: boolean): Prom
   const { error } = await supabase.rpc("set_product_active", { p_product_id: productId, p_active: active });
   if (error) throw error;
 }
+
+/** IVA de cada producto (migración 154): id → alícuota, o null = el IVA general de Facturas. */
+export async function listProductVatRates(): Promise<Record<string, number | null>> {
+  if (!supabase) return {};
+  const out: Record<string, number | null> = {};
+  const PAGE_SIZE = 1000;
+  for (let from = 0; ; from += PAGE_SIZE) {
+    const { data, error } = await supabase.from("products").select("id,vat_rate").order("id").range(from, from + PAGE_SIZE - 1);
+    if (error) {
+      // Base sin la migración 154 todavía: sin IVA por producto, nada se rompe.
+      if ((error as { code?: string }).code === "42703") return {};
+      throw error;
+    }
+    for (const row of data ?? []) out[row.id] = row.vat_rate === null ? null : Number(row.vat_rate);
+    if (!data || data.length < PAGE_SIZE) break;
+  }
+  return out;
+}
+
+/** Cambia el IVA de varios productos, por id o por código. rate null = vuelve al IVA general. */
+export async function setProductsVatRate(input: { productIds?: string[]; codes?: string[]; rate: number | null }): Promise<number> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { data, error } = await supabase.rpc("set_products_vat_rate", {
+    p_product_ids: input.productIds ?? null,
+    p_codes: input.codes ?? null,
+    p_rate: input.rate
+  });
+  if (error) throw error;
+  return Number(data ?? 0);
+}

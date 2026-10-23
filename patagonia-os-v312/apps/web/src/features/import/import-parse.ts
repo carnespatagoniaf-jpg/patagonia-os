@@ -110,7 +110,8 @@ const PRODUCT_FIELDS: FieldSynonyms = {
   price: ["precio", "precioventa", "preciodeventa", "pvp", "venta", "preciopublico", "precioalpublico"],
   stock: ["stock", "existencia", "stockactual", "stockinicial", "cantidad"],
   minStock: ["stockminimo", "minimo", "stockmin", "min"],
-  category: ["categoria", "rubro", "familia", "grupo", "seccion"]
+  category: ["categoria", "rubro", "familia", "grupo", "seccion"],
+  vat: ["iva", "alicuota", "alicuotaiva", "alicuotadeiva", "tasaiva", "ivaventa", "porcentajeiva"]
 };
 
 const SUPPLIER_FIELDS: FieldSynonyms = {
@@ -143,6 +144,7 @@ export const FIELD_LABELS: Record<string, string> = {
   stock: "Stock",
   minStock: "Stock mínimo",
   category: "Categoría / Rubro",
+  vat: "IVA",
   phone: "Teléfono",
   notes: "Notas",
   locality: "Localidad",
@@ -297,6 +299,21 @@ export interface ProductPayload {
   min_stock: number;
   category: string;
   stock: number | null;
+  /** IVA del producto (migración 154); null = el IVA general de Facturas. */
+  vat_rate: number | null;
+}
+
+/**
+ * IVA de una celda: "10,5", "10.5%", "21", "0,21" (Excel con formato %) → 10.5 / 21.
+ * Vacío → null. Otro valor → NaN (error de la fila).
+ */
+export function parseVatCell(cell: Cell): number | null {
+  const text = cellText(cell).replace("%", "").replace(",", ".").trim();
+  if (text === "") return null;
+  const n = Number(text);
+  if (!Number.isFinite(n)) return NaN;
+  const rate = n > 0 && n < 1 ? Math.round(n * 1000) / 10 : n;
+  return [0, 10.5, 21, 27].includes(rate) ? rate : NaN;
 }
 
 export function buildProductRows(
@@ -339,6 +356,8 @@ export function buildProductRows(
     if (stock.invalid) errors.push("El stock no es un número");
     if (min.invalid) errors.push("El stock mínimo no es un número");
     if ((cost.value ?? 0) < 0 || (price.value ?? 0) < 0 || (stock.value ?? 0) < 0 || (min.value ?? 0) < 0) errors.push("No puede haber números negativos");
+    const vat = parseVatCell(get("vat"));
+    if (vat !== null && Number.isNaN(vat)) errors.push(`IVA no reconocido: "${cellText(get("vat"))}" (usá 10,5 o 21)`);
     if (!price.invalid && (price.value ?? 0) === 0) warnings.push("Sin precio de venta");
     if ((cost.value ?? 0) > 0 && (price.value ?? 0) > 0 && (price.value as number) < (cost.value as number)) warnings.push("El precio es menor al costo");
 
@@ -370,7 +389,8 @@ export function buildProductRows(
               price_retail: price.value ?? 0,
               min_stock: min.value ?? 0,
               category: cellText(get("category")),
-              stock: stock.value
+              stock: stock.value,
+              vat_rate: vat
             }
     });
   });
@@ -459,12 +479,12 @@ export function summarize<P>(rows: ImportRow<P>[]) {
 
 export const TEMPLATES: Record<ImportKind, { headers: string[]; rows: (string | number)[][] }> = {
   products: {
-    headers: ["Código", "Nombre", "Unidad", "Costo", "Precio de venta", "Stock", "Stock mínimo", "Categoría"],
+    headers: ["Código", "Nombre", "Unidad", "Costo", "Precio de venta", "Stock", "Stock mínimo", "Categoría", "IVA"],
     rows: [
-      [101, "Asado", "kg", 9500, 13800, 25.5, 5, "Vacuno"],
-      [102, "Milanesa de nalga", "kg", 11000, 15900, 12, 3, "Vacuno"],
-      [201, "Pollo entero", "kg", 3200, 4800, 40, 10, "Pollo"],
-      [301, "Chorizo", "unidad", 700, 1100, 60, 20, "Cerdo"]
+      [101, "Asado", "kg", 9500, 13800, 25.5, 5, "Vacuno", "10,5"],
+      [102, "Milanesa de nalga", "kg", 11000, 15900, 12, 3, "Vacuno", "10,5"],
+      [201, "Pollo entero", "kg", 3200, 4800, 40, 10, "Pollo", "10,5"],
+      [301, "Chorizo", "unidad", 700, 1100, 60, 20, "Cerdo", "21"]
     ]
   },
   suppliers: {

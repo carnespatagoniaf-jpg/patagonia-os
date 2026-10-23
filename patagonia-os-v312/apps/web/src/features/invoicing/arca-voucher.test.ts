@@ -14,6 +14,7 @@ import {
   parseLastAuthorized,
   parseLoginResponse,
   parsePointsOfSale,
+  parseVatLines,
   vatRateId
 } from "../../../../../supabase/functions/arca-invoice/voucher";
 import { arcaQrUrl, voucherNumberLabel } from "./invoicing-view";
@@ -64,6 +65,30 @@ describe("pedido de CAE (FECAESolicitar)", () => {
     assert.match(xml, /<ar:DocTipo>80<\/ar:DocTipo><ar:DocNro>20123456786<\/ar:DocNro>/);
     assert.match(xml, /<ar:CondicionIVAReceptorId>1<\/ar:CondicionIVAReceptorId>/);
     assert.match(xml, /<ar:Id>5<\/ar:Id>/);
+  });
+
+  it("IVA por producto: un AlicIva por alícuota y los totales son su suma", () => {
+    const xml = caeRequestInner({
+      ...base,
+      voucherType: 6,
+      total: 10000,
+      net: 0,
+      vat: 0,
+      vatRate: 10.5,
+      vatLines: [
+        { rate: 21, net: 2361.27, vat: 495.87 },
+        { rate: 10.5, net: 6464.13, vat: 678.73 }
+      ]
+    });
+    assert.ok(xml.includes(
+      "<ar:Iva><ar:AlicIva><ar:Id>5</ar:Id><ar:BaseImp>2361.27</ar:BaseImp><ar:Importe>495.87</ar:Importe></ar:AlicIva>" +
+      "<ar:AlicIva><ar:Id>4</ar:Id><ar:BaseImp>6464.13</ar:BaseImp><ar:Importe>678.73</ar:Importe></ar:AlicIva></ar:Iva>"
+    ));
+    assert.ok(xml.includes("<ar:ImpNeto>8825.40</ar:ImpNeto>"));
+    assert.ok(xml.includes("<ar:ImpIVA>1174.60</ar:ImpIVA>"));
+    assert.ok(xml.includes("<ar:ImpTotal>10000.00</ar:ImpTotal>"));
+    assert.deepEqual(parseVatLines([{ rate: "21", net: "1", vat: "0.21" }]), [{ rate: 21, net: 1, vat: 0.21 }]);
+    assert.equal(parseVatLines(null), null);
   });
 
   it("nota de crédito: lleva la factura que anula, antes del bloque Iva", () => {

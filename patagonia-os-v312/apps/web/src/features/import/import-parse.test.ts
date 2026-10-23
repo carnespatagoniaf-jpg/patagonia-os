@@ -12,6 +12,7 @@ import {
   parseDelimited,
   parseNumberCell,
   parseUnit,
+  parseVatCell,
   summarize
 } from "./import-parse";
 
@@ -105,7 +106,7 @@ describe("buildProductRows", () => {
     ];
     const rows = buildProductRows(table, map, new Set(["102"]), false);
     assert.deepEqual(rows.map((r) => [r.row, r.status]), [[2, "new"], [3, "skip"], [4, "new"], [5, "error"], [6, "error"], [7, "error"], [8, "error"]]);
-    assert.deepEqual(rows[0].payload, { row: 2, code: "101", name: "Asado", unit: "kg", cost: 9500, price_retail: 13800, min_stock: 0, category: "", stock: 25.5 });
+    assert.deepEqual(rows[0].payload, { row: 2, code: "101", name: "Asado", unit: "kg", cost: 9500, price_retail: 13800, min_stock: 0, category: "", stock: 25.5, vat_rate: null });
     assert.match(rows[3].errors[0], /repetido/);
     assert.deepEqual(summarize(rows), { total: 7, created: 2, updated: 0, skipped: 1, errors: 4 });
   });
@@ -187,5 +188,19 @@ describe("convertScaleExport", () => {
 
   it("no toca un archivo normal con encabezados", () => {
     assert.equal(convertScaleExport(parseDelimited("Código;Nombre;Precio\n1;Asado;9000")), null);
+  });
+});
+
+describe("IVA por producto en Importar", () => {
+  it("lee 10,5 / 21 / 0,21 y marca error lo que no es una alícuota", () => {
+    assert.equal(parseVatCell("10,5"), 10.5);
+    assert.equal(parseVatCell("21%"), 21);
+    assert.equal(parseVatCell(0.105), 10.5);
+    assert.equal(parseVatCell(""), null);
+    assert.ok(Number.isNaN(parseVatCell("15") as number));
+    const table = parseDelimited("Código;Nombre;Precio;IVA\n1;Asado;9000;10,5\n2;Queso;5000;21\n3;Pan;800;\n4;Raro;100;15");
+    const rows = buildProductRows(table, mapColumns("products", table[0]), new Set(), false);
+    assert.deepEqual(rows.slice(0, 3).map((r) => r.payload?.vat_rate), [10.5, 21, null]);
+    assert.equal(rows[3].status, "error");
   });
 });

@@ -121,6 +121,8 @@ export interface InvoicePrint {
   net: number;
   vat: number;
   vatRate: number;
+  /** IVA por alícuota (IVA por producto, migración 154). Null: una sola, vatRate. */
+  vatLines?: InvoiceVatLine[] | null;
   qrUrl: string;
   /** "Factura C 00005-00000123" de la factura que anula una nota de crédito. */
   relatedLabel?: string;
@@ -162,6 +164,29 @@ export function arcaQrUrl(p: {
 }
 
 /** 00005-00000123 */
+export interface InvoiceVatLine {
+  rate: number;
+  net: number;
+  vat: number;
+}
+
+/** Líneas de IVA para imprimir: las de cada alícuota, o una sola con la alícuota de la factura. */
+export function invoiceVatLines(inv: { vatLines?: InvoiceVatLine[] | null; vatRate: number; net: number; vat: number }): InvoiceVatLine[] {
+  return inv.vatLines && inv.vatLines.length > 0 ? inv.vatLines : [{ rate: inv.vatRate, net: inv.net, vat: inv.vat }];
+}
+
+/** 10.5 → "10,5" */
+export function vatRateLabel(rate: number): string {
+  return String(rate).replace(".", ",");
+}
+
+/** Lee invoices.vat_breakdown (jsonb). */
+export function parseInvoiceVatLines(value: unknown): InvoiceVatLine[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const lines = value.map((v) => ({ rate: Number(v?.rate), net: Number(v?.net), vat: Number(v?.vat) }));
+  return lines.every((l) => Number.isFinite(l.rate) && Number.isFinite(l.net) && Number.isFinite(l.vat)) ? lines : null;
+}
+
 export function voucherNumberLabel(pointOfSale: number, number: number): string {
   return `${String(pointOfSale).padStart(5, "0")}-${String(number).padStart(8, "0")}`;
 }

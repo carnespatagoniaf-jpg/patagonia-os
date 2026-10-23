@@ -6,7 +6,9 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { useAuth } from "../auth/AuthProvider";
 import { planAllows } from "../auth/permissions";
-import { adjustProductStock, createProduct, deleteProduct, listProductsForBranch, setProductActive, setProductStockSource, updateProduct } from "./inventory-service";
+import { adjustProductStock, createProduct, deleteProduct, listProductsForBranch, listProductVatRates, setProductActive, setProductsVatRate, setProductStockSource, updateProduct } from "./inventory-service";
+import { getFiscalSettings } from "../invoicing/invoicing-service";
+import { PRODUCT_VAT_OPTIONS, productVatLabel, vatFromSelect, vatPercentLabel, vatSelectValue } from "./product-vat";
 import {
   createProductCategory,
   deleteProductCategory,
@@ -46,12 +48,14 @@ interface DraftProduct {
   margin: string;
   priceRetail: string;
   minStock: string;
+  /** IVA: "" = el general de Facturas (migración 154). */
+  vatRate: string;
   active: boolean;
   categoryId: string;
 }
 
 function emptyDraft(): DraftProduct {
-  return { code: "", name: "", unit: "kg", cost: "", margin: "", priceRetail: "", minStock: "", active: true, categoryId: "" };
+  return { code: "", name: "", unit: "kg", cost: "", margin: "", priceRetail: "", minStock: "", active: true, categoryId: "", vatRate: "" };
 }
 
 /** Bloque "Stock" de la ficha: stock propio o descuenta de otro producto (el principal). */
@@ -90,7 +94,8 @@ function draftFromProduct(p: Product): DraftProduct {
     priceRetail: String(p.priceRetail),
     minStock: String(p.minStock),
     active: p.active ?? true,
-    categoryId: p.categoryId ?? ""
+    categoryId: p.categoryId ?? "",
+    vatRate: ""
   };
 }
 
@@ -130,12 +135,18 @@ export function Inventory() {
   const [renamingCategoryId, setRenamingCategoryId] = useState<string | null>(null);
   const [renameCategoryName, setRenameCategoryName] = useState("");
 
+  // IVA por producto (migración 154): id → alícuota, null = el general de Facturas.
+  const [vatRates, setVatRates] = useState<Record<string, number | null>>({});
+  const [generalVatRate, setGeneralVatRate] = useState<number | null>(null);
+
 
   async function reload() {
     if (!isSupabaseConfigured || !branchId) return;
     setLoading(true);
     try {
-      setProducts(await listProductsForBranch(branchId, true));
+      const [list, rates] = await Promise.all([listProductsForBranch(branchId, true), listProductVatRates().catch(() => ({}))]);
+      setProducts(list);
+      setVatRates(rates);
     } finally {
       setLoading(false);
     }
@@ -179,6 +190,33 @@ export function Inventory() {
   async function reloadCategories() {
     if (!isSupabaseConfigured) return;
     setCategories(await listProductCategories());
+  }
+
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    getFiscalSettings()
+      .then((s) => setGeneralVatRate(s ? s.defaultVatRate : null))
+      .catch(() => setGeneralVatRate(null));
+  }, []);
+
+  /** "Poner IVA a toda la categoría". */
+  async function handleCategoryVat(category: ProductCategory, value: string) {
+    const ids = products.filter((p) => p.categoryId === category.id).map((p) => p.id);
+    if (ids.length === 0) {
+      setMessage(`"${category.name}" no tiene productos.`);
+      return;
+    }
+    const rate = vatFromSelect(value);
+    const label = rate === null ? "el IVA general" : `IVA ${vatPercentLabel(rate)}`;
+    if (!window.confirm(`¿Poner ${label} a los ${ids.length} productos de "${category.name}"?`)) return;
+    try {
+      const changed = isSupabaseConfigured ? await setProductsVatRate({ productIds: ids, rate }) : ids.length;
+      if (!isSupabaseConfigured) setVatRates((r) => ({ ...r, ...Object.fromEntries(ids.map((id) => [id, rate])) }));
+      setMessage(`${category.name}: ${changed} productos quedaron con ${label}.`);
+      if (isSupabaseConfigured) await reload();
+    } catch (err) {
+      setMessage(errorText(err) || "No se pudo cambiar el IVA.");
+    }
   }
 
   useEffect(() => {
@@ -333,6 +371,8 @@ export function Inventory() {
         minStock,
         categoryId: newDraft.categoryId || undefined
       });
+      const newVat = vatFromSelect(newDraft.vatRate);
+      if (newVat !== null) await setProductsVatRate({ codes: [newDraft.code.trim()], rate: newVat });
       setNewDraft(emptyDraft());
       setShowNewForm(false);
       setMessage("Producto creado.");
@@ -344,7 +384,7 @@ export function Inventory() {
 
   function startEdit(product: Product) {
     setEditingId(product.id);
-    setEditDraft(draftFromProduct(product));
+    setEditDraft({ ...draftFromProduct(product), vatRate: vatSelectValue(vatRates[product.id]) });
     setEditLink(draftLinkFromProduct(product));
   }
 
@@ -383,6 +423,8 @@ export function Inventory() {
         active: editDraft.active,
         categoryId: editDraft.categoryId || undefined
       });
+      const wantedVat = vatFromSelect(editDraft.vatRate);
+      if (wantedVat !== (vatRates[editingId] ?? null)) await setProductsVatRate({ productIds: [editingId], rate: wantedVat });
       let linkMessage = "";
       if (linkChanged) {
         const result = await setProductStockSource({
@@ -757,6 +799,17 @@ export function Inventory() {
                   <>
                     <span>{category.name}</span>
                     <span>
+                      <select
+                        value="-"
+                        title="Poner el mismo IVA a todos los productos de esta categoría"
+                        onChange={(e) => { if (e.target.value !== "-") void handleCategoryVat(category, e.target.value); }}
+                      >
+                        <option value="-">IVA de todos…</option>
+                        {PRODUCT_VAT_OPTIONS.map((r) => (
+                          <option key={r} value={String(r)}>{vatPercentLabel(r)}</option>
+                        ))}
+                        <option value="">General</option>
+                      </select>{" "}
                       <button
                         className="secondary"
                         disabled={index === 0}
@@ -835,6 +888,12 @@ export function Inventory() {
               onChange={(e) => setNewDraft({ ...newDraft, minStock: e.target.value })}
               style={{ width: 100 }}
             />
+            <select value={newDraft.vatRate} onChange={(e) => setNewDraft({ ...newDraft, vatRate: e.target.value })} title="IVA del producto para la factura">
+              <option value="">IVA {productVatLabel(null, generalVatRate).toLowerCase()}</option>
+              {PRODUCT_VAT_OPTIONS.map((r) => (
+                <option key={r} value={String(r)}>IVA {vatPercentLabel(r)}</option>
+              ))}
+            </select>
             <button onClick={handleCreate}>Guardar producto</button>
             <button className="secondary" onClick={() => { setShowNewForm(false); setNewDraft(emptyDraft()); }}>Cancelar</button>
           </div>
@@ -855,6 +914,7 @@ export function Inventory() {
               <th className="num">Costo</th>
               <th className="num">Margen</th>
               <th className="num">Venta</th>
+              <th>IVA</th>
               <th className="num">Stock</th>
               <th className="num">Mínimo</th>
               <th>Estado</th>
@@ -865,7 +925,7 @@ export function Inventory() {
             {groupedProducts.map((group) => (
               <Fragment key={group.key}>
                 <tr>
-                  <td colSpan={11} style={{ fontWeight: 700, background: "#f7f7f8", padding: "8px 10px" }}>
+                  <td colSpan={12} style={{ fontWeight: 700, background: "#f7f7f8", padding: "8px 10px" }}>
                     {group.label} <span className="muted" style={{ fontWeight: 400 }}>({group.products.length})</span>
                   </td>
                 </tr>
@@ -921,6 +981,14 @@ export function Inventory() {
                         style={{ width: 90 }}
                       />
                     </td>
+                    <td>
+                      <select value={editDraft.vatRate} onChange={(e) => setEditDraft({ ...editDraft, vatRate: e.target.value })}>
+                        <option value="">{productVatLabel(null, generalVatRate)}</option>
+                        {PRODUCT_VAT_OPTIONS.map((r) => (
+                          <option key={r} value={String(r)}>{vatPercentLabel(r)}</option>
+                        ))}
+                      </select>
+                    </td>
                     <td className="num">{product.stock}</td>
                     <td>
                       <input
@@ -958,6 +1026,7 @@ export function Inventory() {
                     <td className="num">{formatMoney(product.cost)}</td>
                     <td className="num">{marginPercent(product.cost, product.priceRetail)}%</td>
                     <td className="num">{formatMoney(product.priceRetail)}</td>
+                    <td>{productVatLabel(vatRates[product.id], generalVatRate)}</td>
                     <td className="num">
                       <input
                         type="text"
@@ -999,6 +1068,7 @@ export function Inventory() {
                     <td className="num">{formatMoney(product.cost)}</td>
                     <td className="num">{marginPercent(product.cost, product.priceRetail)}%</td>
                     <td className="num">{formatMoney(product.priceRetail)}</td>
+                    <td className={vatRates[product.id] == null ? "muted" : undefined}>{productVatLabel(vatRates[product.id], generalVatRate)}</td>
                     <td className="num">
                       {product.stock} {product.stock <= product.minStock ? "⚠" : ""}
                       {product.stockSourceId && (
@@ -1036,14 +1106,14 @@ export function Inventory() {
               </tr>
               {editingId === product.id && (
                 <tr>
-                  <td colSpan={11} style={{ background: "#fafafa", padding: "10px 14px" }}>
+                  <td colSpan={12} style={{ background: "#fafafa", padding: "10px 14px" }}>
                     {renderStockBlock(product)}
                   </td>
                 </tr>
               )}
               {presentationsOfId === product.id && editingId !== product.id && !product.stockSourceId && (
                 <tr>
-                  <td colSpan={11} style={{ background: "#fafafa", padding: "10px 14px" }}>
+                  <td colSpan={12} style={{ background: "#fafafa", padding: "10px 14px" }}>
                     {renderPresentationsPanel(product)}
                   </td>
                 </tr>

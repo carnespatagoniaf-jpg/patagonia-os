@@ -124,8 +124,23 @@ export interface VoucherInput {
   net: number;
   vat: number;
   vatRate: number;
+  /** IVA por alícuota (IVA por producto, migración 154). Sin esto: todo con vatRate. */
+  vatLines?: VatLine[] | null;
   /** Factura que anula una nota de crédito. */
   related?: { voucherType: number; pointOfSale: number; number: number; cuit: string; date: string };
+}
+
+export interface VatLine {
+  rate: number;
+  net: number;
+  vat: number;
+}
+
+/** Lee invoices.vat_breakdown (jsonb). Vacío o mal formado: null (se usa la alícuota única). */
+export function parseVatLines(value: unknown): VatLine[] | null {
+  if (!Array.isArray(value) || value.length === 0) return null;
+  const lines = value.map((v) => ({ rate: Number(v?.rate), net: Number(v?.net), vat: Number(v?.vat) }));
+  return lines.every((l) => Number.isFinite(l.rate) && Number.isFinite(l.net) && Number.isFinite(l.vat)) ? lines : null;
 }
 
 /** Factura C: sin IVA discriminado. A y B (y sus notas de crédito): con el bloque Iva. */
@@ -136,15 +151,17 @@ export function hasVatDetail(voucherType: number): boolean {
 /** Cuerpo de FECAESolicitar para UN comprobante (concepto 1 = productos, en pesos). */
 export function caeRequestInner(v: VoucherInput): string {
   const withVat = hasVatDetail(v.voucherType);
-  const net = withVat ? v.net : v.total;
-  const vat = withVat ? v.vat : 0;
+  // Una línea AlicIva por alícuota; ImpNeto e ImpIVA tienen que ser la suma de esas líneas.
+  const lines: VatLine[] = v.vatLines && v.vatLines.length > 0 ? v.vatLines : [{ rate: v.vatRate, net: v.net, vat: v.vat }];
+  const net = withVat ? lines.reduce((s, l) => s + Math.round(l.net * 100), 0) / 100 : v.total;
+  const vat = withVat ? lines.reduce((s, l) => s + Math.round(l.vat * 100), 0) / 100 : 0;
   const condition = RECEIVER_CONDITION_ID[v.receiverCondition] ?? 5;
   const related = v.related
     ? `<ar:CbtesAsoc><ar:CbteAsoc><ar:Tipo>${v.related.voucherType}</ar:Tipo><ar:PtoVta>${v.related.pointOfSale}</ar:PtoVta>` +
       `<ar:Nro>${v.related.number}</ar:Nro><ar:Cuit>${v.related.cuit}</ar:Cuit><ar:CbteFch>${v.related.date}</ar:CbteFch></ar:CbteAsoc></ar:CbtesAsoc>`
     : "";
   const iva = withVat
-    ? `<ar:Iva><ar:AlicIva><ar:Id>${vatRateId(v.vatRate)}</ar:Id><ar:BaseImp>${money(net)}</ar:BaseImp><ar:Importe>${money(vat)}</ar:Importe></ar:AlicIva></ar:Iva>`
+    ? `<ar:Iva>${lines.map((l) => `<ar:AlicIva><ar:Id>${vatRateId(l.rate)}</ar:Id><ar:BaseImp>${money(l.net)}</ar:BaseImp><ar:Importe>${money(l.vat)}</ar:Importe></ar:AlicIva>`).join("")}</ar:Iva>`
     : "";
   return (
     `<ar:FeCAEReq><ar:FeCabReq><ar:CantReg>1</ar:CantReg><ar:PtoVta>${v.pointOfSale}</ar:PtoVta><ar:CbteTipo>${v.voucherType}</ar:CbteTipo></ar:FeCabReq>` +
