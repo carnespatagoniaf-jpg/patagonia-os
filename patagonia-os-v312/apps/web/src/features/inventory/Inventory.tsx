@@ -1098,7 +1098,7 @@ export function Inventory() {
                     <td className="num">{formatMoney(product.priceRetail)}</td>
                     <td className={vatRates[product.id] == null ? "muted" : undefined}>{productVatLabel(vatRates[product.id], generalVatRate)}</td>
                     <td className="num">
-                      {product.stock} {product.stock <= product.minStock ? "⚠" : ""}
+                      {product.stock} {product.stock < 0 || (product.minStock > 0 && product.stock <= product.minStock) ? "⚠" : ""}
                       {/* Solo productos por kilo (envasados al vacío): en uno por unidad, paquete = unidad y se confundía con el stock (real M2, 24/10). */}
                       {showPackages && !product.stockSourceId && product.unit === "kg" && (
                         <div style={{ fontSize: 12 }}>

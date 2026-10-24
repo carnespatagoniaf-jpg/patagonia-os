@@ -182,7 +182,9 @@ export function Dashboard() {
 
   const cashOnHand = balances.reduce((sum, balance) => sum + balance.balance, 0);
   const stockValue = products.reduce((sum, p) => sum + p.stock * p.cost, 0);
-  const alerts = products.filter((p) => p.stock <= p.minStock);
+  // Solo lo que de verdad hay que mirar: productos con un mínimo cargado que llegaron a él, o en negativo.
+  // Sin mínimo y en 0 no avisa (un negocio nuevo veía una alerta por cada producto; real M2 Alimentos, 24/10).
+  const alerts = products.filter((p) => p.stock < 0 || (p.minStock > 0 && p.stock <= p.minStock));
   const firstName = profile?.full_name?.split(" ")[0] ?? "Usuario";
 
   return (
