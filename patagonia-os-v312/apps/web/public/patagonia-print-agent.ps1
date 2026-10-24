@@ -110,7 +110,7 @@ $CompanionSuffix = " (ticket)"
 # lista (real M2 Alimentos, 24/10/2026).
 function Test-PhysicalPort([string]$port, [string]$driver = '', [string]$name = '') {
   if ($port -match '^(PORTPROMPT:|nul:?|FILE:|SHRFAX:|XPSPort:|Ne[0-9]+:|PDF.*|OneNote.*|Microsoft.*)$') { return $false }
-  if (($driver + ' ' + $name) -match '(PDF|XPS|OneNote|Fax|Microsoft Print)') { return $false }
+  if (($driver + ' ' + $name) -match '(PDF|XPS|OneNote|Fax|Microsoft Print|AnyDesk|TeamViewer|Remote|Redirect)') { return $false }
   return $true
 }
 

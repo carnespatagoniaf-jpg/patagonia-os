@@ -6,7 +6,7 @@
  * dispositivo una vez por navegador (después queda recordado).
  */
 
-import { pingPrintAgent, printViaAgent } from "./printer-agent";
+import { getAgentPrinterName, pingPrintAgent, printViaAgent } from "./printer-agent";
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -265,9 +265,14 @@ export async function printBytes(bytes: Uint8Array): Promise<void> {
   // cualquier marca y cualquier driver). Si está y falla, el error se muestra
   // tal cual en vez de caer a WebUSB/diálogo: con un driver equivocado el
   // diálogo de Windows imprime metros de basura.
+  // Excepción: el programa está pero no tiene una impresora real elegida (Windows no tiene la térmica instalada) y
+  // la térmica ya quedó conectada por USB directo: se usa esa (real M2 Alimentos, 24/10/2026).
+  const usbReady = isThermalPrintSupported() && (cachedDevice !== null || (await navigator.usb.getDevices()).length > 0);
   if (await pingPrintAgent()) {
-    await printViaAgent(bytes);
-    return;
+    if (!(usbReady && !getAgentPrinterName())) {
+      await printViaAgent(bytes);
+      return;
+    }
   }
   if (!isThermalPrintSupported()) {
     throw new Error("Este navegador no soporta impresión USB directa (usá Chrome o Edge).");

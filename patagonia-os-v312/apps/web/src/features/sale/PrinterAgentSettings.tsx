@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { buildTestTicket, getThermalPrintSettings, printBytes } from "./thermal-printer";
 import {
   getAgentPrinterName,
+  isRealPrinter,
   listAgentPrinters,
   pickLikelyThermal,
   pingPrintAgent,
@@ -38,9 +39,12 @@ export function PrinterAgentSettings({ onStatusChange }: { onStatusChange?: (sta
     }
     try {
       const all = await listAgentPrinters();
-      const list = all.filter((p) => p.isPhysical);
+      const list = all.filter(isRealPrinter);
       setPrinters(list);
-      if (list.length === 0) {
+      const usbPaired = typeof navigator !== "undefined" && "usb" in navigator && (await navigator.usb.getDevices()).length > 0;
+      if (list.length === 0 && usbPaired) {
+        setNote("Tu térmica está conectada por USB directo: los tickets salen por ahí. No hace falta elegir nada en esta lista.");
+      } else if (list.length === 0) {
         // El programa viejo solo reconocía puertos USB001/COM1/…; las térmicas con otro puerto no aparecían (real M2, 24/10).
         const names = all.map((p) => p.name).join(", ");
         setNote(

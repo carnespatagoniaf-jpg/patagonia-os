@@ -31,7 +31,7 @@ const THERMAL_NAME = /pos|thermal|term[ií]ca|receipt|ticket|\btp[0-9]|unnion|xp
 /** Devuelve la impresora que casi seguro es la térmica, o null si hay que
  * preguntarle al usuario. Solo mira impresoras físicas. */
 export function pickLikelyThermal(printers: AgentPrinter[]): AgentPrinter | null {
-  const physical = printers.filter((p) => p.isPhysical);
+  const physical = printers.filter(isRealPrinter);
   if (physical.length === 0) return null;
   const byName = physical.filter((p) => THERMAL_NAME.test(p.name) || THERMAL_NAME.test(p.driver));
   if (byName.length === 1) return byName[0];
@@ -39,9 +39,19 @@ export function pickLikelyThermal(printers: AgentPrinter[]): AgentPrinter | null
   return null;
 }
 
+/** Impresoras que aparecen en Windows pero no imprimen en papel (escritorio remoto, PDF, fax). Real M2: "AnyDesk Printer". */
+const VIRTUAL_NAME = /anydesk|teamviewer|remote|redirect|redirigida|pdf|xps|onenote|fax/i;
+
+/** Física y no virtual: la única que se ofrece y se elige sola. */
+export function isRealPrinter(p: AgentPrinter): boolean {
+  return p.isPhysical && !VIRTUAL_NAME.test(p.name) && !VIRTUAL_NAME.test(p.driver);
+}
+
 export function getAgentPrinterName(): string {
   try {
-    return localStorage.getItem(PRINTER_KEY) ?? "";
+    const name = localStorage.getItem(PRINTER_KEY) ?? "";
+    // Una impresora virtual elegida antes (ej. AnyDesk) cuenta como ninguna.
+    return VIRTUAL_NAME.test(name) ? "" : name;
   } catch {
     return "";
   }
