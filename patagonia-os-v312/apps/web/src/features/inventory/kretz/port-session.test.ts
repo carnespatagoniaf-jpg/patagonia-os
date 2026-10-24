@@ -170,3 +170,78 @@ describe("apertura del puerto de la Aura (port-session)", () => {
     }
   });
 });
+
+/** Report LT / NX simulada: contesta solo con su letra "C", SU número de equipo y su velocidad. */
+class FakeReport {
+  readable: ReadableStream<Uint8Array> | null = null;
+  writable: WritableStream<Uint8Array> | null = null;
+  opens = 0;
+  constructor(private equipment: string, private baud: number, private stop: 1 | 2 = 1) {}
+  getInfo() {
+    return { usbVendorId: 0x1a86, usbProductId: 0x7523 };
+  }
+  async open(options: SerialOptions) {
+    this.opens++;
+    if (this.readable) throw Object.assign(new Error("The port is already open."), { name: "InvalidStateError" });
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    this.readable = new ReadableStream<Uint8Array>({ start: (c) => { controller = c; } });
+    const self = this;
+    this.writable = new WritableStream<Uint8Array>({
+      write(chunk) {
+        if (chunk[0] !== 0x02 || options.baudRate !== self.baud || (options.stopBits ?? 1) !== self.stop) return;
+        const head = String.fromCharCode(...chunk.slice(1, 4));
+        if (head !== "C" + self.equipment) return; // otra letra u otro número: no contesta
+        const body = [0x07, ...Array.from(`C${self.equipment}0001`, (c) => c.charCodeAt(0))];
+        setTimeout(() => {
+          try {
+            controller.enqueue(new Uint8Array([...body, ...kretzChecksum(body), 0x04]));
+          } catch {
+            // cerrado
+          }
+        }, 2);
+      }
+    });
+  }
+  async close() {
+    if (this.readable?.locked || this.writable?.locked) throw Object.assign(new Error("locked"), { name: "TypeError" });
+    this.readable = null;
+    this.writable = null;
+  }
+}
+
+describe("Report NX con otro número de balanza", () => {
+  const report = getKretzModel("report-lt");
+  const quick = { releaseOtherTabs: false, frameTimeoutMs: 15, listenMs: 20 } as const;
+
+  it("la Report de siempre (C01, 115200) se encuentra al toque", async () => {
+    const port = new FakeReport("01", 115200);
+    const record = await runKretzDiscovery(port as unknown as SerialPort, "prueba", report, quick);
+    assert.equal(record.verdict, "datos");
+    assert.equal(record.responder?.equipmentId, "01");
+  });
+
+  it("una NX configurada como balanza 09 aparece buscando el número (antes: 'no contestó ni un byte')", async () => {
+    const port = new FakeReport("09", 115200);
+    const record = await runKretzDiscovery(port as unknown as SerialPort, "prueba", report, quick);
+    assert.equal(record.verdict, "datos");
+    assert.deepEqual(record.responder, { link: { baudRate: 115200, stopBits: 1 }, deviceType: "C", equipmentId: "09" });
+    assert.ok(port.opens <= DISCOVERY_OPEN_BUDGET, `abrió ${port.opens} veces`);
+    assert.ok(record.exchanges.length < 80, "los intentos sin respuesta no inflan el reporte");
+  });
+
+  it("también a 9600 baudios (balanza 05)", async () => {
+    const port = new FakeReport("05", 9600);
+    const record = await runKretzDiscovery(port as unknown as SerialPort, "prueba", report, quick);
+    assert.equal(record.responder?.equipmentId, "05");
+    assert.equal(record.responder?.link.baudRate, 9600);
+  });
+
+  it("si no contesta ningún número, dice que se buscó y deja el puerto cerrado", async () => {
+    const port = new FakeReport("07", 38400);
+    const record = await runKretzDiscovery(port as unknown as SerialPort, "prueba", report, quick);
+    assert.equal(record.verdict, "nada");
+    assert.ok(record.exchanges.some((e) => e.step === "buscando el número de balanza"));
+    assert.equal(port.readable, null);
+    assert.ok(port.opens <= DISCOVERY_OPEN_BUDGET, `abrió ${port.opens} veces`);
+  });
+});

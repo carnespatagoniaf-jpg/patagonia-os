@@ -85,13 +85,13 @@ export interface DiagnosticRecord {
 
 export type { OpenAttempt };
 
-export const DISCOVERY_VERSION = "2026-10-02c";
+export const DISCOVERY_VERSION = "2026-10-24";
 
 /** Aperturas de la prueba en curso (presupuesto + registro); runKretzDiscovery y scanAllPlus arman una nueva. */
 let session: PortSession = newSession();
 
 /** Máximo de aperturas del puerto por prueba. Antes no había tope (hasta 700 en 5 minutos). */
-export const DISCOVERY_OPEN_BUDGET = 12;
+export const DISCOVERY_OPEN_BUDGET = 14;
 export const SCAN_OPEN_BUDGET = 4;
 
 export interface DiscoveryOptions {
@@ -388,6 +388,49 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
         } catch {
           openKey = "";
           await closeQuietly(port);
+        }
+      }
+
+      // Report LT / NX: la balanza contesta solo a SU número de equipo (01 a 99; el documento
+      // "Multiprotocolo Report Nx" usa 01 y 09 de ejemplo) y "Mis balanzas" pregunta siempre por el 01.
+      // Si no apareció, se busca el número con la letra "C" en la velocidad del modelo y en 9600/1.
+      // Caso real: Report NX de Don Raúl (24/10), que no contestó a 01 ni 00 en ninguna velocidad.
+      if (!record.responder && model.id === "report-lt") {
+        const idLinks = [primary, ...model.links.filter((l) => l.baudRate === 9600 && l.stopBits === 1 && !(l.baudRate === primary.baudRate && l.stopBits === primary.stopBits))];
+        await closeQuietly(port);
+        openKey = "";
+        search: for (const link of idLinks) {
+          if (stop()) break;
+          try {
+            await openWithRetry(port, { baudRate: link.baudRate, dataBits: 8, stopBits: link.stopBits, parity: "none" }, 1, 200);
+          } catch {
+            continue;
+          }
+          for (let n = 1; n <= 99 && !stop(); n++) {
+            const candidate = String(n).padStart(2, "0");
+            if (candidate === id) continue;
+            progress(`Buscando el número de tu balanza (${linkLabel(link)}): n.º ${candidate}…`);
+            // Los intentos sin respuesta no se guardan uno por uno (serían casi 200 renglones en el reporte).
+            const silent: DiagnosticExchange[] = [];
+            try {
+              const ex = await sendRead(port, silent, "test de conexión (buscando el número de balanza)", link, "C", candidate, "0001", "", Math.min(timeout, 200));
+              if (ex.rx) {
+                record.exchanges.push(ex);
+                noteExchange(ex);
+              }
+              if (ex.kretz) {
+                record.responder = { link, deviceType: ex.kretz.deviceType || "C", equipmentId: ex.kretz.equipmentId || candidate };
+                break search;
+              }
+            } catch {
+              await closeQuietly(port);
+              continue search;
+            }
+          }
+          await closeQuietly(port);
+        }
+        if (!record.responder) {
+          record.exchanges.push({ step: "buscando el número de balanza", link: idLinks.map(linkLabel).join(" y "), tx: "0001 a los equipos C01–C99", rx: "", rxText: "sin respuesta de ningún número", ms: 0, kretz: null, echo: false });
         }
       }
     }

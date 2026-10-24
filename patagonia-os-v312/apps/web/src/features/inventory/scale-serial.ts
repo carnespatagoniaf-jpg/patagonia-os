@@ -676,6 +676,17 @@ function diagnosisVerdictMessage(r: DiagnosticRecord, modelId: string, portLabel
       `Revisá en la balanza el menú COMUNI: MODO = "Datos" y PUERT = RS-232. Después tocá "Enviar a soporte" (abajo) para que veamos lo que llegó.`
     );
   }
+  if (!isAura) {
+    // Report LT / NX: el cable no es el de la Aura. Ya se buscó también el número de balanza (01 a 99).
+    return (
+      `❌ La balanza no mandó ni un dato, en ninguna velocidad ni con ningún número de balanza del 01 al 99 (puerto elegido: ${portLabel}). Casi siempre es algo físico:\n` +
+      `1) El puerto: tocá "Elegir otro puerto" y elegí el del adaptador USB de la balanza (si no sabés cuál es, desenchufá el adaptador, mirá cuál desaparece de la lista y volvé a enchufarlo).\n` +
+      `2) El conector: tiene que ir al puerto serie de la balanza (el de 9 patas, DB9), no al de red.\n` +
+      `3) Cruzado: si el adaptador USB va enchufado directo a la balanza y no contesta, poné entre los dos un adaptador "null modem" (cruzado) DB9 hembra-hembra. En muchas Report el que manda y el que recibe tienen que ir cruzados.\n` +
+      `4) La balanza: en su menú de configuración, que la comunicación con la PC por el puerto serie esté habilitada.\n` +
+      `5) El adaptador USB: en Windows, Administrador de dispositivos → Puertos (COM y LPT): si aparece con un signo amarillo, le falta el driver.`
+    );
+  }
   return (
     `❌ La balanza no mandó ni un dato, en ninguna configuración (puerto elegido: ${portLabel}). Casi siempre es algo físico:\n` +
     `1) El puerto: tocá "Elegir otro puerto" y elegí el del adaptador USB de la balanza (si no sabés cuál es, desenchufá el adaptador, mirá cuál desaparece de la lista y volvé a enchufarlo).\n` +

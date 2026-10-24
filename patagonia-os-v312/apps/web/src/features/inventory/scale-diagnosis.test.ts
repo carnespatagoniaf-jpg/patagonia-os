@@ -94,10 +94,21 @@ describe("Probar todo (diagnóstico de la balanza por cable)", () => {
     const { diagnoseScaleLink, forgetScalePort } = await import("./scale-serial");
     forgetScalePort();
     paired = [new FakeScale("muda", {})];
-    const d = await diagnoseScaleLink(() => {}, fast);
+    const d = await diagnoseScaleLink(() => {}, { ...fast, modelId: "aura" });
     assert.equal(d.verdict, "nada");
     assert.match(d.message, /DIRECTO/);
     assert.match(d.portLabel, /no es USB/);
+  });
+
+  it("no llega nada de una Report: no le da el consejo del cable de la Aura (Report NX real, 24/10)", async () => {
+    const { diagnoseScaleLink, forgetScalePort } = await import("./scale-serial");
+    forgetScalePort();
+    paired = [new FakeScale("muda", {})];
+    const d = await diagnoseScaleLink(() => {}, { ...fast, modelId: "report-lt" });
+    assert.equal(d.verdict, "nada");
+    assert.doesNotMatch(d.message, /DIRECTO/);
+    assert.match(d.message, /null modem/);
+    assert.match(d.message, /del 01 al 99/);
   });
 
   it("'Elegir el puerto' abre siempre el selector, aunque ya haya un puerto con permiso", async () => {
