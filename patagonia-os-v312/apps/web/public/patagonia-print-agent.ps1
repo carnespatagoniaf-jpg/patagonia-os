@@ -18,7 +18,7 @@
 
 $ErrorActionPreference = "Stop"
 $Port = 9101
-$AgentVersion = 2
+$AgentVersion = 3
 
 Add-Type -TypeDefinition @'
 using System;
@@ -114,6 +114,28 @@ function Test-PhysicalPort([string]$port, [string]$driver = '', [string]$name = 
   return $true
 }
 
+# Puertos USB00x con una impresora USB enchufada AHORA (interfaz USBPRINT con Control\Linked = 1), o $null si no se
+# pudo leer. Se lee del registro sin ser administrador.
+function Get-PresentUsbPrinterPorts {
+  try {
+    $root = 'HKLM:\SYSTEM\CurrentControlSet\Control\DeviceClasses\{28d78fad-5a12-11d1-ae5b-0000f803a8c2}'
+    if (-not (Test-Path $root)) { return $null }
+    $ports = @{}
+    foreach ($k in (Get-ChildItem $root -ErrorAction Stop)) {
+      $params = Get-ItemProperty -Path (Join-Path $k.PSPath '#\Device Parameters') -ErrorAction SilentlyContinue
+      $control = Get-ItemProperty -Path (Join-Path $k.PSPath '#\Control') -ErrorAction SilentlyContinue
+      if ($params -and $control -and [int]$control.Linked -eq 1 -and $params.'Port Number' -ne $null) {
+        $base = [string]$params.'Base Name'
+        if (-not $base) { $base = 'USB' }
+        $ports[$base + ([int]$params.'Port Number').ToString('000')] = $true
+      }
+    }
+    return $ports
+  } catch {
+    return $null
+  }
+}
+
 function Get-PrinterList {
   $majors = @{}
   foreach ($d in (Get-PrinterDriver -ErrorAction SilentlyContinue)) { $majors[[string]$d.Name] = [int]$d.MajorVersion }
@@ -131,6 +153,34 @@ function Get-PrinterList {
       driver = $driver
       driverMajor = $major
       isPhysical = (Test-PhysicalPort ([string]$p.PortName) $driver $name)
+    }
+  }
+  # Termica enchufada pero sin impresora en Windows (no se instalo el driver): Windows igual crea el puerto
+  # USB001, USB002... Se ofrece ese puerto libre como "Impresora USB (USB001)"; al imprimir, Get-RawQueueName le
+  # crea la cola con el driver generico de texto (real M2 Alimentos, 24/10/2026: Windows solo tenia OneNote/PDF).
+  $used = @{}
+  foreach ($p in (Get-CimInstance -ClassName Win32_Printer)) {
+    if (-not ([string]$p.Name).EndsWith($CompanionSuffix)) { $used[[string]$p.PortName] = $true }
+  }
+  $present = Get-PresentUsbPrinterPorts
+  $known = ($present -ne $null) -and ($present.Count -gt 0)
+  $hasReal = @($list | Where-Object { $_.isPhysical }).Count -gt 0
+  # En una PC que ya tiene su impresora instalada no se agrega nada, salvo un puerto con algo enchufado ahora.
+  if ($hasReal -and -not $known) { return ,$list }
+  foreach ($port in (Get-PrinterPort -ErrorAction SilentlyContinue)) {
+    $portName = [string]$port.Name
+    # Windows deja puertos USB00x viejos de aparatos que ya no estan: se ofrece solo el que tiene algo enchufado
+    # (si no se pudo saber, todos los libres).
+    $isPresent = (-not $known) -or $present.ContainsKey($portName)
+    if ($portName -match '^USB[0-9]+$' -and -not $used.ContainsKey($portName) -and $isPresent) {
+      $list += @{
+        name = "Impresora USB enchufada ($portName)"
+        isDefault = $false
+        port = $portName
+        driver = ""
+        driverMajor = 4
+        isPhysical = $true
+      }
     }
   }
   return ,$list
