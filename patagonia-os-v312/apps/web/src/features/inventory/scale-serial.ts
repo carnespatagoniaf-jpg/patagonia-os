@@ -1265,7 +1265,8 @@ export interface ReportProductFields {
 /** El producto de ejemplo que traen de fábrica las Report ("NOMBRE") o un nombre vacío. */
 export function isFactoryPluName(name: string | null | undefined): boolean {
   const n = (name ?? "").trim().toUpperCase();
-  return n === "" || n === "NOMBRE";
+  // De fábrica: "NOMBRE" o "NOMBRE 00002" (con el número de PLU), real M2 Alimentos 24/10.
+  return n === "" || /^NOMBRE *\d*$/.test(n);
 }
 
 /** Report: lo que tiene grabado la balanza en el PLU `code` (SOLO LECTURA, 5005), o null si está libre. */

@@ -304,7 +304,7 @@ describe("[SIMULADO] Mi balanza con una Kretz Report", () => {
   });
 
   it("balanza nueva: el producto de ejemplo de fábrica (\"NOMBRE\") se reemplaza solo, sin tildar nada (real M2 Alimentos)", async () => {
-    const { io, sent, scale } = reportIO({ "10": { name: "NOMBRE", byWeight: false, price: 955481 } });
+    const { io, sent, scale } = reportIO({ "10": { name: "NOMBRE 00010", byWeight: false, price: 61 } });
     const s = new KretzSession("kretz-report-lt", ctx(products.slice(0, 1)), "datos", io);
     const prep = await s.prepare(noop);
     assert.equal(prep.pending.length, 0, "no lo toma como ocupado");

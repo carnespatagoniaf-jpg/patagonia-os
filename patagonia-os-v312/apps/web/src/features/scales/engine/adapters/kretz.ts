@@ -196,7 +196,8 @@ export class KretzSession implements ScaleSession {
 /** Nombre del producto de ejemplo que traen de fábrica las Report ("NOMBRE") o un número vacío. */
 export function isFactoryPlaceholder(name: string | null | undefined): boolean {
   const n = normalizeName(name ?? "");
-  return n === "" || n === "NOMBRE";
+  // De fábrica: "NOMBRE" o "NOMBRE 00002" (con el número de PLU), real M2 Alimentos 24/10.
+  return n === "" || /^NOMBRE *\d*$/.test(n);
 }
 
 function done(pending: PendingItem[]): string {
