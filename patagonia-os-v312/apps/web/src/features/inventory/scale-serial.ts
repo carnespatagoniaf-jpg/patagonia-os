@@ -4,7 +4,7 @@ import { listenScale } from "./kretz/scale-listen";
 import { STAGE_LABELS, runKretzDiscovery, saveDiagnosticRecord, savePluScan, scanAllPlus, type DiagnosticRecord, type DiscoveryVerdict, type PluScan } from "./kretz/discovery";
 import { runAuraWriteTest, saveAuraWriteTest, type AuraWriteTestResult } from "./kretz/aura-write-test";
 import { runAuraModelProbe, saveModelProbe, type ModelProbeResult } from "./kretz/aura-model-probe";
-import { readAuraList, runAuraSync, setAuraItemBarcodes, type AuraItemBarcodeResult, type AuraSyncItem, type AuraSyncResult } from "./kretz/aura-sync";
+import { AURA_BARCODE_CONFIG, readAuraList, runAuraSync, setAuraItemBarcodes, type AuraItemBarcodeResult, type AuraSyncItem, type AuraSyncResult } from "./kretz/aura-sync";
 import { getKretzModel, getSavedModelId } from "./kretz/models";
 import { buildKretzFrame, describeKretzCode } from "./kretz/kretz-frame";
 
@@ -698,6 +698,20 @@ function diagnosisVerdictMessage(r: DiagnosticRecord, modelId: string, portLabel
 }
 
 
+/**
+ * Report: formato del código de barras de las etiquetas (comando 1070, Multiprotocolo Report Nx §4.17),
+ * el mismo que ya usa la Aura de Pollo y mar: "2002005" = pesable "20" + importe, no pesable "20" + importe,
+ * formato 5 (2-3-7). Mostrador lee ese formato (producto + importe). Devuelve lo que contestó la balanza.
+ */
+export async function configureReportBarcode(): Promise<"ok" | "rechazada" | "sin_respuesta"> {
+  const settings = getScaleSerialSettings();
+  const port = await pickPort();
+  const frame = buildFrame(settings.deviceType, settings.equipmentId, "1070", AURA_BARCODE_CONFIG);
+  const response = await writeFrameResilient(port, frame, settings.baudRate);
+  const code = extractResponseCode(response);
+  return !response.length ? "sin_respuesta" : code === "01" ? "ok" : "rechazada";
+}
+
 /** Comando 0001 (test de conexión) -- confirma que el cable y la velocidad
  * andan, antes de mandar un PLU real. */
 export async function sendScalePing(): Promise<ScalePingResult> {
@@ -847,7 +861,9 @@ async function buildPluFrame(
   // "00" (sin formato de etiqueta asignado) es probablemente la causa real
   // de "Formato no definido" en la balanza para un PLU nuevo -- un PLU real
   // que sí muestra bien su etiqueta (PLU 3) trae "01" acá, no "00".
-  const codigoEtiqueta = existing?.[15] ?? fixedDigits(1, 2);
+  // Siempre la etiqueta "01": es la que imprime el código de barras en la Report LT (Carnes Patagonia, que
+  // vende escaneando). Heredar la de fábrica dejaba etiquetas sin código (real M2 Alimentos 24/10).
+  const codigoEtiqueta = fixedDigits(1, 2);
   const codigoReceta = existing?.[16] ?? fixedDigits(0, 4);
   const codigoNutricional = existing?.[17] ?? fixedDigits(0, 4);
   // Sin documentación de qué es este campo, pero el mismo PLU 3 trae

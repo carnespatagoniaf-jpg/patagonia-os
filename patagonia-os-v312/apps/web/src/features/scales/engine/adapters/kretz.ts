@@ -1,6 +1,7 @@
 import { planAuraSync, summarizeAuraPlan, type AuraSyncItem } from "../../../inventory/kretz/aura-sync";
 import { getStoredModelId, saveModelId } from "../../../inventory/kretz/models";
 import {
+  configureReportBarcode,
   diagnoseScaleLink,
   expectedReportProduct,
   planScaleSync,
@@ -34,9 +35,11 @@ export interface KretzIO {
   sendReport: typeof syncProductsToScale;
   /** Mostrador de la sucursal lee los códigos por producto de la Aura (2-3-7 con importe). Solo con base. */
   saveItemConfig?: (branchId: string) => Promise<void>;
+  /** Report: manda el formato del código de barras de las etiquetas (1070). */
+  configureReportBarcode?: () => Promise<"ok" | "rechazada" | "sin_respuesta">;
 }
 
-export const KRETZ_IO: KretzIO = { diagnose: diagnoseScaleLink, readAuraList: readAuraListOnScale, runAuraSync: runAuraSyncOnScale, readReport: readReportProduct, sendReport: syncProductsToScale };
+export const KRETZ_IO: KretzIO = { diagnose: diagnoseScaleLink, readAuraList: readAuraListOnScale, runAuraSync: runAuraSyncOnScale, readReport: readReportProduct, sendReport: syncProductsToScale, configureReportBarcode };
 
 export function kretzModelForLetter(deviceType: string | null | undefined): ScaleModelId {
   return deviceType === "H" ? "kretz-aura" : deviceType === "C" ? "kretz-report-lt" : "kretz-otra";
@@ -162,6 +165,16 @@ export class KretzSession implements ScaleSession {
       else wrong.push(p.code);
     }
     if (wrong.length) return { ok: false, verified, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, support: { verificacion: wrong } };
+    // Código de barras en las etiquetas (2-3-7 con el importe) y Mostrador leyéndolo: lo mismo que la Aura.
+    if (this.io.configureReportBarcode) {
+      onProgress("sincronizar", "Configurando el código de barras de las etiquetas…");
+      try {
+        const barcode = await this.io.configureReportBarcode();
+        if (barcode === "ok" && this.ctx.online && this.ctx.branchId && this.io.saveItemConfig) await this.io.saveItemConfig(this.ctx.branchId);
+      } catch {
+        // sin esto la etiqueta sigue como estaba; los productos ya quedaron bien
+      }
+    }
     const pending = opts.allowReplace ? [] : prepared.pending;
     return { ok: true, verified, message: done(pending), pending };
   }

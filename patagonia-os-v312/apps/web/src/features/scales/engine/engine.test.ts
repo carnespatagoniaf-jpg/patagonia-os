@@ -328,6 +328,18 @@ describe("[SIMULADO] Mi balanza con una Kretz Report", () => {
     assert.equal(scale.get("1")?.taxes, 0);
   });
 
+  it("después de mandar, configura el código de barras de las etiquetas (1070) y deja a Mostrador leyéndolo", async () => {
+    const { io } = reportIO({});
+    const calls: string[] = [];
+    io.configureReportBarcode = async () => { calls.push("1070"); return "ok"; };
+    io.saveItemConfig = async (branchId: string) => { calls.push(`mostrador:${branchId}`); };
+    const c = { ...ctx(products.slice(0, 1)), online: true, branchId: "suc-1" };
+    const s = new KretzSession("kretz-report-lt", c, "datos", io);
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, true);
+    assert.deepEqual(calls, ["1070", "mostrador:suc-1"]);
+  });
+
   it("verificación: si lo releído no es lo mandado, no dice 'listo'", async () => {
     const { io } = reportIO({}, { lie: "10" });
     const s = new KretzSession("kretz-report-lt", ctx(products.slice(0, 1)), "datos", io);
