@@ -43,7 +43,9 @@ export function kretzModelForLetter(deviceType: string | null | undefined): Scal
 }
 
 const toSyncable = (p: EngineProduct): ScaleSyncableProduct => ({ id: p.id, code: p.code, name: p.name, unit: p.unit as ScaleSyncableProduct["unit"], priceRetail: p.priceRetail, active: p.active });
-const sameReport = (a: ReportProductFields, b: ReportProductFields) => a.name === b.name && a.byWeight === b.byWeight && a.price === b.price;
+// Los impuestos también cuentan: un PLU con impuesto imprime otro precio aunque nombre y precio coincidan.
+const sameReport = (a: ReportProductFields, b: ReportProductFields) =>
+  a.name === b.name && a.byWeight === b.byWeight && a.price === b.price && (a.taxes ?? 0) === (b.taxes ?? 0);
 
 type ReportState = { kind: "report"; create: ScaleSyncableProduct[]; update: ScaleSyncableProduct[]; occupied: { product: ScaleSyncableProduct; current: ReportProductFields }[] };
 type AuraState = { kind: "aura"; records: string[]; products: { code: string; name: string; byWeight: boolean; price: number }[]; plan: AuraSyncItem[] };

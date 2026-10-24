@@ -804,7 +804,10 @@ async function buildPluFrame(
   }
 
   const settings = { ...getScaleSerialSettings(), deviceType, equipmentId, altaCommand, baudRate };
-  const existing = await readExistingPluFields(port, settings, pluDigits);
+  const read = await readExistingPluFields(port, settings, pluDigits);
+  // El producto de ejemplo de fábrica ("NOMBRE") no es un producto real: sus campos secundarios
+  // no se heredan (real M2 Alimentos 24/10: traía impuesto 21% y la etiqueta salía $12.100 en vez de $10.000).
+  const existing = read && !isFactoryPluName(read[3]) ? read : null;
 
   const pluNumber = fixedDigits(pluDigits, 6);
   const pluCode = fixedDigits(pluDigits, 5);
@@ -835,8 +838,10 @@ async function buildPluFrame(
   // defecto: fue que antes se heredaba el flag viejo de iTegra en vez de
   // forzar "2" siempre.
   const posicionDecimal = fixedDigits(2, 6);
-  const impuesto1 = existing?.[11] ?? fixedDigits(0, 6);
-  const impuesto2 = existing?.[12] ?? fixedDigits(0, 6);
+  // Impuestos siempre en 0: el precio de Patagonia es el precio final que se cobra. Si la balanza tiene
+  // un impuesto cargado en el PLU, se lo suma al imprimir (real: $10.000 → $12.100 con 21%).
+  const impuesto1 = fixedDigits(0, 6);
+  const impuesto2 = fixedDigits(0, 6);
   const taraPreempaque = existing?.[13] ?? fixedDigits(0, 5);
   const taraPublico = existing?.[14] ?? fixedDigits(0, 5);
   // "00" (sin formato de etiqueta asignado) es probablemente la causa real
@@ -1237,6 +1242,14 @@ export interface ReportProductFields {
   name: string;
   byWeight: boolean;
   price: number;
+  /** Impuestos cargados en el PLU (campos 11 y 12). La balanza los suma al imprimir: tienen que ser 0. */
+  taxes?: number;
+}
+
+/** El producto de ejemplo que traen de fábrica las Report ("NOMBRE") o un nombre vacío. */
+export function isFactoryPluName(name: string | null | undefined): boolean {
+  const n = (name ?? "").trim().toUpperCase();
+  return n === "" || n === "NOMBRE";
 }
 
 /** Report: lo que tiene grabado la balanza en el PLU `code` (SOLO LECTURA, 5005), o null si está libre. */
@@ -1245,12 +1258,12 @@ export async function readReportProduct(code: string): Promise<ReportProductFiel
   const port = await pickPort();
   const fields = await readExistingPluFields(port, settings, Number(code));
   if (!fields) return null;
-  return { name: fields[3].trimEnd(), byWeight: fields[6] === "P", price: Number(fields[8]) };
+  return { name: fields[3].trimEnd(), byWeight: fields[6] === "P", price: Number(fields[8]), taxes: (Number(fields[11]) || 0) + (Number(fields[12]) || 0) };
 }
 
 /** Report: cómo tiene que quedar grabado un producto de Patagonia (mismo armado que buildPluFrame). */
 export function expectedReportProduct(product: ScaleSyncableProduct): ReportProductFields {
-  return { name: fixedAscii(product.name, 26).trimEnd(), byWeight: product.unit === "kg", price: Number(fixedDigits(product.priceRetail, 6)) };
+  return { name: fixedAscii(product.name, 26).trimEnd(), byWeight: product.unit === "kg", price: Number(fixedDigits(product.priceRetail, 6)), taxes: 0 };
 }
 
 /** Aura: ¿entrega lo vendido por producto? SOLO LECTURA (5008/5001, nunca borra). Ver kretz/aura-totals-probe.ts. */

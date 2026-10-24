@@ -315,6 +315,19 @@ describe("[SIMULADO] Mi balanza con una Kretz Report", () => {
     assert.equal(scale.get("10")?.byWeight, true);
   });
 
+  it("mismo nombre y precio pero con impuesto en la balanza (imprimía $12.100 en vez de $10.000): se vuelve a grabar sin impuesto", async () => {
+    const vacio = P("a", "1", "vacio", "kg", 10000);
+    const { io, sent, scale } = reportIO({ "1": { ...expectedReportProduct({ id: "a", code: "1", name: "vacio", unit: "kg", priceRetail: 10000 }), taxes: 2100 } });
+    const s = new KretzSession("kretz-report-lt", ctx([vacio]), "datos", io);
+    const prep = await s.prepare(noop);
+    assert.equal(prep.ready, 0);
+    assert.equal(prep.writes, 1);
+    const out = await s.sync(prep, noop);
+    assert.equal(out.ok, true);
+    assert.deepEqual(sent, ["1"]);
+    assert.equal(scale.get("1")?.taxes, 0);
+  });
+
   it("verificación: si lo releído no es lo mandado, no dice 'listo'", async () => {
     const { io } = reportIO({}, { lie: "10" });
     const s = new KretzSession("kretz-report-lt", ctx(products.slice(0, 1)), "datos", io);
