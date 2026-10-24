@@ -214,3 +214,24 @@ export async function setProductsVatRate(input: { productIds?: string[]; codes?:
   if (error) throw error;
   return Number(data ?? 0);
 }
+
+/** Paquetes por producto de la sucursal (migración 157, a pedido: companies.features 'paquetes'). Solo los que cuentan paquetes. */
+export async function listProductPackages(branchId: string): Promise<Record<string, number>> {
+  if (!supabase) return {};
+  const { data, error } = await supabase.rpc("list_product_packages", { p_branch_id: branchId });
+  if (error) throw error;
+  return Object.fromEntries(((data ?? []) as { product_id: string; packages: number }[]).map((r) => [r.product_id, Number(r.packages)]));
+}
+
+/** "Envasé N" (suma) o "Contar" (deja el número contado). Devuelve cuántos paquetes quedaron. */
+export async function registerProductPackages(input: { branchId: string; productId: string; kind: "envasado" | "conteo"; count: number }): Promise<number> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { data, error } = await supabase.rpc("register_product_packages", {
+    p_branch_id: input.branchId,
+    p_product_id: input.productId,
+    p_kind: input.kind,
+    p_count: input.count
+  });
+  if (error) throw error;
+  return Number(data);
+}

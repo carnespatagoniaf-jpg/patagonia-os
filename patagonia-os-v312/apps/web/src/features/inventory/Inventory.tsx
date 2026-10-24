@@ -6,7 +6,7 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { useAuth } from "../auth/AuthProvider";
 import { planAllows } from "../auth/permissions";
-import { adjustProductStock, createProduct, deleteProduct, listProductsForBranch, listProductVatRates, setProductActive, setProductsVatRate, setProductStockSource, updateProduct } from "./inventory-service";
+import { adjustProductStock, createProduct, deleteProduct, listProductPackages, listProductsForBranch, listProductVatRates, registerProductPackages, setProductActive, setProductsVatRate, setProductStockSource, updateProduct } from "./inventory-service";
 import { getFiscalSettings } from "../invoicing/invoicing-service";
 import { PRODUCT_VAT_OPTIONS, productVatLabel, vatFromSelect, vatPercentLabel, vatSelectValue } from "./product-vat";
 import {
@@ -138,17 +138,45 @@ export function Inventory() {
   // IVA por producto (migración 154): id → alícuota, null = el general de Facturas.
   const [vatRates, setVatRates] = useState<Record<string, number | null>>({});
   const [generalVatRate, setGeneralVatRate] = useState<number | null>(null);
+  /** Paquetes por producto (a pedido: companies.features 'paquetes', migración 157). Solo los que ya se contaron. */
+  const showPackages = Boolean(profile?.features?.includes("paquetes"));
+  const [packages, setPackages] = useState<Record<string, number>>({});
 
 
   async function reload() {
     if (!isSupabaseConfigured || !branchId) return;
     setLoading(true);
     try {
-      const [list, rates] = await Promise.all([listProductsForBranch(branchId, true), listProductVatRates().catch(() => ({}))]);
+      const [list, rates, packs] = await Promise.all([
+        listProductsForBranch(branchId, true),
+        listProductVatRates().catch(() => ({})),
+        showPackages ? listProductPackages(branchId).catch(() => ({})) : Promise.resolve({})
+      ]);
       setProducts(list);
       setVatRates(rates);
+      setPackages(packs);
     } finally {
       setLoading(false);
+    }
+  }
+
+  /** "Envasé" suma paquetes; "Contar" deja el número que contaron (cada paquete pesa distinto, se cuentan de a uno). */
+  async function handlePackages(product: Product, kind: "envasado" | "conteo") {
+    if (!branchId) return;
+    const text = window.prompt(kind === "envasado" ? `¿Cuántos paquetes de "${product.name}" envasaste?` : `¿Cuántos paquetes de "${product.name}" hay ahora?`);
+    if (text === null) return;
+    const count = Number(text.trim());
+    if (!Number.isInteger(count) || count < 0 || (kind === "envasado" && count === 0)) {
+      setMessage("Escribí una cantidad entera de paquetes (por ejemplo 20).");
+      return;
+    }
+    setMessage("");
+    try {
+      const left = await registerProductPackages({ branchId, productId: product.id, kind, count });
+      setPackages((p) => ({ ...p, [product.id]: left }));
+      setMessage(`${product.name}: ${left} ${left === 1 ? "paquete" : "paquetes"}.`);
+    } catch (err) {
+      setMessage(errorText(err) || "No se pudieron guardar los paquetes.");
     }
   }
 
@@ -1071,6 +1099,19 @@ export function Inventory() {
                     <td className={vatRates[product.id] == null ? "muted" : undefined}>{productVatLabel(vatRates[product.id], generalVatRate)}</td>
                     <td className="num">
                       {product.stock} {product.stock <= product.minStock ? "⚠" : ""}
+                      {showPackages && !product.stockSourceId && (
+                        <div style={{ fontSize: 12 }}>
+                          {packages[product.id] !== undefined ? (
+                            <>
+                              <strong>{packages[product.id]}</strong> {packages[product.id] === 1 ? "paquete" : "paquetes"}{" "}
+                              <button className="link-button" onClick={() => void handlePackages(product, "envasado")}>Envasé</button>{" · "}
+                              <button className="link-button" onClick={() => void handlePackages(product, "conteo")}>Contar</button>
+                            </>
+                          ) : (
+                            <button className="link-button" onClick={() => void handlePackages(product, "conteo")}>Contar paquetes</button>
+                          )}
+                        </div>
+                      )}
                       {product.stockSourceId && (
                         <div className="muted" style={{ fontSize: 11 }}>
                           usa stock de {productById.get(product.stockSourceId)?.name ?? "otro producto"}
