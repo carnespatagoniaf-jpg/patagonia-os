@@ -96,3 +96,35 @@ export async function listExpenses(from: string, to: string): Promise<ExpenseRow
     };
   });
 }
+
+/** Ventas a cuenta (Clientes → Nueva venta) entre dos fechas, con el nombre del cliente. Para el Reporte de ventas. */
+export async function listSalesInRange(from: string, to: string): Promise<{ id: string; date: string; customerId: string; customerName: string; amount: number; reason: string | null }[]> {
+  if (!supabase) return [];
+  const out: { id: string; date: string; customerId: string; customerName: string; amount: number; reason: string | null }[] = [];
+  const PAGE = 1000;
+  for (let start = 0; ; start += PAGE) {
+    const { data, error } = await supabase
+      .from("customer_charges")
+      .select("id,customer_id,charge_date,amount,reason,created_at,customers(name,number)")
+      .gte("charge_date", from)
+      .lte("charge_date", to)
+      .order("charge_date")
+      .order("created_at")
+      .range(start, start + PAGE - 1);
+    if (error) throw error;
+    type Row = { id: string; customer_id: string; charge_date: string; amount: number; reason: string | null; customers: { name: string; number: number | null } | { name: string; number: number | null }[] | null };
+    for (const row of (data ?? []) as unknown as Row[]) {
+      const c = Array.isArray(row.customers) ? row.customers[0] : row.customers;
+      out.push({
+        id: row.id,
+        date: row.charge_date,
+        customerId: row.customer_id,
+        customerName: c ? `${c.number ? `${c.number} · ` : ""}${c.name}` : "Cliente",
+        amount: Number(row.amount),
+        reason: row.reason
+      });
+    }
+    if (!data || data.length < PAGE) break;
+  }
+  return out;
+}

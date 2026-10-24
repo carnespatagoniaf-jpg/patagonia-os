@@ -33,7 +33,8 @@ const navGroups: Array<{ heading: string | null; items: NavItem[] }> = [
     heading: "Ventas",
     items: [
       { page: "sale", label: "Mostrador", icon: Receipt },
-      { page: "customers", label: "Clientes", icon: Handshake }
+      { page: "customers", label: "Clientes", icon: Handshake },
+      { page: "sales_report", label: "Reporte de ventas", icon: ClipboardList }
     ]
   },
   {

@@ -207,13 +207,15 @@ export const PAGE_PERMISSIONS = {
   audit: "audit.view",
   // A pedido (migración 143): además del permiso, la empresa tiene que tener la pantalla en companies.features.
   accounts: "treasury.manage",
-  expenses: "treasury.manage"
+  expenses: "treasury.manage",
+  // A pedido (Martínez): ventas a cuenta de un período con detalle y PDF.
+  sales_report: "customers.manage"
 } as const satisfies Record<string, Permission>;
 
 export type Page = keyof typeof PAGE_PERMISSIONS;
 
 /** Pantallas que solo ve una empresa que las pidió (companies.features, migración 143). Hoy: Martínez. */
-const PAGE_REQUIRED_FEATURE: Partial<Record<string, string>> = { accounts: "cuentas", expenses: "gastos" };
+const PAGE_REQUIRED_FEATURE: Partial<Record<string, string>> = { accounts: "cuentas", expenses: "gastos", sales_report: "reporte_ventas" };
 
 export function canAccessPage(profile: UserProfile | null, page: Page) {
   const feature = PAGE_REQUIRED_FEATURE[page];

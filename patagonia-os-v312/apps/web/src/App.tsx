@@ -21,6 +21,7 @@ const Treasury = lazyPage(() => import("./features/shifts/Treasury"), "Treasury"
 const Reports = lazyPage(() => import("./features/shifts/Reports"), "Reports");
 const AccountsReport = lazyPage(() => import("./features/accounts/AccountsReport"), "AccountsReport");
 const Expenses = lazyPage(() => import("./features/accounts/Expenses"), "Expenses");
+const SalesReport = lazyPage(() => import("./features/accounts/SalesReport"), "SalesReport");
 const Employees = lazyPage(() => import("./features/employees/Employees"), "Employees");
 const Profitability = lazyPage(() => import("./features/profitability/Profitability"), "Profitability");
 const Carcass = lazyPage(() => import("./features/carcass/Carcass"), "Carcass");
@@ -106,6 +107,7 @@ export default function App() {
         {allowed && page === "customers" && <Customers />}
         {allowed && page === "reports" && <Reports />}
         {allowed && page === "accounts" && <AccountsReport />}
+        {allowed && page === "sales_report" && <SalesReport />}
         {allowed && page === "expenses" && <Expenses />}
         {allowed && page === "export" && <Export />}
         {allowed && page === "import" && <ImportData />}
