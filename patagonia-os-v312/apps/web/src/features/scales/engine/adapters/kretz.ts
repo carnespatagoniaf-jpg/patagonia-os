@@ -110,7 +110,9 @@ export class KretzSession implements ScaleSession {
       onProgress("leer", "Leyendo los productos de tu balanza…", i + 1, plan.toSend.length);
       const current = await this.io.readReport(p.code);
       const expected = expectedReportProduct(p);
-      if (!current) create.push(p);
+      // Un número con el producto de ejemplo de fábrica ("NOMBRE", o sin nombre) cuenta como libre:
+      // una Report LT recién sacada de la caja lo trae así (real: M2 Alimentos, 24/10, PLU 1 "NOMBRE" a $955481 por unidad).
+      if (!current || isFactoryPlaceholder(current.name)) create.push(p);
       else if (sameReport(current, expected)) same++;
       else if (normalizeName(current.name) === normalizeName(expected.name)) update.push(p);
       else occupied.push({ product: p, current });
@@ -174,6 +176,12 @@ export class KretzSession implements ScaleSession {
   supportInfo(): Record<string, unknown> {
     return { marca: "kretz", modelo: this.model, modo: this.mode, ...this.diagnostic };
   }
+}
+
+/** Nombre del producto de ejemplo que traen de fábrica las Report ("NOMBRE") o un número vacío. */
+export function isFactoryPlaceholder(name: string | null | undefined): boolean {
+  const n = normalizeName(name ?? "");
+  return n === "" || n === "NOMBRE";
 }
 
 function done(pending: PendingItem[]): string {
