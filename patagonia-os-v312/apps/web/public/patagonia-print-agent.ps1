@@ -18,7 +18,7 @@
 
 $ErrorActionPreference = "Stop"
 $Port = 9101
-$AgentVersion = 1
+$AgentVersion = 2
 
 Add-Type -TypeDefinition @'
 using System;
@@ -105,8 +105,13 @@ function Send-Json($ctx, [int]$status, $obj, [string]$origin) {
 $RawDriverName = "Generic / Text Only"
 $CompanionSuffix = " (ticket)"
 
-function Test-PhysicalPort([string]$port) {
-  return ($port -match '^(USB[0-9]+|LPT[0-9]+|COM[0-9]+|IP_.+|WSD-.+|[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+.*|.+\.prn)$')
+# Fisica = todo lo que no sea una impresora virtual (PDF, XPS, OneNote, fax, archivo). Antes era al reves (solo
+# USB001/COM1/...) y las termicas cuyo driver usa otro puerto (TMUSB001, ESDPRT001, RW001...) no aparecian en la
+# lista (real M2 Alimentos, 24/10/2026).
+function Test-PhysicalPort([string]$port, [string]$driver = '', [string]$name = '') {
+  if ($port -match '^(PORTPROMPT:|nul:?|FILE:|SHRFAX:|XPSPort:|Ne[0-9]+:|PDF.*|OneNote.*|Microsoft.*)$') { return $false }
+  if (($driver + ' ' + $name) -match '(PDF|XPS|OneNote|Fax|Microsoft Print)') { return $false }
+  return $true
 }
 
 function Get-PrinterList {
@@ -125,7 +130,7 @@ function Get-PrinterList {
       port = [string]$p.PortName
       driver = $driver
       driverMajor = $major
-      isPhysical = (Test-PhysicalPort ([string]$p.PortName))
+      isPhysical = (Test-PhysicalPort ([string]$p.PortName) $driver $name)
     }
   }
   return ,$list

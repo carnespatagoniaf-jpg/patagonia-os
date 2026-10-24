@@ -37,8 +37,18 @@ export function PrinterAgentSettings({ onStatusChange }: { onStatusChange?: (sta
       return;
     }
     try {
-      const list = (await listAgentPrinters()).filter((p) => p.isPhysical);
+      const all = await listAgentPrinters();
+      const list = all.filter((p) => p.isPhysical);
       setPrinters(list);
+      if (list.length === 0) {
+        // El programa viejo solo reconocía puertos USB001/COM1/…; las térmicas con otro puerto no aparecían (real M2, 24/10).
+        const names = all.map((p) => p.name).join(", ");
+        setNote(
+          "No aparece tu impresora. Volvé a tocar \"Descargar el programa\" y abrilo otra vez (se actualiza solo), después \"Actualizar\". " +
+            (names ? `Windows tiene estas impresoras: ${names}. ` : "Windows no tiene ninguna impresora instalada: instalala con el CD o la página de la marca. ") +
+            "Revisá que la térmica esté prendida y enchufada."
+        );
+      }
       let current = getAgentPrinterName();
       if (!current || !list.some((p) => p.name === current)) {
         // Elige sola la térmica si se la reconoce (ej. una sola física, o un
@@ -115,6 +125,7 @@ export function PrinterAgentSettings({ onStatusChange }: { onStatusChange?: (sta
             {testBusy ? "Imprimiendo…" : "Imprimir prueba"}
           </button>
           <button className="secondary" onClick={() => void refresh(true)}>Actualizar</button>
+          {printers.length === 0 && <a className="button-link" href="/instalar-impresora.bat" download>Descargar el programa otra vez</a>}
         </div>
       )}
 
