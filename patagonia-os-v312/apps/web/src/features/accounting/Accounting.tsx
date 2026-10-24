@@ -11,6 +11,7 @@ import {
   getAccountingMonth,
   getAging,
   importPurchaseVouchers,
+  listInventorySnapshots,
   listOfficialDues,
   listSupplierTaxInfo,
   listTaxReminders,
@@ -19,6 +20,7 @@ import {
   type ImportVouchersResult
 } from "./accounting-service";
 import { AgingPanel } from "./AgingPanel";
+import { buildYearSheets, fiscalYearMonths } from "./accounting-year";
 import { computeIibb } from "./iibb";
 import { IibbPanel } from "./IibbPanel";
 import { InventoryClosePanel } from "./InventoryClosePanel";
@@ -100,6 +102,9 @@ export function Accounting() {
   const [official, setOfficial] = useState<OfficialDue[]>([]);
   const [aging, setAging] = useState<{ asOf: string; receivables: AgingRow[]; payables: AgingRow[] } | null>(null);
   const [agingLoading, setAgingLoading] = useState(false);
+  // Resumen del año: mes en que cierra el ejercicio (diciembre si no se elige otro).
+  const [yearEnd, setYearEnd] = useState(`${currentMonth().slice(0, 4)}-12`);
+  const [yearProgress, setYearProgress] = useState<string | null>(null);
 
   const reload = useCallback(async () => {
     if (!isSupabaseConfigured) return;
@@ -249,10 +254,46 @@ export function Accounting() {
         ws["!cols"] = widths.map((wch) => ({ wch }));
         XLSX.utils.book_append_sheet(wb, ws, sheet.name);
       }
-      const fileName = (data.company.businessName || data.company.name).normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^\w]+/g, "_");
+      const fileName = (data.company.businessName || data.company.name).normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w]+/g, "_");
       XLSX.writeFile(wb, `Contable_${fileName}_${month}.xlsx`);
     } catch (err) {
       setMessage(errorText(err, "No se pudo armar el Excel."));
+    }
+  }
+
+  /** Excel con los 12 meses del ejercicio (accounting_month de cada mes) para Ganancias y el balance. */
+  async function downloadYear() {
+    if (yearProgress) return;
+    const today = new Date(Date.now() - 3 * 3600_000).toISOString().slice(0, 10);
+    const months = fiscalYearMonths(yearEnd, today);
+    if (months.length === 0) {
+      setMessage("Ese ejercicio todavía no empezó.");
+      return;
+    }
+    try {
+      const loaded: AccountingMonth[] = [];
+      for (const m of months) {
+        setYearProgress(`Armando ${loaded.length + 1} de ${months.length}…`);
+        loaded.push(await getAccountingMonth(m));
+      }
+      const snapshots = await listInventorySnapshots().catch(() => []);
+      const XLSX = await import("xlsx");
+      const wb = XLSX.utils.book_new();
+      for (const sheet of buildYearSheets({ endMonth: yearEnd, months: loaded, snapshots })) {
+        const ws = XLSX.utils.aoa_to_sheet(sheet.rows);
+        const widths = sheet.rows.reduce<number[]>((w, row) => {
+          row.forEach((c, i) => (w[i] = Math.min(40, Math.max(w[i] ?? 8, String(c ?? "").length + 2))));
+          return w;
+        }, []);
+        ws["!cols"] = widths.map((wch) => ({ wch }));
+        XLSX.utils.book_append_sheet(wb, ws, sheet.name);
+      }
+      const name = (loaded[0].company.businessName || loaded[0].company.name).normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\w]+/g, "_");
+      XLSX.writeFile(wb, `Resumen_ejercicio_${name}_${yearEnd}.xlsx`);
+    } catch (err) {
+      setMessage(errorText(err, "No se pudo armar el resumen del año."));
+    } finally {
+      setYearProgress(null);
     }
   }
 
@@ -395,9 +436,17 @@ export function Accounting() {
               <button onClick={() => void downloadPackage()}>Bajar carpeta del mes (Excel)</button>
               {ri && <button className="secondary" onClick={downloadLibroIva}>Bajar Libro IVA Digital (archivos para ARCA)</button>}
             </div>
+            <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 12 }}>
+              <span>Resumen del año (cierre del ejercicio), que cierra en</span>
+              <input type="month" value={yearEnd} onChange={(e) => e.target.value && setYearEnd(e.target.value)} />
+              <button className="secondary" disabled={Boolean(yearProgress)} onClick={() => void downloadYear()}>
+                {yearProgress ?? "Bajar resumen del año (Excel)"}
+              </button>
+            </div>
             <p className="setting-help">
               La carpeta trae en un Excel: resumen, IVA Ventas, IVA Compras, compras sin factura, gastos y sueldos, saldos de las cuentas a fin de mes, lo que te deben los clientes, lo que les debés a los proveedores, deudas, cheques y el stock a costo.
               {ri && " El Libro IVA Digital es un .zip con los 4 archivos que se importan en ARCA → Libro IVA Digital → Importar."}
+              {" "}El resumen del año trae los 12 meses del ejercicio (ventas, facturado, compras, gastos por categoría, sueldos, {ri ? "IVA" : "monotributo"} e Ingresos Brutos por mes), el inventario al inicio y al cierre, y los saldos: es lo que pide el contador para Ganancias y el balance.
             </p>
             <p className="setting-help">Tu contador puede entrar a mirar: en Usuarios, creale un usuario con el rol "Contador". Solo ve esta pantalla y no puede cargar ni cambiar nada.</p>
             {ri && position && (position.salesByRate.length > 0 || position.purchasesByRate.length > 0) && (

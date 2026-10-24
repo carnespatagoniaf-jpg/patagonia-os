@@ -137,6 +137,7 @@ Stage 1 of the owner's "todo lo que piden ARCA y el contador, como una empresa g
   - **Aging.** `accounting_aging()` allocates payments FIFO and returns 0-30/31-60/61-90/+90 buckets per customer and supplier.
   - **Year-end inventory.** `take_inventory_snapshot(date, label)` (owner/admin) stores stock at the end of that day, summed from movements, at today's cost, in `inventory_snapshot_items`. It can be downloaded as Excel.
   - The month Excel adds the sheets IIBB, Antigüedad and Vencimientos. The new tables also carry `zz_accountant_readonly`.
+- **Year summary (2026-10-23, no migration).** Contable → "Para el contador" → "Bajar resumen del año" calls `accounting_month` once per month of the fiscal year (12 months ending in the chosen month; months not started yet are skipped). `accounting-year.ts` (pure, tested) builds the sheets: monthly totals, expenses by category × month, IVA or monotributo, IIBB by month, opening/closing inventory (only if a snapshot exists on exactly those dates), and balances. Owner rule: build only what accountants really ask for; the rest (cash flow, journal entries, export to Tango) waits until a client asks.
 
 ## Decomisos (migration 151, LIVE 2026-10-23; all plans since 152, owner decision the same day)
 
