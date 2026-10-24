@@ -39,7 +39,7 @@ import {
   type PurchaseVoucher
 } from "./accounting-view";
 import { buildPurchaseFiles, buildSalesFiles, lidFileNames } from "./libro-iva-digital";
-import { parseMisComprobantes, type ParsedRow } from "./mis-comprobantes";
+import { otherTaxesAsIibb, parseMisComprobantes, type ParsedRow } from "./mis-comprobantes";
 import { PurchaseVoucherForm, type VoucherPurchaseHint, type VoucherSupplier } from "./PurchaseVoucherForm";
 import { buildZip, latin1Bytes } from "./zip";
 
@@ -96,6 +96,7 @@ export function Accounting() {
   const [importFile, setImportFile] = useState("");
   const [importBusy, setImportBusy] = useState(false);
   const [importResult, setImportResult] = useState<ImportVouchersResult | null>(null);
+  const [othersAreIibb, setOthersAreIibb] = useState(true);
 
   const [tab, setTab] = useState<Tab>("resumen");
   const [reminders, setReminders] = useState<TaxReminder[]>([]);
@@ -224,7 +225,8 @@ export function Accounting() {
 
   async function handleImport() {
     if (!importRows) return;
-    const vouchers = importRows.filter((r) => r.voucher).map((r) => r.voucher!);
+    const parsed = importRows.filter((r) => r.voucher).map((r) => r.voucher!);
+    const vouchers = othersAreIibb ? otherTaxesAsIibb(parsed) : parsed;
     if (vouchers.length === 0) return;
     setImportBusy(true);
     try {
@@ -533,6 +535,17 @@ export function Accounting() {
                         Fila {r.row}: {[...r.errors, ...r.warnings].join(" · ")}
                       </div>
                     ))}
+                    {importRows.some((r) => (r.voucher?.other_taxes ?? 0) > 0) && (
+                      <label style={{ display: "flex", gap: 6, alignItems: "flex-start", margin: "8px 0", fontSize: 14 }}>
+                        <input type="checkbox" checked={othersAreIibb} onChange={(e) => setOthersAreIibb(e.target.checked)} />
+                        <span>
+                          Lo que viene en "Otros tributos" son percepciones de Ingresos Brutos
+                          <span className="muted" style={{ display: "block", fontSize: 12 }}>
+                            ARCA trae todas las percepciones juntas. Tildado, se descuentan de Ingresos Brutos. Si alguna es de otro impuesto, se corrige después con "Editar" en esa factura.
+                          </span>
+                        </span>
+                      </label>
+                    )}
                     <button style={{ marginTop: 8 }} disabled={importBusy || importable === 0} onClick={() => void handleImport()}>
                       {importBusy ? "Importando…" : `Importar ${importable} facturas`}
                     </button>

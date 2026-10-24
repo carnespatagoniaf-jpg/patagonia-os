@@ -20,7 +20,18 @@ export interface ImportedVoucher {
   no_taxed: number;
   exempt: number;
   other_taxes: number;
+  /** Percepción de Ingresos Brutos (solo si se eligió pasar ahí los "Otros tributos"). */
+  perc_iibb?: number;
   total: number;
+}
+
+/**
+ * ARCA trae todas las percepciones juntas en "Otros tributos". En una carnicería
+ * casi siempre son de Ingresos Brutos: con esta opción pasan a percepción de IIBB
+ * y se descuentan del impuesto del mes (si no, quedan como otros impuestos).
+ */
+export function otherTaxesAsIibb(vouchers: ImportedVoucher[]): ImportedVoucher[] {
+  return vouchers.map((v) => (v.other_taxes > 0 ? { ...v, perc_iibb: (v.perc_iibb ?? 0) + v.other_taxes, other_taxes: 0 } : v));
 }
 
 export interface ParsedRow {

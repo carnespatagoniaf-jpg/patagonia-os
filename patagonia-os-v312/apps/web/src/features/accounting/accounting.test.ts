@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { inflateRawSync } from "node:zlib";
 import { monotributoStatus, purchaseParts, vatPosition, type PurchaseVoucher, type SaleVoucher } from "./accounting-view";
 import { buildPurchaseFiles, buildSalesFiles, lidAmount, lidText } from "./libro-iva-digital";
-import { amountCell, dateCell, parseMisComprobantes, voucherTypeCell } from "./mis-comprobantes";
+import { amountCell, dateCell, otherTaxesAsIibb, parseMisComprobantes, voucherTypeCell } from "./mis-comprobantes";
 import { buildZip, crc32, latin1Bytes } from "./zip";
 
 const sale = (over: Partial<SaleVoucher> = {}): SaleVoucher => ({
@@ -131,6 +131,11 @@ describe("Mis Comprobantes", () => {
     assert.deepEqual(a.vat_lines, [{ rate: 10.5, net: 2000, vat: 210 }, { rate: 21, net: 1000, vat: 210 }]);
     assert.equal(a.other_taxes, 120);
     assert.equal(a.total, 3540);
+    // Con la opción tildada, los "Otros tributos" pasan a percepción de IIBB (el total no cambia).
+    const [moved] = otherTaxesAsIibb([a]);
+    assert.equal(moved.perc_iibb, 120);
+    assert.equal(moved.other_taxes, 0);
+    assert.equal(moved.total, 3540);
     assert.equal(r.rows[1].voucher!.vat_lines.length, 0);
   });
 
