@@ -9,7 +9,7 @@ import { adaptersForChoice } from "./engine/live";
 import { friendlyKind, friendlyMessage } from "./engine/friendly";
 import { choiceLabel, SCALE_CHOICES, type ScaleChoice } from "./engine/choice";
 import { loadRememberedScale, rememberScale } from "./engine/memory";
-import { emptyDiag, type ConnectDiag, type EngineProduct, type EngineStep, type PendingItem, type PreparedSync, type ScaleSession } from "./engine/types";
+import { emptyDiag, type ConnectDiag, type EngineProduct, type EngineStep, type PendingItem, type PreparedSync, type ProductProblem, type ScaleSession } from "./engine/types";
 import { checkScaleFormats, choiceForScale, defaultScaleName, listBranchScales, registerBranchScale, removeBranchScale, renameBranchScale, scaleStatus, type BranchScale } from "./registry/branch-scales";
 import { bindingFor, forgetBinding, saveBinding } from "./registry/local-bindings";
 import { setScaleLinks } from "./sale/scale-sale-service";
@@ -30,9 +30,9 @@ type Phase =
   | { kind: "elegir_marca" }
   | { kind: "trabajando"; stage: "conectar" | "sincronizar"; step: EngineStep; text: string; done?: number; total?: number }
   | { kind: "listo_para_sincronizar"; prepared: PreparedSync }
-  | { kind: "listo"; message: string; pending: PendingItem[]; model: string }
+  | { kind: "listo"; message: string; pending: PendingItem[]; model: string; skipped?: ProductProblem[] }
   | { kind: "bloqueado"; prepared: PreparedSync }
-  | { kind: "error"; message: string; canPick: boolean; canRelease?: boolean };
+  | { kind: "error"; message: string; canPick: boolean; canRelease?: boolean; failures?: ProductProblem[] };
 
 /** Balanza que esta computadora usaba antes de "Mis balanzas" y que todavía no está registrada en la sucursal. */
 const LOCAL_KEY = "__esta-computadora";
@@ -190,7 +190,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       // La lectura pudo descubrir con qué señales o a qué número atiende la balanza: se vuelve a guardar su conexión.
       if (branchId && key) saveBinding(key, { branchId, family: result.family, usb: result.usb });
       if (prepared.blocker) setPhase({ kind: "bloqueado", prepared });
-      else if (prepared.upToDate) setPhase({ kind: "listo", message: "¡Listo! Tu balanza está conectada y ya podés vender.", pending: prepared.pending, model: prepared.label });
+      else if (prepared.upToDate) setPhase({ kind: "listo", message: "¡Listo! Tu balanza está conectada y ya podés vender.", pending: prepared.pending, model: prepared.label, skipped: prepared.skipped });
       else setPhase({ kind: "listo_para_sincronizar", prepared });
     } catch (err) {
       const kind = friendlyKind(err);
@@ -249,12 +249,12 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     try {
       const out = await s.sync(prepared, progress, { allowReplace: replace });
       if (!out.ok) {
-        setPhase({ kind: "error", message: out.message, canPick: false });
+        setPhase({ kind: "error", message: out.message, canPick: false, failures: out.failures });
         reportAndShow("sincronizar (frenado)", out.message, ctxRef.current?.diag ?? null, out.support ?? {});
         return;
       }
       markSynced();
-      setPhase({ kind: "listo", message: out.message, pending: out.pending, model: prepared.label });
+      setPhase({ kind: "listo", message: out.message, pending: out.pending, model: prepared.label, skipped: prepared.skipped });
       void reload();
     } catch (err) {
       setPhase({ kind: "error", message: friendlyMessage(err), canPick: false });
@@ -394,6 +394,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
             </label>
           )}
           <Notes notes={phase.prepared.notes} />
+          <ProblemList title="no van a la balanza" items={phase.prepared.skipped} />
           {lookalike && (
             <p className="my-scale-warning">
               Se agregó como una balanza nueva. En esta sucursal ya está "{lookalike.name}", que contesta con el mismo número. Si las dos se conectan a la misma computadora, cambiale el número a una en su menú; si no, no hace falta nada.
@@ -422,6 +423,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
           <p className="my-scale-status ok"><CheckCircle2 size={22} /> {phase.message}</p>
           <p className="muted">Pesá, imprimí el ticket y escanealo en Mostrador.</p>
           {phase.pending.length > 0 && active && <PendingReview items={phase.pending} products={products} branchId={branchId} scaleKey={active.key} />}
+          <ProblemList title="no van a la balanza" items={phase.skipped} />
           <div className="my-scale-actions">
             <button className="secondary" onClick={() => void handleConnect(active, false)}>Volver a sincronizar</button>
             <button className="secondary" onClick={backToList}>Volver a mis balanzas</button>
@@ -432,6 +434,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       {phase.kind === "error" && (
         <div className="my-scale-body">
           <p className="my-scale-status bad"><TriangleAlert size={20} /> {phase.message}</p>
+          <ProblemList title="no quedaron bien en la balanza" items={phase.failures} open />
           <div className="my-scale-actions">
             {active ? (
               <>
@@ -538,6 +541,23 @@ function Fact({ value, label, tone }: { value: number; label: string; tone?: "wa
       <strong>{value}</strong>
       <span>{label}</span>
     </div>
+  );
+}
+
+/** Cada producto que no se mandó o no quedó bien, con el motivo: el cliente tiene que poder ver cuál es y arreglarlo. */
+function ProblemList({ title, items, open = false }: { title: string; items?: ProductProblem[]; open?: boolean }) {
+  if (!items?.length) return null;
+  return (
+    <details className="my-scale-problems" open={open}>
+      <summary>{items.length === 1 ? `1 producto ${title.replace(/^no van/, "no va").replace(/^no quedaron/, "no quedó")}` : `${items.length} productos ${title}`}</summary>
+      <ul className="my-scale-notes">
+        {items.map((p) => (
+          <li key={`${p.code}|${p.name}`}>
+            <strong>{p.code} {p.name}</strong>: {p.reason}
+          </li>
+        ))}
+      </ul>
+    </details>
   );
 }
 

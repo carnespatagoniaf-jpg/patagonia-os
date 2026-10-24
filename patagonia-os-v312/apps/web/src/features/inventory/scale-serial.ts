@@ -263,7 +263,10 @@ function fixedAscii(text: string, width: number): string {
   const ascii = text
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
-    .replace(/[^\x20-\x7e]/g, "?");
+    // Un símbolo que la balanza no tiene (º, ½, emoji) se saca, no se cambia por "?" (el nombre tiene que leerse limpio).
+    .replace(/[^\x20-\x7e]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
   return ascii.slice(0, width).padEnd(width, " ");
 }
 
@@ -809,13 +812,10 @@ async function buildPluFrame(
   // una prueba sintética (Campo 01 = 90001 sin ningún +1, verificado
   // correctamente con 5005 usando argumento 90000 = N-1).
   const pluDigits = Number(product.code);
-  if (!Number.isFinite(pluDigits) || pluDigits > MAX_PLU_CODE) {
-    // El campo "Código de PLU" de la balanza es de 5 dígitos -- un código
-    // largo (ej. un EAN-13 de un producto envasado) se truncaría en vez de
-    // mandarse, y podría pisar el PLU de otro producto sin aviso. Mejor
-    // frenar acá que mandar un dato corrupto.
-    throw new Error(`El código "${product.code}" de "${product.name}" es demasiado largo para ser un PLU de balanza (parece un EAN/código de barras, no un PLU corto).`);
-  }
+  // Nunca se trunca un código largo (pisaría el PLU de otro producto) ni se redondea un precio: si no entra exacto,
+  // se frena acá con el motivo en vez de mandar un dato distinto del de Stock.
+  const invalid = reportSkipReason(product);
+  if (invalid) throw new Error(`"${product.name}" (${product.code}): ${invalid}`);
 
   const settings = { ...getScaleSerialSettings(), deviceType, equipmentId, altaCommand, baudRate };
   const read = await readExistingPluFields(port, settings, pluDigits);
@@ -1095,6 +1095,26 @@ export async function checkScaleCompatibility(): Promise<ScaleCompatibilityResul
  * de PLU (el otro, "Número de PLU", es de 6), así que es el límite real:
  * el código de Patagonia OS más alto representable sin truncar. */
 const MAX_PLU_CODE = 99999;
+/** El campo precio de la Report es de 6 dígitos, en pesos enteros (flag decimal "2"). */
+const MAX_REPORT_PRICE = 999999;
+
+/**
+ * Por qué un producto NO puede ir a la balanza tal cual está en Stock, o null si puede. Nunca se trunca ni se
+ * redondea nada: el precio de Stock es el que se cobra, y si la balanza no lo puede guardar exacto, no se manda.
+ */
+export function reportSkipReason(product: ScaleSyncableProduct): string | null {
+  if (!/^\d+$/.test(product.code)) return "El código no es un número: no sirve como número de balanza (PLU).";
+  const code = Number(product.code);
+  if (code <= 0) return "El código es 0: la balanza no tiene PLU 0. Poné otro código en Stock.";
+  if (code > MAX_PLU_CODE) return `El código es demasiado largo para la balanza (parece un código de barras); la balanza admite hasta ${MAX_PLU_CODE}.`;
+  if (!fixedAscii(product.name, 26).trim()) return "No tiene nombre. Ponele un nombre en Stock.";
+  const price = product.priceRetail;
+  if (!Number.isFinite(price) || price <= 0) return "No tiene precio de venta. Cargalo en Stock.";
+  if (price !== Math.round(price)) return `El precio tiene centavos ($${price}): la balanza solo guarda pesos enteros. Redondealo en Stock.`;
+  if (price > MAX_REPORT_PRICE) return `El precio ($${price}) es más alto que lo que entra en la balanza ($${MAX_REPORT_PRICE}).`;
+  if (product.unit !== "kg" && product.unit !== "unit" && product.unit !== "box") return "No tiene forma de venta (kg o unidad).";
+  return null;
+}
 
 export interface ScaleSyncPlan {
   toSend: ScaleSyncableProduct[];
@@ -1125,15 +1145,9 @@ export function planScaleSync(products: ScaleSyncableProduct[]): ScaleSyncPlan {
   const candidates: ScaleSyncableProduct[] = [];
 
   for (const product of active) {
-    if (!/^\d+$/.test(product.code)) {
-      skipped.push({ product, reason: "El código no es puramente numérico -- no se puede usar como PLU de balanza." });
-    } else if (!Number.isFinite(product.priceRetail) || product.priceRetail < 0) {
-      skipped.push({ product, reason: "El precio no es un número válido." });
-    } else if (Number(product.code) > MAX_PLU_CODE) {
-      skipped.push({ product, reason: `El código es demasiado largo para ser un PLU de balanza (parece un EAN/código de barras) -- el campo de la balanza solo admite hasta ${MAX_PLU_CODE}.` });
-    } else {
-      candidates.push(product);
-    }
+    const reason = reportSkipReason(product);
+    if (reason) skipped.push({ product, reason });
+    else candidates.push(product);
   }
 
   // Detectar colisiones: dos productos distintos que terminarían con el
@@ -1260,6 +1274,25 @@ export interface ReportProductFields {
   price: number;
   /** Impuestos cargados en el PLU (campos 11 y 12). La balanza los suma al imprimir: tienen que ser 0. */
   taxes?: number;
+  /** Código de PLU (campo 5): es el que va en el código de barras de la etiqueta. */
+  code?: number;
+  /** Formato de etiqueta (campo 15): "01" imprime el código de barras. */
+  label?: string;
+  /** Flag decimal (campo 10): "000002" = precio en pesos enteros; otro valor corre el precio. */
+  decimals?: string;
+}
+
+/** En qué difiere lo que quedó en la balanza de lo que tenía que quedar, en palabras simples ([] = igual). */
+export function reportDifferences(actual: ReportProductFields, expected: ReportProductFields): string[] {
+  const out: string[] = [];
+  if (actual.name !== expected.name) out.push(`el nombre quedó "${actual.name}" (tenía que ser "${expected.name}")`);
+  if (actual.byWeight !== expected.byWeight) out.push(`quedó por ${actual.byWeight ? "kilo" : "unidad"} (tenía que ser por ${expected.byWeight ? "kilo" : "unidad"})`);
+  if (actual.price !== expected.price) out.push(`el precio quedó $${actual.price} (tenía que ser $${expected.price})`);
+  if ((actual.taxes ?? 0) !== (expected.taxes ?? 0)) out.push("tiene un impuesto cargado en la balanza (le suma al precio)");
+  if (actual.code !== undefined && expected.code !== undefined && actual.code !== expected.code) out.push(`el código de la etiqueta quedó ${actual.code} (tenía que ser ${expected.code})`);
+  if (actual.label !== undefined && expected.label !== undefined && actual.label !== expected.label) out.push(`la etiqueta quedó en el formato ${actual.label} (tenía que ser ${expected.label}, la que imprime el código de barras)`);
+  if (actual.decimals !== undefined && expected.decimals !== undefined && actual.decimals !== expected.decimals) out.push("la balanza interpreta el precio con otros decimales");
+  return out;
 }
 
 /** El producto de ejemplo que traen de fábrica las Report ("NOMBRE") o un nombre vacío. */
@@ -1275,12 +1308,21 @@ export async function readReportProduct(code: string): Promise<ReportProductFiel
   const port = await pickPort();
   const fields = await readExistingPluFields(port, settings, Number(code));
   if (!fields) return null;
-  return { name: fields[3].trimEnd(), byWeight: fields[6] === "P", price: Number(fields[8]), taxes: (Number(fields[11]) || 0) + (Number(fields[12]) || 0) };
+  return {
+    name: fields[3].trimEnd(),
+    byWeight: fields[6] === "P",
+    price: Number(fields[8]),
+    taxes: (Number(fields[11]) || 0) + (Number(fields[12]) || 0),
+    code: Number(fields[5]),
+    label: fields[15],
+    decimals: fields[10]
+  };
 }
 
 /** Report: cómo tiene que quedar grabado un producto de Patagonia (mismo armado que buildPluFrame). */
 export function expectedReportProduct(product: ScaleSyncableProduct): ReportProductFields {
-  return { name: fixedAscii(product.name, 26).trimEnd(), byWeight: product.unit === "kg", price: Number(fixedDigits(product.priceRetail, 6)), taxes: 0 };
+  // El precio es el de Stock tal cual (reportSkipReason ya descartó centavos o precios que no entran).
+  return { name: fixedAscii(product.name, 26).trimEnd(), byWeight: product.unit === "kg", price: product.priceRetail, taxes: 0, code: Number(product.code), label: fixedDigits(1, 2), decimals: fixedDigits(2, 6) };
 }
 
 /** Aura: ¿entrega lo vendido por producto? SOLO LECTURA (5008/5001, nunca borra). Ver kretz/aura-totals-probe.ts. */

@@ -7,6 +7,7 @@ import {
   planScaleSync,
   readAuraListOnScale,
   readReportProduct,
+  reportDifferences,
   runAuraSyncOnScale,
   setScaleSerialPort,
   syncProductsToScale,
@@ -16,7 +17,7 @@ import {
 import { canWrite, SCALE_CAPABILITIES, type ScaleModelId } from "../capabilities";
 import { FRIENDLY_MESSAGES, FriendlyError } from "../friendly";
 import { normalizeName } from "../matching";
-import type { EngineContext, EngineProduct, PendingItem, PreparedSync, ProgressFn, ScaleAdapter, ScaleSession, SyncOutcome } from "../types";
+import type { EngineContext, EngineProduct, PendingItem, PreparedSync, ProductProblem, ProgressFn, ScaleAdapter, ScaleSession, SyncOutcome } from "../types";
 
 /**
  * Kretz (Report LT y Aura). Reutiliza, sin cambiarlos, los mismos caminos que usan los clientes hoy:
@@ -46,9 +47,10 @@ export function kretzModelForLetter(deviceType: string | null | undefined): Scal
 }
 
 const toSyncable = (p: EngineProduct): ScaleSyncableProduct => ({ id: p.id, code: p.code, name: p.name, unit: p.unit as ScaleSyncableProduct["unit"], priceRetail: p.priceRetail, active: p.active });
-// Los impuestos también cuentan: un PLU con impuesto imprime otro precio aunque nombre y precio coincidan.
-const sameReport = (a: ReportProductFields, b: ReportProductFields) =>
-  a.name === b.name && a.byWeight === b.byWeight && a.price === b.price && (a.taxes ?? 0) === (b.taxes ?? 0);
+// Todo cuenta: nombre, forma de venta, precio, impuestos (la balanza los suma al imprimir), código de la etiqueta,
+// formato de etiqueta (el 01 imprime el código de barras) y decimales (otro flag corre el precio).
+const sameReport = (a: ReportProductFields, b: ReportProductFields) => reportDifferences(a, b).length === 0;
+const problem = (p: ScaleSyncableProduct, reason: string): ProductProblem => ({ code: p.code, name: p.name, reason });
 
 type ReportState = { kind: "report"; create: ScaleSyncableProduct[]; update: ScaleSyncableProduct[]; occupied: { product: ScaleSyncableProduct; current: ReportProductFields }[] };
 type AuraState = { kind: "aura"; records: string[]; products: { code: string; name: string; byWeight: boolean; price: number }[]; plan: AuraSyncItem[] };
@@ -126,7 +128,8 @@ export class KretzSession implements ScaleSession {
     this.state = { kind: "report", create, update, occupied };
     const pending: PendingItem[] = occupied.map((o) => ({ code: Number(o.product.code), scaleName: o.current.name, byWeight: o.current.byWeight, reason: "ocupado_en_balanza", detail: `en la balanza el ${o.product.code} es "${o.current.name}"; en Patagonia es "${o.product.name}"`, suggestionId: null }));
     const writes = create.length + update.length;
-    return { ...this.base(), scaleProducts: plan.toSend.length, ready: same, writes, pending, upToDate: writes === 0, notes: plan.skipped.length ? [`${plan.skipped.length} productos de Patagonia no van a la balanza (su código no sirve como número de balanza).`] : [] };
+    const skipped = plan.skipped.map((x) => problem(x.product, x.reason));
+    return { ...this.base(), scaleProducts: plan.toSend.length, ready: same, writes, pending, upToDate: writes === 0, skipped };
   }
 
   async sync(prepared: PreparedSync, onProgress: ProgressFn, opts: { allowReplace?: boolean } = {}): Promise<SyncOutcome> {
@@ -135,7 +138,14 @@ export class KretzSession implements ScaleSession {
     if (st.kind === "aura") {
       const plan = opts.allowReplace ? planAuraSync(st.records, st.products, { replaceConflicts: true }) : st.plan;
       const r = await this.io.runAuraSync(plan, (t) => onProgress("sincronizar", "Mandando tus productos a la balanza…", ...progressNumbers(t)), () => false, true);
-      if (r.verdict !== "ok") return { ok: false, verified: r.written.length, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, support: { verdict: r.verdict, detail: r.detail, stoppedAt: r.stoppedAt } };
+      if (r.verdict !== "ok") {
+        const at = r.stoppedAt;
+        const product = at ? st.products.find((p) => Number(p.code) === at.plu) : undefined;
+        const failures: ProductProblem[] = at
+          ? [{ code: String(at.plu), name: product?.name ?? "", reason: at.readBack === null ? "la balanza no lo devolvió al releerlo" : "al releerlo en la balanza no quedó igual a Patagonia" }]
+          : [];
+        return { ok: false, verified: r.written.length, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, failures, support: { verdict: r.verdict, detail: r.detail, stoppedAt: r.stoppedAt } };
+      }
       // La Aura imprime el TOTAL en los tickets con varios productos (manual Aura Eco §7.1.7; el código por producto
       // del ticket de suma no existe: real Pollo y mar 15/10). En Pre-Empaque (ALT + 7) imprime un ticket por producto
       // con su código 2-3-7 + importe: Mostrador de la sucursal queda leyendo ese formato.
@@ -150,21 +160,31 @@ export class KretzSession implements ScaleSession {
     }
 
     const list = [...st.create, ...st.update, ...(opts.allowReplace ? st.occupied.map((o) => o.product) : [])];
+    // Cada producto que no quedó bien, con su motivo. Uno que falla no frena a los demás, pero nunca se dice "Listo".
+    const failures: ProductProblem[] = [];
+    const support: Record<string, unknown> = {};
     if (list.length > 0) {
       const r = await this.io.sendReport(list, (d, t) => onProgress("sincronizar", "Mandando tus productos a la balanza…", d, t));
-      const bad = r.failed.length + r.noResponse.length + r.transportErrors.length;
-      if (bad > 0) return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, support: { failed: r.failed.length, noResponse: r.noResponse.length, transport: r.transportErrors.map((x) => x.message) } };
+      for (const x of r.skipped) failures.push(problem(x.product, x.reason));
+      for (const x of r.failed) failures.push(problem(x.product, `la balanza no lo aceptó (respuesta ${x.responseCode ?? "?"})`));
+      for (const x of r.noResponse) failures.push(problem(x.product, "la balanza no contestó al grabarlo"));
+      for (const x of r.transportErrors) failures.push(problem(x.product, `se cortó la comunicación al grabarlo (${x.message})`));
+      support.envio = { failed: r.failed.length, noResponse: r.noResponse.length, transport: r.transportErrors.map((x) => x.message), codes: r.responseCodeCounts };
     }
-    // Verificación: se relee cada producto mandado y se compara nombre, forma de venta y precio.
+    // Verificación: se relee cada producto mandado (5005) y se comparan TODOS los campos que importan.
     let verified = 0;
-    const wrong: string[] = [];
-    for (const [i, p] of list.entries()) {
-      onProgress("verificar", "Comprobando lo que quedó en la balanza…", i + 1, list.length);
+    const toCheck = list.filter((p) => !failures.some((f) => f.code === p.code));
+    for (const [i, p] of toCheck.entries()) {
+      onProgress("verificar", "Comprobando lo que quedó en la balanza…", i + 1, toCheck.length);
       const back = await this.io.readReport(p.code);
-      if (back && sameReport(back, expectedReportProduct(p))) verified++;
-      else wrong.push(p.code);
+      const diffs = back ? reportDifferences(back, expectedReportProduct(p)) : ["al releerlo, el número está vacío en la balanza"];
+      if (diffs.length === 0) verified++;
+      else failures.push(problem(p, diffs.join("; ")));
     }
-    if (wrong.length) return { ok: false, verified, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, support: { verificacion: wrong } };
+    if (failures.length) {
+      support.verificacion = failures;
+      return { ok: false, verified, message: failedMessage(verified, failures.length), pending: prepared.pending, failures, support };
+    }
     // Código de barras en las etiquetas (2-3-7 con el importe) y Mostrador leyéndolo: lo mismo que la Aura.
     if (this.io.configureReportBarcode) {
       onProgress("sincronizar", "Configurando el código de barras de las etiquetas…");
@@ -198,6 +218,11 @@ export function isFactoryPlaceholder(name: string | null | undefined): boolean {
   const n = normalizeName(name ?? "");
   // De fábrica: "NOMBRE" o "NOMBRE 00002" (con el número de PLU), real M2 Alimentos 24/10.
   return n === "" || /^NOMBRE *\d*$/.test(n);
+}
+
+function failedMessage(verified: number, failed: number): string {
+  const bad = failed === 1 ? "1 producto no quedó bien" : `${failed} productos no quedaron bien`;
+  return verified > 0 ? `${bad} en la balanza (${verified} sí quedaron bien). Abajo está cuál y por qué.` : `${bad} en la balanza. Abajo está cuál y por qué.`;
 }
 
 function done(pending: PendingItem[]): string {

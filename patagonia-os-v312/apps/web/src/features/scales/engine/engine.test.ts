@@ -296,7 +296,8 @@ describe("[SIMULADO] Mi balanza con una Kretz Report", () => {
     assert.equal(prep.ready, 1);
     assert.equal(prep.writes, 1);
     assert.deepEqual(prep.pending.map((x) => x.code), [12]);
-    assert.ok(prep.notes.some((n) => /1 productos de Patagonia no van/.test(n)));
+    assert.deepEqual(prep.skipped?.map((x) => x.code), ["SIN"]);
+    assert.match(prep.skipped![0].reason, /no es un número/);
     const out = await s.sync(prep, noop);
     assert.equal(out.ok, true);
     assert.equal(out.verified, 1);
@@ -345,7 +346,8 @@ describe("[SIMULADO] Mi balanza con una Kretz Report", () => {
     const s = new KretzSession("kretz-report-lt", ctx(products.slice(0, 1)), "datos", io);
     const out = await s.sync(await s.prepare(noop), noop);
     assert.equal(out.ok, false);
-    assert.deepEqual(out.support, { verificacion: ["10"] });
+    assert.deepEqual(out.failures?.map((f) => f.code), ["10"]);
+    assert.match(out.failures![0].reason, /precio quedó \$15001 \(tenía que ser \$15000\)/);
   });
 
   it("modelo Kretz desconocido: solo lectura, sin botón de sincronizar", async () => {

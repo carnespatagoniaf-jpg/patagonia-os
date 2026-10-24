@@ -55,6 +55,15 @@ export interface PreparedSync {
   notes: string[];
   /** Algo que la persona tiene que hacer en la balanza antes de seguir (no hay botón de sincronizar). */
   blocker?: string;
+  /** Productos de Patagonia que no van a la balanza, cada uno con el motivo (código largo, sin precio, centavos…). */
+  skipped?: ProductProblem[];
+}
+
+/** Un producto puntual y por qué no se mandó o no quedó bien, en palabras simples. */
+export interface ProductProblem {
+  code: string;
+  name: string;
+  reason: string;
 }
 
 export interface SyncOutcome {
@@ -65,6 +74,8 @@ export interface SyncOutcome {
   message: string;
   /** Lo que quedó para revisar. */
   pending: PendingItem[];
+  /** Productos que NO quedaron bien en la balanza, cada uno con el motivo (se muestran al cliente). */
+  failures?: ProductProblem[];
   /** Detalle para soporte (nunca se muestra al cliente). */
   support?: Record<string, unknown>;
 }
