@@ -659,3 +659,49 @@ export async function addPlatformAdmin(email: string, fullName: string): Promise
   if (!data || (data as { error?: string }).error) throw new Error((data as { error?: string })?.error ?? "No se pudo crear la cuenta.");
   return data as { email: string; tempPassword: string };
 }
+
+// ── Gasto de Meta en Finanzas (migración 159) ──────────────────────────────────
+
+export interface MetaStatus {
+  connected: boolean;
+  adAccountId?: string;
+  accountId?: string;
+  fromInvestment?: boolean;
+  lastSyncAt?: string | null;
+  lastSyncUntil?: string | null;
+  lastError?: string | null;
+  tokenEnd?: string;
+}
+
+export function getMetaStatus() {
+  return finRpc<MetaStatus>("fin_meta_status", {});
+}
+
+export function saveMetaSettings(input: { adAccountId: string; token: string | null; accountId: string; fromInvestment: boolean }) {
+  return finRpc<void>("fin_meta_save", { p_ad_account_id: input.adAccountId, p_token: input.token, p_account_id: input.accountId, p_from_investment: input.fromInvestment });
+}
+
+export function disconnectMeta() {
+  return finRpc<void>("fin_meta_disconnect", {});
+}
+
+/** Trae el gasto de Meta (solo lectura). Devuelve cuántos días de campaña anotó. */
+export async function syncMetaAds(): Promise<{ connected: boolean; saved?: number; since?: string }> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { data, error } = await supabase.functions.invoke("meta-ads-sync", { body: {} });
+  if (error) {
+    let message = error.message;
+    const context = (error as { context?: Response }).context;
+    if (context) {
+      try {
+        const body = await context.json();
+        if (body?.error) message = body.error;
+      } catch {
+        // mensaje por defecto
+      }
+    }
+    throw new Error(message);
+  }
+  if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
+  return data as { connected: boolean; saved?: number; since?: string };
+}

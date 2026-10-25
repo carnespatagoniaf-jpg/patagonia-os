@@ -3,6 +3,11 @@ import { parseAmount } from "../../lib/money";
 import {
   addPlatformAdmin,
   deleteFinanceMovement,
+  disconnectMeta,
+  getMetaStatus,
+  saveMetaSettings,
+  syncMetaAds,
+  type MetaStatus,
   deleteFinanceRecurring,
   financeTransfer,
   getFinanceOverview,
@@ -65,6 +70,22 @@ export function AdminFinance() {
   useEffect(() => {
     void reload();
   }, [reload]);
+
+  // Gasto de Meta: al abrir la pestaña, si está conectado y hoy todavía no se trajo, se trae solo.
+  useEffect(() => {
+    let cancelled = false;
+    getMetaStatus()
+      .then(async (st) => {
+        if (cancelled || !st.connected || st.lastSyncUntil === todayIso()) return;
+        await syncMetaAds();
+        if (!cancelled) void reload();
+      })
+      .catch((err) => !cancelled && setMessage(`Meta: ${errorText(err)}`));
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const accountById = useMemo(() => new Map((data?.accounts ?? []).map((a) => [a.id, a])), [data]);
   const partnerById = useMemo(() => new Map((data?.partners ?? []).map((p) => [p.id, p])), [data]);
@@ -223,6 +244,8 @@ export function AdminFinance() {
             <PartnersForm partners={data.partners} onSaved={(t) => { setMessage(t); void reload(); }} />
             <h3>Abonos registrados antes</h3>
             <ImportPayments onDone={(t) => { setMessage(t); void reload(); }} />
+            <h3>Publicidad de Meta</h3>
+            <MetaConnect accounts={activeAccounts} onChange={(t) => { setMessage(t); void reload(); }} />
             <h3>Agregar administrador</h3>
             <AddAdmin />
           </details>
@@ -471,6 +494,93 @@ function AddAdmin() {
         }}>{busy ? "Creando…" : "Crear administrador"}</button>
       </div>
       {result && <p className="setting-help">{result}</p>}
+    </div>
+  );
+}
+
+/** Conectar la cuenta publicitaria de Meta (solo lectura): el gasto de cada campaña entra solo como Publicidad. */
+function MetaConnect({ accounts, onChange }: { accounts: FinAccount[]; onChange: (text: string) => void }) {
+  const [status, setStatus] = useState<MetaStatus | null>(null);
+  const [adAccount, setAdAccount] = useState("235768739");
+  const [token, setToken] = useState("");
+  const [accountId, setAccountId] = useState(accounts.find((a) => a.currency === "ARS")?.id ?? accounts[0]?.id ?? "");
+  const [fromInvestment, setFromInvestment] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const load = useCallback(async () => {
+    const st = await getMetaStatus().catch(() => null);
+    setStatus(st);
+    if (st?.connected) {
+      setAdAccount(st.adAccountId ?? "");
+      setAccountId(st.accountId ?? "");
+      setFromInvestment(Boolean(st.fromInvestment));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function run(action: () => Promise<string>) {
+    setBusy(true);
+    setError("");
+    try {
+      onChange(await action());
+      setToken("");
+      await load();
+    } catch (err) {
+      setError(errorText(err));
+      await load();
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 6 }}>
+      <p className="muted">
+        Con una clave de solo lectura (permiso ads_read), lo que gasta cada campaña entra solo como gasto de Publicidad, uno por campaña y por día.
+        Meta informa el gasto sin impuestos: el IVA y las percepciones de la tarjeta se cargan aparte. El sistema no puede crear ni cambiar publicidades.
+      </p>
+      {status?.connected && (
+        <p className="setting-help">
+          Conectada la cuenta {status.adAccountId} (clave terminada en {status.tokenEnd}).
+          {status.lastSyncUntil ? ` Traído hasta el ${status.lastSyncUntil.split("-").reverse().join("/")}.` : " Todavía no se trajo nada."}
+          {status.lastError ? ` Último error: ${status.lastError}` : ""}
+        </p>
+      )}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+        <input placeholder="Cuenta publicitaria" value={adAccount} onChange={(e) => setAdAccount(e.target.value)} style={{ width: 140 }} />
+        <input type="password" autoComplete="off" placeholder={status?.connected ? "Clave nueva (dejar vacío para no cambiarla)" : "Pegá la clave de acceso"} value={token} onChange={(e) => setToken(e.target.value)} style={{ minWidth: 260, flex: 1 }} />
+        <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
+          {accounts.map((a) => <option key={a.id} value={a.id}>Sale de: {a.name} ({a.currency})</option>)}
+        </select>
+        <label style={{ display: "flex", gap: 4, alignItems: "center" }}><input type="checkbox" checked={fromInvestment} onChange={(e) => setFromInvestment(e.target.checked)} /> con la inversión</label>
+      </div>
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button className="secondary" disabled={busy} onClick={() => void run(async () => {
+          await saveMetaSettings({ adAccountId: adAccount, token: token.trim() || null, accountId, fromInvestment });
+          const r = await syncMetaAds();
+          return `Meta conectado. Se anotaron ${r.saved ?? 0} gastos de campañas desde el ${(r.since ?? "").split("-").reverse().join("/")}.`;
+        })}>{status?.connected ? "Guardar y traer gasto" : "Conectar Meta"}</button>
+        {status?.connected && (
+          <>
+            <button className="secondary" disabled={busy} onClick={() => void run(async () => {
+              const r = await syncMetaAds();
+              return `Gasto de Meta actualizado (${r.saved ?? 0} días de campañas).`;
+            })}>Traer gasto ahora</button>
+            <button className="link-button" disabled={busy} onClick={() => {
+              if (!window.confirm("¿Desconectar Meta? Los gastos ya anotados quedan.")) return;
+              void run(async () => {
+                await disconnectMeta();
+                return "Meta desconectado.";
+              });
+            }}>Desconectar</button>
+          </>
+        )}
+      </div>
+      {error && <p className="setting-help">{error}</p>}
     </div>
   );
 }
