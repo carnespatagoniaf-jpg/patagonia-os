@@ -129,7 +129,10 @@ export class KretzSession implements ScaleSession {
     const pending: PendingItem[] = occupied.map((o) => ({ code: Number(o.product.code), scaleName: o.current.name, byWeight: o.current.byWeight, reason: "ocupado_en_balanza", detail: `en la balanza el ${o.product.code} es "${o.current.name}"; en Patagonia es "${o.product.name}"`, suggestionId: null }));
     const writes = create.length + update.length;
     const skipped = plan.skipped.map((x) => problem(x.product, x.reason));
-    return { ...this.base(), scaleProducts: plan.toSend.length, ready: same, writes, pending, upToDate: writes === 0, skipped };
+    // Nunca "ya está todo listo" sin el código de barras configurado en ESTA balanza.
+    const barcodeReady = !this.io.configureReportBarcode || isBarcodeConfigured(this.barcodeKey());
+    const notes = barcodeReady ? [] : ["Falta configurar el código de barras de las etiquetas: se hace al sincronizar."];
+    return { ...this.base(), scaleProducts: plan.toSend.length, ready: same, writes, pending, upToDate: writes === 0 && barcodeReady, skipped, notes };
   }
 
   async sync(prepared: PreparedSync, onProgress: ProgressFn, opts: { allowReplace?: boolean } = {}): Promise<SyncOutcome> {
@@ -163,6 +166,11 @@ export class KretzSession implements ScaleSession {
     // Cada producto que no quedó bien, con su motivo. Uno que falla no frena a los demás, pero nunca se dice "Listo".
     const failures: ProductProblem[] = [];
     const support: Record<string, unknown> = {};
+    // PRIMERO el código de barras de las etiquetas (2-3-7 con el importe) y Mostrador leyéndolo, siempre: sin
+    // código de barras la balanza no sirve para vender escaneando (pedido del dueño 25/10). Antes iba al final y
+    // solo si todo salía bien; si los productos ya estaban iguales, nunca se mandaba.
+    const barcode = await this.configureBarcode(onProgress);
+    support.codigo_de_barras = barcode;
     if (list.length > 0) {
       const r = await this.io.sendReport(list, (d, t) => onProgress("sincronizar", "Mandando tus productos a la balanza…", d, t));
       for (const x of r.skipped) failures.push(problem(x.product, x.reason));
@@ -185,18 +193,32 @@ export class KretzSession implements ScaleSession {
       support.verificacion = failures;
       return { ok: false, verified, message: failedMessage(verified, failures.length), pending: prepared.pending, failures, support };
     }
-    // Código de barras en las etiquetas (2-3-7 con el importe) y Mostrador leyéndolo: lo mismo que la Aura.
-    if (this.io.configureReportBarcode) {
-      onProgress("sincronizar", "Configurando el código de barras de las etiquetas…");
-      try {
-        const barcode = await this.io.configureReportBarcode();
-        if (barcode === "ok" && this.ctx.online && this.ctx.branchId && this.io.saveItemConfig) await this.io.saveItemConfig(this.ctx.branchId);
-      } catch {
-        // sin esto la etiqueta sigue como estaba; los productos ya quedaron bien
-      }
+    if (barcode !== "ok") {
+      return { ok: false, verified, message: BARCODE_FAILED, pending: prepared.pending, support };
     }
     const pending = opts.allowReplace ? [] : prepared.pending;
     return { ok: true, verified, message: done(pending), pending };
+  }
+
+  /** Report: formato del código de barras (1070) + Mostrador leyendo ese formato. "ok" solo si la balanza lo aceptó. */
+  private async configureBarcode(onProgress: ProgressFn): Promise<"ok" | "rechazada" | "sin_respuesta" | "error"> {
+    if (!this.io.configureReportBarcode) return "ok";
+    onProgress("sincronizar", "Configurando el código de barras de las etiquetas…");
+    try {
+      const r = await this.io.configureReportBarcode();
+      if (r === "ok") {
+        if (this.ctx.online && this.ctx.branchId && this.io.saveItemConfig) await this.io.saveItemConfig(this.ctx.branchId);
+        markBarcodeConfigured(this.barcodeKey());
+      }
+      return r;
+    } catch {
+      return "error";
+    }
+  }
+
+  private barcodeKey(): string {
+    const id = this.identity();
+    return `${this.ctx.scaleKey ?? ""}|${String(id.letter ?? "")}${String(id.equipment ?? "")}`;
   }
 
   async close(): Promise<void> {
@@ -218,6 +240,29 @@ export function isFactoryPlaceholder(name: string | null | undefined): boolean {
   const n = normalizeName(name ?? "");
   // De fábrica: "NOMBRE" o "NOMBRE 00002" (con el número de PLU), real M2 Alimentos 24/10.
   return n === "" || /^NOMBRE *\d*$/.test(n);
+}
+
+const BARCODE_FAILED =
+  "Los productos quedaron bien, pero la balanza no aceptó el formato del código de barras: las etiquetas pueden salir sin código. Tocá \"Volver a sincronizar\"; si se repite, soporte ya recibió el detalle.";
+
+/** Balanzas Report en las que ya se configuró el código de barras desde esta computadora. */
+const BARCODE_KEY = "patagonia-report-barcode-ok";
+
+function isBarcodeConfigured(key: string): boolean {
+  try {
+    return (JSON.parse(localStorage.getItem(BARCODE_KEY) ?? "[]") as string[]).includes(key);
+  } catch {
+    return false;
+  }
+}
+
+function markBarcodeConfigured(key: string): void {
+  try {
+    const list = JSON.parse(localStorage.getItem(BARCODE_KEY) ?? "[]") as string[];
+    if (!list.includes(key)) localStorage.setItem(BARCODE_KEY, JSON.stringify([...list, key]));
+  } catch {
+    // sin localStorage: se vuelve a mandar en cada sincronización, que no hace daño
+  }
 }
 
 function failedMessage(verified: number, failed: number): string {

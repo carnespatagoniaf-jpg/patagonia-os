@@ -341,6 +341,33 @@ describe("[SIMULADO] Mi balanza con una Kretz Report", () => {
     assert.deepEqual(calls, ["1070", "mostrador:suc-1"]);
   });
 
+  it("código de barras SIEMPRE: con los productos ya iguales igual se configura, y va antes que los productos", async () => {
+    localStorage.clear();
+    const vacio = P("a", "10", "Vacio", "kg", 15000);
+    const { io } = reportIO({ "10": expectedReportProduct({ id: "a", code: "10", name: "Vacio", unit: "kg", priceRetail: 15000 }) });
+    const calls: string[] = [];
+    io.configureReportBarcode = async () => { calls.push("1070"); return "ok"; };
+    const s = new KretzSession("kretz-report-lt", { ...ctx([vacio]), scaleKey: "m2" }, "datos", io);
+    const prep = await s.prepare(noop);
+    assert.equal(prep.writes, 0);
+    assert.equal(prep.upToDate, false, "sin código de barras configurado no está 'todo listo'");
+    const out = await s.sync(prep, noop);
+    assert.equal(out.ok, true);
+    assert.deepEqual(calls, ["1070"]);
+    assert.equal((await new KretzSession("kretz-report-lt", { ...ctx([vacio]), scaleKey: "m2" }, "datos", io).prepare(noop)).upToDate, true);
+  });
+
+  it("si la balanza no acepta el código de barras, no dice 'Listo'", async () => {
+    localStorage.clear();
+    const { io } = reportIO({});
+    io.configureReportBarcode = async () => "rechazada";
+    const s = new KretzSession("kretz-report-lt", ctx(products.slice(0, 1)), "datos", io);
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, false);
+    assert.equal(out.verified, 1);
+    assert.match(out.message, /código de barras/);
+  });
+
   it("verificación: si lo releído no es lo mandado, no dice 'listo'", async () => {
     const { io } = reportIO({}, { lie: "10" });
     const s = new KretzSession("kretz-report-lt", ctx(products.slice(0, 1)), "datos", io);
