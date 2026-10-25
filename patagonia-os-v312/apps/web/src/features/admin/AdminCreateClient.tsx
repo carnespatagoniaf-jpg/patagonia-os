@@ -172,6 +172,8 @@ export function AdminCreateClient() {
   const [payAmount, setPayAmount] = useState("");
   const [payDate, setPayDate] = useState(todayIso());
   const [payNote, setPayNote] = useState("");
+  /** Pase libre: se extiende el "pagado hasta" sin cobro (no suma plata en Finanzas). */
+  const [payFree, setPayFree] = useState(false);
   const [payBusy, setPayBusy] = useState(false);
   const [historyId, setHistoryId] = useState<string | null>(null);
   const [history, setHistory] = useState<CompanyPayment[]>([]);
@@ -300,9 +302,14 @@ export function AdminCreateClient() {
     }
   }
 
+  /**
+   * Lo que paga por mes: su último pago de un mes (si lo hay) o el precio del Estándar. NO el precio del plan: los
+   * clientes que se pasaron a Full siguen pagando su abono, y con el del plan un pago de 12 meses se completaba
+   * solo en $828.000 (real 05/10, Carnes Patagonia y Lo de menon).
+   */
   function planPrice(companyId: string) {
-    const plan = plans[companyId]?.plan;
-    return plan ? PLAN_PRICE_VALUES[plan] : 0;
+    const last = companies.find((c) => c.id === companyId)?.lastPaymentAmount ?? null;
+    return last && last > 0 && last <= PLAN_PRICE_VALUES.full ? last : PLAN_PRICE_VALUES.estandar;
   }
 
   function openPayment(company: CompanySummary) {
@@ -313,6 +320,7 @@ export function AdminCreateClient() {
     setPayAmount(price ? String(price) : "");
     setPayDate(todayIso());
     setPayNote("");
+    setPayFree(false);
   }
 
   function changePayMonths(company: CompanySummary, months: number) {
@@ -322,7 +330,7 @@ export function AdminCreateClient() {
   }
 
   async function savePayment(company: CompanySummary) {
-    const amount = payAmount.trim() ? parseAmount(payAmount) : undefined;
+    const amount = payFree ? undefined : payAmount.trim() ? parseAmount(payAmount) : undefined;
     if (amount !== undefined && (!Number.isFinite(amount) || amount < 0)) {
       setMessage("El monto no es válido.");
       return;
@@ -330,7 +338,7 @@ export function AdminCreateClient() {
     setPayBusy(true);
     setMessage("");
     try {
-      const until = await registerCompanyPayment({ companyId: company.id, months: payMonths, amount, paymentDate: payDate || undefined, note: payNote.trim() || undefined });
+      const until = await registerCompanyPayment({ companyId: company.id, months: payMonths, amount, paymentDate: payDate || undefined, note: payFree ? ["Pase libre (sin cobro)", payNote.trim()].filter(Boolean).join(" · ") : payNote.trim() || undefined });
       setPayingId(null);
       setMessage(`Pago registrado: ${company.name} queda pagado hasta el ${formatDayMonth(until)}.`);
       await reloadCompanies();
@@ -586,7 +594,11 @@ export function AdminCreateClient() {
             </label>
             <label className="admin-pay-field">
               Monto (opcional)
-              <input type="text" inputMode="decimal" value={payAmount} onChange={(e) => setPayAmount(e.target.value)} placeholder="$" />
+              <input type="text" inputMode="decimal" value={payFree ? "" : payAmount} disabled={payFree} onChange={(e) => setPayAmount(e.target.value)} placeholder={payFree ? "sin cobro" : "$"} />
+            </label>
+            <label className="admin-pay-field" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+              <input type="checkbox" checked={payFree} onChange={(e) => setPayFree(e.target.checked)} />
+              Pase libre (sin cobro)
             </label>
             <label className="admin-pay-field">
               Fecha del pago
