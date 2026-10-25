@@ -17,6 +17,7 @@ import { AdminScaleReports } from "./AdminScaleReports";
 import { AdminMercadoPago } from "./AdminMercadoPago";
 import { AdminSummary } from "./AdminSummary";
 import { AdminContacts } from "./AdminContacts";
+import { AdminFinance } from "./AdminFinance";
 import { mpFailedChargeMessage, mpProblem, toArDate, type MpSubscription } from "./mercadopago";
 
 const PLAN_OPTIONS: Plan[] = ["basico", "estandar", "full"];
@@ -34,7 +35,7 @@ const BILLING_TONE: Record<BillingStatus, string> = {
 };
 
 type SortMode = "status" | "number" | "province";
-type AdminTab = "resumen" | "clientes" | "ventas" | "contactos" | "soporte";
+type AdminTab = "resumen" | "clientes" | "ventas" | "contactos" | "finanzas" | "soporte";
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
@@ -780,7 +781,7 @@ export function AdminCreateClient() {
           <div className="login-logo" style={{ margin: 0 }}><LockKeyhole /></div>
           <div>
             <p className="eyebrow">PATAGONIA OS · ADMIN</p>
-            <h1>{tab === "resumen" ? "Resumen" : tab === "ventas" ? "Ventas" : tab === "contactos" ? "Contactos" : tab === "soporte" ? "Soporte" : "Clientes"}</h1>
+            <h1>{tab === "resumen" ? "Resumen" : tab === "ventas" ? "Ventas" : tab === "contactos" ? "Contactos" : tab === "finanzas" ? "Finanzas" : tab === "soporte" ? "Soporte" : "Clientes"}</h1>
           </div>
         </div>
         <div className="admin-actions">
@@ -796,6 +797,7 @@ export function AdminCreateClient() {
         <button className={tab === "clientes" ? "active" : ""} onClick={() => setTab("clientes")}>Clientes</button>
         <button className={tab === "ventas" ? "active" : ""} onClick={() => setTab("ventas")}>Ventas</button>
         <button className={tab === "contactos" ? "active" : ""} onClick={() => setTab("contactos")}>Contactos</button>
+        <button className={tab === "finanzas" ? "active" : ""} onClick={() => setTab("finanzas")}>Finanzas</button>
         <button className={tab === "soporte" ? "active" : ""} onClick={() => setTab("soporte")}>
           Soporte{pendingReports > 0 && <span className="admin-tab-badge">{pendingReports}</span>}
         </button>
@@ -873,6 +875,8 @@ export function AdminCreateClient() {
       )}
 
       {message && <div className="message warning">{message}</div>}
+
+      {tab === "finanzas" && <AdminFinance />}
 
       {tab === "soporte" && <AdminScaleReports onChange={reloadPendingReports} />}
 

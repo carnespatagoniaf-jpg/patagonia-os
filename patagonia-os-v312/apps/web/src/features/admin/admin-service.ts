@@ -2,6 +2,7 @@ import { supabase } from "../../lib/supabase";
 import type { Plan } from "../auth/permissions";
 import type { CompanyUsage, Lead, LeadStage } from "./sales-pipeline";
 import type { MpSubscription } from "./mercadopago";
+import type { Currency, FinKind, FinOverview, FinPartner } from "./finance";
 
 export interface CreateClientInput {
   companyName: string;
@@ -579,4 +580,82 @@ export async function scheduleLeads(ids: string[], perDay: number): Promise<numb
   const { data, error } = await supabase.rpc("schedule_leads", { p_ids: ids, p_per_day: perDay });
   if (error) throw error;
   return Number(data ?? 0);
+}
+
+// ── Finanzas de Patagonia (migración 158) ─────────────────────────────────────
+
+async function finRpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { data, error } = await supabase.rpc(fn, args);
+  if (error) throw error;
+  return data as T;
+}
+
+export async function getFinanceOverview(month: string): Promise<FinOverview> {
+  await finRpc<number>("fin_apply_recurring", {}).catch(() => 0);
+  const data = await finRpc<FinOverview>("fin_overview", { p_month: `${month}-01` });
+  const num = (v: unknown) => Number(v ?? 0);
+  return {
+    ...data,
+    accounts: data.accounts.map((a) => ({ ...a, openingBalance: num(a.openingBalance), balance: num(a.balance) })),
+    partners: data.partners.map((p) => ({ ...p, sharePct: num(p.sharePct) })),
+    recurring: data.recurring.map((r) => ({ ...r, amount: num(r.amount) })),
+    movements: data.movements.map((m) => ({ ...m, amount: num(m.amount) }))
+  };
+}
+
+export function saveFinanceAccount(input: { id: string | null; name: string; currency: Currency; openingBalance: number; receivesPayments: boolean; active?: boolean }) {
+  return finRpc<string>("fin_save_account", { p_id: input.id, p_name: input.name, p_currency: input.currency, p_opening: input.openingBalance, p_receives_payments: input.receivesPayments, p_active: input.active ?? true });
+}
+
+export function saveFinanceMovement(input: { id: string | null; date: string; accountId: string; kind: FinKind; amount: number; category: string; description: string; partnerId: string | null; fromInvestment: boolean; direction?: "in" | "out" | null }) {
+  return finRpc<string>("fin_save_movement", {
+    p_id: input.id, p_date: input.date, p_account_id: input.accountId, p_kind: input.kind, p_amount: input.amount, p_category: input.category,
+    p_description: input.description, p_partner_id: input.partnerId, p_from_investment: input.fromInvestment, p_direction: input.direction ?? null
+  });
+}
+
+export function deleteFinanceMovement(id: string) {
+  return finRpc<void>("fin_delete_movement", { p_id: id });
+}
+
+export function financeTransfer(input: { date: string; fromId: string; toId: string; amountFrom: number; amountTo: number; description: string }) {
+  return finRpc<string>("fin_transfer", { p_date: input.date, p_from: input.fromId, p_to: input.toId, p_amount_from: input.amountFrom, p_amount_to: input.amountTo, p_description: input.description });
+}
+
+export function saveFinanceRecurring(input: { id: string | null; name: string; category: string; amount: number; accountId: string; dayOfMonth: number; fromInvestment: boolean; active?: boolean }) {
+  return finRpc<string>("fin_save_recurring", { p_id: input.id, p_name: input.name, p_category: input.category, p_amount: input.amount, p_account_id: input.accountId, p_day: input.dayOfMonth, p_from_investment: input.fromInvestment, p_active: input.active ?? true });
+}
+
+export function deleteFinanceRecurring(id: string) {
+  return finRpc<void>("fin_delete_recurring", { p_id: id });
+}
+
+export function saveFinancePartners(partners: FinPartner[]) {
+  return finRpc<void>("fin_save_partners", { p_partners: partners });
+}
+
+export function importFinancePayments(from: string) {
+  return finRpc<number>("fin_import_payments", { p_from: from });
+}
+
+/** Crea la cuenta de otro administrador de Patagonia (un socio) y devuelve su contraseña temporal. */
+export async function addPlatformAdmin(email: string, fullName: string): Promise<{ email: string; tempPassword: string }> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { data, error } = await supabase.functions.invoke("add-platform-admin", { body: { email, fullName } });
+  if (error) {
+    let message = error.message;
+    const context = (error as { context?: Response }).context;
+    if (context) {
+      try {
+        const body = await context.json();
+        if (body?.error) message = body.error;
+      } catch {
+        // mensaje por defecto
+      }
+    }
+    throw new Error(message);
+  }
+  if (!data || (data as { error?: string }).error) throw new Error((data as { error?: string })?.error ?? "No se pudo crear la cuenta.");
+  return data as { email: string; tempPassword: string };
 }
