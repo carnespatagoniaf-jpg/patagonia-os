@@ -109,7 +109,7 @@ describe("Probar todo (diagnóstico de la balanza por cable)", () => {
     assert.doesNotMatch(d.message, /DIRECTO/);
     assert.match(d.message, /del 01 al 99/);
     assert.match(d.message, /Bluetooth/);
-    assert.doesNotMatch(d.message, /null modem/);
+    assert.doesNotMatch(d.message, /null modem/); // puerto que no es un adaptador USB a serie
   });
 
   it("Report con un adaptador USB a serie (DB9) que no contesta: avisa que la Report no se conecta así (manual Kretz; real Darío 24/10)", async () => {
@@ -119,7 +119,9 @@ describe("Probar todo (diagnóstico de la balanza por cable)", () => {
     const d = await diagnoseScaleLink(() => {}, { ...fast, modelId: "report-lt" });
     assert.equal(d.verdict, "nada");
     assert.match(d.message, /adaptador USB a serie \(DB9\)/);
-    assert.match(d.message, /Report NX por red/);
+    assert.match(d.message, /Report NX: se conecta por red/);
+    assert.match(d.message, /RPX/);
+    assert.match(d.message, /null modem/);
   });
 
   it("'Elegir el puerto' abre siempre el selector, aunque ya haya un puerto con permiso", async () => {

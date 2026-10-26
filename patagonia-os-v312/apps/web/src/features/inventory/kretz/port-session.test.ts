@@ -236,6 +236,17 @@ describe("Report NX con otro número de balanza", () => {
     assert.equal(record.responder?.link.baudRate, 9600);
   });
 
+  it("Report por adaptador USB a serie (CH340): activa DTR y RTS al abrir; una Report sin USB (Bluetooth) no", async () => {
+    const withAdapter = Object.assign(new FakeReport("01", 115200), { signals: [] as unknown[], setSignals(this: { signals: unknown[] }, x: unknown) { this.signals.push(x); return Promise.resolve(); } });
+    await runKretzDiscovery(withAdapter as unknown as SerialPort, "prueba", report, quick);
+    assert.ok(withAdapter.signals.length > 0, "con CH340 activa las señales");
+    assert.deepEqual(withAdapter.signals[0], { dataTerminalReady: true, requestToSend: true });
+    const bluetooth = Object.assign(new FakeReport("01", 115200), { getInfo: () => ({}), signals: [] as unknown[], setSignals(this: { signals: unknown[] }, x: unknown) { this.signals.push(x); return Promise.resolve(); } });
+    const r = await runKretzDiscovery(bluetooth as unknown as SerialPort, "prueba", report, quick);
+    assert.equal(r.verdict, "datos", "la Report por Bluetooth sigue andando igual");
+    assert.equal(bluetooth.signals.length, 0, "sin USB no se tocan las señales");
+  });
+
   it("si no contesta ningún número, dice que se buscó y deja el puerto cerrado", async () => {
     const port = new FakeReport("07", 38400);
     const record = await runKretzDiscovery(port as unknown as SerialPort, "prueba", report, quick);

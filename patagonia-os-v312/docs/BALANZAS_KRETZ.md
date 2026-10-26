@@ -41,6 +41,9 @@ Las Report LT que andan (Carnes Patagonia 16/10, M2 Alimentos 24/10) aparecen en
 
 Darío Díaz (Don Raúl, 24/10): adaptador USB a serie DB9 CH340 1a86:7523; abre en 115200/1 y 9600/1, se mandó 0001 con números 01–99: **0 bytes** de vuelta en las 6 corridas. Cero bytes descarta "velocidad equivocada" (llegaría basura): lo que transmite la balanza no llega al RX. Consistente con que la Report no se conecta por DB9. | Real
 
+**Actualización 26/10 (fotos de Darío):** su balanza es **Mod. RPX NP31P2C** (Report anterior a LT/NX, 31 kg) y SÍ tiene un DB9 hembra abajo, con el adaptador USB a serie macho enchufado directo. | Real
+Cambio: la búsqueda y el envío de la Report activan DTR y RTS cuando el puerto es un adaptador USB a serie (CH340/PL2303/FTDI/CP210x); Aura y Report por Bluetooth sin cambios (test de regresión en port-session.test.ts). Si con eso sigue en 0 bytes, el sospechoso es el cruce Tx/Rx: probar un adaptador null modem DB9. Ningún dato oficial del pinout de la RPX todavía.
+
 No verificado: si alguna variante de Report trae un DB9 de datos, ni qué chip usa el USB de la LT. Una Report NX no se puede conectar desde el navegador (TCP crudo): haría falta un puente local.
 
 

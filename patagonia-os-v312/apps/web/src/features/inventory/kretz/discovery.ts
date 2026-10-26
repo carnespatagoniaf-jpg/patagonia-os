@@ -142,9 +142,22 @@ export async function collect(port: SerialPort, ms: number, untilEot: boolean): 
   return got;
 }
 
+/**
+ * Report con adaptador USB a serie (DB9): después de abrir se activan DTR y RTS. Hay balanzas con DB9 que no
+ * transmiten si no ven esas señales, y la Report nunca las activaba (Darío, Kretz RPX NP31P2C + CH340, 26/10: 0
+ * bytes). Ni la Aura ni las Report por Bluetooth (las que ya andan) pasan por acá.
+ */
+let assertLines = false;
+
 /** Abre con el presupuesto de la prueba en curso (ver port-session.ts). */
-function openWithRetry(port: SerialPort, options: SerialOptions, tries = 2, waitMs = 1000): Promise<void> {
-  return openForSession(port, options, session, tries, waitMs);
+async function openWithRetry(port: SerialPort, options: SerialOptions, tries = 2, waitMs = 1000): Promise<void> {
+  await openForSession(port, options, session, tries, waitMs);
+  if (!assertLines) return;
+  try {
+    await (port as SerialPort & { setSignals?: (s: { dataTerminalReady?: boolean; requestToSend?: boolean }) => Promise<void> }).setSignals?.({ dataTerminalReady: true, requestToSend: true });
+  } catch {
+    // el adaptador no soporta señales: se sigue igual
+  }
 }
 
 async function openLink(port: SerialPort, link: SerialLink) {
@@ -206,6 +219,9 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
   const stop = options.shouldStop ?? (() => false);
   const timeout = options.frameTimeoutMs ?? 500;
   const tries = options.openTries ?? 2;
+  // Solo Report (no Aura) con un adaptador USB a serie de los conocidos (CH340, PL2303, FTDI, CP210x).
+  const vendor = (port.getInfo?.() ?? {}).usbVendorId;
+  assertLines = model.id !== "aura" && vendor !== undefined && [0x1a86, 0x067b, 0x0403, 0x10c4].includes(vendor);
   const balanceNumber = (options.balanceNumber ?? "").replace(/\D/g, "").slice(-2) || "1";
   const id = balanceNumber.padStart(2, "0");
   const stages: Record<StageId, Stage> = {

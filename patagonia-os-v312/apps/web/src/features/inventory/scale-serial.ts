@@ -284,6 +284,16 @@ async function ensureOpen(port: SerialPort, baudRate: number): Promise<void> {
   }
   await port.open({ baudRate, dataBits: 8, stopBits, parity: "none" });
   cachedPortOpenKey = key;
+  // Report por adaptador USB a serie (DB9): DTR y RTS activos, igual que en la búsqueda (kretz/discovery.ts).
+  // Las Report por Bluetooth (sin vendedor USB) y la Aura ("H") quedan como siempre.
+  const vendor = (port.getInfo?.() ?? {}).usbVendorId;
+  if (getScaleSerialSettings().deviceType !== "H" && vendor !== undefined && USB_SERIAL_CHIPS[vendor]) {
+    try {
+      await (port as SerialPort & { setSignals?: (s: { dataTerminalReady?: boolean; requestToSend?: boolean }) => Promise<void> }).setSignals?.({ dataTerminalReady: true, requestToSend: true });
+    } catch {
+      // el adaptador no soporta señales: se sigue igual
+    }
+  }
 }
 
 async function writeFrame(port: SerialPort, frame: Uint8Array, baudRate: number): Promise<Uint8Array> {
@@ -688,7 +698,7 @@ function diagnosisVerdictMessage(r: DiagnosticRecord, modelId: string, portLabel
     return (
       `❌ La balanza no mandó ni un dato, en ninguna velocidad ni con ningún número de balanza del 01 al 99 (puerto elegido: ${portLabel}).\n` +
       (viaSerialAdapter
-        ? `⚠️ Elegiste un adaptador USB a serie (DB9). Según el manual de Kretz, la Report LT se conecta a la PC por Bluetooth o con su cable USB, y la Report NX por red: ninguna usa un adaptador USB a serie.\n`
+        ? `⚠️ Elegiste un adaptador USB a serie (DB9). Las Report LT y NX nuevas no usan DB9 (LT: Bluetooth o USB; NX: red). Las Report anteriores con DB9 (por ejemplo modelo RPX) sí: en ese caso lo más común es que el cable tenga que ir CRUZADO: poné un adaptador "null modem" DB9 entre el adaptador USB y la balanza y probá de nuevo.\n`
         : "") +
       `1) Report LT por Bluetooth (como en las que ya andan): en Windows, Configuración → Bluetooth → Agregar dispositivo → elegí la balanza. Después, en "Elegir el cable", elegí "Puerto serie estándar a través de vínculo Bluetooth" (si hay dos, el primero).\n` +
       `2) Report LT por USB: el cable USB va directo de la balanza a la PC, sin adaptador. En la lista de "Elegir el cable" tiene que aparecer un puerto nuevo al enchufarlo.\n` +
