@@ -8,6 +8,7 @@ import { ReportsActivity } from "./ReportsActivity";
 import { useAuth } from "../auth/AuthProvider";
 import { can } from "../auth/permissions";
 import { ReportsResult } from "./ReportsResult";
+import { ReportsStockValue } from "./ReportsStockValue";
 import { changePct, groupSalesByCategory, marginOnCost, previousPeriod, type ProductSalesRow } from "./sales-by-category";
 
 const kgText = (n: number) => `${n.toLocaleString("es-AR", { maximumFractionDigits: 1 })} kg`;
@@ -166,6 +167,8 @@ export function Reports() {
           </div>
         )}
       </section>
+
+      {seesResult && <ReportsStockValue branchId={branchId} />}
 
       {ranOnce && !loading && (
         <>
