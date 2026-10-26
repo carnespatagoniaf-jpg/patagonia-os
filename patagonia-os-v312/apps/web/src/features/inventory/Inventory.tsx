@@ -385,7 +385,7 @@ export function Inventory() {
       if (!newDraft.code.trim() || !newDraft.name.trim()) throw new Error("Código y nombre son obligatorios.");
       const cost = parseAmount(newDraft.cost || "0");
       const priceRetail = parseAmount(newDraft.priceRetail || "0");
-      const minStock = parseAmount(newDraft.minStock || "0");
+      const minStock = quantityNumber(newDraft.minStock || "0"); // kilos o unidades, no plata: "82,598" = 82,598 kg (real M2 26/10)
       if (!Number.isFinite(cost) || cost < 0) throw new Error("El costo no puede ser negativo.");
       if (!Number.isFinite(priceRetail) || priceRetail < 0) throw new Error("El precio no puede ser negativo.");
 
@@ -422,7 +422,7 @@ export function Inventory() {
       if (!editDraft.code.trim() || !editDraft.name.trim()) throw new Error("Código y nombre son obligatorios.");
       const cost = parseAmount(editDraft.cost || "0");
       const priceRetail = parseAmount(editDraft.priceRetail || "0");
-      const minStock = parseAmount(editDraft.minStock || "0");
+      const minStock = quantityNumber(editDraft.minStock || "0");
       if (!Number.isFinite(cost) || cost < 0) throw new Error("El costo no puede ser negativo.");
       if (!Number.isFinite(priceRetail) || priceRetail < 0) throw new Error("El precio no puede ser negativo.");
 
