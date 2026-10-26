@@ -387,6 +387,8 @@ export function AdminCreateClient() {
     setPayBusy(true);
     try {
       await setCompanyPaidUntil(company.id, value);
+      // Pagado hasta una fecha futura = ya no está de prueba (si no, el cliente seguía viendo el cartel; real El Dorado).
+      if (value && value >= todayIso() && company.trialEndsAt) await setCompanyTrial(company.id, null);
       setEditPaidUntil(value ?? "");
       await reloadCompanies();
     } catch (error) {

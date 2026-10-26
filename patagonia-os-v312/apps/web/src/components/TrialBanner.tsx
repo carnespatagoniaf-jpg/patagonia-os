@@ -17,11 +17,14 @@ export function TrialBanner() {
     let cancelled = false;
     void supabase
       .from("companies")
-      .select("trial_ends_at")
+      .select("trial_ends_at, paid_until")
       .eq("id", companyId)
       .maybeSingle()
       .then(({ data }) => {
-        if (!cancelled) setTrialEndsAt((data as { trial_ends_at: string | null } | null)?.trial_ends_at ?? null);
+        const row = data as { trial_ends_at: string | null; paid_until?: string | null } | null;
+        // Si ya pagó ("pagado hasta" desde hoy en adelante) no se avisa de la prueba, aunque la fecha de prueba haya quedado cargada (real El Dorado 26/10).
+        const paid = Boolean(row?.paid_until && row.paid_until >= new Date().toISOString().slice(0, 10));
+        if (!cancelled) setTrialEndsAt(paid ? null : row?.trial_ends_at ?? null);
       });
     return () => { cancelled = true; };
   }, [companyId, canSee]);
