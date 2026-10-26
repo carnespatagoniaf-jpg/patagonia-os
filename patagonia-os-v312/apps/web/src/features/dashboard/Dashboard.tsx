@@ -9,13 +9,12 @@ import { useAuth } from "../auth/AuthProvider";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { listCustomerChargesInRange, listCustomersWithBalance } from "../customers/customers-service";
 import { listProductsForBranch } from "../inventory/inventory-service";
-import { listProfitabilityPeriods } from "../profitability/profitability-service";
 import { getReconReminders, getTransferAlerts, type ReconReminder } from "../reconciliation/reconciliation-service";
 import { chequeAlerts, type ChequeAlerts } from "../cheques/cheque-logic";
 import { getTaxCalendarInputs } from "../accounting/accounting-service";
 import { daysLeftLabel, dueDateLabel, upcomingDues, type DueItem } from "../accounting/tax-calendar";
 import { listOpenCheques } from "../cheques/cheques-service";
-import { listPosSalesInRange } from "../sale/pos-shift-service";
+import { listPosSalesInRange, listSalesByProduct } from "../sale/pos-shift-service";
 import { addDaysIso, formatMoney, todayIso } from "../shifts/format";
 import { useShifts } from "../shifts/useShifts";
 import { useTreasury } from "../shifts/useTreasury";
@@ -34,7 +33,8 @@ export function Dashboard() {
   const [products, setProducts] = useState<Product[]>(isSupabaseConfigured ? [] : demoProducts);
   const [salesToday, setSalesToday] = useState(0);
   const [salesSeries, setSalesSeries] = useState<DaySales[]>([]);
-  const [grossProfit, setGrossProfit] = useState<number | null>(null);
+  /** Ganancia del mes en curso: vendido en Mostrador − costo de lo vendido (antes: solo el último período cerrado en Rentabilidad, y mostraba una raya). */
+  const [grossProfit, setGrossProfit] = useState<{ profit: number; sales: number } | null>(null);
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [overdueCustomers, setOverdueCustomers] = useState<{ name: string; balance: number }[]>([]);
   const [transferAlerts, setTransferAlerts] = useState<{ count: number; total: number; oldest: string } | null>(null);
@@ -52,12 +52,12 @@ export function Dashboard() {
     Promise.all([
       listProductsForBranch(branchId),
       loadRange(weekAgo, today),
-      listProfitabilityPeriods(branchId),
+      can(profile, "treasury.manage") ? listSalesByProduct(branchId, `${today.slice(0, 7)}-01`, today).catch(() => null) : Promise.resolve(null),
       listPosSalesInRange(branchId, weekAgo, today),
       can(profile, "customers.manage") ? listCustomerChargesInRange(branchId, weekAgo, today) : Promise.resolve([]),
       can(profile, "customers.manage") ? listCustomersWithBalance() : Promise.resolve([])
     ])
-      .then(([productList, shiftRows, periods, mostradorSales, customerCharges, customers]) => {
+      .then(([productList, shiftRows, monthRows, mostradorSales, customerCharges, customers]) => {
         if (cancelled) return;
         setProducts(productList);
         setOverdueCustomers(
@@ -88,7 +88,13 @@ export function Dashboard() {
         }
         setSalesSeries(series);
         setSalesToday(series[series.length - 1]?.total ?? 0);
-        setGrossProfit(periods[0]?.grossProfit ?? null);
+        if (monthRows) {
+          const sales = monthRows.reduce((sum, r) => sum + r.amount, 0);
+          const cost = monthRows.reduce((sum, r) => sum + r.cost, 0);
+          setGrossProfit({ profit: sales - cost, sales });
+        } else {
+          setGrossProfit(null);
+        }
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -205,9 +211,15 @@ export function Dashboard() {
       <section className="kpi-grid">
         <Kpi title="Ventas hoy" value={formatMoney(salesToday)} detail={`${salesToday === 0 ? "Sin" : ""} tickets de hoy`} icon={<CircleDollarSign />} />
         <Kpi
-          title="Ganancia estimada"
-          value={grossProfit !== null ? formatMoney(grossProfit) : "—"}
-          detail={grossProfit !== null ? "Último período cerrado" : "Cerrá un período en Rentabilidad"}
+          title="Ganancia del mes"
+          value={grossProfit !== null ? formatMoney(grossProfit.profit) : "—"}
+          detail={
+            grossProfit === null
+              ? "Solo la ve el dueño o un administrador"
+              : grossProfit.sales > 0
+                ? `Vendido ${formatMoney(grossProfit.sales)} − lo que costó · ${Math.round((grossProfit.profit / grossProfit.sales) * 100)}% de lo vendido`
+                : "Todavía no hay ventas este mes"
+          }
           icon={<TrendingUp />}
         />
         <Kpi title="Caja actual" value={formatMoney(cashOnHand)} detail={`${balances.length} cuentas`} icon={<ReceiptText />} />
