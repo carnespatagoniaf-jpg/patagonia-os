@@ -48,14 +48,22 @@ interface DraftProduct {
   margin: string;
   priceRetail: string;
   minStock: string;
+  /** Stock que hay hoy (Agregar: stock inicial; Editar: corrige con un ajuste de stock). */
+  stock: string;
   /** IVA: "" = el general de Facturas (migración 154). */
   vatRate: string;
   active: boolean;
   categoryId: string;
 }
 
+/** Cantidad escrita por una persona: en kilos "0,750" = 0,75; en unidades "1.008" = mil ocho (punto de miles). */
+function typedCount(unit: Product["unit"], raw: string): number {
+  const text = raw.trim();
+  return quantityNumber(unit !== "kg" && /^d{1,3}(.d{3})+$/.test(text) ? text.replace(/./g, "") : text);
+}
+
 function emptyDraft(): DraftProduct {
-  return { code: "", name: "", unit: "kg", cost: "", margin: "", priceRetail: "", minStock: "", active: true, categoryId: "", vatRate: "" };
+  return { code: "", name: "", unit: "kg", cost: "", margin: "", priceRetail: "", minStock: "", stock: "", active: true, categoryId: "", vatRate: "" };
 }
 
 /** Bloque "Stock" de la ficha: stock propio o descuenta de otro producto (el principal). */
@@ -93,6 +101,7 @@ function draftFromProduct(p: Product): DraftProduct {
     margin: String(marginPercent(p.cost, p.priceRetail)),
     priceRetail: String(p.priceRetail),
     minStock: String(p.minStock),
+    stock: String(p.stock),
     active: p.active ?? true,
     categoryId: p.categoryId ?? "",
     vatRate: ""
@@ -405,8 +414,10 @@ export function Inventory() {
       const minStock = quantityNumber(newDraft.minStock || "0"); // kilos o unidades, no plata: "82,598" = 82,598 kg (real M2 26/10)
       if (!Number.isFinite(cost) || cost < 0) throw new Error("El costo no puede ser negativo.");
       if (!Number.isFinite(priceRetail) || priceRetail < 0) throw new Error("El precio no puede ser negativo.");
+      const initialStock = newDraft.stock.trim() ? typedCount(newDraft.unit, newDraft.stock) : 0;
+      if (!Number.isFinite(initialStock) || initialStock < 0) throw new Error("El stock no puede ser negativo.");
 
-      await createProduct({
+      const created = await createProduct({
         branchId,
         code: newDraft.code.trim(),
         name: newDraft.name.trim(),
@@ -418,6 +429,7 @@ export function Inventory() {
       });
       const newVat = vatFromSelect(newDraft.vatRate);
       if (newVat !== null) await setProductsVatRate({ codes: [newDraft.code.trim()], rate: newVat });
+      if (initialStock > 0) await adjustProductStock({ branchId, productId: created.id, countedQuantity: initialStock, reason: "Stock inicial al crear el producto" });
       setNewDraft(emptyDraft());
       setShowNewForm(false);
       setMessage("Producto creado.");
@@ -452,6 +464,9 @@ export function Inventory() {
       if (wantedSourceId && (!Number.isFinite(factor) || factor <= 0)) {
         throw new Error(`Indicá cuántos ${UNIT_LABELS[wantedSource!.unit]} descuenta cada ${UNIT_LABELS[editDraft.unit]}.`);
       }
+      // Stock escrito en Editar (antes solo había "Mínimo" y lo usaban como stock; real M2 26/10).
+      const wantedStock = !original?.stockSourceId && !editLink.linked && editDraft.stock.trim() ? typedCount(editDraft.unit, editDraft.stock) : null;
+      if (wantedStock !== null && (!Number.isFinite(wantedStock) || wantedStock < 0)) throw new Error("El stock no puede ser negativo.");
       const linkChanged =
         wantedSourceId !== (original?.stockSourceId ?? null) ||
         (wantedSourceId !== null && factor !== (original?.stockFactor ?? 1));
@@ -471,6 +486,10 @@ export function Inventory() {
       const wantedVat = vatFromSelect(editDraft.vatRate);
       if (wantedVat !== (vatRates[editingId] ?? null)) await setProductsVatRate({ productIds: [editingId], rate: wantedVat });
       let linkMessage = "";
+      if (wantedStock !== null && original && wantedStock !== Number(original.stock)) {
+        const r = await adjustProductStock({ branchId, productId: editingId, countedQuantity: wantedStock, reason: "Corrección de stock desde Editar" });
+        linkMessage += ` Stock: ${formatQty(r.previous)} → ${formatQty(r.counted)} ${UNIT_LABELS[editDraft.unit]}.`;
+      }
       if (linkChanged) {
         const result = await setProductStockSource({
           productId: editingId,
@@ -935,10 +954,19 @@ export function Inventory() {
             <input
               type="text"
               inputMode="decimal"
-              placeholder="Stock mínimo"
+              placeholder="Avisar si queda menos de"
+              title="Solo para que avise en Inicio cuando quede poco. No es el stock."
               value={newDraft.minStock}
               onChange={(e) => setNewDraft({ ...newDraft, minStock: e.target.value })}
               style={{ width: 100 }}
+            />
+            <input
+              type="text"
+              inputMode="decimal"
+              placeholder={newDraft.unit === "kg" ? "Stock hoy (kg)" : "Stock hoy (unidades)"}
+              value={newDraft.stock}
+              onChange={(e) => setNewDraft({ ...newDraft, stock: e.target.value })}
+              style={{ width: 120 }}
             />
             <select value={newDraft.vatRate} onChange={(e) => setNewDraft({ ...newDraft, vatRate: e.target.value })} title="IVA del producto para la factura">
               <option value="">IVA {productVatLabel(null, generalVatRate).toLowerCase()}</option>
@@ -968,7 +996,7 @@ export function Inventory() {
               <th className="num">Venta</th>
               <th>IVA</th>
               <th className="num">Stock</th>
-              <th className="num">Mínimo</th>
+              <th className="num" title="Avisa en Inicio cuando el stock queda en este número o menos. No es el stock.">Aviso si queda menos de</th>
               <th>Estado</th>
               <th></th>
             </tr>
@@ -1041,12 +1069,31 @@ export function Inventory() {
                         ))}
                       </select>
                     </td>
-                    <td className="num">{product.stock}</td>
+                    <td className="num">
+                      {product.stockSourceId ? (
+                        product.stock
+                      ) : (
+                        <>
+                          <input
+                            type="text"
+                            inputMode="decimal"
+                            className="num"
+                            title="El stock que hay hoy. Si lo cambiás, queda registrado como ajuste de stock."
+                            value={editDraft.stock}
+                            onFocus={(e) => e.target.select()}
+                            onChange={(e) => setEditDraft({ ...editDraft, stock: e.target.value })}
+                            style={{ width: 80 }}
+                          />
+                          <div className="muted" style={{ fontSize: 11 }}>{UNIT_LABELS[editDraft.unit]}</div>
+                        </>
+                      )}
+                    </td>
                     <td>
                       <input
                         type="text"
                         inputMode="decimal"
                         className="num"
+                        title="Solo para que avise en Inicio cuando quede poco. No es el stock."
                         value={editDraft.minStock}
                         onChange={(e) => setEditDraft({ ...editDraft, minStock: e.target.value })}
                         style={{ width: 70 }}
