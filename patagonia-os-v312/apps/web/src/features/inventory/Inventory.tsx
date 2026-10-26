@@ -568,9 +568,16 @@ export function Inventory() {
   async function handleAdjustStock() {
     try {
       if (!branchId || !adjustingId) return;
-      const counted = quantityNumber(adjustCounted);
+      const product = productById.get(adjustingId);
+      // En unidades, "1.008" es mil ocho (punto de miles), no uno coma cero cero ocho.
+      const raw = product && product.unit !== "kg" && /^\d{1,3}(\.\d{3})+$/.test(adjustCounted.trim()) ? adjustCounted.trim().replace(/\./g, "") : adjustCounted;
+      const counted = quantityNumber(raw);
       if (!Number.isFinite(counted) || counted < 0) throw new Error("La cantidad contada no puede ser negativa.");
       if (!adjustReason.trim()) throw new Error("Ingresá un motivo (ej. conteo mensual, merma).");
+      // Real M2 26/10: escribían la cantidad nueva en "Motivo" y el stock quedaba igual, sin aviso.
+      if (product && counted === Number(product.stock) && /^\s*[\d.,]+\s*$/.test(adjustReason)) {
+        throw new Error(`Escribiste ${adjustReason.trim()} en "Motivo". La cantidad nueva va en el casillero de arriba ("¿Cuánto hay?"); en Motivo poné por qué (ej. conteo).`);
+      }
 
       const result = await adjustProductStock({ branchId, productId: adjustingId, countedQuantity: counted, reason: adjustReason.trim() });
       setAdjustingId(null);
@@ -1073,16 +1080,18 @@ export function Inventory() {
                     <td className="num">{formatMoney(product.priceRetail)}</td>
                     <td>{productVatLabel(vatRates[product.id], generalVatRate)}</td>
                     <td className="num">
+                      <div className="muted" style={{ fontSize: 11 }}>¿Cuánto hay?</div>
                       <input
                         type="text"
                         inputMode="decimal"
                         className="num"
+                        autoFocus
                         value={adjustCounted}
                         onFocus={(e) => e.target.select()}
                         onChange={(e) => setAdjustCounted(e.target.value)}
-                        style={{ width: 70 }}
+                        style={{ width: 80, borderColor: "#8b1e1e" }}
                       />
-                      <div className="muted" style={{ fontSize: 11 }}>registrado: {product.stock}</div>
+                      <div className="muted" style={{ fontSize: 11 }}>registrado: {product.stock} {UNIT_LABELS[product.unit]}</div>
                     </td>
                     <td className="num">{product.minStock}</td>
                     <td colSpan={2}>
