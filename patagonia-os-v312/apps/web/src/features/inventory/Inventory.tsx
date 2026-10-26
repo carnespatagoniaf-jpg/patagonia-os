@@ -6,7 +6,7 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { useAuth } from "../auth/AuthProvider";
 import { planAllows } from "../auth/permissions";
-import { adjustProductStock, createProduct, deleteProduct, listProductPackages, listProductsForBranch, listProductVatRates, registerProductPackages, setProductActive, setProductsVatRate, setProductStockSource, updateProduct } from "./inventory-service";
+import { adjustProductStock, clearProductPackages, createProduct, deleteProduct, listProductPackages, listProductsForBranch, listProductVatRates, registerProductPackages, setProductActive, setProductsVatRate, setProductStockSource, updateProduct } from "./inventory-service";
 import { getFiscalSettings } from "../invoicing/invoicing-service";
 import { PRODUCT_VAT_OPTIONS, productVatLabel, vatFromSelect, vatPercentLabel, vatSelectValue } from "./product-vat";
 import {
@@ -157,6 +157,23 @@ export function Inventory() {
       setPackages(packs);
     } finally {
       setLoading(false);
+    }
+  }
+
+  /** Borrar los paquetes de un producto para empezar de nuevo (los kilos no cambian). */
+  async function handleClearPackages(product: Product) {
+    if (!branchId) return;
+    if (!window.confirm(`¿Borrar los paquetes de "${product.name}"? Vuelve a "Contar paquetes" y los cuentan de nuevo. Los kilos no cambian.`)) return;
+    try {
+      await clearProductPackages(branchId, product.id);
+      setPackages((p) => {
+        const next = { ...p };
+        delete next[product.id];
+        return next;
+      });
+      setMessage(`${product.name}: paquetes borrados.`);
+    } catch (err) {
+      setMessage(errorText(err) || "No se pudieron borrar los paquetes.");
     }
   }
 
@@ -1106,7 +1123,8 @@ export function Inventory() {
                             <>
                               <strong>{packages[product.id]}</strong> {packages[product.id] === 1 ? "paquete" : "paquetes"}{" "}
                               <button className="link-button" onClick={() => void handlePackages(product, "envasado")}>Envasé</button>{" · "}
-                              <button className="link-button" onClick={() => void handlePackages(product, "conteo")}>Contar</button>
+                              <button className="link-button" onClick={() => void handlePackages(product, "conteo")}>Contar</button>{" · "}
+                              <button className="link-button" onClick={() => void handleClearPackages(product)}>Borrar</button>
                             </>
                           ) : (
                             <button className="link-button" onClick={() => void handlePackages(product, "conteo")}>Contar paquetes</button>

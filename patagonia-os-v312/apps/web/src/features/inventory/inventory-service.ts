@@ -235,3 +235,10 @@ export async function registerProductPackages(input: { branchId: string; product
   if (error) throw error;
   return Number(data);
 }
+
+/** Borra los paquetes anotados de un producto en la sucursal (migración 160); los kilos no se tocan. */
+export async function clearProductPackages(branchId: string, productId: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("clear_product_packages", { p_branch_id: branchId, p_product_id: productId });
+  if (error) throw error;
+}
