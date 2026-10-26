@@ -386,7 +386,7 @@
     padding: 14px 20px; margin: 4px 0 40px; font-size: 14.5px; color: #e7dcd0;
   }
   .trial-banner b { color: #ef6a5a; }
-  .plans-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 24px; align-items: stretch; }
+  .plans-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 24px; align-items: stretch; max-width: 860px; margin-left: auto; margin-right: auto; }
   .plan-card {
     background: rgba(255,255,255,.04); border: 1px solid rgba(245,237,228,.14); border-radius: 20px;
     padding: 34px 28px; display: flex; flex-direction: column; position: relative;
@@ -468,7 +468,7 @@
 </style>
 
 <a class="promo-bar" href="https://wa.me/5491127871634" target="_blank" rel="noopener">
-  <b>7 días gratis</b> para probarlo<span class="sep">·</span><br>Planes desde <b>$20.000/mes</b>
+  <b>7 días gratis</b> para probarlo<span class="sep">·</span><br>Planes desde <b>$39.000/mes</b>
 </a>
 
 <nav class="nav">
@@ -502,7 +502,7 @@
     <p class="hero-sub">Mostrador, stock, factura electrónica ARCA, balanza conectada, caja y cuentas corrientes — todo en un solo sistema, desde el celu o la compu. Sin instalar nada.</p>
     <div class="hero-offer">
       <span class="hero-offer-badge">7 días gratis</span>
-      <span class="hero-offer-price"><b>Desde $20.000/mes</b></span>
+      <span class="hero-offer-price"><b>Desde $39.000/mes</b></span>
       <span class="hero-offer-note">sin instalación · sin contrato de permanencia</span>
     </div>
     <div class="hero-actions">
@@ -695,6 +695,42 @@
       <p>La factura del proveedor se carga una sola vez: la media res o el cajón de pollo aparece en Despiece ya repartido en cortes.</p>
       <span class="news-card-plan">Estándar y Full</span>
     </div>
+    <div class="benefit-card">
+      <div class="benefit-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5Z"/><path d="M8 7h8M8 11h6"/></svg></div>
+      <h3>Todo listo para tu contador</h3>
+      <p>Libros de IVA, el Libro IVA Digital para ARCA, Ingresos Brutos, vencimientos y la carpeta del mes en Excel. Tu contador entra con su propio usuario, solo para mirar.</p>
+      <span class="news-card-plan">Full</span>
+    </div>
+    <div class="benefit-card">
+      <div class="benefit-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 14h6M15 14h3M6 10h3"/></svg></div>
+      <h3>Cheques y eCheq</h3>
+      <p>Los cheques que te dan y los que firmás, en una sola cartera: cuándo depositarlos, cuáles endosaste y cuánto te debitan esta semana.</p>
+      <span class="news-card-plan">Full</span>
+    </div>
+    <div class="benefit-card">
+      <div class="benefit-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><rect x="7" y="12" width="3" height="6"/><rect x="12" y="8" width="3" height="10"/><rect x="17" y="5" width="3" height="13"/></svg></div>
+      <h3>Reportes que muestran dónde está la plata</h3>
+      <p>Los productos que más dejan, cuánto vende cada cajero, los días y horas fuertes, y el resultado del mes con la merma y lo que se tiró.</p>
+      <span class="news-card-plan">Todos los planes</span>
+    </div>
+    <div class="benefit-card">
+      <div class="benefit-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></div>
+      <h3>Anular solo con PIN</h3>
+      <p>Anular una venta o borrar un movimiento de caja pide motivo y el PIN del dueño. Queda registrado quién, cuándo y por qué.</p>
+      <span class="news-card-plan">Todos los planes</span>
+    </div>
+    <div class="benefit-card">
+      <div class="benefit-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M19 5L5 19"/><circle cx="6.5" cy="6.5" r="2.5"/><circle cx="17.5" cy="17.5" r="2.5"/></svg></div>
+      <h3>IVA por producto</h3>
+      <p>10,5% o 21% en cada producto o categoría. La factura A o B separa cada alícuota sola, como pide ARCA.</p>
+      <span class="news-card-plan">Todos los planes</span>
+    </div>
+    <div class="benefit-card">
+      <div class="benefit-icon"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M9 15l2 2 4-4"/></svg></div>
+      <h3>Remito R oficial</h3>
+      <p>Con el CAI de tu contador, el sistema numera e imprime el Remito R con original y duplicado para acompañar la mercadería.</p>
+      <span class="news-card-plan">Full</span>
+    </div>
   </div>
 </section>
 
@@ -810,7 +846,7 @@
 <section id="modulos" class="wrap">
   <div class="section-head">
     <div class="eyebrow">Todo en un solo lugar</div>
-    <h2 class="section-title">20 módulos, un solo sistema.</h2>
+    <h2 class="section-title">24 módulos, un solo sistema.</h2>
   </div>
 
   <div class="modules-grid">
@@ -826,6 +862,10 @@
     <div class="module-chip"><div class="module-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="13" rx="2"/><path d="M2 10h20"/><path d="M16 15h2"/></svg></div> Tesorería</div>
     <div class="module-chip"><div class="module-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 10l9-6 9 6"/><path d="M4 10v9M9 10v9M15 10v9M20 10v9"/><path d="M2 21h20"/></svg></div> Conciliación</div>
     <div class="module-chip"><div class="module-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M8 13h8M8 17h5"/></svg></div> Facturas ARCA</div>
+    <div class="module-chip"><div class="module-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20V3H6.5A2.5 2.5 0 0 0 4 5.5Z"/><path d="M8 7h8M8 11h6"/></svg></div> Contable</div>
+    <div class="module-chip"><div class="module-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="6" width="20" height="12" rx="2"/><path d="M6 14h6M15 14h3M6 10h3"/></svg></div> Cheques</div>
+    <div class="module-chip"><div class="module-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6"/><path d="M9 15l2 2 4-4"/></svg></div> Remito R</div>
+    <div class="module-chip"><div class="module-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M6 6l1 15h10l1-15"/></svg></div> Decomisos</div>
     <div class="module-chip"><div class="module-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="5" width="20" height="14" rx="2"/><path d="M2 10h20"/><path d="M6 15h4"/></svg></div> Deudas</div>
     <div class="module-chip"><div class="module-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/></svg></div> Rentabilidad</div>
     <div class="module-chip"><div class="module-icon"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg></div> Sucursales</div>
@@ -847,36 +887,21 @@
     <div class="trial-banner"><b>7 días gratis</b> para probar, en cualquier plan · sin instalación · sin contrato de permanencia</div>
 
     <div class="plans-grid">
-      <div class="plan-card">
-        <div class="plan-name">Básico</div>
-        <div class="plan-tagline">Para arrancar con el control del local.</div>
-        <div class="plan-price"><b>$20.000</b><span>/mes</span></div>
-        <div class="plan-unit">1 sucursal · hasta 3 usuarios</div>
-        <ul class="plan-features">
-          <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Mostrador, Stock y Compras</li>
-          <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Tesorería y Reportes</li>
-          <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Impresora de tickets</li>
-          <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Etiquetas de balanza (cualquier marca)</li>
-          <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Importar productos desde Excel</li>
-          <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Caja fuerte y control de balanza al cierre</li>
-          <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Ofertas que comparten stock</li>
-        </ul>
-        <a class="btn btn-ghost plan-cta" href="https://wa.me/5491127871634?text=Hola!%20Quiero%20probar%20el%20plan%20B%C3%A1sico%20de%20Patagonia%20Systems" target="_blank" rel="noopener">Empezar mis 7 días gratis</a>
-      </div>
-
       <div class="plan-card featured">
         <span class="plan-tag">Más elegido</span>
         <div class="plan-name">Estándar</div>
-        <div class="plan-tagline">Todo lo de Básico, más balanza conectada y gestión completa.</div>
+        <div class="plan-tagline">Todo para vender, controlar la caja y facturar desde un local.</div>
         <div class="plan-price"><b>$39.000</b><span>/mes</span></div>
         <div class="plan-unit">hasta 2 sucursales · 8 usuarios</div>
         <ul class="plan-features">
+          <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Mostrador, Stock, Compras y Tesorería</li>
           <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Factura electrónica ARCA</li>
           <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Balanza conectada (peso y precios)</li>
           <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Despiece y Recetas</li>
           <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Rentabilidad por producto</li>
           <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Clientes (fiado) y Deudas</li>
           <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Empleados, liquidaciones y PIN de cajero</li>
+          <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Reportes, decomisos y anulación con PIN</li>
           <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Chat de ayuda con IA</li>
         </ul>
         <a class="btn btn-primary plan-cta" href="https://wa.me/5491127871634?text=Hola!%20Quiero%20probar%20el%20plan%20Est%C3%A1ndar%20de%20Patagonia%20Systems" target="_blank" rel="noopener">Empezar mis 7 días gratis</a>
@@ -889,6 +914,9 @@
         <div class="plan-unit">sucursales y usuarios ilimitados</div>
         <ul class="plan-features">
           <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Todo lo de Estándar incluido</li>
+          <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Contable: libros de IVA, Ingresos Brutos y carpeta del contador</li>
+          <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Cheques y eCheq</li>
+          <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Remito R con CAI</li>
           <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Conciliación bancaria</li>
           <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Resumen y transferencias entre sucursales</li>
           <li><svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg> Permisos por persona</li>
