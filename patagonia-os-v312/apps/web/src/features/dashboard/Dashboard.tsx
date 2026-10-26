@@ -193,7 +193,11 @@ export function Dashboard() {
   const stockValue = stockValueReport(products, []).costValue;
   // Solo lo que de verdad hay que mirar: productos con un mínimo cargado que llegaron a él, o en negativo.
   // Sin mínimo y en 0 no avisa (un negocio nuevo veía una alerta por cada producto; real M2 Alimentos, 24/10).
-  const alerts = products.filter((p) => p.stock < 0 || (p.minStock > 0 && p.stock <= p.minStock));
+  // Las presentaciones usan el stock del principal: no se repite la alerta (real M2: los huevos aparecían 4 veces).
+  const ownStock = products.filter((p) => !p.stockSourceId);
+  const negativeAlerts = ownStock.filter((p) => p.stock < 0);
+  const minimumAlerts = ownStock.filter((p) => p.stock >= 0 && p.minStock > 0 && p.stock <= p.minStock);
+  const alerts = [...negativeAlerts, ...minimumAlerts];
   const firstName = profile?.full_name?.split(" ")[0] ?? "Usuario";
 
   return (
@@ -307,15 +311,36 @@ export function Dashboard() {
                   </div>
                 </div>
               ))}
-              {alerts.map((product) => (
+              {/* Negativos juntos en una línea: un local que vende sin cargar compras tenía una alerta por producto (Pollo y mar: 175). */}
+              {negativeAlerts.length > 3 ? (
+                <div className="alert-row">
+                  <AlertTriangle size={18} />
+                  <div>
+                    <strong>{negativeAlerts.length} productos en negativo</strong>
+                    <span>Se vendió más de lo cargado. Cargá las compras o corregí con Stock → "Ajustar stock" ({negativeAlerts.slice(0, 3).map((p) => p.name).join(", ")}…)</span>
+                  </div>
+                </div>
+              ) : (
+                negativeAlerts.map((product) => (
+                  <div className="alert-row" key={product.id}>
+                    <AlertTriangle size={18} />
+                    <div>
+                      <strong>{product.name}</strong>
+                      <span>En negativo: {product.stock} {product.unit === "kg" ? "kg" : "u."} · se vendió más de lo cargado</span>
+                    </div>
+                  </div>
+                ))
+              )}
+              {minimumAlerts.slice(0, 8).map((product) => (
                 <div className="alert-row" key={product.id}>
                   <AlertTriangle size={18} />
                   <div>
                     <strong>{product.name}</strong>
-                    <span>Stock: {product.stock} {product.unit}</span>
+                    <span>Queda {product.stock} {product.unit === "kg" ? "kg" : "u."} · mínimo {product.minStock}</span>
                   </div>
                 </div>
               ))}
+              {minimumAlerts.length > 8 && <p className="muted" style={{ fontSize: 12 }}>Y {minimumAlerts.length - 8} productos más llegaron a su mínimo (Stock, marcados con ⚠).</p>}
             </>
           )}
         </div>
