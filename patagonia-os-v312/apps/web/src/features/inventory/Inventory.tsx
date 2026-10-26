@@ -954,7 +954,7 @@ export function Inventory() {
             <input
               type="text"
               inputMode="decimal"
-              placeholder="Avisar si queda menos de"
+              placeholder="Stock mínimo"
               title="Solo para que avise en Inicio cuando quede poco. No es el stock."
               value={newDraft.minStock}
               onChange={(e) => setNewDraft({ ...newDraft, minStock: e.target.value })}
@@ -996,7 +996,7 @@ export function Inventory() {
               <th className="num">Venta</th>
               <th>IVA</th>
               <th className="num">Stock</th>
-              <th className="num" title="Avisa en Inicio cuando el stock queda en este número o menos. No es el stock.">Aviso si queda menos de</th>
+              <th className="num" title="Avisa en Inicio cuando el stock queda en este número o menos. No es el stock.">Mínimo</th>
               <th>Estado</th>
               <th></th>
             </tr>
