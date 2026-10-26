@@ -680,14 +680,20 @@ function diagnosisVerdictMessage(r: DiagnosticRecord, modelId: string, portLabel
     );
   }
   if (!isAura) {
-    // Report LT / NX: el cable no es el de la Aura. Ya se buscó también el número de balanza (01 a 99).
+    // Report LT / NX. Manual oficial "Report NX / LT" (Kretz, §1 y §6.2.3): la LT se conecta a la PC por USB o
+    // Bluetooth y la NX por Ethernet/Wi-Fi; no menciona RS232/DB9. Las Report LT que andan (Carnes Patagonia, M2,
+    // 24/10) aparecen como "puerto serie que no es USB" (el COM virtual del Bluetooth). Darío (Don Raúl, 24/10)
+    // probó con un adaptador USB a serie DB9 (CH340) y la balanza no mandó ni un byte en 01..99 ni en 2 velocidades.
+    const viaSerialAdapter = /adaptador USB a serie/.test(portLabel);
     return (
-      `❌ La balanza no mandó ni un dato, en ninguna velocidad ni con ningún número de balanza del 01 al 99 (puerto elegido: ${portLabel}). Casi siempre es algo físico:\n` +
-      `1) El puerto: tocá "Elegir otro puerto" y elegí el del adaptador USB de la balanza (si no sabés cuál es, desenchufá el adaptador, mirá cuál desaparece de la lista y volvé a enchufarlo).\n` +
-      `2) El conector: tiene que ir al puerto serie de la balanza (el de 9 patas, DB9), no al de red.\n` +
-      `3) Cruzado: si el adaptador USB va enchufado directo a la balanza y no contesta, poné entre los dos un adaptador "null modem" (cruzado) DB9 hembra-hembra. En muchas Report el que manda y el que recibe tienen que ir cruzados.\n` +
-      `4) La balanza: en su menú de configuración, que la comunicación con la PC por el puerto serie esté habilitada.\n` +
-      `5) El adaptador USB: en Windows, Administrador de dispositivos → Puertos (COM y LPT): si aparece con un signo amarillo, le falta el driver.`
+      `❌ La balanza no mandó ni un dato, en ninguna velocidad ni con ningún número de balanza del 01 al 99 (puerto elegido: ${portLabel}).\n` +
+      (viaSerialAdapter
+        ? `⚠️ Elegiste un adaptador USB a serie (DB9). Según el manual de Kretz, la Report LT se conecta a la PC por Bluetooth o con su cable USB, y la Report NX por red: ninguna usa un adaptador USB a serie.\n`
+        : "") +
+      `1) Report LT por Bluetooth (como en las que ya andan): en Windows, Configuración → Bluetooth → Agregar dispositivo → elegí la balanza. Después, en "Elegir el cable", elegí "Puerto serie estándar a través de vínculo Bluetooth" (si hay dos, el primero).\n` +
+      `2) Report LT por USB: el cable USB va directo de la balanza a la PC, sin adaptador. En la lista de "Elegir el cable" tiene que aparecer un puerto nuevo al enchufarlo.\n` +
+      `3) Report NX: se conecta por red (Ethernet/Wi-Fi, menú Configuración de Red). Escribinos: esa conexión no se puede hacer desde el navegador.\n` +
+      `4) Que no esté abierto iTegra u otro programa de la balanza, y que la balanza esté prendida.`
     );
   }
   return (

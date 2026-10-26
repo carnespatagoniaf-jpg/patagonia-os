@@ -479,6 +479,10 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
 function connectErrorMessage(err: unknown, choice: ScaleChoice | null): string {
   if (friendlyKind(err) !== "no_contesta" || !choice || choice === "auto") return friendlyMessage(err);
   const label = choiceLabel(choice);
+  if (choice === "kretz-report") {
+    // Manual Kretz Report NX/LT: la LT va por Bluetooth o USB (sin adaptador), la NX por red. No usa adaptador USB a serie (DB9).
+    return `Tu ${label} no contestó. La Report LT se conecta por Bluetooth (emparejala en Windows y elegí "Puerto serie estándar a través de vínculo Bluetooth") o con su cable USB directo, no con un adaptador USB a serie DB9. La Report NX va por red: escribinos. Revisá también que no esté abierto iTegra.`;
+  }
   const check = choice === "kretz-aura" ? "el cable enchufado y, en el menú de la balanza, COMUNI → MODO \"Datos\"" : "el cable USB enchufado y que no esté abierto el programa de la balanza";
   return `Tu ${label} no contestó. Revisá que esté prendida, ${check}, y probá de nuevo.`;
 }

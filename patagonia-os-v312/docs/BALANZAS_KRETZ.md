@@ -35,6 +35,15 @@ Código:
 
 ## Kretz Report LT / NX
 
+**Conexión física (26/10/2026).** El manual oficial "MANUAL DE USO REPORT NX / LT" (Help Desk Kretz, kretz.com.ar/en/shop/report-lt-lite-scale-338/document/34) dice: LT = USB / Bluetooth para cargar datos desde PC, smartphone o tablet; NX = Ethernet / WiFi (menú Configuración de Red: NRO BALANZA, IP, PUERTO 1001). No menciona RS232 ni DB9. | Documentado
+
+Las Report LT que andan (Carnes Patagonia 16/10, M2 Alimentos 24/10) aparecen en Web Serial como "puerto serie que no es USB" (sin usbVendorId = COM virtual del Bluetooth), C01, 115200/1. | Real
+
+Darío Díaz (Don Raúl, 24/10): adaptador USB a serie DB9 CH340 1a86:7523; abre en 115200/1 y 9600/1, se mandó 0001 con números 01–99: **0 bytes** de vuelta en las 6 corridas. Cero bytes descarta "velocidad equivocada" (llegaría basura): lo que transmite la balanza no llega al RX. Consistente con que la Report no se conecta por DB9. | Real
+
+No verificado: si alguna variante de Report trae un DB9 de datos, ni qué chip usa el USB de la LT. Una Report NX no se puede conectar desde el navegador (TCP crudo): haría falta un puente local.
+
+
 | Dato | Nivel | Fuente |
 |---|---|---|
 | Trama: STX + tipo + ID(2) + comando(4) + datos + checksum(2) + EOT. Respuesta: 0x07 + tipo + ID + grupo(2) + código(2) + datos + checksum + EOT. | Documentado + Real | "Multiprotocolo para la comunicación con balanzas Report Nx" (Kretz) + Report LT de Carnes Patagonia |
