@@ -16,6 +16,7 @@ import { daysLeftLabel, dueDateLabel, upcomingDues, type DueItem } from "../acco
 import { listOpenCheques } from "../cheques/cheques-service";
 import { listPosSalesInRange, listSalesByProduct } from "../sale/pos-shift-service";
 import { addDaysIso, formatMoney, todayIso } from "../shifts/format";
+import { stockValueReport } from "../shifts/stock-value";
 import { useShifts } from "../shifts/useShifts";
 import { useTreasury } from "../shifts/useTreasury";
 
@@ -187,9 +188,9 @@ export function Dashboard() {
     : [];
 
   const cashOnHand = balances.reduce((sum, balance) => sum + balance.balance, 0);
-  // A costo. Las presentaciones (maple, x2 maples… que descuentan del cajón) son el mismo stock que su principal:
-  // se contaban dos o más veces (real M2 26/10: los huevos 4 veces, $37 M en vez de $25 M). Lo negativo no suma.
-  const stockValue = products.reduce((sum, p) => (p.stockSourceId || p.stock <= 0 ? sum : sum + p.stock * p.cost), 0);
+  // La MISMA cuenta que Reportes → Stock valorizado (una sola función: antes eran dos cuentas distintas y daban
+  // distinto; real M2 26/10, los huevos se sumaban 4 veces por las presentaciones).
+  const stockValue = stockValueReport(products, []).costValue;
   // Solo lo que de verdad hay que mirar: productos con un mínimo cargado que llegaron a él, o en negativo.
   // Sin mínimo y en 0 no avisa (un negocio nuevo veía una alerta por cada producto; real M2 Alimentos, 24/10).
   const alerts = products.filter((p) => p.stock < 0 || (p.minStock > 0 && p.stock <= p.minStock));
