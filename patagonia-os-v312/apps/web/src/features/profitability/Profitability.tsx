@@ -6,7 +6,8 @@ import { addDaysIso, endOfMonthIso, endOfWeekIso, formatMoney, startOfMonthIso, 
 import { parseAmount } from "../../lib/money";
 import { listTreasuryMovements } from "../shifts/treasury-service";
 import { MOVEMENT_TYPE_LABELS } from "../shifts/Treasury";
-import { sumPosSalesTotalInRange } from "../sale/pos-shift-service";
+import { getPeriodResult, sumPosSalesTotalInRange } from "../sale/pos-shift-service";
+import { computePeriodResult } from "../shifts/period-result";
 import { listCustomerChargesInRange } from "../customers/customers-service";
 
 interface CashSummary {
@@ -81,6 +82,8 @@ export function Profitability() {
   const [stockEndDate, setStockEndDate] = useState<string | null>(null);
   const [salesTotal, setSalesTotal] = useState(0);
   const [purchasesTotal, setPurchasesTotal] = useState(0);
+  /** Costo de lo vendido con el costo de cada producto (el mismo cálculo que Reportes → Resultado). Se usa cuando no hay conteos de stock. */
+  const [soldCost, setSoldCost] = useState<number | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
 
   const [cashSummary, setCashSummary] = useState<CashSummary>(EMPTY_CASH_SUMMARY);
@@ -108,12 +111,14 @@ export function Profitability() {
     try {
       // Igual que close_profitability_period: Turnos + Mostrador (sin anuladas) + entregas a cuenta corriente
       // de los clientes de este local. Antes solo sumaba Turnos y con Mostrador daba Ventas $0 (2026-10-05).
-      const [rangeRows, purchases, mostrador, charges] = await Promise.all([
+      const [rangeRows, purchases, mostrador, charges, result] = await Promise.all([
         loadRange(from, to),
         getPurchasesTotal(from, to),
         sumPosSalesTotalInRange(branchId, from, to),
-        listCustomerChargesInRange(branchId, from, to).catch(() => [])
+        listCustomerChargesInRange(branchId, from, to).catch(() => []),
+        getPeriodResult(branchId, from, to).catch(() => null)
       ]);
+      setSoldCost(result ? computePeriodResult(result).cost : null);
       const turnos = rangeRows.reduce((sum, row) => sum + row.sales.reduce((s, r) => s + r.amount, 0), 0);
       const pos = mostrador;
       const fiado = charges.reduce((sum, c) => sum + c.amount, 0);
@@ -180,7 +185,12 @@ export function Profitability() {
 
   const stockStartValue = parseAmount(stockStart || "0") || 0;
   const stockEndValue = parseAmount(stockEnd || "0") || 0;
-  const cogs = stockStartValue + purchasesTotal - stockEndValue;
+  // Dos formas de calcular lo que costó la mercadería vendida:
+  //  * con conteos de stock en pesos (stock inicial + compras − stock final), la de siempre;
+  //  * sin conteos, con el costo de cada producto vendido. Antes, sin conteos ni compras el costo daba 0 y la
+  //    ganancia salía igual a las ventas (real M2 26/10).
+  const usesCounts = stockStart.trim() !== "" && stockEnd.trim() !== "";
+  const cogs = usesCounts ? stockStartValue + purchasesTotal - stockEndValue : soldCost ?? 0;
   const grossProfit = salesTotal - cogs - fixedCostsPeriod;
 
   const stockCountsByDate = useMemo(() => {
@@ -464,10 +474,17 @@ export function Profitability() {
               <span>Ventas</span>
               <strong>{previewLoading ? "…" : formatMoney(salesTotal)}</strong>
             </div>
-            <div className="kpi-card">
-              <span>Compras</span>
-              <strong>{previewLoading ? "…" : formatMoney(purchasesTotal)}</strong>
-            </div>
+            {usesCounts ? (
+              <div className="kpi-card">
+                <span>Compras</span>
+                <strong>{previewLoading ? "…" : formatMoney(purchasesTotal)}</strong>
+              </div>
+            ) : (
+              <div className="kpi-card">
+                <span>Costo de lo vendido</span>
+                <strong>{previewLoading ? "…" : formatMoney(cogs)}</strong>
+              </div>
+            )}
             <div className="kpi-card">
               <span>Costos fijos (prorrateado)</span>
               <strong>{formatMoney(fixedCostsPeriod)}</strong>
@@ -477,9 +494,18 @@ export function Profitability() {
               <strong className={grossProfit < 0 ? "num-negative" : "num-positive"}>{formatMoney(grossProfit)}</strong>
             </div>
           </div>
-          <button className="charge-button" style={{ marginTop: 14 }} onClick={handleClosePeriod}>
-            Cerrar período
-          </button>
+          <p className="muted" style={{ marginTop: 10 }}>
+            {usesCounts
+              ? "Ganancia = Ventas − (Stock inicial + Compras − Stock final) − Costos fijos."
+              : "Ganancia = Ventas − lo que costó cada producto vendido (su costo en Stock) − Costos fijos. Para calcularla con conteos de stock, cargá el stock inicial y final arriba."}
+          </p>
+          {usesCounts ? (
+            <button className="charge-button" style={{ marginTop: 14 }} onClick={handleClosePeriod}>
+              Cerrar período
+            </button>
+          ) : (
+            <p className="muted" style={{ fontSize: 12 }}>"Cerrar período" guarda el cierre con conteos de stock: aparece cuando cargás el stock inicial y final. La ganancia de arriba ya está al día sin cerrar nada (también en Inicio y en Reportes).</p>
+          )}
 
           <table className="data-table" style={{ marginTop: 18 }}>
             <thead>
