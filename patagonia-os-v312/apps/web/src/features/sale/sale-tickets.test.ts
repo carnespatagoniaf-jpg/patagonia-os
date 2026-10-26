@@ -45,6 +45,18 @@ describe("buildReceiptTicket", () => {
     assert.doesNotMatch(t, /Descuento:/);
   });
 
+  it("sin '?' en la plata y con la hora en 24 hs (real M2 24/10: salía '$?12.200' y '04:24:27')", () => {
+    const t = text(buildReceiptTicket({
+      items: [{ name: "Ricosaurios", unit: "unit", quantity: 1, unitPrice: 12200, discountAmount: 0 }],
+      saleDiscount: 0, saleSurcharge: 0, total: 12200, soldAt: "2026-10-24T19:24:27.000Z",
+      paymentSummary: "EFECTIVO", amountTendered: 15000, change: 2800
+    }));
+    assert.doesNotMatch(t, /\?/);
+    assert.match(t, /TOTAL \$ ?12\.200/);
+    assert.match(t, /Vuelto: \$ ?2\.800/);
+    assert.match(t, /24\/10\/2026 16:24/);
+  });
+
   it("termina con el comando de corte de papel", () => {
     const bytes = buildReceiptTicket(receipt);
     assert.equal(bytes[0], 0x1b); // ESC @ (inicializar)

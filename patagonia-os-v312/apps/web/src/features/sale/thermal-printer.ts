@@ -85,10 +85,18 @@ export function saveThermalPrintSettings(settings: ThermalPrintSettings): void {
 }
 
 /** Reemplaza acentos/ñ por su equivalente simple -- la mayoría de estas impresoras no soportan UTF-8. */
-function toPrinterText(text: string): string {
+export function toPrinterText(text: string): string {
   return text
     .normalize("NFD")
     .replace(/[̀-ͯ]/g, "")
+    // El formato de plata del navegador pone un espacio especial entre "$" y el número (U+00A0) y en la hora
+    // (U+202F): la impresora no los tiene y salía "$?12.200" (real M2 24/10). Se cambian por espacios comunes.
+    .replace(/[    ]/g, " ")
+    .replace(/[‐-―]/g, "-")
+    .replace(/[‘’]/g, "'")
+    .replace(/[“”]/g, '"')
+    .replace(/×/g, "x")
+    .replace(/[º°]/g, "o")
     .replace(/[^\x00-\x7f]/g, "?");
 }
 

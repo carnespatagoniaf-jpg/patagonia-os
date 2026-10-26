@@ -16,6 +16,12 @@ import {
   type InvoicePrint
 } from "../invoicing/invoicing-view";
 
+/** Fecha y hora del ticket en 24 horas y hora argentina: "24/10/2026 16:24" (salía "04:24:27" sin p. m.; real M2 24/10). */
+export function ticketDateTime(value?: string | number | Date): string {
+  const d = value === undefined ? new Date() : new Date(value);
+  return d.toLocaleString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "America/Argentina/Buenos_Aires" }).replace(",", "");
+}
+
 // Armado de los tickets para la impresora térmica (bytes ESC/POS). Funciones
 // puras: reciben todo lo que necesitan, no leen el estado de la pantalla.
 
@@ -32,7 +38,7 @@ export function buildReceiptTicket(receiptToPrint: ReceiptState, branchName?: st
     t.line("NO VÁLIDO COMO FACTURA");
     if (branchName) t.line(branchName);
     t.align("left").separator("-", settings.lineWidth);
-    t.line(new Date(receiptToPrint.soldAt).toLocaleString("es-AR"));
+    t.line(ticketDateTime(receiptToPrint.soldAt));
     t.separator("-", settings.lineWidth);
   }
   for (const item of receiptToPrint.items) {
@@ -125,7 +131,7 @@ export function buildCloseTicket({ summary, branchName, accounts, adjustments, v
   t.align("center").bold(true).line("CIERRE DE TURNO").bold(false);
   if (branchName) t.line(branchName);
   t.align("left").separator("-", width);
-  t.line(new Date().toLocaleString("es-AR"));
+  t.line(ticketDateTime());
   if (summary) {
     t.separator("-", width);
     t.bold(true).line(row("Total del turno", formatMoney(summary.total))).bold(false);
@@ -156,7 +162,7 @@ export function buildCloseTicket({ summary, branchName, accounts, adjustments, v
     t.line("MOVIMIENTOS DE CAJA");
     adjustments.forEach((a) => {
       const kind = a.movementType === "transferencia" ? "Traspaso" : a.direction === "in" ? "Ingreso" : "Egreso";
-      const hour = new Date(a.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+      const hour = new Date(a.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hourCycle: "h23", timeZone: "America/Argentina/Buenos_Aires" });
       t.line(row(hour + " " + kind, (a.direction === "in" ? "" : "-") + formatMoney(a.amount)));
       if (a.notes) t.line("  " + a.notes);
     });
@@ -197,7 +203,7 @@ export function buildMovementTicket(mov: MovementReceiptState, branchName?: stri
   t.align("center").bold(true).line(mov.title).bold(false);
   if (branchName) t.line(branchName);
   t.align("left").separator("-", settings.lineWidth);
-  t.line(new Date(mov.date).toLocaleString("es-AR"));
+  t.line(ticketDateTime(mov.date));
   t.separator("-", settings.lineWidth);
   t.line(`Cuenta: ${mov.accountName}`);
   if (mov.counterpartName) t.line(`${mov.counterpartLabel}: ${mov.counterpartName}`);
