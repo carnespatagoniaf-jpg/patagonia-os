@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { BarChart3, Banknote, Beef, BookOpenCheck, Boxes, ChefHat, ClipboardList, ScrollText, Download, FileText, HandCoins, Handshake, History, KeyRound, Landmark, MapPin, Menu, Upload, LogOut, PackagePlus, Receipt, Tag, TrendingUp, Users, Wallet } from "lucide-react";
+import { BarChart3, Banknote, Beef, BookOpenCheck, Boxes, ChefHat, ClipboardList, ScrollText, Download, FileText, HandCoins, Handshake, History, Truck, KeyRound, Landmark, MapPin, Menu, Upload, LogOut, PackagePlus, Receipt, Tag, TrendingUp, Users, Wallet } from "lucide-react";
 import { useAuth } from "../features/auth/AuthProvider";
 import { PLAN_LABELS, canAccessPage, planAllows, profilePlan, type Page } from "../features/auth/permissions";
 
@@ -33,6 +33,8 @@ const navGroups: Array<{ heading: string | null; items: NavItem[] }> = [
     heading: "Ventas",
     items: [
       { page: "sale", label: "Mostrador", icon: Receipt },
+      { page: "route", label: "Venta en ruta", icon: Truck },
+      { page: "route_trucks", label: "Camiones", icon: Truck },
       { page: "customers", label: "Clientes", icon: Handshake },
       { page: "sales_report", label: "Reporte de ventas", icon: ClipboardList }
     ]

@@ -24,7 +24,8 @@ export type Permission =
   | "branches.manage"
   | "audit.view"
   | "import.data"
-  | "scales.manage";
+  | "scales.manage"
+  | "route.sell";
 
 // "owner" es interno nuestro (el equipo de Patagonia OS): ve todo, incluidas
 // herramientas todavía en prueba (Auditoría) antes de decidir si pasan a
@@ -82,10 +83,12 @@ export const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> 
     "branches.manage",
     "users.manage",
     "import.data",
-    "scales.manage"
+    "scales.manage",
+    "route.sell"
   ],
   manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view"],
-  cashier: ["pos.sell", "products.view", "sales.create", "pos.treasury"],
+  // "route.sell": vendedor de un camión (venta en ruta, migración 161); la pantalla además pide companies.features "venta_ruta".
+  cashier: ["pos.sell", "products.view", "sales.create", "pos.treasury", "route.sell"],
   production: ["dashboard.view", "inventory.view", "inventory.adjust"],
   readonly: ["dashboard.view", "inventory.view", "reports.view"],
   // El contador (migración 155): solo la pantalla Contable. La base le corta toda escritura.
@@ -118,7 +121,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   "branches.manage": "Sucursales",
   "audit.view": "Auditoría",
   "import.data": "Importar desde Excel",
-  "scales.manage": "Balanzas"
+  "scales.manage": "Balanzas",
+  "route.sell": "Venta en ruta (camión)"
 };
 
 /** Planes que se venden (migración 101). El plan de la empresa se chequea
@@ -145,14 +149,15 @@ const PERMISSION_MIN_PLAN: Partial<Record<Permission, Plan>> = {
   "recipes.manage": "estandar",
   "profitability.view": "estandar",
   "creditors.manage": "estandar",
-  "scales.manage": "estandar"
+  "scales.manage": "estandar",
+  "route.sell": "estandar"
 };
 
 /** Páginas que piden un plan más alto que su permiso (ej. Sucursales: el
  * permiso branches.manage también maneja el selector de sucursal, que
  * Estándar necesita, pero la pantalla de resumen es de Full). */
 // Facturas (ARCA) bajó de Full a Estándar el 15/10/2026 (decisión del dueño; migración 121).
-const PAGE_MIN_PLAN: Partial<Record<string, Plan>> = { branches: "full", reconciliation: "full", cheques: "full", invoicing: "estandar", accounting: "full" };
+const PAGE_MIN_PLAN: Partial<Record<string, Plan>> = { branches: "full", reconciliation: "full", cheques: "full", invoicing: "estandar", accounting: "full", route_trucks: "estandar" };
 
 /** Plan de la empresa del usuario. Sin dato (modo demo, o la base todavía
  * sin la migración 101) cuenta como Full: nunca se le saca algo a nadie por
@@ -180,6 +185,8 @@ export function can(profile: UserProfile | null, permission: Permission) {
 /** Permiso requerido para cada página del menú — fuente única de verdad para el tipo Page. */
 export const PAGE_PERMISSIONS = {
   dashboard: "dashboard.view",
+  // Venta en ruta (migración 161), a pedido: va antes de Mostrador para que el vendedor del camión entre directo acá.
+  route: "route.sell",
   sale: "pos.sell",
   branches: "branches.manage",
   products: "products.view",
@@ -209,13 +216,14 @@ export const PAGE_PERMISSIONS = {
   accounts: "treasury.manage",
   expenses: "treasury.manage",
   // A pedido (Martínez): ventas a cuenta de un período con detalle y PDF.
-  sales_report: "customers.manage"
+  sales_report: "customers.manage",
+  route_trucks: "treasury.manage"
 } as const satisfies Record<string, Permission>;
 
 export type Page = keyof typeof PAGE_PERMISSIONS;
 
 /** Pantallas que solo ve una empresa que las pidió (companies.features, migración 143). Hoy: Martínez. */
-const PAGE_REQUIRED_FEATURE: Partial<Record<string, string>> = { accounts: "cuentas", expenses: "gastos", sales_report: "reporte_ventas" };
+const PAGE_REQUIRED_FEATURE: Partial<Record<string, string>> = { accounts: "cuentas", expenses: "gastos", sales_report: "reporte_ventas", route: "venta_ruta", route_trucks: "venta_ruta" };
 
 export function canAccessPage(profile: UserProfile | null, page: Page) {
   const feature = PAGE_REQUIRED_FEATURE[page];

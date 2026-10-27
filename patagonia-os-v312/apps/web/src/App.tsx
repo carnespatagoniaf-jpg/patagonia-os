@@ -3,6 +3,7 @@ import { lazyPage, PageFrame, prefetchPages } from "./components/LazyPage";
 import { Layout, type Page } from "./components/Layout";
 import { Dashboard } from "./features/dashboard/Dashboard";
 import { Sale } from "./features/sale/Sale";
+import { RouteSale } from "./features/route/RouteSale";
 import { Login } from "./features/auth/Login";
 import { ResetPassword } from "./features/auth/ResetPassword";
 import { useAuth } from "./features/auth/AuthProvider";
@@ -38,6 +39,8 @@ const Export = lazyPage(() => import("./features/export/Export"), "Export");
 const ImportData = lazyPage(() => import("./features/import/ImportData"), "ImportData");
 const Users = lazyPage(() => import("./features/users/Users"), "Users");
 const AuditLog = lazyPage(() => import("./features/audit/AuditLog"), "AuditLog");
+// Venta en ruta va en el paquete principal (como Mostrador): el vendedor la abre sin señal.
+const RouteTrucks = lazyPage(() => import("./features/route/RouteTrucks"), "RouteTrucks");
 const AdminCreateClient = lazyPage(() => import("./features/admin/AdminCreateClient"), "AdminCreateClient");
 
 export default function App() {
@@ -88,6 +91,8 @@ export default function App() {
         <PageFrame key={page}>
         {allowed && page === "dashboard" && <Dashboard />}
         {allowed && page === "sale" && <Sale />}
+        {allowed && page === "route" && <RouteSale />}
+        {allowed && page === "route_trucks" && <RouteTrucks />}
         {allowed && page === "products" && <ProductsLookup />}
         {allowed && page === "inventory" && <Inventory />}
         {allowed && page === "purchases" && <Purchases />}
