@@ -693,11 +693,16 @@ export function Purchases() {
             </table>
           </div>
 
-          <div className="cash-banner-form" style={{ marginTop: 16, flexWrap: "wrap" }}>
-            <input placeholder="Nombre" value={supplierName} onChange={(e) => setSupplierName(e.target.value)} />
-            <input placeholder="Rubro (pollo, carne...)" value={supplierCategory} onChange={(e) => setSupplierCategory(e.target.value)} />
-            <input placeholder="Teléfono" value={supplierPhone} onChange={(e) => setSupplierPhone(e.target.value)} />
-            <button disabled={busy} onClick={handleCreateSupplier}>Agregar proveedor</button>
+          <div className="form-box" style={{ marginTop: 16, marginBottom: 0 }}>
+            <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Proveedor nuevo</h3>
+            <div className="form-grid">
+              <label>Nombre<input value={supplierName} onChange={(e) => setSupplierName(e.target.value)} /></label>
+              <label>Rubro<input placeholder="Pollo, carne…" value={supplierCategory} onChange={(e) => setSupplierCategory(e.target.value)} /></label>
+              <label>Teléfono<input value={supplierPhone} onChange={(e) => setSupplierPhone(e.target.value)} /></label>
+            </div>
+            <div className="form-actions">
+              <button disabled={busy} onClick={handleCreateSupplier}>Agregar proveedor</button>
+            </div>
           </div>
         </section>
 
@@ -734,28 +739,38 @@ export function Purchases() {
             </div>
           )}
           {selectedSupplier && editingSupplier && (
-            <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
-              <input placeholder="Nombre" value={editSupplierName} onChange={(e) => setEditSupplierName(e.target.value)} />
-              <input placeholder="Rubro (pollo, carne...)" value={editSupplierCategory} onChange={(e) => setEditSupplierCategory(e.target.value)} />
-              <input placeholder="Teléfono" value={editSupplierPhone} onChange={(e) => setEditSupplierPhone(e.target.value)} />
-              <input placeholder="Notas" value={editSupplierNotes} onChange={(e) => setEditSupplierNotes(e.target.value)} />
-              {fiscalOn && (
-                <>
-                  <input placeholder="CUIT" inputMode="numeric" value={editSupplierCuit} onChange={(e) => setEditSupplierCuit(e.target.value)} />
-                  <select value={editSupplierTaxCondition} onChange={(e) => setEditSupplierTaxCondition(e.target.value)}>
-                    <option value="">Condición frente al IVA…</option>
-                    <option value="responsable_inscripto">Responsable inscripto (te da Factura A)</option>
-                    <option value="monotributo">Monotributista (Factura C)</option>
-                    <option value="exento">Exento</option>
+            <div>
+              <div className="form-grid">
+                <label>Nombre<input value={editSupplierName} onChange={(e) => setEditSupplierName(e.target.value)} /></label>
+                <label>Rubro<input placeholder="Pollo, carne…" value={editSupplierCategory} onChange={(e) => setEditSupplierCategory(e.target.value)} /></label>
+                <label>Teléfono<input value={editSupplierPhone} onChange={(e) => setEditSupplierPhone(e.target.value)} /></label>
+                <label>Notas<input value={editSupplierNotes} onChange={(e) => setEditSupplierNotes(e.target.value)} /></label>
+                {fiscalOn && (
+                  <>
+                    <label>CUIT<input inputMode="numeric" value={editSupplierCuit} onChange={(e) => setEditSupplierCuit(e.target.value)} /></label>
+                    <label>
+                      Condición frente al IVA
+                      <select value={editSupplierTaxCondition} onChange={(e) => setEditSupplierTaxCondition(e.target.value)}>
+                        <option value="">Sin definir</option>
+                        <option value="responsable_inscripto">Responsable inscripto (te da Factura A)</option>
+                        <option value="monotributo">Monotributista (Factura C)</option>
+                        <option value="exento">Exento</option>
+                      </select>
+                    </label>
+                  </>
+                )}
+                <label>
+                  Estado
+                  <select value={editSupplierActive ? "1" : "0"} onChange={(e) => setEditSupplierActive(e.target.value === "1")}>
+                    <option value="1">Activo</option>
+                    <option value="0">Dado de baja</option>
                   </select>
-                </>
-              )}
-              <select value={editSupplierActive ? "1" : "0"} onChange={(e) => setEditSupplierActive(e.target.value === "1")}>
-                <option value="1">Activo</option>
-                <option value="0">Dado de baja</option>
-              </select>
-              <button disabled={busy} onClick={handleUpdateSupplier}>Guardar</button>
-              <button className="secondary" disabled={busy} onClick={() => setEditingSupplier(false)}>Cancelar</button>
+                </label>
+              </div>
+              <div className="form-actions">
+                <button disabled={busy} onClick={handleUpdateSupplier}>Guardar</button>
+                <button className="secondary" disabled={busy} onClick={() => setEditingSupplier(false)}>Cancelar</button>
+              </div>
             </div>
           )}
         </section>
@@ -767,9 +782,11 @@ export function Purchases() {
             <div className="panel-title">
               <h2>Registrar pago a {selectedSupplier.name}</h2>
             </div>
-              <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
-                <input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
-                <input type="text" inputMode="decimal" placeholder="Monto" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
+              <div className="form-grid">
+                <label>Fecha<input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} /></label>
+                <label>Monto<input type="text" inputMode="decimal" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} /></label>
+                <label className="span-2">
+                  Pagar desde
                 <select
                   value={paymentAccountId}
                   onChange={(e) => {
@@ -779,7 +796,7 @@ export function Purchases() {
                     if (cheque) setPaymentAmount(String(cheque.amount).replace(".", ","));
                   }}
                 >
-                  <option value="">Pagar desde…</option>
+                  <option value="">Elegí de dónde sale…</option>
                   {accounts.map((a) => (
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
@@ -794,12 +811,8 @@ export function Purchases() {
                     </optgroup>
                   )}
                 </select>
-                {!paymentAccountId.startsWith("__") && (
-                  <>
-                    <input placeholder="Nota" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} />
-                    <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
-                  </>
-                )}
+                </label>
+                <label className="span-2">Nota (opcional)<input value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} /></label>
               </div>
               {paymentAccountId === OWN_CHEQUE_OPTION && (
                 <div style={{ marginTop: 10 }}>
@@ -818,12 +831,9 @@ export function Purchases() {
               {paymentAccountId.startsWith(ENDORSE_PREFIX) && (
                 <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>Se paga con el monto del cheque. El cheque sale de la cartera y queda como endosado a este proveedor.</p>
               )}
-              {paymentAccountId.startsWith("__") && (
-                <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 10 }}>
-                  <input placeholder="Nota" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} />
-                  <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
-                </div>
-              )}
+              <div className="form-actions">
+                <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
+              </div>
           </section>
 
           {adjustmentsEnabled && (
@@ -832,14 +842,19 @@ export function Purchases() {
                 <h2>Descuento o recargo a {selectedSupplier.name}</h2>
               </div>
               <p className="muted" style={{ marginTop: 0 }}>Cambia lo que le debés, sin mover caja ni stock. Descuento: le debés menos. Recargo: le debés más.</p>
-              <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
-                <select value={adjustmentKind} onChange={(e) => setAdjustmentKind(e.target.value as "descuento" | "recargo")}>
-                  <option value="descuento">Descuento</option>
-                  <option value="recargo">Recargo</option>
-                </select>
-                <input type="date" value={adjustmentDate} onChange={(e) => setAdjustmentDate(e.target.value)} />
-                <input type="text" inputMode="decimal" placeholder="Monto" value={adjustmentAmount} onChange={(e) => setAdjustmentAmount(e.target.value)} />
-                <input placeholder="Motivo (opcional)" value={adjustmentNotes} onChange={(e) => setAdjustmentNotes(e.target.value)} />
+              <div className="form-grid">
+                <label>
+                  Tipo
+                  <select value={adjustmentKind} onChange={(e) => setAdjustmentKind(e.target.value as "descuento" | "recargo")}>
+                    <option value="descuento">Descuento</option>
+                    <option value="recargo">Recargo</option>
+                  </select>
+                </label>
+                <label>Fecha<input type="date" value={adjustmentDate} onChange={(e) => setAdjustmentDate(e.target.value)} /></label>
+                <label>Monto<input type="text" inputMode="decimal" value={adjustmentAmount} onChange={(e) => setAdjustmentAmount(e.target.value)} /></label>
+                <label className="span-2">Motivo (opcional)<input value={adjustmentNotes} onChange={(e) => setAdjustmentNotes(e.target.value)} /></label>
+              </div>
+              <div className="form-actions">
                 <button disabled={busy} onClick={handleAddAdjustment}>{busy ? "Guardando…" : adjustmentKind === "descuento" ? "Cargar descuento" : "Cargar recargo"}</button>
               </div>
             </section>

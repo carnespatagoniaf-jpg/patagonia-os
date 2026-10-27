@@ -109,6 +109,8 @@ details > summary { cursor: pointer; }
 .shift-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
 .shift-actions > :not(.pos-toolbar-btn), .shift-actions > .wide { grid-column: 1 / -1; }
 .shift-actions .pos-toolbar-btn { padding: 6px 8px; font-size: 12px; border-radius: 9px; line-height: 1.25; }
+/* Todos los botones del Turno del mismo alto y con el texto centrado, aunque unos ocupen dos renglones. */
+.shift-actions .pos-toolbar-btn { min-height: 38px; display: flex; align-items: center; justify-content: center; text-align: center; }
 /* Con una lista o un formulario abierto en Turno (caja, vale, decomiso, cierre…), la columna se ensancha. */
 .pos-grid:has(.shift-card.expanded) { grid-template-columns: minmax(0, 1fr) 460px; }
 .shift-card.expanded { overflow-x: auto; }
@@ -359,6 +361,15 @@ button.danger { background: white; color: #b42318; border: 1px solid #f3d0cc; }
   .pos-cart-row .name { grid-column: 1 / -1; }
   .pos-total-bar { flex-direction: column; align-items: stretch; text-align: center; }
   .pos-charge-btn { width: 100%; }
+  /* Celular: el engranaje al lado del título y la parte fija de cobro más baja, para que se vea el ticket. */
+  .page-header.pos-page-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+  .pos-checkout-dock .pos-payment-methods { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .pos-checkout-dock .pos-payment-method-btn { padding: 6px 4px; font-size: 12.5px; line-height: 1.2; }
+  .pos-checkout-dock .pos-payment-method-btn kbd { display: none; }
+  .pos-checkout-dock .pos-total-bar { flex-direction: row; flex-wrap: nowrap; align-items: center; text-align: left; padding: 8px 12px; gap: 10px; }
+  .pos-checkout-dock .pos-charge-btn kbd { display: none; }
+  .pos-checkout-dock .pos-total-value { font-size: 24px; }
+  .pos-checkout-dock .pos-charge-btn { width: auto; padding: 11px 18px; }
 }
 
 .login-page, .loading-page {
@@ -638,6 +649,7 @@ button:disabled { opacity: .55; cursor: not-allowed; }
 .import-tabs { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
 .import-steps { margin: 0 0 12px; padding-left: 20px; display: grid; gap: 12px; font-size: 14px; }
 .import-inputs { display: grid; gap: 8px; margin-top: 8px; max-width: 640px; }
+.import-inputs > * { min-width: 0; }
 .import-inputs textarea { width: 100%; border: 1px solid #d6dce5; border-radius: 10px; padding: 10px 12px; font: inherit; box-sizing: border-box; }
 .import-summary { display: flex; gap: 8px; flex-wrap: wrap; margin: 10px 0; }
 .import-chip { border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 800; background: #f2f4f7; color: #47505c; }
@@ -988,9 +1000,9 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--brand); outline
 
 /* Lo que va adentro de una sección de configuración no puede ser más ancho que
    ella (en el celular una grilla de dos columnas se salía de la pantalla). */
-.setting-body > *, .setting-body li { min-width: 0; }
-.setting-body li { overflow-wrap: anywhere; }
-input[type="file"] { max-width: 100%; }
+.setting-body > *, main li { min-width: 0; }
+main li { overflow-wrap: anywhere; }
+input[type="file"], main textarea { max-width: 100%; }
 
 /* Tablas como tarjetas en el celular (hasta 600px): cada fila es una tarjeta y
    cada dato muestra el nombre de su columna (data-label, lo pone

@@ -822,22 +822,22 @@ export function Customers() {
           {customers.length === 0 && !loading && <p className="muted">Todavía no cargaste ningún cliente.</p>}
           {customers.length > 0 && visibleCustomers.length === 0 && <p className="muted">Ningún cliente coincide con la búsqueda.</p>}
 
-          <div className="cash-banner-form" style={{ marginTop: 16, flexWrap: "wrap" }}>
-            <input placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} />
-            <input placeholder="Teléfono (opcional)" value={phone} onChange={(e) => setPhone(e.target.value)} />
-            <input placeholder="Localidad (opcional)" value={locality} onChange={(e) => setLocality(e.target.value)} />
-            <input placeholder="Provincia (opcional)" value={province} onChange={(e) => setProvince(e.target.value)} />
-            <input placeholder="Nota (opcional)" value={notes} onChange={(e) => setNotes(e.target.value)} />
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="Saldo anterior: lo que ya te debe (opcional)"
-              title="Si el cliente ya te debía antes de usar el sistema, poné cuánto. Queda como primer movimiento de su cuenta."
-              value={openingBalance}
-              onChange={(e) => setOpeningBalance(e.target.value)}
-              style={{ minWidth: 260 }}
-            />
-            <button disabled={busy} onClick={handleCreateCustomer}>Agregar cliente</button>
+          <div className="form-box" style={{ marginTop: 16, marginBottom: 0 }}>
+            <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Cliente nuevo</h3>
+            <div className="form-grid">
+              <label>Nombre<input value={name} onChange={(e) => setName(e.target.value)} /></label>
+              <label>Teléfono (opcional)<input value={phone} onChange={(e) => setPhone(e.target.value)} /></label>
+              <label>Localidad (opcional)<input value={locality} onChange={(e) => setLocality(e.target.value)} /></label>
+              <label>Provincia (opcional)<input value={province} onChange={(e) => setProvince(e.target.value)} /></label>
+              <label>Nota (opcional)<input value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
+              <label title="Si el cliente ya te debía antes de usar el sistema, poné cuánto. Queda como primer movimiento de su cuenta.">
+                Saldo anterior (opcional)
+                <input type="text" inputMode="decimal" placeholder="Lo que ya te debe" value={openingBalance} onChange={(e) => setOpeningBalance(e.target.value)} />
+              </label>
+            </div>
+            <div className="form-actions">
+              <button disabled={busy} onClick={handleCreateCustomer}>Agregar cliente</button>
+            </div>
           </div>
         </section>
 
@@ -860,26 +860,28 @@ export function Customers() {
             </div>
           )}
           {selectedCustomer && editingCustomer && (
-            <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
-              <input placeholder="Nombre" value={editName} onChange={(e) => setEditName(e.target.value)} />
-              <input placeholder="Teléfono" value={editPhone} onChange={(e) => setEditPhone(e.target.value)} />
-              <input placeholder="Localidad" value={editLocality} onChange={(e) => setEditLocality(e.target.value)} />
-              <input placeholder="Provincia" value={editProvince} onChange={(e) => setEditProvince(e.target.value)} />
-              <input placeholder="Nota" value={editNotesField} onChange={(e) => setEditNotesField(e.target.value)} />
-              <input
-                type="number"
-                placeholder="Plazo de pago (días)"
-                value={editTermDays}
-                onChange={(e) => setEditTermDays(e.target.value)}
-                style={{ width: 170 }}
-              />
-              <select value={editActive ? "1" : "0"} onChange={(e) => setEditActive(e.target.value === "1")}>
-                <option value="1">Activo</option>
-                <option value="0">Dado de baja</option>
-              </select>
-              <button disabled={busy} onClick={handleUpdateCustomer}>Guardar</button>
-              <button className="secondary" disabled={busy} onClick={() => setEditingCustomer(false)}>Cancelar</button>
-              <button className="link-button" disabled={busy} onClick={() => void handleDeleteCustomer()}>Eliminar cliente</button>
+            <div>
+              <div className="form-grid">
+                <label>Nombre<input value={editName} onChange={(e) => setEditName(e.target.value)} /></label>
+                <label>Teléfono<input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} /></label>
+                <label>Localidad<input value={editLocality} onChange={(e) => setEditLocality(e.target.value)} /></label>
+                <label>Provincia<input value={editProvince} onChange={(e) => setEditProvince(e.target.value)} /></label>
+                <label>Nota<input value={editNotesField} onChange={(e) => setEditNotesField(e.target.value)} /></label>
+                <label>Plazo de pago (días)<input type="number" value={editTermDays} onChange={(e) => setEditTermDays(e.target.value)} /></label>
+                <label>
+                  Estado
+                  <select value={editActive ? "1" : "0"} onChange={(e) => setEditActive(e.target.value === "1")}>
+                    <option value="1">Activo</option>
+                    <option value="0">Dado de baja</option>
+                  </select>
+                </label>
+              </div>
+              <div className="form-actions">
+                <button disabled={busy} onClick={handleUpdateCustomer}>Guardar</button>
+                <button className="secondary" disabled={busy} onClick={() => setEditingCustomer(false)}>Cancelar</button>
+                <span className="spacer" />
+                <button className="danger" disabled={busy} onClick={() => void handleDeleteCustomer()}>Eliminar cliente</button>
+              </div>
             </div>
           )}
         </section>
@@ -1077,35 +1079,42 @@ export function Customers() {
               <div className="panel-title">
                 <h2>Registrar pago</h2>
               </div>
-              <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10 }}>
-                <input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
-                <input type="text" inputMode="decimal" placeholder="Monto" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
-                <select value={paymentAccountId} onChange={(e) => setPaymentAccountId(e.target.value)}>
-                  <option value="">Entra a…</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                  {canCheques && <option value={CHEQUE_OPTION}>Cheque / eCheq</option>}
-                </select>
+              <div className="form-grid" style={{ marginBottom: 10 }}>
+                <label>Fecha<input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} /></label>
+                <label>Monto<input type="text" inputMode="decimal" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} /></label>
+                <label>
+                  Entra a
+                  <select value={paymentAccountId} onChange={(e) => setPaymentAccountId(e.target.value)}>
+                    <option value="">Elegí la cuenta…</option>
+                    {accounts.map((a) => (
+                      <option key={a.id} value={a.id}>{a.name}</option>
+                    ))}
+                    {canCheques && <option value={CHEQUE_OPTION}>Cheque / eCheq</option>}
+                  </select>
+                </label>
+                <label className="span-2">Nota (opcional)<input value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} /></label>
               </div>
               {paymentAccountId === CHEQUE_OPTION && (
                 <div style={{ marginBottom: 10 }}>
                   <ChequeFields value={paymentCheque} onChange={setPaymentCheque} withAmount={false} />
                 </div>
               )}
-              <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
-                <input placeholder="Nota (opcional)" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} style={{ flex: 1, minWidth: 220 }} />
+              <div className="form-actions" style={{ marginTop: 0 }}>
                 <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
               </div>
               <div style={{ marginTop: 12 }}>
                 {!showOpening ? (
                   <button className="link-button" onClick={() => setShowOpening(true)}>Cargar saldo anterior (lo que ya debía antes del sistema)</button>
                 ) : (
-                  <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
-                    <input type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} />
-                    <input type="text" inputMode="decimal" placeholder="Cuánto te debía" value={openingAmount} onChange={(e) => setOpeningAmount(e.target.value)} />
-                    <button disabled={busy} onClick={handleOpeningBalance}>Cargar saldo anterior</button>
-                    <button className="secondary" onClick={() => setShowOpening(false)}>Cancelar</button>
+                  <div className="form-box" style={{ marginBottom: 0 }}>
+                    <div className="form-grid">
+                      <label>Fecha<input type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} /></label>
+                      <label>Cuánto te debía<input type="text" inputMode="decimal" value={openingAmount} onChange={(e) => setOpeningAmount(e.target.value)} /></label>
+                    </div>
+                    <div className="form-actions">
+                      <button disabled={busy} onClick={handleOpeningBalance}>Cargar saldo anterior</button>
+                      <button className="secondary" onClick={() => setShowOpening(false)}>Cancelar</button>
+                    </div>
                   </div>
                 )}
               </div>

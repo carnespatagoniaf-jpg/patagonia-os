@@ -355,6 +355,7 @@ export function Profitability() {
           <button onClick={handleSaveStockCount}>Guardar conteo</button>
         </div>
 
+        <div className="table-scroll">
         <table className="data-table">
           <thead>
             <tr>
@@ -379,6 +380,7 @@ export function Profitability() {
             ))}
           </tbody>
         </table>
+        </div>
         {stockCountsByDate.length === 0 && <p className="muted">Todavía no cargaste ningún conteo.</p>}
       </section>
 
@@ -386,9 +388,9 @@ export function Profitability() {
         <div className="panel-title">
           <h2>Período</h2>
         </div>
-        <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 4 }}>
-          <input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
-          <input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
+        <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 4, alignItems: "flex-end" }}>
+          <label className="form-field">Desde<input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} /></label>
+          <label className="form-field">Hasta<input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} /></label>
           <button className="secondary" onClick={() => { setPeriodStart(startOfWeekIso(todayIso())); setPeriodEnd(endOfWeekIso(todayIso())); }}>Esta semana</button>
           <button className="secondary" onClick={() => { setPeriodStart(startOfWeekIso(addDaysIso(todayIso(), -7))); setPeriodEnd(endOfWeekIso(addDaysIso(todayIso(), -7))); }}>Semana pasada</button>
           <button className="secondary" onClick={() => { setPeriodStart(startOfMonthIso(todayIso())); setPeriodEnd(endOfMonthIso(todayIso())); }}>Este mes</button>
