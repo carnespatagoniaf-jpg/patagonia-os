@@ -58,7 +58,7 @@ export function addScannedItem(paper: Paper, scan: DecodedScan, links: ScaleLink
 
   if (scan.generic || link?.kind === "libre") {
     const name = scan.item?.name.trim() || "Venta libre de la balanza";
-    const item: PaperItem = { barcode: scan.barcode, scaleCode: scan.code, kind: "libre", productId: null, name, unit, quantity: scan.quantity, prices: [], amount: null };
+    const item: PaperItem = { barcode: scan.barcode, scaleCode: scan.code, kind: "libre", productId: null, name, unit, quantity: scan.quantity, prices: [], amount: scan.amount ?? null };
     return { ok: true, paper: { items: [...paper.items, item] }, item };
   }
   if (!scan.item) return { ok: false, reason: `${label} no está en los productos leídos de la balanza. Hay que leer la balanza de nuevo (Stock → Balanza). No se agregó.` };
@@ -71,7 +71,7 @@ export function addScannedItem(paper: Paper, scan: DecodedScan, links: ScaleLink
   if (!weighed && !Number.isInteger(scan.quantity)) return { ok: false, reason: `${label}: la cantidad ${scan.quantity} no es un número entero de unidades. No se agregó.` };
   const prices = scan.item.prices.filter((p) => p > 0);
   if (prices.length === 0) return { ok: false, reason: `${label} no tiene precio en la balanza. No se agregó.` };
-  const item: PaperItem = { barcode: scan.barcode, scaleCode: scan.code, kind: "product", productId: product.id, name: product.name, unit, quantity: scan.quantity, prices, amount: null };
+  const item: PaperItem = { barcode: scan.barcode, scaleCode: scan.code, kind: "product", productId: product.id, name: product.name, unit, quantity: scan.quantity, prices, amount: scan.amount ?? null };
   return { ok: true, paper: { items: [...paper.items, item] }, item };
 }
 
@@ -155,13 +155,23 @@ export function closePaper(paper: Paper, total: { amount: number; articles: numb
     productIdx.forEach((idx, k) => (result[idx] = Math.round(paperAmounts[k])));
     return { ok: true, amounts: result, method: "papel", detail: "importes copiados del ticket impreso" };
   }
-  if (productIdx.length > 0) {
-    const s = settleWithPrices(productIdx.map((i) => items[i].quantity), productIdx.map((i) => items[i].prices), productTarget);
+  // Artículos cuyo código trae el importe (ej. Systel de Giuseppe): ese importe es seguro y no se deduce.
+  const knownIdx = productIdx.filter((i) => (items[i].amount ?? 0) > 0);
+  const unknownIdx = productIdx.filter((i) => !knownIdx.includes(i));
+  const knownSum = knownIdx.reduce((s, i) => s + Math.round(items[i].amount!), 0);
+  if (knownIdx.length > 0 && unknownIdx.length === 0 && Math.abs(knownSum - productTarget) > 1) {
+    return { ok: false, need: "fix", reason: `los artículos escaneados suman $${knownSum + libreSum} y el TOTAL del ticket es $${target} (¿es de otro ticket?)` };
+  }
+  if (knownIdx.length > 0 && unknownIdx.length > 0 && productTarget - knownSum <= 0) {
+    return { ok: false, need: "fix", reason: `los artículos con importe ya suman $${knownSum + libreSum} y el TOTAL del ticket es $${target}` };
+  }
+  if (unknownIdx.length > 0) {
+    const s = settleWithPrices(unknownIdx.map((i) => items[i].quantity), unknownIdx.map((i) => items[i].prices), productTarget - knownSum);
     if (s === "ninguna") return { ok: false, need: "paper_amounts", reason: "el total no coincide con los precios de lista de la balanza (precio a mano o cambiado)" };
     if (s === "varias") return { ok: false, need: "paper_amounts", reason: "más de una combinación de precios da el total" };
-    productIdx.forEach((idx, k) => (result[idx] = s[k]));
+    unknownIdx.forEach((idx, k) => (result[idx] = s[k]));
     const groups = new Map<string, number[]>();
-    for (const idx of productIdx) {
+    for (const idx of unknownIdx) {
       const key = `${items[idx].productId}|${items[idx].quantity}`;
       groups.set(key, [...(groups.get(key) ?? []), idx]);
     }
@@ -170,6 +180,12 @@ export function closePaper(paper: Paper, total: { amount: number; articles: numb
       const question = repeated.map((g) => `${g.length} × ${describeItem(items[g[0]])}: $${result[g[0]].toLocaleString("es-AR")} cada uno`).join("; ");
       return { ok: false, need: "confirm_split", amounts: result, question, reason: "hay artículos iguales: hay que confirmar con el papel el importe de cada uno" };
     }
+  }
+  if (knownIdx.length > 0 && unknownIdx.length === 0) {
+    // Diferencia de redondeo (±$1): va al último, para que la venta dé exacto el TOTAL.
+    const last = knownIdx[knownIdx.length - 1];
+    result[last] += productTarget - knownSum;
+    return { ok: true, amounts: result, method: "listas", detail: "importe de cada artículo según su código de barras" };
   }
   return { ok: true, amounts: result, method: "listas", detail: productIdx.length ? "importe de cada artículo según el precio de lista que usó la balanza" : "venta libre" };
 }
