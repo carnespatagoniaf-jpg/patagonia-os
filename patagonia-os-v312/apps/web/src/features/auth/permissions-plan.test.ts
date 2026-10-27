@@ -55,3 +55,17 @@ describe("planes: qué ve cada uno", () => {
     assert.equal(planAllows(cashier, "full"), true);
   });
 });
+
+describe("pantallas que una empresa no usa (companies.features 'no:<permiso>')", () => {
+  it("se le sacan a todos sus usuarios, incluido el dueño, y nada más", () => {
+    const features = ["venta_ruta", "no:carcass.manage", "no:recipes.manage"];
+    const admin: UserProfile = { ...owner("estandar"), role: "admin", features };
+    const ownerUser: UserProfile = { ...owner("estandar"), features };
+    for (const p of [admin, ownerUser]) {
+      assert.equal(canAccessPage(p, "carcass"), false);
+      assert.equal(canAccessPage(p, "recipes"), false);
+      assert.equal(canAccessPage(p, "customers"), true);
+      assert.equal(canAccessPage(p, "route"), true);
+    }
+  });
+});

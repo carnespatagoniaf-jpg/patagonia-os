@@ -178,6 +178,9 @@ export function can(profile: UserProfile | null, permission: Permission) {
   const permissions = rolePermissions[profile.role];
   const grantedByRole = permissions.includes("*") || permissions.includes(permission);
   if (!grantedByRole) return false;
+  // Empresa que no usa una pantalla (ej. La primera, fiambres: sin Despiece ni Recetas): companies.features
+  // "no:<permiso>" se lo saca a TODOS sus usuarios, también a los que se creen después.
+  if (profile.features?.includes(`no:${permission}`)) return false;
   // denied_permissions solo puede sacar permisos que el rol ya daba, nunca agregar.
   return !profile.denied_permissions?.includes(permission);
 }
