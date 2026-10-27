@@ -648,8 +648,7 @@ export function Purchases() {
       <div className="content-grid">
         <section className="panel">
           <div className="panel-title">
-            <h2>Proveedores</h2>
-            <span>{suppliersLoading ? "Cargando…" : `${suppliers.length} proveedores`}</span>
+            <h2>Proveedores <span className="muted" style={{ fontSize: 14, fontWeight: 500 }}>{suppliersLoading ? "Cargando…" : suppliers.length}</span></h2>
           </div>
 
           <div className="panel-list-scroll">
@@ -663,28 +662,29 @@ export function Purchases() {
               </thead>
               <tbody>
                 {suppliers.map((supplier) => (
-                  <tr key={supplier.id}>
-                    <td>{supplier.name}</td>
+                  <tr key={supplier.id} className={supplier.id === selectedSupplierId ? "row-selected" : "row-clickable"} onClick={() => setSelectedSupplierId(supplier.id)}>
+                    <td><strong>{supplier.name}</strong></td>
                     <td>{supplier.category}</td>
-                    <td>
+                    <td onClick={(e) => e.stopPropagation()}>
                       {confirmDeleteSupplierId === supplier.id ? (
-                        <>
-                          <span className="muted" style={{ fontSize: 13, marginRight: 6 }}>¿Seguro? Si ya tiene compras o pagos, queda dado de baja y se guarda su historia.</span>
-                          <button className="danger" disabled={deleteSupplierBusy} onClick={() => handleConfirmDeleteSupplier(supplier.id)}>
-                            {deleteSupplierBusy ? "Eliminando…" : "Sí, borrar"}
-                          </button>{" "}
-                          <button className="secondary" disabled={deleteSupplierBusy} onClick={() => setConfirmDeleteSupplierId(null)}>Cancelar</button>
-                        </>
+                        <div style={{ whiteSpace: "normal", display: "grid", gap: 6, maxWidth: 280 }}>
+                          <span className="muted" style={{ fontSize: 12 }}>¿Seguro? Si ya tiene compras o pagos, queda dado de baja y se guarda su historia.</span>
+                          <div className="row-actions" style={{ justifyContent: "flex-start" }}>
+                            <button className="danger" disabled={deleteSupplierBusy} onClick={() => handleConfirmDeleteSupplier(supplier.id)}>
+                              {deleteSupplierBusy ? "Eliminando…" : "Sí, borrar"}
+                            </button>
+                            <button className="secondary" disabled={deleteSupplierBusy} onClick={() => setConfirmDeleteSupplierId(null)}>Cancelar</button>
+                          </div>
+                        </div>
                       ) : (
-                        <>
-                          <button
-                            className={supplier.id === selectedSupplierId ? "" : "secondary"}
-                            onClick={() => setSelectedSupplierId(supplier.id)}
-                          >
-                            {supplier.id === selectedSupplierId ? "Seleccionado" : "Ver cuenta"}
-                          </button>{" "}
+                        <div className="row-actions">
+                          {supplier.id === selectedSupplierId ? (
+                            <span className="badge brand">Viendo</span>
+                          ) : (
+                            <button className="secondary" onClick={() => setSelectedSupplierId(supplier.id)}>Ver cuenta</button>
+                          )}
                           <button className="danger" onClick={() => setConfirmDeleteSupplierId(supplier.id)}>Borrar</button>
-                        </>
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -1124,8 +1124,10 @@ export function Purchases() {
                                 <input type="text" inputMode="decimal" value={editUnitPrice} onChange={(e) => setEditUnitPrice(e.target.value)} style={{ width: 90 }} />
                               </td>
                               <td className="num">
-                                <button disabled={busy} onClick={() => handleSaveEdit(item.id)}>Guardar</button>
-                                <button className="secondary" disabled={busy} onClick={() => setEditingItemId(null)}>Cancelar</button>
+                                <div className="row-actions">
+                                  <button disabled={busy} onClick={() => handleSaveEdit(item.id)}>Guardar</button>
+                                  <button className="secondary" disabled={busy} onClick={() => setEditingItemId(null)}>Cancelar</button>
+                                </div>
                               </td>
                             </>
                           ) : (
@@ -1160,9 +1162,10 @@ export function Purchases() {
               <div className="panel-title">
                 <h2>Pagos</h2>
               </div>
-              <table className="data-table">
+              <div className="table-scroll">
+              <table className="data-table compact">
                 <thead>
-                  <tr><th>Fecha</th><th className="num">Monto</th><th>Cuenta</th><th>Nota</th><th></th></tr>
+                  <tr><th>Fecha</th><th className="num">Monto</th><th>Cuenta y nota</th><th></th></tr>
                 </thead>
                 <tbody>
                   {payments.map((payment) => (
@@ -1186,28 +1189,35 @@ export function Purchases() {
                               <option key={a.id} value={a.id}>{a.name}</option>
                             ))}
                           </select>
+                          <input placeholder="Nota" value={editPaymentNotes} onChange={(e) => setEditPaymentNotes(e.target.value)} style={{ marginTop: 6, width: "100%" }} />
                         </td>
-                        <td><input value={editPaymentNotes} onChange={(e) => setEditPaymentNotes(e.target.value)} /></td>
                         <td>
-                          <button disabled={busy} onClick={handleSavePayment}>Guardar</button>{" "}
-                          <button className="secondary" disabled={busy} onClick={() => setEditingPaymentId(null)}>Cancelar</button>
+                          <div className="row-actions">
+                            <button disabled={busy} onClick={handleSavePayment}>Guardar</button>
+                            <button className="secondary" disabled={busy} onClick={() => setEditingPaymentId(null)}>Cancelar</button>
+                          </div>
                         </td>
                       </tr>
                     ) : (
                       <tr key={payment.id}>
-                        <td>{payment.paymentDate}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>{payment.paymentDate}</td>
                         <td className="num">{formatMoney(payment.amount)}</td>
-                        <td>{payment.accountName ?? PAYMENT_METHOD_LABELS[payment.paymentMethod]}</td>
-                        <td>{payment.notes ?? "-"}</td>
                         <td>
-                          <button className="secondary" disabled={busy} onClick={() => startEditPayment(payment)}>Editar</button>{" "}
-                          <button className="secondary" disabled={busy} onClick={() => handleDeletePayment(payment.id)}>Borrar</button>
+                          {payment.accountName ?? PAYMENT_METHOD_LABELS[payment.paymentMethod]}
+                          {payment.notes && <span className="cell-sub" style={{ whiteSpace: "normal" }}>{payment.notes}</span>}
+                        </td>
+                        <td>
+                          <div className="row-actions">
+                            <button className="secondary" disabled={busy} onClick={() => startEditPayment(payment)}>Editar</button>
+                            <button className="danger" disabled={busy} onClick={() => handleDeletePayment(payment.id)}>Borrar</button>
+                          </div>
                         </td>
                       </tr>
                     )
                   ))}
                 </tbody>
               </table>
+              </div>
               {payments.length === 0 && <p className="muted">Todavía no hay pagos registrados.</p>}
             </section>
           </div>
@@ -1220,6 +1230,7 @@ export function Purchases() {
             <p className="muted print-only-header">
               {selectedSupplier.name} · {selectedSupplier.category}
             </p>
+            <div className="table-scroll">
             <table className="data-table">
               <thead>
                 <tr>
@@ -1233,7 +1244,7 @@ export function Purchases() {
               <tbody>
                 {ledger.map((row) => (
                   <tr key={row.key}>
-                    <td>{row.date}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{row.date}</td>
                     <td>
                       {row.detail}
                       {row.adjustmentId && (
@@ -1252,6 +1263,7 @@ export function Purchases() {
                 ))}
               </tbody>
             </table>
+            </div>
             {ledger.length === 0 && <p className="muted">Todavía no hay movimientos para este proveedor.</p>}
           </section>
         </>

@@ -269,7 +269,7 @@ export function Treasury() {
                     onChange={(e) => void handleChangeAccountBranch(account.id, e.target.value)}
                     style={{ marginTop: 8, fontSize: 12 }}
                   >
-                    <option value="">Compartida (todas las sucursales)</option>
+                    <option value="">Compartida (todas)</option>
                     {branches.map((b) => (
                       <option key={b.id} value={b.id}>Solo {b.name}</option>
                     ))}

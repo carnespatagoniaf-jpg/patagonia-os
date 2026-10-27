@@ -830,3 +830,194 @@ a.button-link:hover { background: #731818; }
 .my-scale-diag table { border-collapse: collapse; width: 100%; }
 .my-scale-diag th, .my-scale-diag td { border-bottom: 1px solid #eef0f3; padding: 4px 6px; text-align: left; vertical-align: top; }
 .my-scale-diag code { font-size: 11px; word-break: break-all; }
+
+/* ══════════════════════════════════════════════════════════════════════════
+   Sistema de diseño (2026-10-27). Va al final: pisa lo de arriba sin tocar
+   cada pantalla. Reglas:
+   - Un solo color de marca (--brand) y una escala de grises.
+   - Botones: 38px de alto en formularios; 32px dentro de tablas. Principal =
+     relleno de marca; secundario = borde gris; peligro = borde rojo; link =
+     texto subrayado.
+   - Tablas: celdas de 10/12px, contenido centrado en la vertical, las acciones
+     siempre en una sola fila (nunca apiladas).
+   - Pensado para 1366×768 sin achicar el zoom.
+   ══════════════════════════════════════════════════════════════════════════ */
+:root {
+  --brand: #8b1e1e; --brand-dark: #731818; --brand-soft: #fff1f1; --brand-line: #f3d0cc;
+  --ink: #18202b; --ink-2: #47505c; --muted: #697386; --faint: #8b95a5;
+  --line: #e5e7eb; --line-soft: #edf0f4; --field-line: #d6dce5; --bg: #f2f4f7; --surface: #fff; --surface-2: #f7f8fa;
+  --ok: #176329; --ok-soft: #eef7ef; --warn: #8a4b00; --warn-soft: #fff5e6; --danger: #b42318; --danger-soft: #fdecea;
+  --r-sm: 8px; --r: 10px; --r-lg: 14px;
+  --shadow: 0 1px 2px rgba(24,32,43,.04), 0 6px 20px rgba(24,32,43,.05);
+}
+body { background: var(--bg); color: var(--ink); font-size: 14px; line-height: 1.45; }
+h1, h2, h3 { color: var(--ink); letter-spacing: -.01em; }
+h2 { font-size: 19px; }
+h3 { font-size: 16px; }
+
+/* Estructura: menú un poco más angosto y menos margen, para que entren las tablas en una notebook. */
+.app-shell { grid-template-columns: 228px minmax(0, 1fr); }
+.sidebar { padding: 22px 14px; }
+.sidebar nav { margin-top: 24px; }
+.nav-item { padding: 9px 12px; font-size: 14px; }
+.nav-heading { margin: 14px 4px 4px; }
+.main-content { padding: 28px 32px; }
+@media (max-width: 1440px) { .main-content { padding: 22px 24px; } }
+.page-header { margin-bottom: 18px; align-items: center; }
+.page-header h1 { font-size: clamp(24px, 2.4vw, 32px); margin: 2px 0 4px; }
+.page-header .muted, .page-header p { max-width: 860px; }
+.panel { padding: 20px; border-radius: var(--r-lg); box-shadow: var(--shadow); border-color: var(--line); }
+.panel + .panel, .content-grid + .panel, .panel + .content-grid { margin-top: 16px; }
+.panel-title { margin-bottom: 14px; flex-wrap: wrap; }
+.panel-title h2 { font-size: 18px; }
+.kpi-card { border-radius: var(--r-lg); box-shadow: var(--shadow); padding: 16px 18px; min-width: 0; }
+.kpi-card > strong { font-size: 24px; overflow-wrap: anywhere; }
+/* Tarjetas de resumen: se acomodan solas (4, 3 o 2 por fila según el ancho), nunca cortadas. */
+.kpi-grid { grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; }
+.content-grid { gap: 16px; }
+.content-grid > * { min-width: 0; }
+
+/* Botones */
+button:not([class]), button[class=""], button.secondary, button.danger { border-radius: var(--r); white-space: nowrap; }
+button.secondary { color: var(--ink-2); border-color: var(--field-line); }
+button.danger { color: var(--danger); border-color: var(--brand-line); }
+button:focus-visible, a:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.link-button { color: var(--brand); text-underline-offset: 2px; }
+.link-button:hover:not(:disabled) { color: var(--brand-dark); }
+
+/* Tablas */
+.data-table th, .data-table td { padding: 10px 12px; vertical-align: middle; }
+.data-table th { font-size: 11px; color: var(--faint); line-height: 1.25; }
+.data-table td { color: var(--ink); }
+.data-table tbody tr:hover { background: #fafbfc; }
+.data-table td.num, .data-table th.num { white-space: nowrap; }
+/* Botones dentro de tablas: más bajos y siempre en una fila. */
+.data-table button:is(:not([class]), [class=""], .secondary, .danger), .data-table a.button-link {
+  min-height: 32px; padding: 5px 11px; font-size: 13px; border-radius: var(--r-sm);
+}
+.data-table td:has(> button:is(:not([class]), [class=""], .secondary, .danger)) { white-space: nowrap; }
+.data-table td > button + button { margin-left: 2px; }
+.data-table input:not([type="checkbox"]):not([type="radio"]), .data-table select { min-height: 34px; padding: 6px 9px; max-width: 100%; }
+/* Contenedor de tabla ancha: scrollea ella sola, nunca la página. */
+.table-scroll { overflow-x: auto; margin: 0 -4px; padding: 0 4px; }
+/* Acciones de una fila: botones juntos, alineados a la derecha. */
+.row-actions { display: flex; gap: 6px; justify-content: flex-end; align-items: center; flex-wrap: nowrap; }
+.row-actions .link-button { margin-left: 4px; }
+/* Fila que se abre debajo de otra para editar (en vez de inputs apretados en cada columna). */
+.data-table tr.row-editor > td { background: var(--surface-2); padding: 14px 16px; }
+.data-table tr.row-editing > td { background: var(--brand-soft); }
+.form-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px 12px; align-items: end; }
+.form-grid label, .form-field { display: grid; gap: 4px; font-size: 12px; font-weight: 700; color: var(--ink-2); min-width: 0; }
+.form-grid label input, .form-grid label select { width: 100%; min-width: 0; font-weight: 400; }
+.form-grid .span-2 { grid-column: span 2; }
+.form-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 12px; }
+.form-actions .spacer { flex: 1; }
+.badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 11.5px; font-weight: 700; background: #f2f4f7; color: var(--ink-2); white-space: nowrap; }
+.badge.ok { background: var(--ok-soft); color: var(--ok); }
+.badge.warn { background: var(--warn-soft); color: var(--warn); }
+.badge.danger { background: var(--danger-soft); color: var(--danger); }
+.badge.brand { background: var(--brand-soft); color: var(--brand); }
+.cell-sub { display: block; font-size: 12px; color: var(--muted); font-weight: 500; margin-top: 2px; white-space: nowrap; }
+.status-pill { padding: 3px 10px; font-size: 11.5px; white-space: nowrap; display: inline-block; }
+
+/* Mensajes */
+.message { border-radius: var(--r); padding: 10px 12px; }
+
+/* Formularios en fila (cash-banner-form) que no se salgan del panel. */
+.cash-banner-form { flex-wrap: wrap; align-items: center; }
+.cash-banner-form input, .cash-banner-form select { min-height: 38px; padding: 8px 11px; max-width: 100%; }
+.cash-banner-form button { min-height: 38px; padding: 8px 14px; border-radius: var(--r); font-size: 14px; font-weight: 700; }
+.cash-banner-form button.secondary { background: white; color: var(--ink-2); border: 1px solid var(--field-line); }
+
+@media (max-width: 760px) {
+  .main-content { padding: 16px 12px; }
+  .panel { padding: 14px; }
+  .kpi-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .form-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .row-actions { flex-wrap: wrap; justify-content: flex-start; }
+}
+/* Título de grupo dentro de una tabla (ej. categoría en Stock). */
+.data-table tr.group-row > td { background: var(--surface-2); font-weight: 700; padding: 8px 12px; font-size: 13px; color: var(--ink-2); }
+.data-table tr.group-row:hover { background: transparent; }
+.products-table td:nth-child(2) { min-width: 160px; }
+/* Casillas dentro de una fila de filtros: tamaño normal (antes heredaban el ancho de 160px de los campos). */
+.cash-banner-form input[type="checkbox"], .cash-banner-form input[type="radio"] { width: 16px; min-height: 0; padding: 0; flex: none; }
+.cash-banner-form label:has(> input[type="checkbox"]) { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; }
+/* Caja para un formulario que se abre (ej. Producto nuevo). */
+.form-box { background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: var(--r-lg); padding: 16px; margin-bottom: 16px; }
+/* Filas que se eligen tocándolas (ej. Despiece → reses). */
+.data-table tr.row-clickable { cursor: pointer; }
+.data-table tr.row-selected > td { background: var(--brand-soft); }
+.data-table tr.row-selected > td:first-child { box-shadow: inset 3px 0 0 var(--brand); }
+/* Tarjetas de resumen dentro de una columna angosta. */
+.kpi-grid.compact { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 10px; margin-bottom: 0; }
+.kpi-grid.compact .kpi-card { padding: 12px 14px; box-shadow: none; background: var(--surface-2); }
+.kpi-grid.compact .kpi-card > strong { font-size: 20px; }
+.kpi-card small { font-size: 12px; }
+/* Encabezado de página: el texto se achica, los botones de la derecha no (antes se apilaban). */
+.page-header > :first-child { flex: 1 1 auto; min-width: 0; }
+.page-header > :not(:first-child) { flex: 0 0 auto; display: flex; gap: 8px; align-items: center; flex-wrap: nowrap; }
+@media (max-width: 760px) { .page-header > :not(:first-child) { flex-wrap: wrap; margin-top: 10px; } }
+/* Controles dentro de una tarjeta: nunca más anchos que la tarjeta. */
+.kpi-card select, .kpi-card input { width: 100%; min-width: 0; max-width: 100%; }
+.kpi-card button { max-width: 100%; justify-self: start; }
+/* Tabla compacta: para columnas angostas (ej. Pagos en Compras). */
+.data-table.compact th, .data-table.compact td { padding: 8px 7px; }
+.data-table.compact button:is(:not([class]), [class=""], .secondary, .danger) { padding: 5px 9px; }
+/* Tablet (hasta 1024px): el menú pasa a ser el cajón lateral del celular, así el contenido usa todo el ancho. */
+@media (max-width: 1024px) {
+  .app-shell { grid-template-columns: minmax(0, 1fr); grid-template-rows: auto 1fr; }
+  .mobile-topbar {
+    display: flex; align-items: center; gap: 12px; position: sticky; top: 0; z-index: 30;
+    height: calc(54px + env(safe-area-inset-top)); padding: env(safe-area-inset-top) 12px 0; background: #15191f; color: white;
+  }
+  .mobile-menu-btn { background: transparent; border: 0; color: white; display: grid; place-items: center; padding: 8px; margin-left: -6px; border-radius: 10px; }
+  .mobile-topbar-title { font-size: 17px; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-topbar-brand { font-size: 11px; letter-spacing: .12em; color: #a7b0bd; font-weight: 800; }
+  .sidebar {
+    position: fixed; top: 0; left: 0; bottom: 0; width: min(300px, 86vw); height: 100vh; z-index: 40;
+    transform: translateX(-104%); transition: transform .22s ease; overflow-y: auto;
+    padding: calc(22px + env(safe-area-inset-top)) 16px calc(22px + env(safe-area-inset-bottom));
+  }
+  .sidebar.open { transform: none; box-shadow: 0 0 40px rgba(0,0,0,.4); }
+  .drawer-backdrop { display: block; position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 35; }
+  .main-content { padding: 20px 18px; }
+  .hide-md { display: none; }
+}
+@media (max-width: 900px) { .hide-sm { display: none; } }
+
+/* Tablas como tarjetas en el celular (hasta 600px): cada fila es una tarjeta y
+   cada dato muestra el nombre de su columna (data-label, lo pone
+   lib/table-labels.ts). Así no hay que correr la tabla para el costado. Una
+   tabla puede quedarse como tabla con la clase .no-stack. */
+@media screen and (max-width: 600px) {
+  .data-table:not(.no-stack) thead { display: none; }
+  .data-table:not(.no-stack), .data-table:not(.no-stack) tbody, .data-table:not(.no-stack) tfoot { display: block; width: 100%; }
+  .data-table:not(.no-stack) tr {
+    display: block; border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+    padding: 6px 12px; margin-bottom: 8px;
+  }
+  .data-table:not(.no-stack) tbody tr:hover { background: var(--surface); }
+  .data-table:not(.no-stack) td {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    padding: 6px 0; border: 0; text-align: right; white-space: normal;
+  }
+  .data-table:not(.no-stack) td + td { border-top: 1px dashed var(--line-soft); }
+  .data-table:not(.no-stack) td::before {
+    content: attr(data-label); flex: none; max-width: 45%; text-align: left;
+    font-size: 11px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase; color: var(--faint);
+  }
+  .data-table:not(.no-stack) td:not([data-label])::before, .data-table:not(.no-stack) td[data-label=""]::before { content: none; }
+  .data-table:not(.no-stack) td:not([data-label]) { justify-content: flex-start; text-align: left; }
+  .data-table:not(.no-stack) td:first-child { font-weight: 700; }
+  .data-table:not(.no-stack) td > .row-actions { justify-content: flex-end; flex-wrap: wrap; width: 100%; }
+  .data-table:not(.no-stack) td[colspan] { display: block; text-align: left; }
+  .data-table:not(.no-stack) tr.group-row { border: 0; background: transparent; padding: 10px 2px 4px; margin: 0; }
+  .data-table:not(.no-stack) tr.group-row > td { background: transparent; padding: 0; }
+  .data-table:not(.no-stack) tr.row-editor { padding: 0; }
+  .data-table:not(.no-stack) tr.row-editor > td { display: block; }
+  .data-table:not(.no-stack) tr.row-selected > td, .data-table:not(.no-stack) tr.row-editing > td { background: transparent; box-shadow: none; }
+  .data-table:not(.no-stack) tr.row-selected, .data-table:not(.no-stack) tr.row-editing { border-color: var(--brand); background: var(--brand-soft); }
+  .data-table:not(.no-stack) .cell-sub { white-space: normal; }
+  .table-scroll { overflow-x: visible; margin: 0; padding: 0; }
+}

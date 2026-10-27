@@ -796,7 +796,7 @@ export function Customers() {
                   const status = customerStatus(c, today);
                   const badge = STATUS_BADGE[status];
                   return (
-                    <tr key={c.id} style={status === "overdue" ? { background: "#fdecea" } : undefined}>
+                    <tr key={c.id} className={c.id === selectedId ? "row-selected" : "row-clickable"} onClick={() => selectCustomer(c.id)} style={status === "overdue" && c.id !== selectedId ? { background: "#fdecea" } : undefined}>
                       <td><b>{c.number ?? "—"}</b></td>
                       <td>{c.name}</td>
                       <td>
@@ -807,9 +807,11 @@ export function Customers() {
                       <td className="num" style={{ color: status === "clear" ? "#2e7d32" : undefined }}>{formatMoney(c.balance)}</td>
                       <td className="muted" style={{ whiteSpace: "nowrap" }}>{c.lastActivityDate ? formatShortDate(c.lastActivityDate) : "—"}</td>
                       <td>
-                        <button className={c.id === selectedId ? "" : "secondary"} onClick={() => selectCustomer(c.id)}>
-                          {c.id === selectedId ? "Seleccionado" : "Ver cuenta"}
-                        </button>
+                        {c.id === selectedId ? (
+                          <span className="badge brand">Viendo</span>
+                        ) : (
+                          <button className="secondary" onClick={() => selectCustomer(c.id)}>Ver cuenta</button>
+                        )}
                       </td>
                     </tr>
                   );

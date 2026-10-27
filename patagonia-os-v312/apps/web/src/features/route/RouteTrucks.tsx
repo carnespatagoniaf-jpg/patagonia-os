@@ -97,7 +97,7 @@ export function RouteTrucks() {
         <section className="panel">
           <div className="panel-title">
             <h2>{vehicle.name}</h2>
-            <div style={{ display: "flex", gap: 8 }}>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
               <button className={mode === "load" ? "" : "secondary"} onClick={() => setMode(mode === "load" ? "none" : "load")}>Cargar camión</button>
               <button className={mode === "settle" ? "" : "secondary"} onClick={() => setMode(mode === "settle" ? "none" : "settle")}>Rendir (vuelve el camión)</button>
             </div>
@@ -142,24 +142,26 @@ export function RouteTrucks() {
       {vehicle && settlements.length > 0 && (
         <section className="panel">
           <h3 style={{ marginTop: 0 }}>Rendiciones de {vehicle.name}</h3>
+          <div className="table-scroll">
           <table className="data-table">
             <thead>
-              <tr><th>Fecha</th><th className="num">Ventas</th><th className="num">A cuenta</th><th className="num">Efectivo esperado</th><th className="num">Contado</th><th className="num">Diferencia</th><th className="num">Mercadería faltante (costo)</th></tr>
+              <tr><th>Fecha</th><th className="num">Ventas</th><th className="num hide-md">A cuenta</th><th className="num hide-sm">Efectivo esperado</th><th className="num hide-sm">Contado</th><th className="num">Diferencia</th><th className="num">Mercadería faltante (costo)</th></tr>
             </thead>
             <tbody>
               {settlements.map((s) => (
                 <tr key={s.id} title={s.notes ?? undefined}>
                   <td>{new Date(s.createdAt).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", hour12: false, dateStyle: "short", timeStyle: "short" })}</td>
                   <td className="num">{s.salesCount} · {money(s.salesTotal)}</td>
-                  <td className="num">{money(s.onAccount)}</td>
-                  <td className="num">{money(s.cashExpected)}</td>
-                  <td className="num">{money(s.cashCounted)}</td>
+                  <td className="num hide-md">{money(s.onAccount)}</td>
+                  <td className="num hide-sm">{money(s.cashExpected)}</td>
+                  <td className="num hide-sm">{money(s.cashCounted)}</td>
                   <td className="num" style={{ color: s.cashDifference < 0 ? "#b42318" : undefined }}>{money(s.cashDifference)}</td>
                   <td className="num" style={{ color: s.missingValue > 0 ? "#b42318" : undefined }}>{money(s.missingValue)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         </section>
       )}
     </div>

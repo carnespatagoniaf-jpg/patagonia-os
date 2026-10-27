@@ -27,13 +27,13 @@ function AnimalTypePicker({ value, options, onChange }: { value: string; options
   const [typing, setTyping] = useState(false);
   if (typing || !options.includes(value)) {
     return (
-      <span style={{ display: "inline-flex", gap: 6, alignItems: "center" }}>
+      <span style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
         <input
           autoFocus={typing}
           placeholder="Nombre (ej. Media res de cerdo)"
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          style={{ width: 220 }}
+          style={{ flex: 1, minWidth: 0 }}
         />
         <button
           type="button"
@@ -44,7 +44,7 @@ function AnimalTypePicker({ value, options, onChange }: { value: string; options
             if (!options.includes(value)) onChange(options[0]);
           }}
         >
-          Elegir de la lista
+          Lista
         </button>
       </span>
     );
@@ -612,30 +612,32 @@ export function Carcass() {
       <div className="content-grid">
         <section className="panel">
           <div className="panel-title">
-            <h2>Reses cargadas</h2>
-            <span>{loading ? "Cargando…" : `${batches.length}`}</span>
+            <h2>Reses cargadas <span className="muted" style={{ fontSize: 14, fontWeight: 500 }}>{loading ? "Cargando…" : batches.length}</span></h2>
+            {!showBatchForm && <button onClick={() => setShowBatchForm(true)}>+ Agregar res</button>}
           </div>
           <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
             Despiece es para saber cuánto rindió y cuánto te costó cada corte. La factura del proveedor va en <strong>Compras</strong>:
             marcá la línea "Para despostar" y la res aparece sola acá (con plantilla, ya repartida en cortes). Una res cargada acá no genera deuda con el proveedor.
           </p>
-          {showBatchForm ? (
-            <>
-              <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10 }}>
-                <input type="date" value={batchDate} onChange={(e) => setBatchDate(e.target.value)} />
-                <AnimalTypePicker value={animalType} options={animalTypeOptions} onChange={setAnimalType} />
-                <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-                  <option value="">Proveedor (opcional, solo como dato)…</option>
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>{s.name}</option>
-                  ))}
-                </select>
-                <input type="text" inputMode="decimal" placeholder="Peso total (kg)" value={totalWeight} onChange={(e) => setTotalWeight(e.target.value)} />
-                <input type="text" inputMode="decimal" placeholder="Precio por kg ($)" value={pricePerKg} onChange={(e) => setPricePerKg(e.target.value)} />
-                <button onClick={handleSaveBatch}>{editingBatchId ? "Guardar cambio" : "Guardar res"}</button>
-                <button className="secondary" onClick={resetBatchForm}>Cancelar</button>
+          {showBatchForm && (
+            <div className="form-box">
+              <h3 style={{ margin: "0 0 10px" }}>{editingBatchId ? "Corregir res" : "Res nueva"}</h3>
+              <div className="form-grid">
+                <label>Fecha<input type="date" value={batchDate} onChange={(e) => setBatchDate(e.target.value)} /></label>
+                <label>Tipo<AnimalTypePicker value={animalType} options={animalTypeOptions} onChange={setAnimalType} /></label>
+                <label className="span-2">
+                  Proveedor (opcional, solo como dato)
+                  <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
+                    <option value="">Sin proveedor</option>
+                    {suppliers.map((s) => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </label>
+                <label>Peso total (kg)<input type="text" inputMode="decimal" value={totalWeight} onChange={(e) => setTotalWeight(e.target.value)} /></label>
+                <label>Precio por kg ($)<input type="text" inputMode="decimal" value={pricePerKg} onChange={(e) => setPricePerKg(e.target.value)} /></label>
               </div>
-              <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 16, alignItems: "center" }}>
+              <div className="cash-banner-form" style={{ marginTop: 10, alignItems: "center" }}>
                 <span className="muted" style={{ fontSize: 13 }}>¿Varias unidades iguales (ej. cajones de pollo)?</span>
                 <input type="number" min="1" step="1" value={batchBoxCount} onChange={(e) => setBatchBoxCount(e.target.value)} style={{ width: 55 }} />
                 <span className="muted">de</span>
@@ -657,49 +659,47 @@ export function Carcass() {
                   Usar como peso total ({batchBoxTotal} kg)
                 </button>
               </div>
-            </>
-          ) : (
-            <button className="secondary" style={{ marginBottom: 16 }} onClick={() => setShowBatchForm(true)}>
-              + Agregar res
-            </button>
+              <div className="form-actions">
+                <button onClick={handleSaveBatch}>{editingBatchId ? "Guardar cambio" : "Guardar res"}</button>
+                <button className="secondary" onClick={resetBatchForm}>Cancelar</button>
+                <span className="muted" style={{ fontSize: 13 }}>Costo total calculado: {formatMoney(computedTotalCost)}</span>
+              </div>
+            </div>
           )}
 
+          {batches.length > 0 && <p className="muted" style={{ margin: "0 0 6px", fontSize: 12 }}>Tocá una res para ver su resumen y sus cortes.</p>}
+          <div className="table-scroll">
           <table className="data-table">
             <thead>
-              <tr><th>Fecha</th><th>Tipo</th><th className="num">Peso</th><th className="num">$/kg</th><th className="num">Compra</th><th></th></tr>
+              <tr><th>Fecha</th><th>Tipo</th><th className="num">Peso</th><th className="num hide-sm">$/kg</th><th className="num">Compra</th><th></th></tr>
             </thead>
             <tbody>
               {batches.map((b) => (
-                <tr key={b.id}>
-                  <td>{b.batchDate}</td>
-                  <td>{b.animalType}</td>
+                <tr key={b.id} className={selectedId === b.id ? "row-selected" : "row-clickable"} onClick={() => setSelectedId(b.id)}>
+                  <td style={{ whiteSpace: "nowrap" }}>{b.batchDate}</td>
+                  <td style={{ minWidth: 105 }}>{b.animalType}</td>
                   <td className="num">{b.totalWeight} kg</td>
-                  <td className="num">{formatMoney(b.totalWeight > 0 ? b.totalCost / b.totalWeight : 0)}</td>
+                  <td className="num hide-sm">{formatMoney(b.totalWeight > 0 ? b.totalCost / b.totalWeight : 0)}</td>
                   <td className="num">{formatMoney(b.totalCost)}</td>
-                  <td>
-                    {selectedId === b.id ? (
-                      <button className="secondary" disabled>Seleccionado</button>
-                    ) : (
-                      <button className="secondary" onClick={() => setSelectedId(b.id)}>Ver</button>
-                    )}{" "}
-                    {b.purchaseItemId ? (
-                      <small className="muted">De Compras · se corrige allá</small>
-                    ) : (
-                      <>
-                        <button className="secondary" onClick={() => startEditBatch(b.id)}>Editar</button>{" "}
-                        <button className="danger" onClick={() => handleDeleteBatch(b.id)}>Quitar</button>
-                      </>
-                    )}
+                  <td onClick={(e) => e.stopPropagation()}>
+                    <div className="row-actions">
+                      {b.purchaseItemId ? (
+                        <span className="muted" style={{ fontSize: 12 }} title="Esta res vino de Compras: se corrige allá">De Compras</span>
+                      ) : (
+                        <>
+                          <button className="secondary" onClick={() => startEditBatch(b.id)}>Editar</button>
+                          <button className="danger" onClick={() => handleDeleteBatch(b.id)}>Quitar</button>
+                        </>
+                      )}
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
           {batches.length === 0 && !loading && <p className="muted">Todavía no cargaste ninguna res.</p>}
 
-          {showBatchForm && (
-            <p className="muted" style={{ marginTop: 10 }}>Costo total calculado: {formatMoney(computedTotalCost)}</p>
-          )}
         </section>
 
         <section className="panel">
@@ -708,7 +708,7 @@ export function Carcass() {
           </div>
           {!selectedBatch && <p className="muted">Elegí una res para ver el detalle.</p>}
           {selectedBatch && (
-            <div className="kpi-grid">
+            <div className="kpi-grid compact">
               <div className="kpi-card">
                 <span>Compra</span>
                 <strong>{formatMoney(selectedBatch.totalCost)}</strong>
@@ -727,7 +727,8 @@ export function Carcass() {
               </div>
               <div className="kpi-card">
                 <span>Rendimiento cargado</span>
-                <strong>{cutsWeightTotal} kg de {selectedBatch.totalWeight} kg ({yieldSoFar}%)</strong>
+                <strong>{yieldSoFar}%</strong>
+                <small>{cutsWeightTotal} kg de {selectedBatch.totalWeight} kg</small>
               </div>
             </div>
           )}
@@ -748,20 +749,25 @@ export function Carcass() {
           <p className="muted print-only-header">
             Compra {formatMoney(selectedBatch.totalCost)} · Venta {formatMoney(cutsTotal)} · Ganancia {formatMoney(gananciaTotal)} ({margenTotal}%)
           </p>
-          <div className="cash-banner-form no-print" style={{ flexWrap: "wrap", marginBottom: 4 }}>
-            <input placeholder="Corte (ej. Asado)" value={cutName} onChange={(e) => setCutName(e.target.value)} />
-            <input type="text" inputMode="decimal" placeholder="Peso (kg)" value={cutWeight} onChange={(e) => setCutWeight(e.target.value)} />
-            <input type="text" inputMode="decimal" placeholder="Precio venta ($/kg)" value={cutPrice} onChange={(e) => setCutPrice(e.target.value)} />
-            <select value={cutProductId} onChange={(e) => setCutProductId(e.target.value)}>
-              <option value="">Sin producto (no suma stock)</option>
-              {products.map((product) => (
-                <option key={product.id} value={product.id}>{product.name}</option>
-              ))}
-            </select>
+          <div className="form-grid no-print" style={{ marginBottom: 4 }}>
+            <label>Corte<input placeholder="Ej. Asado" value={cutName} onChange={(e) => setCutName(e.target.value)} /></label>
+            <label>Peso (kg)<input type="text" inputMode="decimal" value={cutWeight} onChange={(e) => setCutWeight(e.target.value)} /></label>
+            <label>Precio venta ($/kg)<input type="text" inputMode="decimal" value={cutPrice} onChange={(e) => setCutPrice(e.target.value)} /></label>
+            <label className="span-2">
+              Producto de Stock
+              <select value={cutProductId} onChange={(e) => setCutProductId(e.target.value)}>
+                <option value="">Sin producto (no suma stock)</option>
+                {products.map((product) => (
+                  <option key={product.id} value={product.id}>{product.name}</option>
+                ))}
+              </select>
+            </label>
+            <div className="row-actions" style={{ justifyContent: "flex-start" }}>
             <button onClick={handleSaveCut}>{editingCutId ? "Guardar cambio" : "Agregar corte"}</button>
             {editingCutId && (
               <button className="secondary" onClick={() => { setEditingCutId(null); setCutName(""); setCutWeight(""); setCutPrice(""); setCutProductId(""); }}>Cancelar</button>
             )}
+            </div>
           </div>
           <p className="muted no-print" style={{ marginBottom: 14 }}>
             Subtotal de este corte: {formatMoney(previewCutTotal)}
@@ -770,19 +776,21 @@ export function Carcass() {
 
           <table className="data-table">
             <thead>
-              <tr><th>Corte</th><th className="num">Peso</th><th className="num">Precio/kg</th><th className="num">Subtotal</th><th>Stock</th><th className="no-print"></th></tr>
+              <tr><th>Corte</th><th className="num">Peso</th><th className="num hide-sm">Precio/kg</th><th className="num">Subtotal</th><th className="hide-md">Stock</th><th className="no-print"></th></tr>
             </thead>
             <tbody>
               {cuts.map((cut) => (
                 <tr key={cut.id}>
                   <td>{cut.cutName}</td>
                   <td className="num">{cut.weight} kg</td>
-                  <td className="num">{formatMoney(cut.unitPrice)}</td>
+                  <td className="num hide-sm">{formatMoney(cut.unitPrice)}</td>
                   <td className="num">{formatMoney(cut.lineTotal)}</td>
-                  <td>{cut.productId ? (products.find((p) => p.id === cut.productId)?.name ?? "Sí") : "-"}</td>
+                  <td className="hide-md">{cut.productId ? (products.find((p) => p.id === cut.productId)?.name ?? "Sí") : "-"}</td>
                   <td className="no-print">
-                    <button className="secondary" onClick={() => startEditCut(cut.id)}>Editar</button>{" "}
-                    <button className="danger" onClick={() => handleDeleteCut(cut.id)}>Quitar</button>
+                    <div className="row-actions">
+                      <button className="secondary" onClick={() => startEditCut(cut.id)}>Editar</button>
+                      <button className="danger" onClick={() => handleDeleteCut(cut.id)}>Quitar</button>
+                    </div>
                   </td>
                 </tr>
               ))}

@@ -404,16 +404,15 @@ export function Employees() {
             </thead>
             <tbody>
               {employees.map((employee) => (
-                <tr key={employee.id}>
+                <tr key={employee.id} className={employee.id === selectedId ? "row-selected" : "row-clickable"} onClick={() => setSelectedId(employee.id)}>
                   <td>{employee.fullName}</td>
                   <td className="num">{formatMoney(employee.baseSalary)} <span className="muted">{SALARY_PERIOD_LABELS[employee.salaryPeriod]}</span></td>
                   <td>
-                    <button
-                      className={employee.id === selectedId ? "" : "secondary"}
-                      onClick={() => setSelectedId(employee.id)}
-                    >
-                      {employee.id === selectedId ? "Seleccionado" : "Ver"}
-                    </button>
+                    {employee.id === selectedId ? (
+                          <span className="badge brand">Viendo</span>
+                        ) : (
+                          <button className="secondary" onClick={() => setSelectedId(employee.id)}>Ver</button>
+                        )}
                   </td>
                 </tr>
               ))}

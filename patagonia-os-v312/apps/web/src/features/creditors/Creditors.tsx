@@ -314,16 +314,18 @@ export function Creditors() {
                 {creditors.map((c) => {
                   const overdue = isOverdueDebt(c, todayIso());
                   return (
-                    <tr key={c.id} style={overdue ? { background: "#fdecea" } : undefined}>
+                    <tr key={c.id} className={c.id === selectedId ? "row-selected" : "row-clickable"} onClick={() => selectCreditor(c.id)} style={overdue && c.id !== selectedId ? { background: "#fdecea" } : undefined}>
                       <td>
                         {c.name}
                         {overdue && <span className="message warning" style={{ display: "inline-block", marginLeft: 8, padding: "1px 8px", fontSize: 11 }}>Atrasado</span>}
                       </td>
                       <td className="num">{formatMoney(c.balance)}</td>
                       <td>
-                        <button className={c.id === selectedId ? "" : "secondary"} onClick={() => selectCreditor(c.id)}>
-                          {c.id === selectedId ? "Seleccionado" : "Ver cuenta"}
-                        </button>
+                        {c.id === selectedId ? (
+                          <span className="badge brand">Viendo</span>
+                        ) : (
+                          <button className="secondary" onClick={() => selectCreditor(c.id)}>Ver cuenta</button>
+                        )}
                       </td>
                     </tr>
                   );

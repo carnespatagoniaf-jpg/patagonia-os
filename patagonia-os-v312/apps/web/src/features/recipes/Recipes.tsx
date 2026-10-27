@@ -643,8 +643,7 @@ export function Recipes() {
 
       <section className="panel">
         <div className="panel-title">
-          <h2>Recetas cargadas</h2>
-          <span>{loading ? "Cargando…" : recipes.length}</span>
+          <h2>Recetas cargadas <span className="muted" style={{ fontSize: 14, fontWeight: 500 }}>{loading ? "Cargando…" : recipes.length}</span></h2>
         </div>
 
         {outdatedCount > 0 && (
@@ -663,14 +662,15 @@ export function Recipes() {
         )}
 
         {recipes.length > 0 && (
+          <div className="table-scroll">
           <table className="data-table">
             <thead>
               <tr>
                 <th>Producto</th>
-                <th className="num">Rinde</th>
-                <th className="num">Costo por la receta hoy</th>
-                <th className="num">Costo cargado</th>
-                <th className="num">Precio de venta</th>
+                <th className="num hide-md">Rinde</th>
+                <th className="num hide-sm" title="Lo que cuesta hacerla hoy, con los precios actuales de los insumos">Costo hoy</th>
+                <th className="num hide-md" title="El costo que tiene hoy el producto en Stock">Costo cargado</th>
+                <th className="num">Venta</th>
                 <th className="num">Margen</th>
                 <th>Estado</th>
                 <th></th>
@@ -683,9 +683,9 @@ export function Recipes() {
                 return (
                   <tr key={recipe.id}>
                     <td>
-                      {recipe.kind === "combo" && <span className="status-pill" style={{ marginRight: 6 }}>Combo</span>}
-                      {product?.name ?? "Producto no encontrado"}{" "}
-                      <span className="muted">({recipe.items.length} {recipe.kind === "combo" ? "productos" : "insumos"})</span>
+                      {recipe.kind === "combo" && <span className="badge brand" style={{ marginRight: 6 }}>Combo</span>}
+                      <strong>{product?.name ?? "Producto no encontrado"}</strong>{" "}
+                      <span className="muted" style={{ fontSize: 12 }}>({recipe.items.length} {recipe.kind === "combo" ? "productos" : "insumos"})</span>
                       {recipe.kind === "combo" && product && (() => {
                         const suelto = comboRetailTotal(recipe.items, productsById);
                         const discount = comboDiscountPct(product.priceRetail, suelto);
@@ -696,37 +696,43 @@ export function Recipes() {
                         ) : null;
                       })()}
                     </td>
-                    <td className="num">{recipe.kind === "combo" ? "1 combo" : `${fmtNum(recipe.yieldQty)} ${product ? UNIT_SHORT[product.unit] : ""}`}</td>
-                    <td className="num">{summary.cost.unitCost > 0 ? formatCost(summary.cost.unitCost) : "-"}</td>
-                    <td className="num">{product ? formatCost(summary.loadedCost) : "-"}</td>
+                    <td className="num hide-md">{recipe.kind === "combo" ? "1 combo" : `${fmtNum(recipe.yieldQty)} ${product ? UNIT_SHORT[product.unit] : ""}`}</td>
+                    <td className="num hide-sm">{summary.cost.unitCost > 0 ? formatCost(summary.cost.unitCost) : "-"}</td>
+                    <td className="num hide-md">{product ? formatCost(summary.loadedCost) : "-"}</td>
                     <td className="num">{product ? formatCost(product.priceRetail) : "-"}</td>
                     <td className="num">{margin !== null ? `${fmtNum(margin, 1)}%` : "-"}</td>
                     <td>
                       {summary.zeroCostIngredients.length > 0 || summary.missingIngredients > 0 ? (
-                        <span className="status-pill">Insumos sin costo</span>
+                        <span className="badge danger">Insumos sin costo</span>
                       ) : summary.drift ? (
-                        <span className="status-pill">Costo desactualizado</span>
+                        <span className="badge warn">Costo desactualizado</span>
                       ) : (
-                        <span className="muted">Al día</span>
+                        <span className="badge ok">Al día</span>
+                      )}
+                      {summary.drift && (
+                        <span className="cell-sub">
+                          <button className="link-button" style={{ fontSize: 12 }} disabled={busy} onClick={() => void handleQuickUpdate(recipe, false)}>Actualizar costo</button>
+                          {recipe.marginPct !== null && (
+                            <>
+                              {" · "}
+                              <button className="link-button" style={{ fontSize: 12 }} disabled={busy} onClick={() => void handleQuickUpdate(recipe, true)}>y precio</button>
+                            </>
+                          )}
+                        </span>
                       )}
                     </td>
                     <td>
-                      <button className="secondary" disabled={busy} onClick={() => startEdit(recipe)}>Editar</button>{" "}
-                      {summary.drift && (
-                        <>
-                          <button disabled={busy} onClick={() => void handleQuickUpdate(recipe, false)}>Actualizar costo</button>{" "}
-                          {recipe.marginPct !== null && (
-                            <button disabled={busy} onClick={() => void handleQuickUpdate(recipe, true)}>Actualizar costo y precio</button>
-                          )}{" "}
-                        </>
-                      )}
-                      <button className="danger" disabled={busy} onClick={() => void handleDelete(recipe)}>Borrar</button>
+                      <div className="row-actions">
+                        <button className="secondary" disabled={busy} onClick={() => startEdit(recipe)}>Editar</button>
+                        <button className="danger" disabled={busy} onClick={() => void handleDelete(recipe)}>Borrar</button>
+                      </div>
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+          </div>
         )}
       </section>
     </>
