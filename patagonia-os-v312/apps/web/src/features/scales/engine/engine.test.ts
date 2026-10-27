@@ -181,6 +181,10 @@ describe("[SIMULADO, registros REALES] Mi balanza con una Systel Cuora Max: Pata
     const prep = await new SystelSession(f, 20, ctx(PRODUCTS), lab(deps)).prepare(noop);
     assert.equal(prep.model, "systel-otra");
     assert.equal(prep.canWrite, false);
+    // Mensaje honesto (real Giuseppe 27/10): no promete que soporte "la habilita en unos minutos", porque no hay con qué.
+    assert.match(prep.blocker!, /todavía no está comprobado/);
+    assert.match(prep.blocker!, /no se le mandó nada/);
+    assert.doesNotMatch(prep.blocker!, /unos minutos/);
   });
 
   it("un cajero no puede mandar productos (tiene que ser el dueño o un administrador)", async () => {

@@ -293,7 +293,13 @@ export class SystelSession implements ScaleSession {
       upToDate,
       notes,
       ...(!writable && !upToDate
-        ? { blocker: allowed ? "No se pudo leer toda la balanza. Tocá \"Conectar balanza\" otra vez." : "Tu balanza está conectada. Para que Patagonia le mande los productos falta habilitarla: lo hace soporte de Patagonia en unos minutos." }
+        ? {
+            // Antes decía "falta habilitarla: lo hace soporte en unos minutos", pero no hay nada que soporte pueda tocar:
+            // un modelo se habilita solo después de una prueba con la balanza real (capabilities.ts). Real Giuseppe, 27/10.
+            blocker: allowed
+              ? "No se pudo leer toda la balanza. Tocá \"Conectar balanza\" otra vez."
+              : `Tu balanza está conectada y Patagonia pudo leerla, pero este modelo de Systel todavía no está comprobado para recibir productos. Para no arriesgar los productos y precios de tu balanza, no se le mandó nada. Soporte de Patagonia tiene que hacer una prueba con vos antes de habilitarla: escribinos por WhatsApp al 11 2787-1634.`
+          }
         : this.ctx.canManageLinks === false && !upToDate
           ? { blocker: "Para mandar los productos a la balanza tiene que entrar el dueño o un administrador de Patagonia." }
           : {})

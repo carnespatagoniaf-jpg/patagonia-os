@@ -4,6 +4,7 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 import { releaseSerialEverywhere } from "../inventory/kretz/serial-tabs";
 import { connectBranchScale, type BranchConnectResult } from "./engine/connect-branch";
+import { isPhoneOrTablet, PHONE_OR_TABLET_MESSAGE } from "./engine/device";
 import { markSynced } from "./engine/engine";
 import { adaptersForChoice } from "./engine/live";
 import { friendlyKind, friendlyMessage } from "./engine/friendly";
@@ -189,8 +190,12 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       }
       // La lectura pudo descubrir con qué señales o a qué número atiende la balanza: se vuelve a guardar su conexión.
       if (branchId && key) saveBinding(key, { branchId, family: result.family, usb: result.usb });
-      if (prepared.blocker) setPhase({ kind: "bloqueado", prepared });
-      else if (prepared.upToDate) setPhase({ kind: "listo", message: "¡Listo! Tu balanza está conectada y ya podés vender.", pending: prepared.pending, model: prepared.label, skipped: prepared.skipped });
+      if (prepared.blocker) {
+        setPhase({ kind: "bloqueado", prepared });
+        // Frenada por la balanza (modelo no comprobado o lectura incompleta), no por permisos: va sola a soporte. Antes
+        // no se mandaba nada y no se sabía qué balanza era (real Giuseppe, 27/10).
+        if (!prepared.canWrite) reportAndShow("frenada", prepared.blocker, diag, { modelo_detectado: prepared.label, formatos_leidos: result.session.codeFormats?.() ?? null, notas: prepared.notes });
+      } else if (prepared.upToDate) setPhase({ kind: "listo", message: "¡Listo! Tu balanza está conectada y ya podés vender.", pending: prepared.pending, model: prepared.label, skipped: prepared.skipped });
       else setPhase({ kind: "listo_para_sincronizar", prepared });
     } catch (err) {
       const kind = friendlyKind(err);
@@ -294,6 +299,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     setPhase({ kind: "inicio" });
   }
 
+  const onPhoneOrTablet = isPhoneOrTablet();
   const working = phase.kind === "trabajando";
   const showList = phase.kind === "inicio";
 
@@ -306,6 +312,8 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
           <p className="muted">{showList ? "Conectá cada balanza una vez y vendé escaneando el ticket." : "Seguí los pasos en pantalla."}</p>
         </div>
       </div>
+
+      {onPhoneOrTablet && (showList || phase.kind === "elegir_marca") && <p className="my-scale-warning">{PHONE_OR_TABLET_MESSAGE}</p>}
 
       {showList && (
         <div className="my-scale-body">
@@ -415,6 +423,12 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
             <button className="secondary" onClick={() => void handleConnect(active, false)}>Conectar otra vez</button>
             <button className="secondary" onClick={backToList}>Volver a mis balanzas</button>
           </div>
+          {!phase.prepared.canWrite && (
+            <p className="muted">
+              {reportSent === null ? "Mandando el detalle técnico a soporte de Patagonia…" : reportSent ? "El detalle técnico ya le llegó a soporte de Patagonia." : "No se pudo mandar el detalle técnico a soporte: descargalo y mandalo por WhatsApp."}
+            </p>
+          )}
+          {!phase.prepared.canWrite && lastDiagnostic && <DiagnosticView diagnostic={lastDiagnostic} />}
         </div>
       )}
 
@@ -477,6 +491,8 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
 
 /** El error al conectar, nombrando la balanza que eligió el cliente y qué revisar en ESA balanza. */
 function connectErrorMessage(err: unknown, choice: ScaleChoice | null): string {
+  // Desde la tablet la lista de cables sale vacía y el cliente la cierra: el motivo real es el aparato, no la elección.
+  if (isPhoneOrTablet() && (friendlyKind(err) === "sin_eleccion" || friendlyKind(err) === "sin_navegador")) return PHONE_OR_TABLET_MESSAGE;
   if (friendlyKind(err) !== "no_contesta" || !choice || choice === "auto") return friendlyMessage(err);
   const label = choiceLabel(choice);
   if (choice === "kretz-report") {
