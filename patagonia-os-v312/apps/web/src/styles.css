@@ -986,6 +986,12 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--brand); outline
 }
 @media (max-width: 900px) { .hide-sm { display: none; } }
 
+/* Lo que va adentro de una sección de configuración no puede ser más ancho que
+   ella (en el celular una grilla de dos columnas se salía de la pantalla). */
+.setting-body > *, .setting-body li { min-width: 0; }
+.setting-body li { overflow-wrap: anywhere; }
+input[type="file"] { max-width: 100%; }
+
 /* Tablas como tarjetas en el celular (hasta 600px): cada fila es una tarjeta y
    cada dato muestra el nombre de su columna (data-label, lo pone
    lib/table-labels.ts). Así no hay que correr la tabla para el costado. Una
@@ -1002,6 +1008,7 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--brand); outline
     display: flex; justify-content: space-between; align-items: center; gap: 12px;
     padding: 6px 0; border: 0; text-align: right; white-space: normal;
   }
+  .data-table:not(.no-stack) td.hide-sm, .data-table:not(.no-stack) td.hide-md { display: none; }
   .data-table:not(.no-stack) td + td { border-top: 1px dashed var(--line-soft); }
   .data-table:not(.no-stack) td::before {
     content: attr(data-label); flex: none; max-width: 45%; text-align: left;
@@ -1018,6 +1025,8 @@ button:focus-visible, a:focus-visible { outline: 2px solid var(--brand); outline
   .data-table:not(.no-stack) tr.row-editor > td { display: block; }
   .data-table:not(.no-stack) tr.row-selected > td, .data-table:not(.no-stack) tr.row-editing > td { background: transparent; box-shadow: none; }
   .data-table:not(.no-stack) tr.row-selected, .data-table:not(.no-stack) tr.row-editing { border-color: var(--brand); background: var(--brand-soft); }
+  .data-table:not(.no-stack) td:has(> .cell-sub) { flex-wrap: wrap; row-gap: 0; }
+  .data-table:not(.no-stack) td > .cell-sub { flex-basis: 100%; text-align: right; white-space: normal; }
   .data-table:not(.no-stack) .cell-sub { white-space: normal; }
   .table-scroll { overflow-x: visible; margin: 0; padding: 0; }
 }
