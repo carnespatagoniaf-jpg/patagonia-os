@@ -1,36 +1,28 @@
-# Publicar la página (Netlify) desde GitHub, sin depender de ninguna computadora.
+# Publicación AUTOMÁTICA de Patagonia System.
 #
-# APAGADO hasta que se cree la variable del repositorio PUBLICAR_HABILITADO = true
-# (Settings → Secrets and variables → Actions → Variables). Nunca corre solo: se
-# arranca a mano (Actions → "Publicar" → Run workflow) y cada paso que usa claves
-# espera la aprobación del entorno "produccion" (Settings → Environments).
+# Arranca sola cuando el CI de un cambio en main termina EN VERDE (pruebas, tipos, compilación y
+# migraciones desde cero). Si el CI falla, no corre. También se puede correr a mano (Run workflow).
+# Queda apagada mientras la variable del repositorio AUTOPUBLICAR no sea "true".
 #
-# Dos pasos, como scripts/deploy-netlify.mjs:
-#   1. paso = borrador   → pruebas + compilar + subir un BORRADOR a Netlify (los clientes
-#                          no lo ven) + pruebas de humo contra ese borrador. Muestra su id y URL.
-#   2. paso = produccion → publica ESE borrador (id) en patagoniasystem.com.ar.
-#                          Hay que escribir PUBLICAR en "confirmar".
-# Volver atrás: Netlify → Deploys → elegir el anterior → "Publish deploy".
-# No toca la base de datos ni la configuración de Netlify.
+# Orden (cualquier falla frena lo que sigue; nada de lo anterior se pierde):
+#   1. Base de PRUEBAS (staging): aplica las migraciones pendientes.
+#   2. Página: compila con los valores de producción, sube un BORRADOR a Netlify (los clientes
+#      no lo ven) y le corre las pruebas de humo (solo lectura).
+#   3. Base de PRODUCCIÓN: guarda la estructura actual (sin datos de clientes) como respaldo y
+#      aplica las migraciones pendientes. Frena si una migración borra o cambia datos
+#      (PROTEGER_DATOS) o si falta una migración vieja: eso se revisa a mano.
+#   4. Funciones: despliega help-chat en staging y en producción.
+#   5. Publica el borrador y vuelve a correr las pruebas de humo contra la página real.
+#      Si fallan, VUELVE SOLA a la versión anterior.
+# Volver atrás a mano: Actions → "Volver atrás" → Run workflow.
 name: Publicar
 
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      paso:
-        description: "borrador (no lo ven los clientes) o produccion (publica un borrador ya probado)"
-        required: true
-        type: choice
-        options: [borrador, produccion]
-        default: borrador
-      deploy_id:
-        description: "Solo para produccion: el id del borrador que se probó"
-        required: false
-        type: string
-      confirmar:
-        description: "Solo para produccion: escribir PUBLICAR"
-        required: false
-        type: string
 
 permissions:
   contents: read
@@ -40,83 +32,113 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  guardia:
-    name: ¿Está habilitado?
+  decidir:
+    name: ¿Corresponde publicar?
     runs-on: ubuntu-latest
+    outputs:
+      seguir: ${{ steps.d.outputs.seguir }}
+      sha: ${{ steps.d.outputs.sha }}
     steps:
-      - name: Revisar que se pueda publicar
+      - id: d
         env:
-          HABILITADO: ${{ vars.PUBLICAR_HABILITADO }}
+          HABILITADO: ${{ vars.AUTOPUBLICAR }}
+          EVENTO: ${{ github.event_name }}
+          CI_RESULTADO: ${{ github.event.workflow_run.conclusion }}
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
+          CI_RAMA: ${{ github.event.workflow_run.head_branch }}
+          CI_EVENTO: ${{ github.event.workflow_run.event }}
           RAMA: ${{ github.ref_name }}
-          PASO: ${{ inputs.paso }}
-          DEPLOY_ID: ${{ inputs.deploy_id }}
-          CONFIRMAR: ${{ inputs.confirmar }}
+          SHA: ${{ github.sha }}
         run: |
+          seguir=true
           if [ "$HABILITADO" != "true" ]; then
-            echo "::error::Publicar está apagado (falta la variable PUBLICAR_HABILITADO=true). No se hizo nada."
-            exit 1
+            echo "Publicación automática apagada (variable AUTOPUBLICAR). No se publica nada." | tee -a "$GITHUB_STEP_SUMMARY"
+            seguir=false
+          elif [ "$EVENTO" = "workflow_run" ]; then
+            sha="$CI_SHA"
+            if [ "$CI_RESULTADO" != "success" ] || [ "$CI_RAMA" != "main" ] || [ "$CI_EVENTO" != "push" ]; then
+              echo "El CI no terminó en verde en main ($CI_RESULTADO): no se publica." | tee -a "$GITHUB_STEP_SUMMARY"
+              seguir=false
+            fi
+          else
+            sha="$SHA"
+            if [ "$RAMA" != "main" ]; then echo "::error::Solo se publica desde main."; exit 1; fi
           fi
-          if [ "$RAMA" != "main" ]; then
-            echo "::error::Solo se publica desde main (se pidió desde $RAMA)."
-            exit 1
-          fi
-          if [ "$PASO" = "produccion" ]; then
-            if [ "$CONFIRMAR" != "PUBLICAR" ]; then echo "::error::Para publicar hay que escribir PUBLICAR en confirmar."; exit 1; fi
-            if ! printf '%s' "$DEPLOY_ID" | grep -Eq '^[a-f0-9]{24}$'; then echo "::error::Falta el id del borrador (24 letras/números)."; exit 1; fi
-          fi
+          echo "seguir=$seguir" >> "$GITHUB_OUTPUT"
+          echo "sha=${sha:-}" >> "$GITHUB_OUTPUT"
+
+  staging:
+    name: 1. Base de pruebas
+    needs: decidir
+    if: needs.decidir.outputs.seguir == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: staging
+    defaults:
+      run:
+        working-directory: patagonia-os-v312
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.decidir.outputs.sha }}
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+      - name: Migraciones en staging
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then echo "::error::Falta SUPABASE_DB_URL en el entorno staging."; exit 1; fi
+          bash scripts/ci/apply-migrations.sh aplicar
 
   borrador:
-    name: Borrador + pruebas
-    needs: guardia
-    if: inputs.paso == 'borrador'
+    name: 2. Borrador + pruebas de humo
+    needs: [decidir, staging]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     environment: produccion
+    outputs:
+      id: ${{ steps.draft.outputs.id }}
+      url: ${{ steps.draft.outputs.url }}
     defaults:
       run:
         working-directory: patagonia-os-v312
     env:
-      # Valores de la página (van dentro del sitio, igual que hoy desde la PC).
       VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
       VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
       VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
       VITE_HELP_CHAT: ${{ vars.VITE_HELP_CHAT }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.decidir.outputs.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
           cache-dependency-path: patagonia-os-v312/package-lock.json
       - run: npm ci
-      - name: Pruebas y tipos
-        run: npm test && npm run typecheck
 
       - name: Revisar los valores de producción (sin mostrarlos)
         run: |
           for v in VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY; do
             if [ -z "${!v}" ]; then echo "::error::Falta el secreto $v en el entorno produccion."; exit 1; fi
           done
-          # Que no se compile por error contra la base de pruebas.
           case "$VITE_SUPABASE_URL" in
             https://tayylvhfmoybchutybcz.supabase.co|https://tayylvhfmoybchutybcz.supabase.co/) ;;
             *) echo "::error::VITE_SUPABASE_URL no es la base de producción. No se sigue."; exit 1 ;;
           esac
-          if [ "$VITE_HELP_CHAT" != "1" ]; then echo "::warning::VITE_HELP_CHAT no es 1: la página saldría sin el chat de ayuda."; fi
+          if [ "$VITE_HELP_CHAT" != "1" ]; then echo "::error::Falta la variable VITE_HELP_CHAT=1 (sin ella la página sale sin el chat de ayuda)."; exit 1; fi
 
       - name: Compilar
         run: npm run build
 
-      - name: Subir borrador a Netlify (los clientes no lo ven)
+      - name: Subir borrador (los clientes no lo ven)
         id: draft
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
         run: |
           out="$(node scripts/deploy-netlify.mjs draft)"
-          id="$(printf '%s' "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).id))')"
-          url="$(printf '%s' "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).url))')"
-          echo "id=$id" >> "$GITHUB_OUTPUT"
-          echo "url=$url" >> "$GITHUB_OUTPUT"
+          echo "id=$(printf '%s' "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).id))')" >> "$GITHUB_OUTPUT"
+          echo "url=$(printf '%s' "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).url))')" >> "$GITHUB_OUTPUT"
 
       - name: Pruebas de humo contra el borrador (no cambian datos)
         env:
@@ -127,43 +149,143 @@ jobs:
           E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
         run: |
           if [ -z "$E2E_OWNER_EMAIL" ] || [ -z "$E2E_OWNER_PASSWORD" ]; then
-            echo "::error::Faltan los secretos E2E_OWNER_EMAIL / E2E_OWNER_PASSWORD (cuenta de prueba). Sin pruebas de humo no se da por bueno el borrador."
+            echo "::error::Faltan E2E_OWNER_EMAIL / E2E_OWNER_PASSWORD (cuenta de prueba). Sin pruebas de humo no se publica."
             exit 1
           fi
           npx playwright install --with-deps chromium
           npm run test:e2e
 
-      - name: Resumen
-        env:
-          ID: ${{ steps.draft.outputs.id }}
-          URL: ${{ steps.draft.outputs.url }}
-        run: |
-          {
-            echo "### Borrador listo y probado"
-            echo ""
-            echo "- URL para mirarlo: $URL"
-            echo "- Id para publicarlo: \`$ID\`"
-            echo ""
-            echo "Para publicarlo: Actions → Publicar → Run workflow → paso = produccion, deploy_id = $ID, confirmar = PUBLICAR."
-          } >> "$GITHUB_STEP_SUMMARY"
-
-  produccion:
-    name: Publicar el borrador
-    needs: guardia
-    if: inputs.paso == 'produccion'
+  produccion_base:
+    name: 3. Base de producción
+    needs: [decidir, borrador]
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     environment: produccion
     defaults:
       run:
         working-directory: patagonia-os-v312
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.decidir.outputs.sha }}
+      # pg_dump tiene que ser igual o más nuevo que el servidor de Supabase (17): se instala el 17 oficial.
+      - name: Instalar psql/pg_dump 17
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y > /dev/null
+          sudo apt-get install -y -qq postgresql-client-17
+          echo "/usr/lib/postgresql/17/bin" >> "$GITHUB_PATH"
+      - name: ¿Falta alguna migración? (protección de datos)
+        id: check
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+          PROTEGER_DATOS: "1"
+        run: |
+          if [ -z "$DATABASE_URL" ]; then echo "::error::Falta SUPABASE_DB_URL en el entorno produccion."; exit 1; fi
+          out="$(bash scripts/ci/apply-migrations.sh revisar)"
+          echo "$out"
+          if printf '%s' "$out" | grep -q "al día"; then echo "pendientes=no" >> "$GITHUB_OUTPUT"; else echo "pendientes=si" >> "$GITHUB_OUTPUT"; fi
+      - name: Respaldo de la estructura (sin datos de clientes)
+        if: steps.check.outputs.pendientes == 'si'
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: |
+          mkdir -p ../respaldo
+          pg_dump "$DATABASE_URL" --schema-only --schema=public --no-owner --no-privileges -f ../respaldo/estructura-antes.sql
+          psql "$DATABASE_URL" -X -At -c "select version from public.schema_migrations order by version" > ../respaldo/migraciones-antes.txt
+      - name: Guardar respaldo
+        if: steps.check.outputs.pendientes == 'si'
+        uses: actions/upload-artifact@v4
+        with:
+          name: estructura-produccion-antes-${{ needs.decidir.outputs.sha }}
+          path: respaldo/
+          retention-days: 90
+      - name: Aplicar migraciones en producción
+        if: steps.check.outputs.pendientes == 'si'
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+          PROTEGER_DATOS: "1"
+        run: bash scripts/ci/apply-migrations.sh aplicar
+
+  funciones:
+    name: 4. Función help-chat
+    needs: [decidir, produccion_base]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment: produccion
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.decidir.outputs.sha }}
+      - name: Desplegar help-chat (staging y producción)
+        working-directory: patagonia-os-v312
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROD_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+          STAGING_REF: ${{ vars.SUPABASE_STAGING_REF }}
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ] || [ -z "$PROD_REF" ]; then echo "::error::Faltan SUPABASE_ACCESS_TOKEN o SUPABASE_PROJECT_REF en el entorno produccion."; exit 1; fi
+          if [ -n "$STAGING_REF" ]; then npx --yes supabase@2.119.0 functions deploy help-chat --project-ref "$STAGING_REF"; fi
+          npx --yes supabase@2.119.0 functions deploy help-chat --project-ref "$PROD_REF"
+
+  publicar:
+    name: 5. Publicar + comprobar (vuelve atrás sola si falla)
+    needs: [decidir, borrador, produccion_base, funciones]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: produccion
+    defaults:
+      run:
+        working-directory: patagonia-os-v312
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.decidir.outputs.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Publicar
+          cache: npm
+          cache-dependency-path: patagonia-os-v312/package-lock.json
+      - run: npm ci
+      - name: Anotar la versión actual (para volver)
+        id: antes
+        run: |
+          id="$(node scripts/deploy-netlify.mjs current | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).id))')"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+      - name: Publicar el borrador probado
         env:
-          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
-          DEPLOY_ID: ${{ inputs.deploy_id }}
+          DEPLOY_ID: ${{ needs.borrador.outputs.id }}
         run: node scripts/deploy-netlify.mjs publish "$DEPLOY_ID"
+      - name: Pruebas de humo contra la página real
+        id: humo
+        env:
+          E2E_BASE_URL: https://patagoniasystem.com.ar
+          E2E_OWNER_EMAIL: ${{ secrets.E2E_OWNER_EMAIL }}
+          E2E_OWNER_PASSWORD: ${{ secrets.E2E_OWNER_PASSWORD }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+        run: |
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+      - name: Falló después de publicar → volver a la versión anterior
+        if: failure() && steps.antes.outputs.id != ''
+        env:
+          ANTERIOR: ${{ steps.antes.outputs.id }}
+        run: |
+          node scripts/deploy-netlify.mjs publish "$ANTERIOR"
+          echo "::error::La página nueva falló las pruebas y se volvió sola a la versión anterior ($ANTERIOR)."
+      - name: Resumen
+        if: success()
+        env:
+          NUEVO: ${{ needs.borrador.outputs.id }}
+          ANTERIOR: ${{ steps.antes.outputs.id }}
+          SHA: ${{ needs.decidir.outputs.sha }}
+        run: |
+          {
+            echo "### Publicado"
+            echo "- Cambio: \`$SHA\`"
+            echo "- Versión nueva: \`$NUEVO\`"
+            echo "- Versión anterior (para volver): \`$ANTERIOR\`"
+          } >> "$GITHUB_STEP_SUMMARY"

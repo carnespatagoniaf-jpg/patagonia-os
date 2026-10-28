@@ -1,7 +1,8 @@
 # Base de datos (migraciones) y funciones de Supabase desde GitHub.
 #
-# APAGADO hasta que se cree la variable del repositorio SUPABASE_FLUJO_HABILITADO = true.
-# Nunca corre solo: se arranca a mano (Actions → "Supabase" → Run workflow).
+# Herramienta MANUAL (la publicación automática ya aplica migraciones y help-chat sola, ver publicar.yml).
+# Sirve para revisar qué le falta a una base, o para aplicar a mano una migración que la publicación
+# automática frenó por cambiar datos. Nunca corre sola: Actions → "Supabase" → Run workflow.
 #   * accion = revisar      -> solo lista las migraciones que le faltan a esa base (no cambia nada).
 #   * accion = aplicar      -> las aplica (cada una en su transacción; frena ante cualquier error o hueco).
 #   * accion = help-chat    -> despliega la función del chat de ayuda (la única habilitada por ahora).
@@ -49,13 +50,11 @@ jobs:
     steps:
       - name: ¿Está habilitado?
         env:
-          HABILITADO: ${{ vars.SUPABASE_FLUJO_HABILITADO }}
           RAMA: ${{ github.ref_name }}
           DESTINO: ${{ inputs.destino }}
           ACCION: ${{ inputs.accion }}
           CONFIRMAR: ${{ inputs.confirmar }}
         run: |
-          if [ "$HABILITADO" != "true" ]; then echo "::error::Este flujo está apagado (falta SUPABASE_FLUJO_HABILITADO=true). No se hizo nada."; exit 1; fi
           if [ "$RAMA" != "main" ]; then echo "::error::Solo desde main (se pidió desde $RAMA)."; exit 1; fi
           if [ "$DESTINO" = "produccion" ] && [ "$ACCION" != "revisar" ] && [ "$CONFIRMAR" != "APLICAR" ]; then
             echo "::error::Para cambiar producción hay que escribir APLICAR en confirmar."; exit 1

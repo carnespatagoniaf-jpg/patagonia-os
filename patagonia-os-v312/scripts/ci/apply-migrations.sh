@@ -56,6 +56,23 @@ fi
 echo "Faltan ${#pending[@]} migraciones:"
 for f in "${pending[@]}"; do echo "  - $(basename "$f")"; done
 
+# Protección de datos (publicación automática, PROTEGER_DATOS=1): una migración que a nivel
+# de archivo (fuera de funciones, que van indentadas) borra o cambia filas o tablas no se
+# aplica sola. Crear tablas/columnas/funciones/vistas sí. Se mira solo el código, no los comentarios.
+if [ "${PROTEGER_DATOS:-0}" = "1" ]; then
+  risky=()
+  for f in "${pending[@]}"; do
+    if grep -nEi '^(drop[[:space:]]+(table|schema|column)|truncate|delete[[:space:]]+from|update[[:space:]]+[a-z_."]+[[:space:]]+set|alter[[:space:]]+table[^;]*drop[[:space:]]+column)' "$f" > /dev/null; then
+      risky+=("$(basename "$f")")
+    fi
+  done
+  if [ "${#risky[@]}" -gt 0 ]; then
+    echo "Estas migraciones borran o cambian datos y NO se aplican solas (hay que revisarlas antes):"
+    printf '  - %s\n' "${risky[@]}"
+    exit 3
+  fi
+fi
+
 if [ "$MODE" = "revisar" ]; then
   echo "(Solo revisión: no se cambió nada.)"
   exit 0

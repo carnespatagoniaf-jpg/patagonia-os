@@ -5,6 +5,8 @@
 // Dos pasos, para no arriesgar a todos los clientes con un deploy roto:
 //   node scripts/deploy-netlify.mjs draft            -> sube apps/web/dist como BORRADOR y muestra su URL
 //   node scripts/deploy-netlify.mjs publish <deployId> -> publica ese borrador en producción
+//   node scripts/deploy-netlify.mjs current            -> id de la versión publicada ahora
+//   node scripts/deploy-netlify.mjs rollback [deployId] -> vuelve a esa versión (sin id: a la publicada antes de la actual)
 //
 // Token en la variable NETLIFY_AUTH_TOKEN (nunca en el chat ni en un archivo).
 // Las redirecciones viven en netlify.toml, que la API no lee: se sube el
@@ -77,7 +79,30 @@ async function publish(id) {
   console.log(JSON.stringify({ id: d.id, state: d.state, published: d.published_at ?? null, url: d.ssl_url ?? d.url }));
 }
 
+async function current() {
+  const site = await api("GET", `/sites/${SITE_ID}`);
+  console.log(JSON.stringify({ id: site.published_deploy?.id ?? null, url: site.ssl_url ?? site.url }));
+}
+
+/** Volver atrás: a la versión indicada o, sin id, a la última publicada antes de la actual. */
+async function rollback(id) {
+  let target = id;
+  if (!target) {
+    const site = await api("GET", `/sites/${SITE_ID}`);
+    const now = site.published_deploy?.id;
+    const deploys = await api("GET", `/sites/${SITE_ID}/deploys?per_page=50`);
+    const previous = deploys
+      .filter((d) => d.id !== now && d.state === "ready" && d.published_at)
+      .sort((a, b) => Date.parse(b.published_at) - Date.parse(a.published_at))[0];
+    if (!previous) throw new Error("No encontré una versión anterior publicada");
+    target = previous.id;
+  }
+  await publish(target);
+}
+
 const [cmd, arg] = process.argv.slice(2);
 if (cmd === "draft") await draft();
 else if (cmd === "publish") await publish(arg);
-else console.log("Uso: node scripts/deploy-netlify.mjs draft | publish <deployId>");
+else if (cmd === "current") await current();
+else if (cmd === "rollback") await rollback(arg);
+else console.log("Uso: node scripts/deploy-netlify.mjs draft | publish <deployId> | current | rollback [deployId]");
