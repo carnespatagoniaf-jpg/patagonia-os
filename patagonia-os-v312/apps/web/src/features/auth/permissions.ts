@@ -24,7 +24,8 @@ export type Permission =
   | "branches.manage"
   | "audit.view"
   | "import.data"
-  | "scales.manage";
+  | "scales.manage"
+  | "frigo.manage";
 
 // "owner" es interno nuestro (el equipo de Patagonia OS): ve todo, incluidas
 // herramientas todavía en prueba (Auditoría) antes de decidir si pasan a
@@ -82,9 +83,11 @@ export const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> 
     "branches.manage",
     "users.manage",
     "import.data",
-    "scales.manage"
+    "scales.manage",
+    "frigo.manage"
   ],
-  manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view"],
+  // frigo.manage: el encargado carga DT, faena y salidas (la pantalla solo existe si la empresa tiene 'frigorifico').
+  manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view", "frigo.manage"],
   cashier: ["pos.sell", "products.view", "sales.create", "pos.treasury"],
   production: ["dashboard.view", "inventory.view", "inventory.adjust"],
   readonly: ["dashboard.view", "inventory.view", "reports.view"],
@@ -118,7 +121,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   "branches.manage": "Sucursales",
   "audit.view": "Auditoría",
   "import.data": "Importar desde Excel",
-  "scales.manage": "Balanzas"
+  "scales.manage": "Balanzas",
+  "frigo.manage": "Frigorífico (tropa, garrón y kilo)"
 };
 
 /** Planes que se venden (migración 101). El plan de la empresa se chequea
@@ -209,13 +213,15 @@ export const PAGE_PERMISSIONS = {
   accounts: "treasury.manage",
   expenses: "treasury.manage",
   // A pedido (Martínez): ventas a cuenta de un período con detalle y PDF.
-  sales_report: "customers.manage"
+  sales_report: "customers.manage",
+  // Frigorífico (migración 160, a pedido): stock de medias por tropa, garrón y kilo.
+  frigorifico: "frigo.manage"
 } as const satisfies Record<string, Permission>;
 
 export type Page = keyof typeof PAGE_PERMISSIONS;
 
-/** Pantallas que solo ve una empresa que las pidió (companies.features, migración 143). Hoy: Martínez. */
-const PAGE_REQUIRED_FEATURE: Partial<Record<string, string>> = { accounts: "cuentas", expenses: "gastos", sales_report: "reporte_ventas" };
+/** Pantallas que solo ve una empresa que las pidió (companies.features, migración 143). Hoy: Martínez y los frigoríficos (frigorifico, migración 160). */
+const PAGE_REQUIRED_FEATURE: Partial<Record<string, string>> = { accounts: "cuentas", expenses: "gastos", sales_report: "reporte_ventas", frigorifico: "frigorifico" };
 
 export function canAccessPage(profile: UserProfile | null, page: Page) {
   const feature = PAGE_REQUIRED_FEATURE[page];

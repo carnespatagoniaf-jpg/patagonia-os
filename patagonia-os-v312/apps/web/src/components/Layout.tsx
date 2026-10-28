@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { BarChart3, Banknote, Beef, BookOpenCheck, Boxes, ChefHat, ClipboardList, ScrollText, Download, FileText, HandCoins, Handshake, History, KeyRound, Landmark, MapPin, Menu, Upload, LogOut, PackagePlus, Receipt, Tag, TrendingUp, Users, Wallet } from "lucide-react";
+import { BarChart3, Banknote, Beef, BookOpenCheck, Boxes, ChefHat, ClipboardList, ScrollText, Download, FileText, HandCoins, Handshake, History, KeyRound, Landmark, MapPin, Menu, Upload, LogOut, PackagePlus, Receipt, Snowflake, Tag, TrendingUp, Users, Wallet } from "lucide-react";
 import { useAuth } from "../features/auth/AuthProvider";
 import { PLAN_LABELS, canAccessPage, planAllows, profilePlan, type Page } from "../features/auth/permissions";
 
@@ -44,7 +44,9 @@ const navGroups: Array<{ heading: string | null; items: NavItem[] }> = [
       { page: "inventory", label: "Stock", icon: Boxes },
       { page: "purchases", label: "Compras", icon: PackagePlus },
       { page: "carcass", label: "Despiece", icon: Beef },
-      { page: "recipes", label: "Recetas", icon: ChefHat }
+      { page: "recipes", label: "Recetas", icon: ChefHat },
+      // Solo para la empresa con 'frigorifico' en companies.features (migración 160).
+      { page: "frigorifico", label: "Frigorífico", icon: Snowflake }
       // "Balanzas" (features/scales, el Scale Manager) está escondida desde el
       // 2026-09-30: duplicaba lo que ya
       // anda (Productos/Stock → "Balanza por cable" y el engranaje de
