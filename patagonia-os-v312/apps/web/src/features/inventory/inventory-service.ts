@@ -191,7 +191,8 @@ export async function listProductVatRates(): Promise<Record<string, number | nul
   const out: Record<string, number | null> = {};
   const PAGE_SIZE = 1000;
   for (let from = 0; ; from += PAGE_SIZE) {
-    const { data, error } = await supabase.from("products").select("id,vat_rate").order("id").range(from, from + PAGE_SIZE - 1);
+    // Por la vista: la tabla products no se lee directo desde la 051 (por eso Stock mostraba "General" siempre).
+    const { data, error } = await supabase.from("products_price_list").select("id,vat_rate").order("id").range(from, from + PAGE_SIZE - 1);
     if (error) {
       // Base sin la migración 154 todavía: sin IVA por producto, nada se rompe.
       if ((error as { code?: string }).code === "42703") return {};

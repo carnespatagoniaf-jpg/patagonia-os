@@ -17,7 +17,7 @@ import {
   updateProductCategory,
   type ProductCategory
 } from "./product-categories-service";
-import { parseAmount } from "../../lib/money";
+import { amountInputText, parseAmount } from "../../lib/money";
 import { downloadScaleExportCsv } from "./scale-export";
 import { ScaleSyncPanel } from "./ScaleSyncPanel";
 import { SystelPanel } from "./systel/SystelPanel";
@@ -98,9 +98,10 @@ function draftFromProduct(p: Product): DraftProduct {
     code: p.code,
     name: p.name,
     unit: p.unit,
-    cost: String(p.cost),
-    margin: String(marginPercent(p.cost, p.priceRetail)),
-    priceRetail: String(p.priceRetail),
+    // Con coma: los campos de plata se leen con parseAmount ("14315.25" daba 1.431.525, real 28/10).
+    cost: amountInputText(p.cost),
+    margin: amountInputText(marginPercent(p.cost, p.priceRetail)),
+    priceRetail: amountInputText(p.priceRetail),
     minStock: String(p.minStock),
     stock: String(p.stock),
     active: p.active ?? true,
@@ -388,7 +389,7 @@ export function Inventory() {
       const margin = field === "margin" ? parseAmount(value) : parseAmount(draft.margin);
       const next = { ...draft, [field]: value };
       if (Number.isFinite(cost) && Number.isFinite(margin)) {
-        next.priceRetail = String(priceFromMargin(cost, margin));
+        next.priceRetail = amountInputText(priceFromMargin(cost, margin));
       }
       setDraft(next);
     };
@@ -400,7 +401,7 @@ export function Inventory() {
       const price = parseAmount(value);
       const next = { ...draft, priceRetail: value };
       if (Number.isFinite(cost) && Number.isFinite(price) && cost > 0) {
-        next.margin = String(marginPercent(cost, price));
+        next.margin = amountInputText(marginPercent(cost, price));
       }
       setDraft(next);
     };
