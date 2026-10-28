@@ -47,6 +47,19 @@ export function looksLikeScaleLabel(code: string, config: ScaleConfig): boolean 
   return true;
 }
 
+/** Etiqueta con importe de un producto que existe, pero con el importe en 0 o todo en 9: mensaje de error, o null. */
+export function amountOverflow(raw: string, config: ScaleConfig, active: Product[]): string | null {
+  if (config.payloadType !== "amount" || !looksLikeScaleLabel(raw, config)) return null;
+  const start = config.prefixLength + config.pluLength;
+  const value = raw.slice(start, start + config.weightLength);
+  if (!/^(0+|9+)$/.test(value)) return null;
+  const plu = String(parseInt(raw.slice(config.prefixLength, start), 10));
+  const product = active.find((p) => p.code === plu);
+  if (!product) return null;
+  const max = (Math.pow(10, config.weightLength) - 1) / config.weightDivisor;
+  return `La etiqueta de ${product.name} no trae el importe en el código de barras: pasa de ${max.toLocaleString("es-AR", { minimumFractionDigits: 2 })}, lo más alto que entra. No se agregó nada. Cobralo con "Vender algo sin código" por el importe impreso, o pesalo en dos partes.`;
+}
+
 const fmtQty = (q: number, unit: string) => (unit === "kg" ? `${q.toLocaleString("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg` : `${q} u.`);
 
 export function resolveScan(rawInput: string, products: Product[], config: ScaleConfig): ScanResolution {
@@ -66,6 +79,10 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
       message: "Este ticket de la balanza no trae el importe en el código de barras (con el formato actual de la balanza solo entran tickets de hasta $999,99). Cargá el TOTAL impreso con \"Vender algo sin código\" y avisale al encargado: en Productos → \"Balanza por cable\" → \"Mandar productos a la balanza\", Patagonia le ajusta el código de barras a la balanza."
     };
   }
+  // Etiqueta con importe que no entró en el campo (7 cifras en centavos = hasta $99.999,99): la balanza pone todo
+  // en 0 (REAL Aura con 2-5-5) o todo en 9 (REAL Systel). Nunca se cobra: el importe impreso no está en el código.
+  const overflow = amountOverflow(raw, config, active);
+  if (overflow) return { type: "error", message: overflow };
   const label = looksLikeScaleLabel(raw, config) ? parseWeightBarcode(raw, config) : null;
   const labelProduct = label ? active.find((p) => p.code === label.plu) : undefined;
   if (!labelProduct && systelSumWithoutAmount(raw)) {

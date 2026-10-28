@@ -117,8 +117,15 @@ export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDec
     if (!Number.isInteger(number) || number < 1 || number > Math.min(info.maxPlu, info.maxCode)) return { ...base, number: null, action: "omitir", reason: "su código no sirve como número de balanza" };
     if (seen.has(number)) return { ...base, number, action: "omitir", reason: `el código ${number} está repetido en Patagonia` };
     seen.set(number, product.id);
-    const priceRaw = product.price > 0 ? priceToRaw(product.price, priceDecimals) : null;
-    if (priceRaw === null || priceRaw <= 0) return { ...base, number, action: "omitir", reason: "no tiene precio en Patagonia" };
+    if (!(product.price > 0)) return { ...base, number, action: "omitir", reason: "no tiene precio en Patagonia" };
+    // Nunca se redondea: la etiqueta cobraría distinto que Patagonia (auditoría 28/10).
+    if (priceDecimals === 0 && Math.round(product.price * 100) % 100 !== 0) {
+      return { ...base, number, action: "omitir", reason: "tiene centavos y esta balanza trabaja sin centavos: redondeá el precio en Patagonia" };
+    }
+    const priceRaw = priceToRaw(product.price, priceDecimals);
+    if (priceRaw === null || priceRaw <= 0) {
+      return { ...base, number, action: "omitir", reason: `precio fuera de lo que admite la balanza (máximo ${priceDecimals === 2 ? "$9.999,99" : "$999.999"})` };
+    }
     const cur = byNumber.get(number) ?? null;
     const target = targetCodeFor(product.byWeight ? "P" : "U")!;
     const template = cur ? null : (plus.find((p) => (p.saleType === "P" || p.saleType === "C") === product.byWeight) ?? plus[0])?.raw ?? null;

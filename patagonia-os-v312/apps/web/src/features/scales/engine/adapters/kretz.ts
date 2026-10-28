@@ -14,8 +14,9 @@ import {
   type ReportProductFields,
   type ScaleSyncableProduct
 } from "../../../inventory/scale-serial";
-import { canWrite, SCALE_CAPABILITIES, type ScaleModelId } from "../capabilities";
-import { FRIENDLY_MESSAGES, FriendlyError } from "../friendly";
+import { canWrite, MODEL_LIMITS, SCALE_CAPABILITIES, type ScaleModelId } from "../capabilities";
+import { preflightProducts, type PreflightResult } from "../preflight";
+import { FRIENDLY_MESSAGES, FriendlyError, SENT_AND_CHECKED } from "../friendly";
 import { normalizeName } from "../matching";
 import type { EngineContext, EngineProduct, PendingItem, PreparedSync, ProductProblem, ProgressFn, ScaleAdapter, ScaleSession, SyncOutcome } from "../types";
 
@@ -89,7 +90,9 @@ export class KretzSession implements ScaleSession {
     if (!canWrite(this.model, "sendProducts")) {
       return { ...this.base(), canWrite: false, scaleProducts: 0, ready: 0, writes: 0, pending: [], upToDate: false, blocker: "Tu balanza Kretz respondió, pero este modelo todavía no está habilitado para recibir productos. Soporte te ayuda a habilitarlo." };
     }
-    const active = this.ctx.products.filter((p) => (p.active ?? true));
+    // Etapa 1: se revisa todo antes de leer la balanza. Lo que no se puede mandar exacto no se manda (con su motivo).
+    const check = this.preflight();
+    const active = check.ready;
     if (this.model === "kretz-aura") {
       onProgress("leer", "Leyendo los productos de tu balanza…");
       const list = await this.io.readAuraList((t) => onProgress("leer", "Leyendo los productos de tu balanza…", ...progressNumbers(t)));
@@ -104,7 +107,8 @@ export class KretzSession implements ScaleSession {
         .filter((x) => x.action === "conflicto")
         .map((x) => ({ code: x.plu ?? 0, scaleName: x.name, byWeight: false, reason: "ocupado_en_balanza", detail: x.reason, suggestionId: null }));
       const writes = s.crear + s.actualizar + s.reemplazar;
-      return { ...this.base(), scaleProducts: list.records.length, ready: s.sin_cambios, writes, pending, upToDate: writes === 0, notes: s.omitir ? [`${s.omitir} productos de Patagonia no van a la balanza (su código no sirve como número de balanza).`] : [] };
+      const skipped = [...check.problems, ...plan.filter((x) => x.action === "omitir").map((x) => ({ code: String(x.plu ?? ""), name: x.name, reason: x.reason }))];
+      return { ...this.base(), scaleProducts: list.records.length, ready: s.sin_cambios, writes, pending, upToDate: writes === 0, notes: [], skipped, warnings: check.warnings };
     }
 
     // Report: se lee cada número antes de escribir, para no pisar otro producto.
@@ -128,11 +132,11 @@ export class KretzSession implements ScaleSession {
     this.state = { kind: "report", create, update, occupied };
     const pending: PendingItem[] = occupied.map((o) => ({ code: Number(o.product.code), scaleName: o.current.name, byWeight: o.current.byWeight, reason: "ocupado_en_balanza", detail: `en la balanza el ${o.product.code} es "${o.current.name}"; en Patagonia es "${o.product.name}"`, suggestionId: null }));
     const writes = create.length + update.length;
-    const skipped = plan.skipped.map((x) => problem(x.product, x.reason));
+    const skipped = [...check.problems, ...plan.skipped.map((x) => problem(x.product, x.reason))];
     // Nunca "ya está todo listo" sin el código de barras configurado en ESTA balanza.
     const barcodeReady = !this.io.configureReportBarcode || isBarcodeConfigured(this.barcodeKey());
     const notes = barcodeReady ? [] : ["Falta configurar el código de barras de las etiquetas: se hace al sincronizar."];
-    return { ...this.base(), scaleProducts: plan.toSend.length, ready: same, writes, pending, upToDate: writes === 0 && barcodeReady, skipped, notes };
+    return { ...this.base(), scaleProducts: plan.toSend.length, ready: same, writes, pending, upToDate: writes === 0 && barcodeReady, skipped, warnings: check.warnings, notes };
   }
 
   async sync(prepared: PreparedSync, onProgress: ProgressFn, opts: { allowReplace?: boolean } = {}): Promise<SyncOutcome> {
@@ -216,6 +220,13 @@ export class KretzSession implements ScaleSession {
     }
   }
 
+  /** Revisión previa con los límites del modelo (capabilities.ts). Un modelo sin límites conocidos no manda nada. */
+  private preflight(): PreflightResult {
+    const limits = MODEL_LIMITS[this.model];
+    if (!limits) return { ready: [], problems: [], warnings: [] };
+    return preflightProducts(this.ctx.products, limits);
+  }
+
   private barcodeKey(): string {
     const id = this.identity();
     return `${this.ctx.scaleKey ?? ""}|${String(id.letter ?? "")}${String(id.equipment ?? "")}`;
@@ -272,8 +283,8 @@ function failedMessage(verified: number, failed: number): string {
 
 function done(pending: PendingItem[]): string {
   return pending.length
-    ? `¡Listo! Tu balanza está conectada y ya podés vender. ${pending.length} productos no se mandaron porque en la balanza ese número es de otro producto.`
-    : "¡Listo! Tu balanza está conectada y ya podés vender.";
+    ? `${SENT_AND_CHECKED} ${pending.length} productos no se mandaron porque en la balanza ese número es de otro producto.`
+    : SENT_AND_CHECKED;
 }
 
 /** "PLU 12 de 223" → [12, 223] para la barra de avance. */

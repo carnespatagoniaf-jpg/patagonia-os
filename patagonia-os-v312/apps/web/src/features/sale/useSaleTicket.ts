@@ -6,6 +6,7 @@ import type { ProductCategory } from "../inventory/product-categories-service";
 import { parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, type ScaleConfig } from "./scale-config-service";
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
 import { resolveScan } from "./scan-resolve";
+import { noteLabelRead } from "../scales/label-read";
 import { closeSystelTicketSession, readSystelTicketFromScale, refreshSystelLabelFormat, systelTicketReadConfigured } from "../inventory/systel/systel-ticket-from-scale";
 import { loadSystelLabelTemplates, systelConfigForCode } from "./systel-label-format";
 import { settleTicket, type ScalePrices } from "./systel-ticket-settle";
@@ -328,6 +329,8 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       done();
       return;
     }
+    // Paso 5 de la instalación de la balanza: Mostrador leyó bien una etiqueta (producto + cantidad).
+    if (resolved.type === "label" && scaleBranchId) noteLabelRead(scaleBranchId, resolved.detail);
     // 125: un papel que ya está anulado en el control de la balanza se pregunta antes de cobrarlo
     // (real Haedo 13/10: anulado 14:14 y cobrado 14:24; el control lo restaba igual).
     if (resolved.type === "ticket_total" || resolved.type === "label") {

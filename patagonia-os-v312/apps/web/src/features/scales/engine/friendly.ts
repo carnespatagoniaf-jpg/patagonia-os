@@ -20,6 +20,13 @@ export const FRIENDLY_MESSAGES: Record<FriendlyKind, string> = {
   general: "Algo no salió bien. Probá de nuevo o contactá a soporte."
 };
 
+/**
+ * Después de mandar y releer los productos. NO dice "ya podés vender": eso recién se sabe cuando Mostrador lee bien una
+ * etiqueta impresa (paso 5, install-status.ts). Antes decía "¡Listo! Tu balanza está conectada y ya podés vender".
+ */
+export const SENT_AND_CHECKED = "Productos pasados y comprobados en la balanza. Falta el último paso: pesá algo, imprimí la etiqueta y escaneala en Mostrador.";
+export const ALREADY_SAME = "La balanza ya tiene los mismos productos y precios que Patagonia (comprobado uno por uno). Falta el último paso: pesá algo, imprimí la etiqueta y escaneala en Mostrador.";
+
 export class FriendlyError extends Error {
   constructor(readonly kind: FriendlyKind, readonly technical?: string) {
     super(FRIENDLY_MESSAGES[kind]);
@@ -33,10 +40,21 @@ export function friendlyKind(err: unknown): FriendlyKind {
   const text = `${name} ${err instanceof Error ? err.message : String((err as { message?: string })?.message ?? err)}`;
   if (/no soporta|not supported|navigator\.serial|usá Chrome/i.test(text)) return "sin_navegador";
   if (/NotFoundError|No port selected|no se eligió/i.test(text)) return "sin_eleccion";
-  if (/already open|InvalidStateError|abierto en otra|Failed to open|NetworkError|Access denied/i.test(text)) return "puerto_ocupado";
+  // Internet primero: "NetworkError when attempting to fetch" también dice NetworkError (antes se mostraba como
+  // "otra pestaña usa la balanza"; auditoría 28/10).
   if (/Failed to fetch|NetworkError when attempting|ERR_INTERNET|offline/i.test(text)) return "sin_internet";
+  // Ya abierto por Patagonia (otra pestaña o esta misma).
+  if (/already open|InvalidStateError|abierto en otra/i.test(text)) return "puerto_ocupado";
+  // Windows no deja abrir el puerto: otro programa lo tiene (Qendra, iTegra, otra ventana) o el driver del cable falla.
+  if (/Failed to open|NetworkError|Access denied|acceso denegado/i.test(text)) return "puerto_otro_programa";
   if (/no contest|no respond|sin respuesta|timeout/i.test(text)) return "no_contesta";
   return "general";
+}
+
+/** El puerto no se pudo abrir (otra pestaña, otro programa o el driver): no tiene sentido probar otra marca. */
+export function isPortOpenError(err: unknown): boolean {
+  const kind = friendlyKind(err);
+  return kind === "puerto_ocupado" || kind === "puerto_otro_programa";
 }
 
 export function friendlyMessage(err: unknown): string {

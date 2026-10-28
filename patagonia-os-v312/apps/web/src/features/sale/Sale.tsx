@@ -1,3 +1,4 @@
+import { cachedScaleConfig, scaleConfigLoaded, scaleConfigOnError, SCALE_CONFIG_UNKNOWN_MESSAGE, type ScaleConfigState } from "./scale-config-cache";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Settings } from "lucide-react";
 import * as Sentry from "@sentry/react";
@@ -264,19 +265,20 @@ export function Sale() {
 
   useEffect(() => {
     if (!isSupabaseConfigured || !branchId) return;
+    // Nunca el formato de fábrica a ciegas: mientras carga, el último de esta computadora; si falla y no hay, no se
+    // leen etiquetas y se avisa (auditoría 28/10: con el de fábrica una etiqueta 1-6-5 se leía como otro producto).
+    const apply = (s: ScaleConfigState) => {
+      setScaleConfig(s.config);
+      setScaleConfigCalibrated(s.calibrated);
+    };
+    const cached = cachedScaleConfig(branchId);
+    if (cached) apply(cached);
     void getBranchScaleConfig(branchId)
-      .then((config) => {
-        if (config) {
-          setScaleConfig(config);
-          setScaleConfigCalibrated(true);
-        } else {
-          setScaleConfig(DEFAULT_SCALE_CONFIG);
-          setScaleConfigCalibrated(false);
-        }
-      })
+      .then((config) => apply(scaleConfigLoaded(branchId, config)))
       .catch(() => {
-        setScaleConfig(DEFAULT_SCALE_CONFIG);
-        setScaleConfigCalibrated(false);
+        const s = scaleConfigOnError(branchId);
+        apply(s);
+        if (s.unknown) setMessage(SCALE_CONFIG_UNKNOWN_MESSAGE);
       });
   }, [branchId]);
 
@@ -1063,6 +1065,7 @@ Cancelar = es el mismo papel: no cobrar.`)) {
         onScaleConfigChange={(config) => {
           setScaleConfig(config ?? DEFAULT_SCALE_CONFIG);
           setScaleConfigCalibrated(config !== null);
+          if (branchId) scaleConfigLoaded(branchId, config);
         }}
         mostradorPin={mostradorPin}
         onPinChange={setMostradorPinValue}

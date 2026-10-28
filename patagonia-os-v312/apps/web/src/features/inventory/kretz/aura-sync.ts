@@ -59,6 +59,20 @@ export const AURA_ITEM_SCALE_CONFIG = {
 };
 
 export const AURA_MAX_PLU = 9999;
+
+/**
+ * Código más alto que entra en la etiqueta 2-3-7 que les configuramos a las Kretz (Report y Aura, comando 1070
+ * "2002005"): el producto va en 3 cifras. Un código de 4 o 5 cifras se guarda en la balanza pero la etiqueta no lo
+ * puede llevar, y Mostrador leería otro producto: no se manda (auditoría 28/10; hoy ningún cliente tiene uno).
+ */
+export const KRETZ_LABEL_MAX_CODE = 999;
+
+/** Por qué un código no entra en la etiqueta de las Kretz, o null si entra. */
+export function kretzLabelCodeProblem(code: number): string | null {
+  return code > KRETZ_LABEL_MAX_CODE
+    ? `el código ${code} tiene más de 3 cifras y la etiqueta de la balanza lleva 3: Mostrador leería otro producto. Poné un código de 1 a ${KRETZ_LABEL_MAX_CODE} en Stock`
+    : null;
+}
 export const AURA_MAX_CODE = 99999;
 
 export interface AuraSyncProduct {
@@ -106,7 +120,11 @@ export function planAuraSync(scaleRecords: string[], products: AuraSyncProduct[]
     }
     if (seen.has(plu)) return { ...base, plu, action: "omitir", reason: `hay otro producto de Patagonia con el código ${plu}` };
     seen.add(plu);
+    const labelProblem = kretzLabelCodeProblem(plu);
+    if (labelProblem) return { ...base, plu, action: "omitir", reason: labelProblem };
     if (!(p.price >= 0)) return { ...base, plu, action: "omitir", reason: "precio inválido" };
+    // La Aura guarda pesos enteros: nunca se redondea (la etiqueta cobraría distinto que Patagonia).
+    if (Math.round(p.price * 100) % 100 !== 0) return { ...base, plu, action: "omitir", reason: "tiene centavos y la balanza guarda pesos enteros: redondeá el precio en Stock" };
     const priceRaw = Math.round(p.price);
     if (priceRaw > 999999) return { ...base, plu, action: "omitir", reason: "precio de más de $999.999: no entra en la balanza" };
     const type = p.byWeight ? "D" : "C";

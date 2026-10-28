@@ -767,6 +767,7 @@ a.button-link:hover { background: #731818; }
 .my-scale-item-status.ok { color: #176329; }
 .my-scale-item-status.warn { color: #8a4b00; }
 .my-scale-item-status.off { color: #697386; }
+.my-scale-item-status.bad { color: #b42318; }
 .my-scale-check { display: flex; gap: 10px; align-items: flex-start; font-size: 14px; max-width: 620px; }
 .my-scale-actions { display: flex; gap: 10px; flex-wrap: wrap; }
 .my-scale-review { width: 100%; border-top: 1px solid #eef0f3; padding-top: 12px; }
@@ -1124,3 +1125,11 @@ input[type="file"], main textarea { max-width: 100%; }
 .cash-out-option:hover:not(:disabled) { border-color: var(--brand); background: var(--brand-soft); color: var(--ink); }
 .cash-out-option strong { font-size: 15px; }
 .cash-out-option small { color: var(--muted); font-size: 12.5px; }
+
+/* Mis balanzas: los 5 pasos de la instalación (install-status.ts) */
+.my-scale-steps ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.my-scale-steps li { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.my-scale-steps li > div { display: grid; gap: 2px; min-width: 0; }
+.my-scale-steps li.ok svg { color: var(--success, #15803d); flex: none; margin-top: 2px; }
+.my-scale-steps li.todo strong { color: var(--muted, #6b7280); }
+.my-scale-step-dot { width: 14px; height: 14px; margin: 3px 2px 0; border-radius: 50%; border: 2px solid var(--border, #cbd5e1); flex: none; }

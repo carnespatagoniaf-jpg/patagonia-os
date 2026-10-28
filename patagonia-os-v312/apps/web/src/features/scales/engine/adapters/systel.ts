@@ -3,13 +3,14 @@ import { takeSystelBackup, type SystelBackup } from "../../../inventory/systel/s
 import type { SystelExchangeLog } from "../../../inventory/systel/systel-client";
 import { discoverSystelLink, loadSavedSystelLink, saveSystelLink, type SystelFoundLink } from "../../../inventory/systel/systel-discovery";
 import type { SystelLinkEvent } from "../../../inventory/systel/systel-serial";
-import type { SystelLayout } from "../../../inventory/systel/systel-plu";
+import { LAYOUT_INFO, type SystelLayout } from "../../../inventory/systel/systel-plu";
 import { takeProductBackup } from "../../../inventory/systel/systel-product-barcode";
 import { saveSystelLabelTemplates, saveSystelPluBarcodes } from "../../../sale/systel-label-format";
 import type { ScaleCatalogItem, ScaleLink, ScaleSaleProfile } from "../../sale/profile";
 import type { ScaleSetup } from "../../sale/scale-sale-service";
-import { canWrite, SCALE_CAPABILITIES, type ScaleModelId } from "../capabilities";
-import { FRIENDLY_MESSAGES, FriendlyError } from "../friendly";
+import { canWrite, SCALE_CAPABILITIES, systelLimits, type ScaleModelId } from "../capabilities";
+import { preflightProducts, type PreflightResult } from "../preflight";
+import { FRIENDLY_MESSAGES, FriendlyError, SENT_AND_CHECKED } from "../friendly";
 import type { EngineContext, PendingItem, PreparedSync, ProgressFn, ScaleAdapter, ScaleSession, SyncOutcome } from "../types";
 import { planSystelPush, runSystelPush, scaleOnly, type PushItem, type PushProduct } from "./systel-push";
 
@@ -255,8 +256,14 @@ export class SystelSession implements ScaleSession {
 
     onProgress("comparar", "Comparando con los productos de Patagonia…");
     const setup = this.ctx.online && this.ctx.branchId ? await this.deps.loadSetup(this.ctx.branchId, this.scaleKey) : null;
-    const products = this.pushProducts();
     const layout = backup.layout;
+    // Etapa 1: revisión previa con los límites que informó ESTA balanza (layout, decimales y formato de etiqueta).
+    const values = backup.config?.values ?? {};
+    const check: PreflightResult | null = layout
+      ? preflightProducts(this.ctx.products, systelLimits(LAYOUT_INFO[layout], backup.signature?.priceDecimals ?? 0, [values.E_P, values.E_U]))
+      : null;
+    const readyIds = new Set((check?.ready ?? []).map((p) => p.id));
+    const products = this.pushProducts().filter((p) => readyIds.has(p.id));
     const plan = layout ? planSystelPush(backup.plus, layout, backup.signature?.priceDecimals ?? 0, products) : [];
     this.state = { backup, products, plan, setup };
 
@@ -265,14 +272,11 @@ export class SystelSession implements ScaleSession {
     const pending: PendingItem[] = plan
       .filter((x) => x.action === "ocupado")
       .map((x) => ({ code: x.number ?? 0, scaleName: x.product.name, byWeight: x.product.byWeight, reason: "ocupado_en_balanza", detail: x.reason, suggestionId: null }));
-    const noPrice = plan.filter((x) => x.action === "omitir" && /precio/.test(x.reason)).length;
-    const badCode = plan.filter((x) => x.action === "omitir" && !/precio/.test(x.reason)).length;
-    const extra = scaleOnly(backup.plus, products).length;
+    const skipped = [...(check?.problems ?? []), ...plan.filter((x) => x.action === "omitir").map((x) => ({ code: x.product.code, name: x.product.name, reason: x.reason }))];
+    const extra = scaleOnly(backup.plus, this.pushProducts()).length;
     const notes: string[] = [];
     if (this.startupWaitOn) notes.push("La balanza está configurada para esperar a la PC cada vez que se prende. Al sincronizar, Patagonia además la deja en \"iniciar sin esperar\" (comando oficial de Systel, función 35) y lo comprueba releyendo su configuración.");
     if (!backup.complete) notes.push("No se pudo leer toda la balanza. Probá de nuevo; si sigue, avisá a soporte.");
-    if (noPrice) notes.push(noPrice === 1 ? "1 producto no tiene precio en Patagonia: no se manda hasta que lo tenga." : `${noPrice} productos no tienen precio en Patagonia: no se mandan hasta que lo tengan.`);
-    if (badCode) notes.push(`${badCode === 1 ? "1 producto tiene" : `${badCode} productos tienen`} un código que no sirve como número de balanza (tiene que ser un número de hasta 4 cifras, sin repetir).`);
     const changing = count("actualizar");
     if (changing) notes.push(`${changing === 1 ? "1 producto que ya está" : `${changing} productos que ya están`} en la balanza cambia de precio o nombre. Los totales de venta que guarda la balanza para ${changing === 1 ? "ese producto" : "esos productos"} podrían volver a cero (no está comprobado). Las ventas de Patagonia no cambian.`);
     if (extra) notes.push(extra === 1 ? "La balanza tiene 1 producto que no está en Patagonia: no se toca." : `La balanza tiene ${extra} productos que no están en Patagonia: no se tocan.`);
@@ -292,6 +296,8 @@ export class SystelSession implements ScaleSession {
       canWrite: writable,
       upToDate,
       notes,
+      skipped,
+      warnings: check?.warnings ?? [],
       ...(!writable && !upToDate
         ? {
             // Antes decía "falta habilitarla: lo hace soporte en unos minutos", pero no hay nada que soporte pueda tocar:
@@ -356,7 +362,7 @@ export class SystelSession implements ScaleSession {
     return {
       ok: true,
       verified: written.length,
-      message: pending.length ? `¡Listo! Tu balanza está conectada y ya podés vender. ${pending.length} productos no se mandaron porque en la balanza ese número es de otro producto.` : "¡Listo! Tu balanza está conectada y ya podés vender.",
+      message: pending.length ? `${SENT_AND_CHECKED} ${pending.length} productos no se mandaron porque en la balanza ese número es de otro producto.` : SENT_AND_CHECKED,
       pending
     };
   }

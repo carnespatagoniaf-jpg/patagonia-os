@@ -1,7 +1,7 @@
 import { bindingFor, restoreBinding, type ScaleBinding } from "../registry/local-bindings";
 import { findRegistered, legacyCandidate, sameIdentity, type BranchScale, type ScaleFamily } from "../registry/scale-identity";
 import { serialApi, type SerialApi } from "./engine";
-import { FriendlyError, friendlyKind } from "./friendly";
+import { FriendlyError, friendlyKind, isPortOpenError } from "./friendly";
 import { usbKeyOf } from "./memory";
 import { emptyDiag, type ConnectDiag, type EngineContext, type ProgressFn, type ScaleAdapter, type ScaleSession } from "./types";
 
@@ -125,7 +125,7 @@ export async function connectBranchScale(
       try {
         session = await adapter.identify(port, ctx, onProgress);
       } catch (err) {
-        if (friendlyKind(err) === "puerto_ocupado") {
+        if (isPortOpenError(err)) {
           busyErr = err;
           diag.steps.push(`${adapter.family}: puerto ocupado (${usb ?? "?"})`);
           break;
