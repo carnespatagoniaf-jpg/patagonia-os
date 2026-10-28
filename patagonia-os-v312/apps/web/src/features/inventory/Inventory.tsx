@@ -1,6 +1,6 @@
-import { Fragment, lazy, Suspense, useEffect, useState } from "react";
+import { Fragment, lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { Product } from "@patagonia/domain";
-import { marginPercent, priceFromMargin } from "@patagonia/domain";
+import { marginPercent } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
@@ -18,6 +18,7 @@ import {
   type ProductCategory
 } from "./product-categories-service";
 import { parseAmount } from "../../lib/money";
+import { marginToInput, moneyToInput, onCostOrMargin, onPrice, productWithCode } from "./product-pricing";
 import { downloadScaleExportCsv } from "./scale-export";
 import { ScaleSyncPanel } from "./ScaleSyncPanel";
 import { SystelPanel } from "./systel/SystelPanel";
@@ -97,9 +98,10 @@ function draftFromProduct(p: Product): DraftProduct {
     code: p.code,
     name: p.name,
     unit: p.unit,
-    cost: String(p.cost),
-    margin: String(marginPercent(p.cost, p.priceRetail)),
-    priceRetail: String(p.priceRetail),
+    // Con coma: "17804.35" lo leía parseAmount como 1.780.435 al guardar.
+    cost: moneyToInput(p.cost),
+    margin: marginToInput(marginPercent(p.cost, p.priceRetail)),
+    priceRetail: moneyToInput(p.priceRetail),
     minStock: String(p.minStock),
     stock: String(p.stock),
     active: p.active ?? true,
@@ -119,6 +121,7 @@ export function Inventory() {
   const [showInactive, setShowInactive] = useState(false);
 
   const [showNewForm, setShowNewForm] = useState(false);
+  const newNameRef = useRef<HTMLInputElement>(null);
   const [newDraft, setNewDraft] = useState<DraftProduct>(emptyDraft());
 
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -382,33 +385,20 @@ export function Inventory() {
   }
 
   function onCostOrMarginChange(draft: DraftProduct, setDraft: (d: DraftProduct) => void, field: "cost" | "margin") {
-    return (value: string) => {
-      const cost = field === "cost" ? parseAmount(value) : parseAmount(draft.cost);
-      const margin = field === "margin" ? parseAmount(value) : parseAmount(draft.margin);
-      const next = { ...draft, [field]: value };
-      if (Number.isFinite(cost) && Number.isFinite(margin)) {
-        next.priceRetail = String(priceFromMargin(cost, margin));
-      }
-      setDraft(next);
-    };
+    // Costo + margen → el precio de venta sale solo (product-pricing.ts).
+    return (value: string) => setDraft(onCostOrMargin(draft, field, value));
   }
 
   function onPriceChange(draft: DraftProduct, setDraft: (d: DraftProduct) => void) {
-    return (value: string) => {
-      const cost = parseAmount(draft.cost);
-      const price = parseAmount(value);
-      const next = { ...draft, priceRetail: value };
-      if (Number.isFinite(cost) && Number.isFinite(price) && cost > 0) {
-        next.margin = String(marginPercent(cost, price));
-      }
-      setDraft(next);
-    };
+    return (value: string) => setDraft(onPrice(draft, value));
   }
 
   async function handleCreate() {
     try {
       if (!branchId) throw new Error("Tu usuario no tiene sucursal asignada.");
       if (!newDraft.code.trim() || !newDraft.name.trim()) throw new Error("Código y nombre son obligatorios.");
+      const taken = productWithCode(products, newDraft.code);
+      if (taken) throw new Error(`El código ${taken.code} ya es de "${taken.name}". Buscalo en la lista para editarlo.`);
       const cost = parseAmount(newDraft.cost || "0");
       const priceRetail = parseAmount(newDraft.priceRetail || "0");
       const minStock = quantityNumber(newDraft.minStock || "0"); // kilos o unidades, no plata: "82,598" = 82,598 kg (real M2 26/10)
@@ -449,6 +439,8 @@ export function Inventory() {
     try {
       if (!branchId || !editingId) return;
       if (!editDraft.code.trim() || !editDraft.name.trim()) throw new Error("Código y nombre son obligatorios.");
+      const taken = productWithCode(products, editDraft.code, editingId);
+      if (taken) throw new Error(`El código ${taken.code} ya es de "${taken.name}".`);
       const cost = parseAmount(editDraft.cost || "0");
       const priceRetail = parseAmount(editDraft.priceRetail || "0");
       const minStock = quantityNumber(editDraft.minStock || "0");
@@ -827,11 +819,20 @@ export function Inventory() {
             type="search"
             name="stock-product-search"
             autoComplete="off"
-            placeholder="Buscar producto por nombre o código…"
+            placeholder="Buscar por nombre o código, o escaneá…"
             value={productSearch}
             onChange={(e) => setProductSearch(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Escape") setProductSearch("");
+              // Escanearon un código de barras que no es de ningún producto: se abre "Agregar" con ese código.
+              const code = productSearch.trim();
+              if (e.key === "Enter" && /^\d{6,}$/.test(code) && !productWithCode(products, code)) {
+                e.preventDefault();
+                setNewDraft({ ...emptyDraft(), code });
+                setShowNewForm(true);
+                setProductSearch("");
+                setMessage(`El código ${code} no es de ningún producto: completá el nombre y el precio para agregarlo.`);
+              }
             }}
             style={{ flex: "1 1 260px", minWidth: 220 }}
           />
@@ -914,8 +915,23 @@ export function Inventory() {
 
         {showNewForm ? (
           <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 16 }}>
-            <input placeholder="Código" value={newDraft.code} onChange={(e) => setNewDraft({ ...newDraft, code: e.target.value })} style={{ width: 100 }} />
-            <input placeholder="Nombre" value={newDraft.name} onChange={(e) => setNewDraft({ ...newDraft, name: e.target.value })} />
+            <input
+              placeholder="Código o escaneá"
+              title="Escribí el código o escaneá el código de barras del producto con la pistola"
+              autoFocus
+              autoComplete="off"
+              value={newDraft.code}
+              onChange={(e) => setNewDraft({ ...newDraft, code: e.target.value })}
+              onKeyDown={(e) => {
+                // La pistola manda el código y un Enter: pasa al nombre.
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  newNameRef.current?.focus();
+                }
+              }}
+              style={{ width: 150 }}
+            />
+            <input ref={newNameRef} placeholder="Nombre" value={newDraft.name} onChange={(e) => setNewDraft({ ...newDraft, name: e.target.value })} />
             <select value={newDraft.categoryId} onChange={(e) => setNewDraft({ ...newDraft, categoryId: e.target.value })}>
               <option value="">Sin categoría</option>
               {categories.map((c) => (
@@ -927,30 +943,39 @@ export function Inventory() {
               <option value="unit">unidad</option>
               <option value="box">caja</option>
             </select>
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="Costo"
-              value={newDraft.cost}
-              onChange={(e) => onCostOrMarginChange(newDraft, setNewDraft, "cost")(e.target.value)}
-              style={{ width: 100 }}
-            />
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="Margen %"
-              value={newDraft.margin}
-              onChange={(e) => onCostOrMarginChange(newDraft, setNewDraft, "margin")(e.target.value)}
-              style={{ width: 90 }}
-            />
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="Precio venta"
-              value={newDraft.priceRetail}
-              onChange={(e) => onPriceChange(newDraft, setNewDraft)(e.target.value)}
-              style={{ width: 100 }}
-            />
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 12 }}>
+              Costo
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="Costo"
+                value={newDraft.cost}
+                onChange={(e) => onCostOrMarginChange(newDraft, setNewDraft, "cost")(e.target.value)}
+                style={{ width: 100 }}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 12 }}>
+              Margen %
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="ej. 35"
+                value={newDraft.margin}
+                onChange={(e) => onCostOrMarginChange(newDraft, setNewDraft, "margin")(e.target.value)}
+                style={{ width: 90 }}
+              />
+            </label>
+            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 12 }}>
+              Precio venta
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder="Precio venta"
+                value={newDraft.priceRetail}
+                onChange={(e) => onPriceChange(newDraft, setNewDraft)(e.target.value)}
+                style={{ width: 100 }}
+              />
+            </label>
             <input
               type="text"
               inputMode="decimal"
@@ -976,6 +1001,17 @@ export function Inventory() {
             </select>
             <button onClick={handleCreate}>Guardar producto</button>
             <button className="secondary" onClick={() => { setShowNewForm(false); setNewDraft(emptyDraft()); }}>Cancelar</button>
+            {(() => {
+              const taken = productWithCode(products, newDraft.code);
+              return taken ? (
+                <p className="message warning" style={{ flexBasis: "100%", margin: 0 }}>
+                  El código {taken.code} ya es de "{taken.name}".
+                </p>
+              ) : null;
+            })()}
+            <p className="muted" style={{ flexBasis: "100%", margin: 0, fontSize: 12 }}>
+              Código: escribilo o escaneá el código de barras con la pistola (así Mostrador lo encuentra al escanearlo). Precio: poné el costo y el margen (ej. 35) y el precio de venta se calcula solo; o poné el precio y te muestra el margen.
+            </p>
           </div>
         ) : (
           <button className="secondary" style={{ marginBottom: 16 }} onClick={() => setShowNewForm(true)}>
@@ -1014,7 +1050,7 @@ export function Inventory() {
               <tr>
                 {editingId === product.id ? (
                   <>
-                    <td><input value={editDraft.code} onChange={(e) => setEditDraft({ ...editDraft, code: e.target.value })} style={{ width: 90 }} /></td>
+                    <td><input value={editDraft.code} title="Código o código de barras (se puede escanear)" onChange={(e) => setEditDraft({ ...editDraft, code: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }} style={{ width: 130 }} /></td>
                     <td><input value={editDraft.name} onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} /></td>
                     <td>
                       <select value={editDraft.categoryId} onChange={(e) => setEditDraft({ ...editDraft, categoryId: e.target.value })}>
