@@ -8,7 +8,7 @@ export async function listProductsForBranch(branchId: string, includeInactive = 
   // Supabase devuelve como máximo 1000 filas por consulta: se pide por páginas
   // (orden estable por nombre + id) para no cortar el catálogo en silencio.
   const PAGE_SIZE = 1000;
-  // Precios por lista (Mayorista, migración 166) en paralelo: si la empresa no tiene listas viene vacío.
+  // Precios por lista (Mayorista, migración 167) en paralelo: si la empresa no tiene listas viene vacío.
   const listPricesPromise = listProductListPrices().catch(() => new Map<string, Record<string, { price: number; manual: boolean }>>());
   const rows: {
     id: string; code: string; name: string; unit: Product["unit"]; cost: number | string; price_retail: number | string;

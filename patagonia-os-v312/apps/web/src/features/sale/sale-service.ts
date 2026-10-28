@@ -13,7 +13,7 @@ export interface CreatePosSaleItemInput {
   scaleTicket?: string;
   /** Código de la balanza escaneado (venta "artículos + TOTAL", migración 119); null = venta libre sin código. */
   scaleCode?: number | null;
-  /** Lista de precios (Mayorista, migración 166): el servidor cobra el precio de esa lista. */
+  /** Lista de precios (Mayorista, migración 167): el servidor cobra el precio de esa lista. */
   priceListId?: string;
 }
 

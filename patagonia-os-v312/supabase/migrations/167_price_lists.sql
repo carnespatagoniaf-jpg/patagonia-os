@@ -1,4 +1,4 @@
--- 166: Listas de precios (mayorista). Un producto, un PLU, varios precios.
+-- 167: Listas de precios (mayorista). Un producto, un PLU, varios precios.
 --
 -- Pedido del dueño (28/10): clientes que venden el chorizo a minorista y a
 -- mayorista no quieren 2 productos por cada cosa. Las "presentaciones" (111)
@@ -461,18 +461,18 @@ declare
   i int;
 begin
   if v_proc is null then
-    raise notice '166: no está create_pos_sale de 7 argumentos (staging viejo): Mostrador sigue sin listas';
+    raise notice '167: no está create_pos_sale de 7 argumentos (staging viejo): Mostrador sigue sin listas';
     return;
   end if;
   v_def := replace(pg_get_functiondef(v_proc), E'\r\n', E'\n');
   if position('pos_list_unit_price' in v_def) > 0 then
-    raise notice '166: create_pos_sale ya tiene listas de precios';
+    raise notice '167: create_pos_sale ya tiene listas de precios';
     return;
   end if;
   v_new := v_def;
   for i in 1 .. array_length(v_pairs, 1) loop
     if position(v_pairs[i][1] in v_new) = 0 then
-      raise exception '166: create_pos_sale no tiene el punto %: %', i, v_pairs[i][1];
+      raise exception '167: create_pos_sale no tiene el punto %: %', i, v_pairs[i][1];
     end if;
     v_new := replace(v_new, v_pairs[i][1], v_pairs[i][2]);
   end loop;
@@ -492,16 +492,16 @@ declare
   v_b2 constant text := $b$      v_unit_price := public.customer_list_price(v_product, p_customer_id);$b$;
 begin
   if v_proc is null then
-    raise notice '166: no está create_customer_charge_with_items de 6 argumentos: Clientes sigue sin listas';
+    raise notice '167: no está create_customer_charge_with_items de 6 argumentos: Clientes sigue sin listas';
     return;
   end if;
   v_def := replace(pg_get_functiondef(v_proc), E'\r\n', E'\n');
   if position('customer_list_price' in v_def) > 0 then
-    raise notice '166: create_customer_charge_with_items ya tiene listas de precios';
+    raise notice '167: create_customer_charge_with_items ya tiene listas de precios';
     return;
   end if;
   if position(v_a1 in v_def) = 0 or position(v_a2 in v_def) = 0 then
-    raise exception '166: create_customer_charge_with_items no tiene los puntos esperados';
+    raise exception '167: create_customer_charge_with_items no tiene los puntos esperados';
   end if;
   v_new := replace(replace(v_def, v_a1, v_b1), v_a2, v_b2);
   execute v_new;
@@ -542,4 +542,4 @@ as $function$
 $function$;
 revoke all on function public.scale_control_totals(uuid[]) from public, anon, authenticated;
 
-insert into public.schema_migrations (version) values ('166_price_lists') on conflict do nothing;
+insert into public.schema_migrations (version) values ('167_price_lists') on conflict do nothing;

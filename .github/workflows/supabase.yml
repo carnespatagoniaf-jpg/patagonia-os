@@ -1,0 +1,86 @@
+# Base de datos (migraciones) y funciones de Supabase desde GitHub.
+#
+# APAGADO hasta que se cree la variable del repositorio SUPABASE_FLUJO_HABILITADO = true.
+# Nunca corre solo: se arranca a mano (Actions → "Supabase" → Run workflow).
+#   * accion = revisar      -> solo lista las migraciones que le faltan a esa base (no cambia nada).
+#   * accion = aplicar      -> las aplica (cada una en su transacción; frena ante cualquier error o hueco).
+#   * accion = help-chat    -> despliega la función del chat de ayuda (la única habilitada por ahora).
+# destino = staging usa el entorno "staging"; destino = produccion usa el entorno "produccion",
+# que pide aprobación, y además hay que escribir APLICAR en "confirmar" para cambiar algo.
+# Orden obligatorio: primero staging, probar, después producción.
+name: Supabase
+
+on:
+  workflow_dispatch:
+    inputs:
+      destino:
+        description: "staging (base de pruebas) o produccion"
+        required: true
+        type: choice
+        options: [staging, produccion]
+        default: staging
+      accion:
+        description: "revisar (no cambia nada), aplicar (migraciones) o help-chat (función)"
+        required: true
+        type: choice
+        options: [revisar, aplicar, help-chat]
+        default: revisar
+      confirmar:
+        description: "Solo para cambiar producción: escribir APLICAR"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: supabase-${{ inputs.destino }}
+  cancel-in-progress: false
+
+jobs:
+  supabase:
+    name: ${{ inputs.accion }} en ${{ inputs.destino }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: ${{ inputs.destino }}
+    defaults:
+      run:
+        working-directory: patagonia-os-v312
+    steps:
+      - name: ¿Está habilitado?
+        env:
+          HABILITADO: ${{ vars.SUPABASE_FLUJO_HABILITADO }}
+          RAMA: ${{ github.ref_name }}
+          DESTINO: ${{ inputs.destino }}
+          ACCION: ${{ inputs.accion }}
+          CONFIRMAR: ${{ inputs.confirmar }}
+        run: |
+          if [ "$HABILITADO" != "true" ]; then echo "::error::Este flujo está apagado (falta SUPABASE_FLUJO_HABILITADO=true). No se hizo nada."; exit 1; fi
+          if [ "$RAMA" != "main" ]; then echo "::error::Solo desde main (se pidió desde $RAMA)."; exit 1; fi
+          if [ "$DESTINO" = "produccion" ] && [ "$ACCION" != "revisar" ] && [ "$CONFIRMAR" != "APLICAR" ]; then
+            echo "::error::Para cambiar producción hay que escribir APLICAR en confirmar."; exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - name: Instalar psql
+        if: inputs.accion != 'help-chat'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+
+      - name: Migraciones (${{ inputs.accion }})
+        if: inputs.accion != 'help-chat'
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+          ACCION: ${{ inputs.accion }}
+        run: |
+          if [ -z "$DATABASE_URL" ]; then echo "::error::Falta el secreto SUPABASE_DB_URL en el entorno ${{ inputs.destino }}."; exit 1; fi
+          bash scripts/ci/apply-migrations.sh "$ACCION"
+
+      - name: Desplegar help-chat
+        if: inputs.accion == 'help-chat'
+        env:
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+        run: |
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ] || [ -z "$PROJECT_REF" ]; then echo "::error::Faltan SUPABASE_ACCESS_TOKEN (secreto) o SUPABASE_PROJECT_REF (variable) en el entorno."; exit 1; fi
+          npx --yes supabase@2.119.0 functions deploy help-chat --project-ref "$PROJECT_REF"

@@ -20,7 +20,7 @@ export interface RouteCustomer {
   number?: number;
   phone?: string;
   balance: number;
-  /** Lista de precios del cliente (migración 166): compra a esos precios. */
+  /** Lista de precios del cliente (migración 167): compra a esos precios. */
   priceListId?: string;
   priceListName?: string;
 }

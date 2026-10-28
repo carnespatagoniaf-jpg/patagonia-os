@@ -32,7 +32,7 @@ export interface TicketLine {
   scaleCode?: number | null;
   /** Producto detallado de un ticket de TOTAL (ticket-detail.ts): la clave de la línea de ese TOTAL. */
   detailOf?: string;
-  /** Lista de precios con la que se cobra (Mayorista, migración 166). Sin lista = minorista. */
+  /** Lista de precios con la que se cobra (Mayorista, migración 167). Sin lista = minorista. */
   priceListId?: string;
   /** Precio minorista por unidad (el de la balanza): con lista, unitPrice es el de la lista. */
   retailPrice?: number;

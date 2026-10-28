@@ -1,7 +1,7 @@
 import type { Product } from "@patagonia/domain";
 
 /**
- * Listas de precios (migración 166): "Mayorista" = minorista ± % o costo + %, redondeado a pesos.
+ * Listas de precios (migración 167): "Mayorista" = minorista ± % o costo + %, redondeado a pesos.
  * El minorista es products.price_retail (no es una lista guardada). Lógica pura, testeada en
  * price-lists.test.ts; la misma cuenta está en SQL (price_list_price / product_list_prices_view):
  * si se cambia una, cambiar la otra.

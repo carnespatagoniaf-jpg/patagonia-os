@@ -1,7 +1,7 @@
 import { supabase } from "../../lib/supabase";
 import type { PriceList } from "./price-lists";
 
-/** La tabla/vista no existe todavía (migración 166 sin aplicar): se sigue como si no hubiera listas. */
+/** La tabla/vista no existe todavía (migración 167 sin aplicar): se sigue como si no hubiera listas. */
 function missingRelation(error: { code?: string } | null): boolean {
   return error?.code === "42P01" || error?.code === "PGRST205" || error?.code === "42703" || error?.code === "PGRST204";
 }

@@ -160,7 +160,7 @@ export function Inventory() {
   /** Paquetes por producto (a pedido: companies.features 'paquetes', migración 157). Solo los que ya se contaron. */
   const showPackages = Boolean(profile?.features?.includes("paquetes"));
   const [packages, setPackages] = useState<Record<string, number>>({});
-  // Listas de precios (Mayorista, migración 166). Sin listas, la pantalla queda como siempre.
+  // Listas de precios (Mayorista, migración 167). Sin listas, la pantalla queda como siempre.
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
   const [showPriceLists, setShowPriceLists] = useState(false);
   const activeLists = priceLists.filter((l) => l.active);

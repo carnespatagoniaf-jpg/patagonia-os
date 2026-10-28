@@ -1,0 +1,169 @@
+# Publicar la página (Netlify) desde GitHub, sin depender de ninguna computadora.
+#
+# APAGADO hasta que se cree la variable del repositorio PUBLICAR_HABILITADO = true
+# (Settings → Secrets and variables → Actions → Variables). Nunca corre solo: se
+# arranca a mano (Actions → "Publicar" → Run workflow) y cada paso que usa claves
+# espera la aprobación del entorno "produccion" (Settings → Environments).
+#
+# Dos pasos, como scripts/deploy-netlify.mjs:
+#   1. paso = borrador   → pruebas + compilar + subir un BORRADOR a Netlify (los clientes
+#                          no lo ven) + pruebas de humo contra ese borrador. Muestra su id y URL.
+#   2. paso = produccion → publica ESE borrador (id) en patagoniasystem.com.ar.
+#                          Hay que escribir PUBLICAR en "confirmar".
+# Volver atrás: Netlify → Deploys → elegir el anterior → "Publish deploy".
+# No toca la base de datos ni la configuración de Netlify.
+name: Publicar
+
+on:
+  workflow_dispatch:
+    inputs:
+      paso:
+        description: "borrador (no lo ven los clientes) o produccion (publica un borrador ya probado)"
+        required: true
+        type: choice
+        options: [borrador, produccion]
+        default: borrador
+      deploy_id:
+        description: "Solo para produccion: el id del borrador que se probó"
+        required: false
+        type: string
+      confirmar:
+        description: "Solo para produccion: escribir PUBLICAR"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publicar
+  cancel-in-progress: false
+
+jobs:
+  guardia:
+    name: ¿Está habilitado?
+    runs-on: ubuntu-latest
+    steps:
+      - name: Revisar que se pueda publicar
+        env:
+          HABILITADO: ${{ vars.PUBLICAR_HABILITADO }}
+          RAMA: ${{ github.ref_name }}
+          PASO: ${{ inputs.paso }}
+          DEPLOY_ID: ${{ inputs.deploy_id }}
+          CONFIRMAR: ${{ inputs.confirmar }}
+        run: |
+          if [ "$HABILITADO" != "true" ]; then
+            echo "::error::Publicar está apagado (falta la variable PUBLICAR_HABILITADO=true). No se hizo nada."
+            exit 1
+          fi
+          if [ "$RAMA" != "main" ]; then
+            echo "::error::Solo se publica desde main (se pidió desde $RAMA)."
+            exit 1
+          fi
+          if [ "$PASO" = "produccion" ]; then
+            if [ "$CONFIRMAR" != "PUBLICAR" ]; then echo "::error::Para publicar hay que escribir PUBLICAR en confirmar."; exit 1; fi
+            if ! printf '%s' "$DEPLOY_ID" | grep -Eq '^[a-f0-9]{24}$'; then echo "::error::Falta el id del borrador (24 letras/números)."; exit 1; fi
+          fi
+
+  borrador:
+    name: Borrador + pruebas
+    needs: guardia
+    if: inputs.paso == 'borrador'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: produccion
+    defaults:
+      run:
+        working-directory: patagonia-os-v312
+    env:
+      # Valores de la página (van dentro del sitio, igual que hoy desde la PC).
+      VITE_SUPABASE_URL: ${{ secrets.VITE_SUPABASE_URL }}
+      VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+      VITE_SENTRY_DSN: ${{ secrets.VITE_SENTRY_DSN }}
+      VITE_HELP_CHAT: ${{ vars.VITE_HELP_CHAT }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: patagonia-os-v312/package-lock.json
+      - run: npm ci
+      - name: Pruebas y tipos
+        run: npm test && npm run typecheck
+
+      - name: Revisar los valores de producción (sin mostrarlos)
+        run: |
+          for v in VITE_SUPABASE_URL VITE_SUPABASE_ANON_KEY; do
+            if [ -z "${!v}" ]; then echo "::error::Falta el secreto $v en el entorno produccion."; exit 1; fi
+          done
+          # Que no se compile por error contra la base de pruebas.
+          case "$VITE_SUPABASE_URL" in
+            https://tayylvhfmoybchutybcz.supabase.co|https://tayylvhfmoybchutybcz.supabase.co/) ;;
+            *) echo "::error::VITE_SUPABASE_URL no es la base de producción. No se sigue."; exit 1 ;;
+          esac
+          if [ "$VITE_HELP_CHAT" != "1" ]; then echo "::warning::VITE_HELP_CHAT no es 1: la página saldría sin el chat de ayuda."; fi
+
+      - name: Compilar
+        run: npm run build
+
+      - name: Subir borrador a Netlify (los clientes no lo ven)
+        id: draft
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+        run: |
+          out="$(node scripts/deploy-netlify.mjs draft)"
+          id="$(printf '%s' "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).id))')"
+          url="$(printf '%s' "$out" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).url))')"
+          echo "id=$id" >> "$GITHUB_OUTPUT"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Pruebas de humo contra el borrador (no cambian datos)
+        env:
+          E2E_BASE_URL: ${{ steps.draft.outputs.url }}
+          E2E_OWNER_EMAIL: ${{ secrets.E2E_OWNER_EMAIL }}
+          E2E_OWNER_PASSWORD: ${{ secrets.E2E_OWNER_PASSWORD }}
+          E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
+          E2E_ADMIN_PASSWORD: ${{ secrets.E2E_ADMIN_PASSWORD }}
+        run: |
+          if [ -z "$E2E_OWNER_EMAIL" ] || [ -z "$E2E_OWNER_PASSWORD" ]; then
+            echo "::error::Faltan los secretos E2E_OWNER_EMAIL / E2E_OWNER_PASSWORD (cuenta de prueba). Sin pruebas de humo no se da por bueno el borrador."
+            exit 1
+          fi
+          npx playwright install --with-deps chromium
+          npm run test:e2e
+
+      - name: Resumen
+        env:
+          ID: ${{ steps.draft.outputs.id }}
+          URL: ${{ steps.draft.outputs.url }}
+        run: |
+          {
+            echo "### Borrador listo y probado"
+            echo ""
+            echo "- URL para mirarlo: $URL"
+            echo "- Id para publicarlo: \`$ID\`"
+            echo ""
+            echo "Para publicarlo: Actions → Publicar → Run workflow → paso = produccion, deploy_id = $ID, confirmar = PUBLICAR."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  produccion:
+    name: Publicar el borrador
+    needs: guardia
+    if: inputs.paso == 'produccion'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: produccion
+    defaults:
+      run:
+        working-directory: patagonia-os-v312
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Publicar
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          DEPLOY_ID: ${{ inputs.deploy_id }}
+        run: node scripts/deploy-netlify.mjs publish "$DEPLOY_ID"

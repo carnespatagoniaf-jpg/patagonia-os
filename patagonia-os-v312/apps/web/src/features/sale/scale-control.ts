@@ -18,7 +18,7 @@ export interface ScaleControlTotals {
   voidedKg: number;
   voidedTickets: number;
   shiftCount: number;
-  /** Descuento por lista de precios (Mayorista, migración 166) en las etiquetas: ya está sumado en systemAmount. */
+  /** Descuento por lista de precios (Mayorista, migración 167) en las etiquetas: ya está sumado en systemAmount. */
   listDiscount?: number;
   listDiscountTickets?: number;
 }

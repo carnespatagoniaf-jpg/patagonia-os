@@ -146,7 +146,7 @@ export function Customers() {
   const [openingDate, setOpeningDate] = useState(todayIso());
   const printSectionRef = useRef<HTMLDivElement | null>(null);
 
-  // Listas de precios (Mayorista, migración 166): el cliente que tiene una compra a esos precios.
+  // Listas de precios (Mayorista, migración 167): el cliente que tiene una compra a esos precios.
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
   const [newPriceListId, setNewPriceListId] = useState("");
   const [editPriceListId, setEditPriceListId] = useState("");

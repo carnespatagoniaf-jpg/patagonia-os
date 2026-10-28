@@ -52,7 +52,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [showProductTable, setShowProductTable] = useState(false);
   const [baseCart, setCart] = useState<TicketLine[]>([]);
-  /** Lista de precios de esta venta (botón Minorista / Mayorista, migración 166); null = minorista. */
+  /** Lista de precios de esta venta (botón Minorista / Mayorista, migración 167); null = minorista. */
   const [priceListId, setPriceListId] = useState<string | null>(null);
   const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
   // El ticket que se ve y se cobra: cada línea con el precio de la lista elegida (withPriceList no

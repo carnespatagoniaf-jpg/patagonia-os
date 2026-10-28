@@ -164,7 +164,7 @@ export function Sale() {
   const [scaleConfigCalibrated, setScaleConfigCalibrated] = useState(false);
 
 
-  // Listas de precios (Mayorista, migración 166): sin listas, Mostrador queda como siempre.
+  // Listas de precios (Mayorista, migración 167): sin listas, Mostrador queda como siempre.
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
   useEffect(() => {
     if (!isSupabaseConfigured) return;

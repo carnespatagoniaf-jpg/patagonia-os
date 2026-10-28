@@ -41,7 +41,7 @@ export async function listCustomers(includeInactive = false): Promise<Customer[]
     return query;
   };
   let { data, error } = await run(`${BASE},price_list_id`);
-  // Antes de la migración 166 la columna no existe: se lee como siempre.
+  // Antes de la migración 167 la columna no existe: se lee como siempre.
   if (error && (error.code === "42703" || error.code === "PGRST204")) ({ data, error } = await run(BASE));
   if (error) throw error;
   return ((data ?? []) as unknown as CustomerRow[]).map(mapCustomer);
