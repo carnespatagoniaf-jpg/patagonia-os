@@ -5,6 +5,7 @@ import App from "./App";
 import { AuthProvider } from "./features/auth/AuthProvider";
 import "./styles.css";
 import { installSerialTabResponder } from "./features/inventory/kretz/serial-tabs";
+import { installTableLabels } from "./lib/table-labels";
 
 const sentryDsn = import.meta.env.VITE_SENTRY_DSN as string | undefined;
 if (sentryDsn) {
@@ -32,6 +33,8 @@ function ErrorFallback() {
 
 // Cada pestaña avisa si tiene la balanza tomada y la suelta si "Probar todo" lo pide.
 installSerialTabResponder();
+// En el celular las tablas se ven como tarjetas: cada dato con el nombre de su columna.
+installTableLabels();
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
   <React.StrictMode>

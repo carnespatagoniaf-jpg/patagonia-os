@@ -4,15 +4,18 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 import { releaseSerialEverywhere } from "../inventory/kretz/serial-tabs";
 import { connectBranchScale, type BranchConnectResult } from "./engine/connect-branch";
+import { isPhoneOrTablet, PHONE_OR_TABLET_MESSAGE } from "./engine/device";
 import { markSynced } from "./engine/engine";
 import { adaptersForChoice } from "./engine/live";
-import { friendlyKind, friendlyMessage } from "./engine/friendly";
+import { ALREADY_SAME, friendlyKind, friendlyMessage } from "./engine/friendly";
 import { choiceLabel, SCALE_CHOICES, type ScaleChoice } from "./engine/choice";
 import { loadRememberedScale, rememberScale } from "./engine/memory";
 import { emptyDiag, type ConnectDiag, type EngineProduct, type EngineStep, type PendingItem, type PreparedSync, type ProductProblem, type ScaleSession } from "./engine/types";
-import { checkScaleFormats, choiceForScale, defaultScaleName, listBranchScales, registerBranchScale, removeBranchScale, renameBranchScale, scaleStatus, type BranchScale } from "./registry/branch-scales";
+import { checkScaleFormats, choiceForScale, defaultScaleName, listBranchScales, registerBranchScale, removeBranchScale, renameBranchScale, saveScaleInstall, scaleStatus, type BranchScale } from "./registry/branch-scales";
+import { installSteps, installSummary, localInstall, newestInstall, saveLocalInstall, type InstallRecord } from "./install-status";
 import { bindingFor, forgetBinding, saveBinding } from "./registry/local-bindings";
 import { setScaleLinks } from "./sale/scale-sale-service";
+import { compactSupportLog } from "./support-compact";
 import { submitScaleSupportReport } from "./support-service";
 
 /**
@@ -55,6 +58,8 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
   /** El último diagnóstico, para verlo y descargarlo aunque el reporte no haya llegado. */
   const [lastDiagnostic, setLastDiagnostic] = useState<Record<string, unknown> | null>(null);
   const session = useRef<ScaleSession | null>(null);
+  /** Para volver a dibujar los pasos después de guardar uno en esta computadora. */
+  const [, setInstallTick] = useState(0);
   const ctxRef = useRef<BranchConnectResult | null>(null);
 
   const reload = useCallback(async () => {
@@ -99,6 +104,9 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     const target = active ? { clave: active.key, nombre: active.name, marca: active.family, identidad: active.identity } : { nueva: newChoice };
     return {
       cuando: new Date().toISOString(),
+      // Qué web tenía y qué balanzas tiene registradas la sucursal: sin esto no se sabía si el arreglo ya le había llegado.
+      version: typeof __APP_BUILD__ === "string" ? __APP_BUILD__ : null,
+      balanzas_sucursal: scales.map((s) => ({ clave: s.key, nombre: s.name, marca: s.family, modelo: s.model, identidad: s.identity, activa: s.active, vende_con_codigos: s.sellsWithCodes })),
       etapa: stage,
       mensaje: technical instanceof Error ? technical.message : String(technical),
       balanza: target,
@@ -122,7 +130,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     try {
       await submitScaleSupportReport({
         note: `Mis balanzas (${active?.name ?? `nueva: ${newChoice ?? "?"}`}) · ${stage}: ${String(full.mensaje)}`.slice(0, 500),
-        logText: JSON.stringify(full).slice(0, 60000),
+        logText: compactSupportLog(full),
         connections: [],
         branchId
       });
@@ -135,6 +143,20 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
   function reportAndShow(...args: Parameters<typeof report>) {
     setReportSent(null);
     void report(...args).then(setReportSent);
+  }
+
+  /** Paso comprobado de la instalación: en esta computadora y en la ficha de la balanza (si la base la tiene). */
+  function recordInstall(key: string | null | undefined, patch: InstallRecord) {
+    if (!branchId || !key) return;
+    saveLocalInstall(branchId, key, patch);
+    if (key !== LOCAL_KEY && isSupabaseConfigured) void saveScaleInstall(branchId, key, patch).catch(() => {});
+    setInstallTick((t) => t + 1);
+  }
+
+  /** Lo comprobado de una balanza: lo más nuevo entre esta computadora y su ficha. */
+  function installOf(s: BranchScale | null): InstallRecord {
+    if (!s || !branchId) return {};
+    return newestInstall(localInstall(branchId, s.key), s.install ?? null);
   }
 
   async function closeSession() {
@@ -171,6 +193,14 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       const key = await remember(result, target);
       if (key) setActiveKey(key);
       const prepared = await result.session.prepare(progress);
+      const at = new Date().toISOString();
+      recordInstall(key, {
+        model: prepared.label,
+        detectedAt: at,
+        communicationAt: at,
+        // "Ya está igual" sale de releer cada producto de la balanza: cuenta como enviado y comprobado.
+        ...(prepared.upToDate ? { sentAt: at, sentCount: prepared.ready, verifiedAt: at, verifiedCount: prepared.ready, failedCount: 0 } : {})
+      });
       // Mismo número y mismo cable que otra (real Los gringos): si imprime distinto que la tarjeta elegida, no es esa.
       const realTarget = target && target.key !== LOCAL_KEY ? target : null;
       if (realTarget) {
@@ -189,12 +219,17 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       }
       // La lectura pudo descubrir con qué señales o a qué número atiende la balanza: se vuelve a guardar su conexión.
       if (branchId && key) saveBinding(key, { branchId, family: result.family, usb: result.usb });
-      if (prepared.blocker) setPhase({ kind: "bloqueado", prepared });
-      else if (prepared.upToDate) setPhase({ kind: "listo", message: "¡Listo! Tu balanza está conectada y ya podés vender.", pending: prepared.pending, model: prepared.label, skipped: prepared.skipped });
+      if (prepared.blocker) {
+        setPhase({ kind: "bloqueado", prepared });
+        // Frenada por la balanza (modelo no comprobado o lectura incompleta), no por permisos: va sola a soporte. Antes
+        // no se mandaba nada y no se sabía qué balanza era (real Giuseppe, 27/10).
+        if (!prepared.canWrite) reportAndShow("frenada", prepared.blocker, diag, { modelo_detectado: prepared.label, formatos_leidos: result.session.codeFormats?.() ?? null, notas: prepared.notes });
+      } else if (prepared.upToDate) setPhase({ kind: "listo", message: ALREADY_SAME, pending: prepared.pending, model: prepared.label, skipped: prepared.skipped });
       else setPhase({ kind: "listo_para_sincronizar", prepared });
     } catch (err) {
       const kind = friendlyKind(err);
       setPhase({ kind: "error", message: connectErrorMessage(err, choice), canPick: kind === "elegir_cable" || kind === "no_contesta" || kind === "otra_balanza", canRelease: kind === "balanza_ocupada" && !allowSystelRelease && canManage });
+      recordInstall(target?.key, { lastError: friendlyMessage(err).slice(0, 200), lastErrorAt: new Date().toISOString() });
       reportAndShow("conectar", err, diag);
     }
   }
@@ -248,12 +283,15 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     progress("sincronizar", "Preparando…");
     try {
       const out = await s.sync(prepared, progress, { allowReplace: replace });
+      const at = new Date().toISOString();
       if (!out.ok) {
+        recordInstall(activeKey, { sentAt: at, sentCount: prepared.ready + out.verified, verifiedAt: at, verifiedCount: prepared.ready + out.verified, failedCount: Math.max(out.failures?.length ?? 0, 1), lastError: out.message.slice(0, 200), lastErrorAt: at });
         setPhase({ kind: "error", message: out.message, canPick: false, failures: out.failures });
         reportAndShow("sincronizar (frenado)", out.message, ctxRef.current?.diag ?? null, out.support ?? {});
         return;
       }
       markSynced();
+      recordInstall(activeKey, { sentAt: at, sentCount: prepared.ready + out.verified, verifiedAt: at, verifiedCount: prepared.ready + out.verified, failedCount: 0 });
       setPhase({ kind: "listo", message: out.message, pending: out.pending, model: prepared.label, skipped: prepared.skipped });
       void reload();
     } catch (err) {
@@ -294,6 +332,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     setPhase({ kind: "inicio" });
   }
 
+  const onPhoneOrTablet = isPhoneOrTablet();
   const working = phase.kind === "trabajando";
   const showList = phase.kind === "inicio";
 
@@ -307,6 +346,8 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
         </div>
       </div>
 
+      {onPhoneOrTablet && (showList || phase.kind === "elegir_marca") && <p className="my-scale-warning">{PHONE_OR_TABLET_MESSAGE}</p>}
+
       {showList && (
         <div className="my-scale-body">
           {loaded && list.length === 0 && <p className="my-scale-status">Todavía no agregaste ninguna balanza.</p>}
@@ -314,7 +355,8 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
             <ul className="my-scale-list">
               {list.map((s) => {
                 const local = s.key === LOCAL_KEY ? (loadRememberedScale()?.connectedAt ?? null) : branchId ? (bindingFor(s.key, branchId)?.lastOkAt ?? null) : null;
-                const st = scaleStatus({ active: s.active, sellsWithCodes: s.sellsWithCodes, localOkAt: local });
+                const inst = installOf(s);
+                const st = inst.detectedAt && !(s.sellsWithCodes && !s.active) ? installSummary(inst) : scaleStatus({ active: s.active, sellsWithCodes: s.sellsWithCodes, localOkAt: local });
                 return (
                   <li key={s.key} className="my-scale-item">
                     <div>
@@ -395,6 +437,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
           )}
           <Notes notes={phase.prepared.notes} />
           <ProblemList title="no van a la balanza" items={phase.prepared.skipped} />
+          <ProblemList title="van con el nombre acortado" items={phase.prepared.warnings} />
           {lookalike && (
             <p className="my-scale-warning">
               Se agregó como una balanza nueva. En esta sucursal ya está "{lookalike.name}", que contesta con el mismo número. Si las dos se conectan a la misma computadora, cambiale el número a una en su menú; si no, no hace falta nada.
@@ -415,13 +458,19 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
             <button className="secondary" onClick={() => void handleConnect(active, false)}>Conectar otra vez</button>
             <button className="secondary" onClick={backToList}>Volver a mis balanzas</button>
           </div>
+          {!phase.prepared.canWrite && (
+            <p className="muted">
+              {reportSent === null ? "Mandando el detalle técnico a soporte de Patagonia…" : reportSent ? "El detalle técnico ya le llegó a soporte de Patagonia." : "No se pudo mandar el detalle técnico a soporte: descargalo y mandalo por WhatsApp."}
+            </p>
+          )}
+          {!phase.prepared.canWrite && lastDiagnostic && <DiagnosticView diagnostic={lastDiagnostic} />}
         </div>
       )}
 
       {phase.kind === "listo" && (
         <div className="my-scale-body">
           <p className="my-scale-status ok"><CheckCircle2 size={22} /> {phase.message}</p>
-          <p className="muted">Pesá, imprimí el ticket y escanealo en Mostrador.</p>
+          <InstallChecklist record={installOf(active)} onRefresh={() => void reload()} />
           {phase.pending.length > 0 && active && <PendingReview items={phase.pending} products={products} branchId={branchId} scaleKey={active.key} />}
           <ProblemList title="no van a la balanza" items={phase.skipped} />
           <div className="my-scale-actions">
@@ -475,8 +524,35 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
   }
 }
 
+/** Los 5 pasos de la instalación, cada uno con lo que lo prueba (install-status.ts). */
+function InstallChecklist({ record, onRefresh }: { record: InstallRecord; onRefresh: () => void }) {
+  const steps = installSteps(record);
+  return (
+    <div className="my-scale-steps">
+      <ol>
+        {steps.map((s) => (
+          <li key={s.id} className={s.done ? "ok" : "todo"}>
+            {s.done ? <CheckCircle2 size={18} /> : <span className="my-scale-step-dot" />}
+            <div>
+              <strong>{s.label}</strong>
+              <span className="muted">{s.detail}</span>
+            </div>
+          </li>
+        ))}
+      </ol>
+      {!steps[4].done && (
+        <div className="my-scale-actions">
+          <button className="secondary" onClick={onRefresh}>Ya escaneé una etiqueta: comprobar</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** El error al conectar, nombrando la balanza que eligió el cliente y qué revisar en ESA balanza. */
 function connectErrorMessage(err: unknown, choice: ScaleChoice | null): string {
+  // Desde la tablet la lista de cables sale vacía y el cliente la cierra: el motivo real es el aparato, no la elección.
+  if (isPhoneOrTablet() && (friendlyKind(err) === "sin_eleccion" || friendlyKind(err) === "sin_navegador")) return PHONE_OR_TABLET_MESSAGE;
   if (friendlyKind(err) !== "no_contesta" || !choice || choice === "auto") return friendlyMessage(err);
   const label = choiceLabel(choice);
   if (choice === "kretz-report") {

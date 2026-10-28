@@ -25,6 +25,9 @@ import { chequeTitle, formatDay, type Cheque } from "../cheques/cheque-logic";
 const OWN_CHEQUE_OPTION = "__own_cheque";
 const ENDORSE_PREFIX = "__endorse:";
 import { useCarcassTemplates } from "../carcass/useCarcassTemplates";
+import { listDefaultCarcassCuts, type DefaultCarcassCut } from "../carcass/carcass-templates-service";
+import { listCarcassBatches } from "../carcass/carcass-service";
+import { animalTypeLabel, buildTypeChips, carcassTypeKey, findSameType, type TypeChips } from "../carcass/carcass-types";
 
 interface DraftLine {
   key: string;
@@ -44,7 +47,46 @@ function emptyLine(): DraftLine {
   return { key: crypto.randomUUID(), productId: "", description: "", quantity: "", unit: "kg", unitPrice: "", carcass: false, animalType: "", carcassWeight: "" };
 }
 
-const DEFAULT_ANIMAL_TYPES = ["Vaca / media res", "Cerdo", "Pollo", "Mocho"];
+/**
+ * Qué se desposta en un renglón "Para despostar": los mismos botones que Despiece. Se toca uno; "Otro" deja
+ * escribir, y si ya existe uno igual ("MEDIA" = Media res) usa ese, para no llenar Despiece de repetidos.
+ */
+function CarcassTypePicker({ value, chips, onChange }: { value: string; chips: TypeChips; onChange: (value: string) => void }) {
+  const isChip = (t: string) => chips.visible.some((c) => carcassTypeKey(c) === carcassTypeKey(t));
+  const [typing, setTyping] = useState(() => value.trim() !== "" && !isChip(value));
+  return (
+    <div className="type-chips compact">
+      {chips.visible.map((type) => (
+        <button
+          key={type}
+          type="button"
+          className={`type-chip${!typing && value && carcassTypeKey(value) === carcassTypeKey(type) ? " active" : ""}`}
+          onClick={() => { setTyping(false); onChange(type); }}
+        >
+          {animalTypeLabel(type)}
+        </button>
+      ))}
+      {typing ? (
+        <input
+          autoFocus
+          autoComplete="off"
+          list="purchase-animal-types"
+          placeholder="¿Qué es?"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={() => {
+            const same = value.trim() ? findSameType(value, chips.all) : undefined;
+            if (same) onChange(same);
+            if (same && isChip(same)) setTyping(false);
+          }}
+          style={{ maxWidth: 170 }}
+        />
+      ) : (
+        <button type="button" className="type-chip add" onClick={() => { setTyping(true); onChange(""); }}>Otro</button>
+      )}
+    </div>
+  );
+}
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -119,15 +161,39 @@ export function Purchases() {
   // Para despostar: solo quien tiene Despiece (plan Estándar o más).
   const canCarcass = can(profile, "carcass.manage");
   const { templates } = useCarcassTemplates();
-  const animalTypes = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const name of [...DEFAULT_ANIMAL_TYPES, ...templates.map((t) => t.animalType)]) {
-      if (name.trim() && !seen.has(name.trim().toLowerCase())) seen.set(name.trim().toLowerCase(), name.trim());
-    }
-    return [...seen.values()];
-  }, [templates]);
+  const [defaultCuts, setDefaultCuts] = useState<DefaultCarcassCut[]>([]);
+  // Lo que el negocio ya desposta (todas sus reses): para los botones y para saber si es la primera vez.
+  const [carcassBatchTypes, setCarcassBatchTypes] = useState<string[]>([]);
+  useEffect(() => {
+    if (!canCarcass || !isSupabaseConfigured) return;
+    listDefaultCarcassCuts().then(setDefaultCuts).catch(() => setDefaultCuts([]));
+  }, [canCarcass]);
+  useEffect(() => {
+    if (!canCarcass || !isSupabaseConfigured || !branchId) return;
+    listCarcassBatches(branchId)
+      .then((list) => setCarcassBatchTypes(list.map((b) => b.animalType)))
+      .catch(() => setCarcassBatchTypes([]));
+  }, [canCarcass, branchId, purchases]);
   const templateCutsFor = (animalType: string) =>
-    templates.filter((t) => t.animalType.trim().toLowerCase() === animalType.trim().toLowerCase()).length;
+    templates.filter((t) => carcassTypeKey(t.animalType) === carcassTypeKey(animalType)).length;
+  /** Sin cortes de siempre, la PRIMERA vez que se desposta ese animal se usan los típicos (migración 162). */
+  const defaultCutsFor = (animalType: string) =>
+    carcassBatchTypes.some((t) => carcassTypeKey(t) === carcassTypeKey(animalType))
+      ? 0
+      : defaultCuts.filter((d) => d.typeKey === carcassTypeKey(animalType)).length;
+  // Lo que este proveedor ya trajo para despostar, el último primero: "Compras se acuerda".
+  const supplierCarcassTypes = useMemo(() => {
+    const dateOf = new Map(purchases.map((p) => [p.id, p.purchaseDate]));
+    return Object.values(items)
+      .flat()
+      .filter((i) => i.carcassAnimalType)
+      .sort((a, b) => (dateOf.get(b.purchaseId) ?? "").localeCompare(dateOf.get(a.purchaseId) ?? ""))
+      .map((i) => i.carcassAnimalType as string);
+  }, [items, purchases]);
+  const animalChips = useMemo(
+    () => buildTypeChips([...supplierCarcassTypes, ...carcassBatchTypes], templates.map((t) => t.animalType)),
+    [supplierCarcassTypes, carcassBatchTypes, templates]
+  );
 
   const [products, setProducts] = useState<Product[]>(isSupabaseConfigured ? [] : demoProducts);
   const [updateCosts, setUpdateCosts] = useState(true);
@@ -648,8 +714,7 @@ export function Purchases() {
       <div className="content-grid">
         <section className="panel">
           <div className="panel-title">
-            <h2>Proveedores</h2>
-            <span>{suppliersLoading ? "Cargando…" : `${suppliers.length} proveedores`}</span>
+            <h2>Proveedores <span className="muted" style={{ fontSize: 14, fontWeight: 500 }}>{suppliersLoading ? "Cargando…" : suppliers.length}</span></h2>
           </div>
 
           <div className="panel-list-scroll">
@@ -663,28 +728,29 @@ export function Purchases() {
               </thead>
               <tbody>
                 {suppliers.map((supplier) => (
-                  <tr key={supplier.id}>
-                    <td>{supplier.name}</td>
+                  <tr key={supplier.id} className={supplier.id === selectedSupplierId ? "row-selected" : "row-clickable"} onClick={() => setSelectedSupplierId(supplier.id)}>
+                    <td><strong>{supplier.name}</strong></td>
                     <td>{supplier.category}</td>
-                    <td>
+                    <td onClick={(e) => e.stopPropagation()}>
                       {confirmDeleteSupplierId === supplier.id ? (
-                        <>
-                          <span className="muted" style={{ fontSize: 13, marginRight: 6 }}>¿Seguro? Si ya tiene compras o pagos, queda dado de baja y se guarda su historia.</span>
-                          <button className="danger" disabled={deleteSupplierBusy} onClick={() => handleConfirmDeleteSupplier(supplier.id)}>
-                            {deleteSupplierBusy ? "Eliminando…" : "Sí, borrar"}
-                          </button>{" "}
-                          <button className="secondary" disabled={deleteSupplierBusy} onClick={() => setConfirmDeleteSupplierId(null)}>Cancelar</button>
-                        </>
+                        <div style={{ whiteSpace: "normal", display: "grid", gap: 6, maxWidth: 280 }}>
+                          <span className="muted" style={{ fontSize: 12 }}>¿Seguro? Si ya tiene compras o pagos, queda dado de baja y se guarda su historia.</span>
+                          <div className="row-actions" style={{ justifyContent: "flex-start" }}>
+                            <button className="danger" disabled={deleteSupplierBusy} onClick={() => handleConfirmDeleteSupplier(supplier.id)}>
+                              {deleteSupplierBusy ? "Eliminando…" : "Sí, borrar"}
+                            </button>
+                            <button className="secondary" disabled={deleteSupplierBusy} onClick={() => setConfirmDeleteSupplierId(null)}>Cancelar</button>
+                          </div>
+                        </div>
                       ) : (
-                        <>
-                          <button
-                            className={supplier.id === selectedSupplierId ? "" : "secondary"}
-                            onClick={() => setSelectedSupplierId(supplier.id)}
-                          >
-                            {supplier.id === selectedSupplierId ? "Seleccionado" : "Ver cuenta"}
-                          </button>{" "}
+                        <div className="row-actions">
+                          {supplier.id === selectedSupplierId ? (
+                            <span className="badge brand">Viendo</span>
+                          ) : (
+                            <button className="secondary" onClick={() => setSelectedSupplierId(supplier.id)}>Ver cuenta</button>
+                          )}
                           <button className="danger" onClick={() => setConfirmDeleteSupplierId(supplier.id)}>Borrar</button>
-                        </>
+                        </div>
                       )}
                     </td>
                   </tr>
@@ -693,11 +759,16 @@ export function Purchases() {
             </table>
           </div>
 
-          <div className="cash-banner-form" style={{ marginTop: 16, flexWrap: "wrap" }}>
-            <input placeholder="Nombre" value={supplierName} onChange={(e) => setSupplierName(e.target.value)} />
-            <input placeholder="Rubro (pollo, carne...)" value={supplierCategory} onChange={(e) => setSupplierCategory(e.target.value)} />
-            <input placeholder="Teléfono" value={supplierPhone} onChange={(e) => setSupplierPhone(e.target.value)} />
-            <button disabled={busy} onClick={handleCreateSupplier}>Agregar proveedor</button>
+          <div className="form-box" style={{ marginTop: 16, marginBottom: 0 }}>
+            <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Proveedor nuevo</h3>
+            <div className="form-grid">
+              <label>Nombre<input value={supplierName} onChange={(e) => setSupplierName(e.target.value)} /></label>
+              <label>Rubro<input placeholder="Pollo, carne…" value={supplierCategory} onChange={(e) => setSupplierCategory(e.target.value)} /></label>
+              <label>Teléfono<input value={supplierPhone} onChange={(e) => setSupplierPhone(e.target.value)} /></label>
+            </div>
+            <div className="form-actions">
+              <button disabled={busy} onClick={handleCreateSupplier}>Agregar proveedor</button>
+            </div>
           </div>
         </section>
 
@@ -734,28 +805,38 @@ export function Purchases() {
             </div>
           )}
           {selectedSupplier && editingSupplier && (
-            <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
-              <input placeholder="Nombre" value={editSupplierName} onChange={(e) => setEditSupplierName(e.target.value)} />
-              <input placeholder="Rubro (pollo, carne...)" value={editSupplierCategory} onChange={(e) => setEditSupplierCategory(e.target.value)} />
-              <input placeholder="Teléfono" value={editSupplierPhone} onChange={(e) => setEditSupplierPhone(e.target.value)} />
-              <input placeholder="Notas" value={editSupplierNotes} onChange={(e) => setEditSupplierNotes(e.target.value)} />
-              {fiscalOn && (
-                <>
-                  <input placeholder="CUIT" inputMode="numeric" value={editSupplierCuit} onChange={(e) => setEditSupplierCuit(e.target.value)} />
-                  <select value={editSupplierTaxCondition} onChange={(e) => setEditSupplierTaxCondition(e.target.value)}>
-                    <option value="">Condición frente al IVA…</option>
-                    <option value="responsable_inscripto">Responsable inscripto (te da Factura A)</option>
-                    <option value="monotributo">Monotributista (Factura C)</option>
-                    <option value="exento">Exento</option>
+            <div>
+              <div className="form-grid">
+                <label>Nombre<input value={editSupplierName} onChange={(e) => setEditSupplierName(e.target.value)} /></label>
+                <label>Rubro<input placeholder="Pollo, carne…" value={editSupplierCategory} onChange={(e) => setEditSupplierCategory(e.target.value)} /></label>
+                <label>Teléfono<input value={editSupplierPhone} onChange={(e) => setEditSupplierPhone(e.target.value)} /></label>
+                <label>Notas<input value={editSupplierNotes} onChange={(e) => setEditSupplierNotes(e.target.value)} /></label>
+                {fiscalOn && (
+                  <>
+                    <label>CUIT<input inputMode="numeric" value={editSupplierCuit} onChange={(e) => setEditSupplierCuit(e.target.value)} /></label>
+                    <label>
+                      Condición frente al IVA
+                      <select value={editSupplierTaxCondition} onChange={(e) => setEditSupplierTaxCondition(e.target.value)}>
+                        <option value="">Sin definir</option>
+                        <option value="responsable_inscripto">Responsable inscripto (te da Factura A)</option>
+                        <option value="monotributo">Monotributista (Factura C)</option>
+                        <option value="exento">Exento</option>
+                      </select>
+                    </label>
+                  </>
+                )}
+                <label>
+                  Estado
+                  <select value={editSupplierActive ? "1" : "0"} onChange={(e) => setEditSupplierActive(e.target.value === "1")}>
+                    <option value="1">Activo</option>
+                    <option value="0">Dado de baja</option>
                   </select>
-                </>
-              )}
-              <select value={editSupplierActive ? "1" : "0"} onChange={(e) => setEditSupplierActive(e.target.value === "1")}>
-                <option value="1">Activo</option>
-                <option value="0">Dado de baja</option>
-              </select>
-              <button disabled={busy} onClick={handleUpdateSupplier}>Guardar</button>
-              <button className="secondary" disabled={busy} onClick={() => setEditingSupplier(false)}>Cancelar</button>
+                </label>
+              </div>
+              <div className="form-actions">
+                <button disabled={busy} onClick={handleUpdateSupplier}>Guardar</button>
+                <button className="secondary" disabled={busy} onClick={() => setEditingSupplier(false)}>Cancelar</button>
+              </div>
             </div>
           )}
         </section>
@@ -767,9 +848,11 @@ export function Purchases() {
             <div className="panel-title">
               <h2>Registrar pago a {selectedSupplier.name}</h2>
             </div>
-              <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
-                <input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} />
-                <input type="text" inputMode="decimal" placeholder="Monto" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} />
+              <div className="form-grid">
+                <label>Fecha<input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} /></label>
+                <label>Monto<input type="text" inputMode="decimal" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} /></label>
+                <label className="span-2">
+                  Pagar desde
                 <select
                   value={paymentAccountId}
                   onChange={(e) => {
@@ -779,7 +862,7 @@ export function Purchases() {
                     if (cheque) setPaymentAmount(String(cheque.amount).replace(".", ","));
                   }}
                 >
-                  <option value="">Pagar desde…</option>
+                  <option value="">Elegí de dónde sale…</option>
                   {accounts.map((a) => (
                     <option key={a.id} value={a.id}>{a.name}</option>
                   ))}
@@ -794,12 +877,8 @@ export function Purchases() {
                     </optgroup>
                   )}
                 </select>
-                {!paymentAccountId.startsWith("__") && (
-                  <>
-                    <input placeholder="Nota" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} />
-                    <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
-                  </>
-                )}
+                </label>
+                <label className="span-2">Nota (opcional)<input value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} /></label>
               </div>
               {paymentAccountId === OWN_CHEQUE_OPTION && (
                 <div style={{ marginTop: 10 }}>
@@ -818,12 +897,9 @@ export function Purchases() {
               {paymentAccountId.startsWith(ENDORSE_PREFIX) && (
                 <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>Se paga con el monto del cheque. El cheque sale de la cartera y queda como endosado a este proveedor.</p>
               )}
-              {paymentAccountId.startsWith("__") && (
-                <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 10 }}>
-                  <input placeholder="Nota" value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} />
-                  <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
-                </div>
-              )}
+              <div className="form-actions">
+                <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
+              </div>
           </section>
 
           {adjustmentsEnabled && (
@@ -832,14 +908,19 @@ export function Purchases() {
                 <h2>Descuento o recargo a {selectedSupplier.name}</h2>
               </div>
               <p className="muted" style={{ marginTop: 0 }}>Cambia lo que le debés, sin mover caja ni stock. Descuento: le debés menos. Recargo: le debés más.</p>
-              <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
-                <select value={adjustmentKind} onChange={(e) => setAdjustmentKind(e.target.value as "descuento" | "recargo")}>
-                  <option value="descuento">Descuento</option>
-                  <option value="recargo">Recargo</option>
-                </select>
-                <input type="date" value={adjustmentDate} onChange={(e) => setAdjustmentDate(e.target.value)} />
-                <input type="text" inputMode="decimal" placeholder="Monto" value={adjustmentAmount} onChange={(e) => setAdjustmentAmount(e.target.value)} />
-                <input placeholder="Motivo (opcional)" value={adjustmentNotes} onChange={(e) => setAdjustmentNotes(e.target.value)} />
+              <div className="form-grid">
+                <label>
+                  Tipo
+                  <select value={adjustmentKind} onChange={(e) => setAdjustmentKind(e.target.value as "descuento" | "recargo")}>
+                    <option value="descuento">Descuento</option>
+                    <option value="recargo">Recargo</option>
+                  </select>
+                </label>
+                <label>Fecha<input type="date" value={adjustmentDate} onChange={(e) => setAdjustmentDate(e.target.value)} /></label>
+                <label>Monto<input type="text" inputMode="decimal" value={adjustmentAmount} onChange={(e) => setAdjustmentAmount(e.target.value)} /></label>
+                <label className="span-2">Motivo (opcional)<input value={adjustmentNotes} onChange={(e) => setAdjustmentNotes(e.target.value)} /></label>
+              </div>
+              <div className="form-actions">
                 <button disabled={busy} onClick={handleAddAdjustment}>{busy ? "Guardando…" : adjustmentKind === "descuento" ? "Cargar descuento" : "Cargar recargo"}</button>
               </div>
             </section>
@@ -882,27 +963,29 @@ export function Purchases() {
                     <div className="purchase-line-product">
                       {line.carcass ? (
                         <>
-                          <input
-                            list="purchase-animal-types"
-                            placeholder="¿Qué es? (Pollo, Vaca…)"
-                            value={line.animalType}
-                            onChange={(e) => updateLine(line.key, { animalType: e.target.value })}
-                          />
+                          <span className="purchase-carcass-question">¿Qué despostás?</span>
+                          <CarcassTypePicker value={line.animalType} chips={animalChips} onChange={(animalType) => updateLine(line.key, { animalType })} />
                           {line.unit === "unit" && (
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              placeholder="Kilos en total"
-                              value={line.carcassWeight}
-                              onFocus={(e) => e.target.select()}
-                              onChange={(e) => updateLine(line.key, { carcassWeight: e.target.value })}
-                              style={{ marginTop: 4 }}
-                            />
+                            <label className="purchase-carcass-kg">
+                              ¿Cuántos kilos son{line.quantity.trim() ? ` los ${line.quantity.trim()}` : ""} en total?
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="kg"
+                                value={line.carcassWeight}
+                                onFocus={(e) => e.target.select()}
+                                onChange={(e) => updateLine(line.key, { carcassWeight: e.target.value })}
+                              />
+                            </label>
                           )}
-                          <small className="muted">
-                            {line.animalType.trim() && templateCutsFor(line.animalType) > 0
-                              ? `Se reparte solo en ${templateCutsFor(line.animalType)} cortes y entran a Stock.`
-                              : "Aparece en Despiece para cargar los cortes (con una plantilla de cortes se reparte solo)."}
+                          <small className={line.animalType.trim() && (templateCutsFor(line.animalType) > 0 || defaultCutsFor(line.animalType) > 0) ? "num-positive" : "muted"}>
+                            {!line.animalType.trim()
+                              ? "Tocá qué es."
+                              : templateCutsFor(line.animalType) > 0
+                                ? `✓ Se reparte solo en ${templateCutsFor(line.animalType)} cortes y entran a Stock.`
+                                : defaultCutsFor(line.animalType) > 0
+                                  ? `✓ Se reparte solo en los ${defaultCutsFor(line.animalType)} cortes típicos de ${animalTypeLabel(line.animalType).toLowerCase()}.`
+                                  : "Aparece en Despiece para cargar los cortes."}
                           </small>
                         </>
                       ) : selectedProduct ? (
@@ -950,7 +1033,14 @@ export function Purchases() {
                             checked={line.carcass}
                             style={{ width: "auto", margin: 0 }}
                             onChange={(e) => updateLine(line.key, e.target.checked
-                              ? { carcass: true, productId: "", animalType: line.animalType || line.description }
+                              ? {
+                                  carcass: true,
+                                  productId: "",
+                                  animalType: line.animalType
+                                    || (line.description.trim() ? findSameType(line.description, animalChips.all) : undefined)
+                                    || supplierCarcassTypes[0]
+                                    || ""
+                                }
                               : { carcass: false })}
                           />
                           <span>Para despostar</span>
@@ -983,7 +1073,7 @@ export function Purchases() {
               })}
             </div>
             <datalist id="purchase-animal-types">
-              {animalTypes.map((name) => <option key={name} value={name} />)}
+              {animalChips.all.map((name) => <option key={name} value={name} />)}
             </datalist>
             <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
               Para una descripción libre (sin elegir un producto de la lista): escribí el nombre y tocá afuera o Esc.
@@ -1124,8 +1214,10 @@ export function Purchases() {
                                 <input type="text" inputMode="decimal" value={editUnitPrice} onChange={(e) => setEditUnitPrice(e.target.value)} style={{ width: 90 }} />
                               </td>
                               <td className="num">
-                                <button disabled={busy} onClick={() => handleSaveEdit(item.id)}>Guardar</button>
-                                <button className="secondary" disabled={busy} onClick={() => setEditingItemId(null)}>Cancelar</button>
+                                <div className="row-actions">
+                                  <button disabled={busy} onClick={() => handleSaveEdit(item.id)}>Guardar</button>
+                                  <button className="secondary" disabled={busy} onClick={() => setEditingItemId(null)}>Cancelar</button>
+                                </div>
                               </td>
                             </>
                           ) : (
@@ -1160,9 +1252,10 @@ export function Purchases() {
               <div className="panel-title">
                 <h2>Pagos</h2>
               </div>
-              <table className="data-table">
+              <div className="table-scroll">
+              <table className="data-table compact">
                 <thead>
-                  <tr><th>Fecha</th><th className="num">Monto</th><th>Cuenta</th><th>Nota</th><th></th></tr>
+                  <tr><th>Fecha</th><th className="num">Monto</th><th>Cuenta y nota</th><th></th></tr>
                 </thead>
                 <tbody>
                   {payments.map((payment) => (
@@ -1186,28 +1279,35 @@ export function Purchases() {
                               <option key={a.id} value={a.id}>{a.name}</option>
                             ))}
                           </select>
+                          <input placeholder="Nota" value={editPaymentNotes} onChange={(e) => setEditPaymentNotes(e.target.value)} style={{ marginTop: 6, width: "100%" }} />
                         </td>
-                        <td><input value={editPaymentNotes} onChange={(e) => setEditPaymentNotes(e.target.value)} /></td>
                         <td>
-                          <button disabled={busy} onClick={handleSavePayment}>Guardar</button>{" "}
-                          <button className="secondary" disabled={busy} onClick={() => setEditingPaymentId(null)}>Cancelar</button>
+                          <div className="row-actions">
+                            <button disabled={busy} onClick={handleSavePayment}>Guardar</button>
+                            <button className="secondary" disabled={busy} onClick={() => setEditingPaymentId(null)}>Cancelar</button>
+                          </div>
                         </td>
                       </tr>
                     ) : (
                       <tr key={payment.id}>
-                        <td>{payment.paymentDate}</td>
+                        <td style={{ whiteSpace: "nowrap" }}>{payment.paymentDate}</td>
                         <td className="num">{formatMoney(payment.amount)}</td>
-                        <td>{payment.accountName ?? PAYMENT_METHOD_LABELS[payment.paymentMethod]}</td>
-                        <td>{payment.notes ?? "-"}</td>
                         <td>
-                          <button className="secondary" disabled={busy} onClick={() => startEditPayment(payment)}>Editar</button>{" "}
-                          <button className="secondary" disabled={busy} onClick={() => handleDeletePayment(payment.id)}>Borrar</button>
+                          {payment.accountName ?? PAYMENT_METHOD_LABELS[payment.paymentMethod]}
+                          {payment.notes && <span className="cell-sub" style={{ whiteSpace: "normal" }}>{payment.notes}</span>}
+                        </td>
+                        <td>
+                          <div className="row-actions">
+                            <button className="secondary" disabled={busy} onClick={() => startEditPayment(payment)}>Editar</button>
+                            <button className="danger" disabled={busy} onClick={() => handleDeletePayment(payment.id)}>Borrar</button>
+                          </div>
                         </td>
                       </tr>
                     )
                   ))}
                 </tbody>
               </table>
+              </div>
               {payments.length === 0 && <p className="muted">Todavía no hay pagos registrados.</p>}
             </section>
           </div>
@@ -1220,6 +1320,7 @@ export function Purchases() {
             <p className="muted print-only-header">
               {selectedSupplier.name} · {selectedSupplier.category}
             </p>
+            <div className="table-scroll">
             <table className="data-table">
               <thead>
                 <tr>
@@ -1233,7 +1334,7 @@ export function Purchases() {
               <tbody>
                 {ledger.map((row) => (
                   <tr key={row.key}>
-                    <td>{row.date}</td>
+                    <td style={{ whiteSpace: "nowrap" }}>{row.date}</td>
                     <td>
                       {row.detail}
                       {row.adjustmentId && (
@@ -1252,6 +1353,7 @@ export function Purchases() {
                 ))}
               </tbody>
             </table>
+            </div>
             {ledger.length === 0 && <p className="muted">Todavía no hay movimientos para este proveedor.</p>}
           </section>
         </>

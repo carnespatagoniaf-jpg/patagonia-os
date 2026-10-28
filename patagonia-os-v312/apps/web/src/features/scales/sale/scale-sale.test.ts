@@ -210,3 +210,64 @@ describe("los 945 tickets REALES de la semana (07-13/10), escaneados como lo har
     assert.equal(repeated, 94);
   });
 });
+
+describe("Systel de Pollería Giuseppe: el código del artículo trae el IMPORTE, no el peso (REAL 27/10)", () => {
+  // Ticket real 20-451: MILA POLLO 0,220 kg × $11.000 = $2420. Artículo "2000010024209", TOTAL "2201000024203".
+  const giuseppe = (weighedFormat: string, prices = [11000]) => {
+    const catalog = [{ code: 1, name: "MILA POLLO", saleType: "P" as const, prices, eanType: 0, eanConfig: null }, { code: 2, name: "HUEVOS", saleType: "U" as const, prices: [300], eanType: 0, eanConfig: null }];
+    return { profile: { scaleKey: "systel", brand: "systel", weighedFormat, unitFormat: weighedFormat, totalFormat: "22AAIIIIIIII", amountDecimals: 0, genericCodes: [], catalog }, products: mirrorProducts(catalog), links: mirrorLinks(catalog) };
+  };
+
+  it("lee producto, importe y saca los kilos con el precio de la balanza", () => {
+    const g = giuseppe("20PPPPIIIIII");
+    const d = decodeScaleCode("2000010024209", g.profile);
+    assert.equal(d.kind, "item");
+    if (d.kind !== "item") return;
+    assert.equal(d.code, 1);
+    assert.equal(d.amount, 2420);
+    assert.equal(d.quantity, 0.22);
+  });
+
+  it("el ticket real se cobra con su importe exacto y descuenta 0,220 kg", () => {
+    const g = giuseppe("20PPPPIIIIII");
+    const added = addScannedItem(emptyPaper(), decodeScaleCode("2000010024209", g.profile), g.links, g.products);
+    assert.ok(added.ok);
+    if (!added.ok) return;
+    assert.equal(added.item.quantity, 0.22);
+    const total = decodeScaleCode("2201000024203", g.profile);
+    assert.equal(total.kind, "total");
+    if (total.kind !== "total") return;
+    assert.deepEqual([total.amount, total.articles], [2420, 1]);
+    const close = closePaper(added.paper, total);
+    assert.ok(close.ok);
+    if (close.ok) assert.deepEqual(close.amounts, [2420]);
+  });
+
+  it("si los importes de los artículos no suman el TOTAL, no confirma", () => {
+    const g = giuseppe("20PPPPIIIIII");
+    const added = addScannedItem(emptyPaper(), decodeScaleCode("2000010024209", g.profile), g.links, g.products);
+    assert.ok(added.ok);
+    if (!added.ok) return;
+    const close = closePaper(added.paper, { amount: 5000, articles: 1 });
+    assert.equal(close.ok, false);
+  });
+
+  it("precio cambiado a mano en la balanza: no adivina los kilos y no lo agrega", () => {
+    const g = giuseppe("20PPPPIIIIII", [12500]);
+    const d = decodeScaleCode("2000010024209", g.profile);
+    assert.equal(d.kind === "item" && d.quantity, null);
+    assert.equal(addScannedItem(emptyPaper(), d, g.links, g.products).ok, false);
+  });
+
+  it("unitarios: las unidades salen del importe (3 × $300 = $900)", () => {
+    const g = giuseppe("20PPPPIIIIII");
+    const code = withCheckDigit("200002000900");
+    const d = decodeScaleCode(code, g.profile);
+    assert.equal(d.kind === "item" && d.quantity, 3);
+  });
+
+  it("listo para vender: un formato con importe no es 'sin cantidad'", () => {
+    const g = giuseppe("20PPPPIIIIII");
+    assert.deepEqual(profileReadiness(g.profile, g.links).problems, []);
+  });
+});

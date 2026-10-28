@@ -77,7 +77,7 @@ const PRODUCTS: AuraSyncProduct[] = [
   { code: "2", name: "Suprema", byWeight: true, price: 9900 }, // el 2 es PASTELITOS → conflicto
   { code: "97", name: "Pechuga", byWeight: true, price: 8500 }, // producto de prueba nuestro → se reemplaza solo
   { code: "120", name: "Milanesa de pollo", byWeight: true, price: 11800 }, // libre → crear
-  { code: "121", name: "Empanadas x12", byWeight: false, price: 14500.5 }, // libre, por unidad, redondea
+  { code: "121", name: "Empanadas x12", byWeight: false, price: 14501 }, // libre, por unidad
   { code: "A-7", name: "Sin número", byWeight: true, price: 100 }, // omitir
   { code: "130", name: "Caro", byWeight: true, price: 1_200_000 } // omitir
 ];
@@ -99,6 +99,17 @@ describe("plan de envío a la Aura (D/C en pesos enteros)", () => {
     const plan = planAuraSync(SCALE_NOW, PRODUCTS, { replaceConflicts: true });
     assert.equal(plan[3].action, "reemplazar");
     assert.equal(summarizeAuraPlan(plan).conflicto, 0);
+  });
+
+  it("nunca redondea el precio ni manda un código que no entra en la etiqueta 2-3-7 (auditoría 28/10)", () => {
+    const plan = planAuraSync([], [
+      { code: "50", name: "Con centavos", byWeight: true, price: 14500.5 },
+      { code: "1000", name: "Cuatro cifras", byWeight: true, price: 9000 },
+      { code: "999", name: "Tres cifras", byWeight: true, price: 9000 }
+    ]);
+    assert.deepEqual(plan.map((p) => p.action), ["omitir", "omitir", "crear"]);
+    assert.match(plan[0].reason, /centavos/);
+    assert.match(plan[1].reason, /más de 3 cifras/);
   });
 
   it("nombres como los guarda la balanza", () => {

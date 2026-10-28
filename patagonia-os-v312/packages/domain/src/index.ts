@@ -335,7 +335,11 @@ export interface CarcassBatch {
   createdAt: string;
   /** La res vino de una línea de Compras (migración 126): peso, costo, fecha y proveedor se corrigen en Compras. */
   purchaseItemId?: string;
+  /** De dónde salió el reparto automático (migración 163): promedio de reses pesadas de verdad o cortes de siempre. */
+  fillSource?: CarcassFillSource;
 }
+
+export type CarcassFillSource = { kind: "learned"; batches: number; min: number; max: number } | { kind: "template" };
 
 export interface CarcassCut {
   id: string;
@@ -345,6 +349,8 @@ export interface CarcassCut {
   weight: Quantity;
   unitPrice: Money;
   lineTotal: Money;
+  /** Lo repartió el sistema y nadie lo corrigió (false = cargado a mano o pesado de verdad). */
+  fromTemplate?: boolean;
 }
 
 export function carcassCutLineTotal(cut: { weight: Quantity; unitPrice: Money }): Money {

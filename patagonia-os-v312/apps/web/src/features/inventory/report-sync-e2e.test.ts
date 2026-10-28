@@ -179,13 +179,13 @@ describe("[SIMULADO] Kretz Report: 100 productos de punta a punta (tramas reales
     const prep = await s.prepare(noop);
     const reasons = Object.fromEntries((prep.skipped ?? []).map((x) => [x.name, x.reason]));
     assert.match(reasons["Código cero"], /código es 0/);
-    assert.match(reasons["Aceite"], /demasiado largo/);
+    assert.match(reasons["Aceite"], /código de barras de fábrica/);
     assert.match(reasons["Con centavos"], /centavos/);
     assert.match(reasons["Carísimo"], /más alto/);
     assert.match(reasons["Sin precio"], /precio/);
     assert.match(reasons["½"], /nombre/);
-    assert.match(reasons["Uno"], /Colisión/);
-    assert.match(reasons["Otro con el mismo código"], /Colisión/);
+    assert.match(reasons["Uno"], /2 productos con el código 504/);
+    assert.match(reasons["Otro con el mismo código"], /2 productos con el código 504/);
     const out = await s.sync(prep, noop);
     assert.equal(out.ok, true);
     assert.equal(out.verified, 3);

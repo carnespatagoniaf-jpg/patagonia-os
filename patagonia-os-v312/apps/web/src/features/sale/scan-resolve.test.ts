@@ -14,6 +14,30 @@ function withCheck(first12: string): string {
   return first12 + ((10 - (sum % 10)) % 10);
 }
 
+describe("[REAL] etiquetas de M2 (Kretz Report LT, 2-3-7 con importe en centavos)", () => {
+  const M2 = { prefixLength: 2, pluLength: 3, weightLength: 7, weightDivisor: 100, totalLength: 13, payloadType: "amount" as const };
+  const products = [product("2", "Matambre novillo gorina", "kg", 13700), product("99", "Bondiola PifPaf", "kg", 7000), product("6", "Vacio novillo gorina", "kg", 15500)];
+
+  it("las etiquetas reales escaneadas en su Mostrador el 24/10: producto, importe y kilos", () => {
+    for (const [code, plu, amount, kg] of [["2009901890008", "99", 1890, 0.27], ["2000258567506", "2", 58567.5, 4.275]] as const) {
+      const r = resolveScan(code, products, M2);
+      assert.equal(r.type, "label", code);
+      if (r.type !== "label") continue;
+      assert.equal(r.product.code, plu);
+      assert.equal(r.amount, amount);
+      assert.equal(r.quantity, kg);
+    }
+  });
+
+  it("importe que no entró (todo en 0 o todo en 9): error, no se cobra nada", () => {
+    for (const first12 of ["200060000000", "200069999999"]) {
+      const r = resolveScan(withCheck(first12), products, M2);
+      assert.equal(r.type, "error", first12);
+      if (r.type === "error") assert.match(r.message, /Vacio novillo gorina.*no trae el importe/);
+    }
+  });
+});
+
 describe("[REAL] etiquetas de la balanza de Carnes Patagonia", () => {
   const products = [...new Set(CARNES_PATAGONIA_LABELS.map(([, plu]) => plu))].map((plu) => product(plu, `Producto ${plu}`, "kg", 10000));
 

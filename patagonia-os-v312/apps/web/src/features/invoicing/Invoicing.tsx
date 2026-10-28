@@ -527,6 +527,7 @@ export function Invoicing() {
         )}
         {invoices.length === 0 && !loading && <p className="muted">Todavía no hay facturas.</p>}
         {invoices.length > 0 && (
+          <div className="table-scroll">
           <table className="data-table">
             <thead>
               <tr>
@@ -535,15 +536,20 @@ export function Invoicing() {
                 <th>Cliente</th>
                 <th className="num">Total</th>
                 <th>Estado</th>
-                <th>CAE</th>
                 <th />
               </tr>
             </thead>
             <tbody>
               {invoices.map((inv) => (
                 <tr key={inv.id}>
-                  <td>{new Date(inv.createdAt).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })}</td>
-                  <td>{invoiceLabel(inv)}</td>
+                  <td style={{ whiteSpace: "nowrap" }}>
+                    {new Date(inv.createdAt).toLocaleDateString("es-AR", { dateStyle: "short" })}
+                    <span className="cell-sub">{new Date(inv.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit", hour12: false })}</span>
+                  </td>
+                  <td>
+                    {invoiceLabel(inv)}
+                    {inv.cae && <span className="cell-sub" style={{ whiteSpace: "normal" }}>CAE {inv.cae}{inv.caeDue ? ` · vence ${inv.caeDue}` : ""}</span>}
+                  </td>
                   <td>
                     {inv.customerName || CUSTOMER_CONDITION_LABEL[inv.customerTaxCondition]}
                     {inv.customerDocType !== 99 && <span className="muted"> · {inv.customerDocType === 80 ? `CUIT ${formatCuit(inv.customerDocNumber)}` : `DNI ${inv.customerDocNumber}`}</span>}
@@ -553,18 +559,20 @@ export function Invoicing() {
                     <span className={`setting-status ${inv.status === "autorizada" ? "ok" : inv.status === "rechazada" ? "warn" : ""}`}>{STATUS_LABEL[inv.status]}</span>
                     {inv.status !== "autorizada" && inv.errorMessage && <div className="muted" style={{ fontSize: 12 }}>{inv.errorMessage}</div>}
                   </td>
-                  <td>{inv.cae ? `${inv.cae}${inv.caeDue ? ` (vence ${inv.caeDue})` : ""}` : "-"}</td>
-                  <td style={{ whiteSpace: "nowrap" }}>
-                    {inv.status === "autorizada" && <button className="secondary" onClick={() => void handlePrintInvoice(inv)}>Imprimir</button>}{" "}
-                    {inv.status === "autorizada" && inv.kind === "factura" && !invoices.some((n) => n.relatedInvoiceId === inv.id && n.status !== "rechazada") && (
-                      <button className="secondary" disabled={busy} onClick={() => void handleCreditNote(inv)}>Anular</button>
-                    )}
-                    {inv.status === "pendiente" && <button className="secondary" disabled={busy} onClick={() => void handleRetry(inv.id)}>Reintentar</button>}
+                  <td>
+                    <div className="row-actions">
+                      {inv.status === "autorizada" && <button className="secondary" onClick={() => void handlePrintInvoice(inv)}>Imprimir</button>}
+                      {inv.status === "autorizada" && inv.kind === "factura" && !invoices.some((n) => n.relatedInvoiceId === inv.id && n.status !== "rechazada") && (
+                        <button className="danger" disabled={busy} onClick={() => void handleCreditNote(inv)}>Anular</button>
+                      )}
+                      {inv.status === "pendiente" && <button className="secondary" disabled={busy} onClick={() => void handleRetry(inv.id)}>Reintentar</button>}
+                    </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+          </div>
         )}
       </section>
     </>

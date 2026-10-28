@@ -70,11 +70,33 @@ export function itemFormat(item: ScaleCatalogItem, profile: ScaleSaleProfile): s
 
 export type DecodedScan =
   | { kind: "total"; amount: number; articles: number | null; barcode: string }
-  | { kind: "item"; code: number; barcode: string; item: ScaleCatalogItem | null; generic: boolean; quantity: number | null; quantityNote?: string }
+  /** `amount`: importe en pesos, cuando el código del artículo lo trae (campo I). */
+  | { kind: "item"; code: number; barcode: string; item: ScaleCatalogItem | null; generic: boolean; quantity: number | null; quantityNote?: string; amount?: number | null }
   | { kind: "not_scale" }
   | { kind: "error"; reason: string };
 
 const unique = <T,>(xs: T[]) => [...new Set(xs)];
+
+/**
+ * Cantidad a partir del importe, para balanzas cuyo código de artículo trae el importe y no el peso. REAL (Systel de
+ * Pollería Giuseppe, 27/10): "2000010024209" = producto 1 + $2420, MILA POLLO 0,220 kg × $11.000. Con cada precio de
+ * lista de la balanza se busca la cantidad que da ese importe (±$1 de redondeo); todos los que la expliquen tienen
+ * que dar la misma cantidad. null si no se puede saber sin suponer.
+ */
+export function quantityFromAmount(item: ScaleCatalogItem, amount: number): number | null {
+  if (!(amount > 0)) return null;
+  const weighed = isWeighed(item.saleType);
+  const found = unique(
+    item.prices
+      .filter((p) => p > 0)
+      .map((p) => {
+        const q = weighed ? Math.round((amount / p) * 1000) / 1000 : Math.round(amount / p);
+        return q > 0 && Math.abs(Math.round(q * p) - amount) <= 1 ? q : null;
+      })
+      .filter((q): q is number => q !== null)
+  );
+  return found.length === 1 ? found[0] : null;
+}
 
 /** Todos los formatos de artículo que puede imprimir esta balanza (generales y propios de cada producto). */
 function itemTemplates(profile: ScaleSaleProfile): ParsedTemplate[] {
@@ -125,6 +147,14 @@ export function decodeScaleCode(raw: string, profile: ScaleSaleProfile): Decoded
     tpl = qs.length === 1 && qs[0] !== undefined ? itemMatches[0] : null;
   }
   const c = tpl?.fields.C ? readFields(code, tpl)!.C! : null;
+  const amount = tpl?.fields.I ? readFields(code, tpl)!.I! / 10 ** profile.amountDecimals : null;
+  if (c === null && amount !== null && item && !generic) {
+    const q = quantityFromAmount(item, amount);
+    if (q === null) return { kind: "item", code: productCode, barcode: code, item, generic, quantity: null, amount, quantityNote: `el importe ($${amount}) no coincide con ningún precio de la balanza: no se puede saber la cantidad` };
+    return { kind: "item", code: productCode, barcode: code, item, generic, quantity: q, amount };
+  }
+  // Venta libre con importe en el código: la cantidad no importa (no descuenta stock).
+  if (c === null && amount !== null && generic) return { kind: "item", code: productCode, barcode: code, item, generic, quantity: 1, amount };
   if (c === null) return { kind: "item", code: productCode, barcode: code, item, generic, quantity: null, quantityNote: "el código no trae la cantidad" };
   if (!item) return { kind: "item", code: productCode, barcode: code, item, generic, quantity: null, quantityNote: "producto que no está en el catálogo leído de la balanza" };
   if (isWeighed(item.saleType)) return { kind: "item", code: productCode, barcode: code, item, generic, quantity: c > 0 ? c / 1000 : null };
@@ -163,15 +193,15 @@ export function profileReadiness(profile: ScaleSaleProfile, links: ScaleLink[], 
       problems.push({ ...base, problem: "sin_codigo", detail: item.eanType === 1 ? `su código propio es "${item.eanConfig ?? ""}" (sin producto): la balanza imprime ceros` : "no imprime código de barras" });
       continue;
     }
-    if (!t.fields.C) {
-      problems.push({ ...base, problem: "sin_cantidad", detail: `su código ("${t.text}") no trae la cantidad` });
+    if (!t.fields.C && !t.fields.I) {
+      problems.push({ ...base, problem: "sin_cantidad", detail: `su código ("${t.text}") no trae la cantidad ni el importe` });
       continue;
     }
     if (String(item.code).length > fieldLength(t, "P")) {
       problems.push({ ...base, problem: "codigo_no_entra", detail: `el código ${item.code} no entra en ${fieldLength(t, "P")} cifras: la balanza no imprime el código` });
       continue;
     }
-    const maxC = 10 ** fieldLength(t, "C") - 1;
+    const maxC = t.fields.C ? 10 ** fieldLength(t, "C") - 1 : Infinity;
     if (isWeighed(item.saleType) && maxC < maxGrams) {
       problems.push({ ...base, problem: "kilos_limitados", detail: `su código ("${t.text}") trae ${fieldLength(t, "C")} cifras de cantidad: hasta ${(maxC / 1000).toLocaleString("es-AR")} kg` });
     }

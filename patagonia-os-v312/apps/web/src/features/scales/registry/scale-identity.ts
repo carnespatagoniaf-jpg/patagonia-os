@@ -1,3 +1,4 @@
+import type { InstallRecord } from "../install-status";
 /** Balanzas de una sucursal: tipos y lógica pura, sin base (para poder probarla). Ver branch-scales.ts. */
 
 export type ScaleFamily = "systel" | "kretz";
@@ -15,6 +16,8 @@ export interface BranchScale {
   sellsWithCodes: boolean;
   /** Cómo imprime los códigos (pesables, unitarios, TOTAL), si ya se leyó: sirve para reconocerla. */
   formats?: CodeFormats | null;
+  /** Pasos de la instalación comprobados (migración 165), o null si la base no lo tiene. */
+  install?: InstallRecord | null;
 }
 
 export interface CodeFormats {
@@ -35,6 +38,7 @@ export interface ScaleRow {
   weighed_format: string | null;
   unit_format: string | null;
   total_format: string | null;
+  install?: InstallRecord | null;
 }
 
 export function familyOfBrand(brand: string): ScaleFamily {
@@ -53,7 +57,8 @@ export function rowToScale(r: ScaleRow): BranchScale {
     active: r.active !== false,
     lastSeenAt: r.last_seen_at ?? null,
     sellsWithCodes: !!(r.weighed_format || r.unit_format || r.total_format),
-    formats: r.weighed_format || r.unit_format || r.total_format ? { weighed: r.weighed_format, unit: r.unit_format, total: r.total_format } : null
+    formats: r.weighed_format || r.unit_format || r.total_format ? { weighed: r.weighed_format, unit: r.unit_format, total: r.total_format } : null,
+    install: r.install ?? null
   };
 }
 

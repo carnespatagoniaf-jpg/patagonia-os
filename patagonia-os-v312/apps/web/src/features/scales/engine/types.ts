@@ -57,6 +57,8 @@ export interface PreparedSync {
   blocker?: string;
   /** Productos de Patagonia que no van a la balanza, cada uno con el motivo (código largo, sin precio, centavos…). */
   skipped?: ProductProblem[];
+  /** Se mandan, pero conviene saberlo antes (por ejemplo, cómo queda el nombre en la balanza). */
+  warnings?: ProductProblem[];
 }
 
 /** Un producto puntual y por qué no se mandó o no quedó bien, en palabras simples. */

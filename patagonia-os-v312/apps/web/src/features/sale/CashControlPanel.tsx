@@ -4,8 +4,14 @@ import { formatMoney } from "../shifts/format";
 import type { useTreasury } from "../shifts/useTreasury";
 import { CLOSE_OK_TOLERANCE } from "./cash-close";
 import {
+  countCashWithdrawals,
   countSafe,
+  listPendingWithdrawals,
   listPosShiftCloses,
+  listWithdrawalCounts,
+  setScaleCloseControl,
+  type PendingWithdrawal,
+  type WithdrawalCount,
   listSafeAccounts,
   listSafeCounts,
   listSafeDeposits,
@@ -19,11 +25,98 @@ import {
 import { hasPosVoidPin, listPosVoidedSales, setPosVoidPin, type VoidedSale } from "./pos-shift-service";
 import { delayLabel, isValidAuthPin, minutesBetween } from "./void-sale";
 
-// "Control de caja" para el dueño/admin, abajo de Mostrador (migración 117):
-// cuánto tiene que haber en la caja fuerte según los papelitos, contarla, y
-// los últimos cierres con el PRIMER conteo de cada cajera.
+// "Control de caja" para el dueño/admin, abajo de Mostrador (migraciones 117 y 164):
+// los retiros de dinero sin contar (papelitos), el control de la balanza opcional,
+// las ventas anuladas y los últimos cierres con el PRIMER conteo de cada cajera.
 
 type Adjust = ReturnType<typeof useTreasury>["adjust"];
+
+/** Retiros de dinero sin contar (migración 164): el dueño cuenta los papelitos y pone cuánto había. */
+function WithdrawalsBlock({ branchId, pending, counts, onMessage, onChanged }: {
+  branchId: string;
+  pending: PendingWithdrawal[];
+  counts: WithdrawalCount[];
+  onMessage: (m: string) => void;
+  onChanged: () => Promise<void>;
+}) {
+  const [input, setInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const total = pending.reduce((sum, w) => sum + w.amount, 0);
+  const first = pending[0]?.number;
+  const last = pending[pending.length - 1]?.number;
+
+  async function submit() {
+    const counted = parseAmount(input || "");
+    if (!Number.isFinite(counted) || counted < 0) { onMessage("Poné cuánta plata contaste."); return; }
+    setBusy(true);
+    try {
+      const r = await countCashWithdrawals(branchId, counted);
+      setInput("");
+      onMessage(Math.abs(r.difference) < 1
+        ? `Retiros contados: da justo (${formatMoney(r.expected)}).`
+        : `Retiros contados: ${r.difference < 0 ? "faltan" : "sobran"} ${formatMoney(Math.abs(r.difference))}. Quedó anotado en Efectivo.`);
+      await onChanged();
+    } catch (err) {
+      onMessage(err instanceof Error ? err.message : "No se pudieron contar los retiros.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="panel" style={{ padding: 12, marginBottom: 14, display: "grid", gap: 8 }}>
+      <p style={{ margin: 0, fontWeight: 700 }}>Retiros sin contar</p>
+      {pending.length === 0 ? (
+        <p className="muted" style={{ margin: 0, fontSize: 13 }}>No hay retiros sin contar. Cada "Retiro de dinero" de Mostrador imprime un papelito con número.</p>
+      ) : (
+        <>
+          <p style={{ margin: 0 }}>
+            Papelitos <strong>N.º {first}{last !== first ? ` a ${last}` : ""}</strong> · {pending.length} retiro{pending.length === 1 ? "" : "s"}
+            <br />
+            Tiene que haber <strong style={{ fontSize: 20 }}>{formatMoney(total)}</strong>
+          </p>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+            <input type="text" inputMode="decimal" placeholder="Contaste $" value={input} onChange={(e) => setInput(e.target.value)} style={{ width: 160 }} />
+            <button disabled={busy} onClick={() => void submit()}>{busy ? "Guardando…" : "Contar"}</button>
+          </div>
+        </>
+      )}
+      {counts.length > 0 && (
+        <p className="muted" style={{ margin: 0, fontSize: 12 }}>
+          Último conteo: {fmtDate(counts[0].createdAt)} · N.º {counts[0].numbers[0]}{counts[0].numbers.length > 1 ? ` a ${counts[0].numbers[counts[0].numbers.length - 1]}` : ""} · {diffText(counts[0].difference)}
+        </p>
+      )}
+    </div>
+  );
+}
+
+/** "Controlar la balanza al cerrar" (migración 164): opcional; apagado no aparece nada de la balanza al cerrar. */
+function ScaleCloseToggle({ enabled, onChange, onMessage }: { enabled: boolean; onChange: (enabled: boolean) => void; onMessage: (m: string) => void }) {
+  const [busy, setBusy] = useState(false);
+  async function toggle(next: boolean) {
+    setBusy(true);
+    try {
+      await setScaleCloseControl(next);
+      onChange(next);
+      onMessage(next ? "Listo: al cerrar la caja se pide el TOTAL DEL DÍA de la balanza." : "Listo: al cerrar la caja ya no se pide la balanza.");
+    } catch (err) {
+      onMessage(err instanceof Error ? err.message : "No se pudo cambiar.");
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <label className="panel" style={{ padding: 12, marginBottom: 14, display: "flex", gap: 10, alignItems: "flex-start", cursor: "pointer" }}>
+      <input type="checkbox" checked={enabled} disabled={busy} onChange={(e) => void toggle(e.target.checked)} style={{ width: "auto", marginTop: 3 }} />
+      <span>
+        <strong>Controlar la balanza al cerrar</strong>
+        <span className="muted" style={{ display: "block", fontSize: 13 }}>
+          Al cerrar pide el "TOTAL DEL DÍA" que imprime la balanza y lo compara con lo cobrado. Si no lo usás, dejalo apagado.
+        </span>
+      </span>
+    </label>
+  );
+}
 
 function fmtDate(iso: string) {
   return new Date(iso).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
@@ -304,16 +397,20 @@ function VoidedSalesBlock({ sales }: { sales: VoidedSale[] }) {
   );
 }
 
-export function CashControlPanel({ branchId, onMessage, adjust, onVoidPinChange, refreshKey }: {
+export function CashControlPanel({ branchId, onMessage, adjust, onVoidPinChange, refreshKey, scaleCloseControl, onScaleCloseControlChange }: {
   branchId: string;
   onMessage: (m: string) => void;
   adjust: Adjust;
   onVoidPinChange: (hasPin: boolean) => void;
   /** Cambia cuando se anula una venta del turno, para recargar la lista. */
   refreshKey: number;
+  scaleCloseControl: boolean;
+  onScaleCloseControlChange: (enabled: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [safes, setSafes] = useState<SafeAccount[]>([]);
+  const [pending, setPending] = useState<PendingWithdrawal[]>([]);
+  const [counts, setCounts] = useState<WithdrawalCount[]>([]);
   const [closes, setCloses] = useState<ShiftCloseRow[]>([]);
   const [voided, setVoided] = useState<VoidedSale[]>([]);
   const [loading, setLoading] = useState(false);
@@ -321,8 +418,17 @@ export function CashControlPanel({ branchId, onMessage, adjust, onVoidPinChange,
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, c, v] = await Promise.all([listSafeAccounts(), listPosShiftCloses(branchId, 14), listPosVoidedSales(branchId, 14).catch(() => [])]);
-      setSafes(s);
+      const [s, c, v, w, wc] = await Promise.all([
+        listSafeAccounts(),
+        listPosShiftCloses(branchId, 14),
+        listPosVoidedSales(branchId, 14).catch(() => []),
+        listPendingWithdrawals(branchId).catch(() => []),
+        listWithdrawalCounts(branchId)
+      ]);
+      // Las cuentas "Caja fuerte" del sistema anterior: solo si les queda saldo (se pasa a Efectivo con una transferencia).
+      setSafes(s.filter((safe) => Math.abs(safe.balance) >= 1));
+      setPending(w);
+      setCounts(wc);
       setCloses(c);
       setVoided(v);
     } catch (err) {
@@ -340,18 +446,23 @@ export function CashControlPanel({ branchId, onMessage, adjust, onVoidPinChange,
     <section className="panel" style={{ marginTop: 18 }}>
       <div className="panel-title">
         <h2>Control de caja</h2>
-        <button className="secondary" onClick={() => setOpen((v) => !v)}>{open ? "Ocultar" : "Ver caja fuerte, anuladas y cierres"}</button>
+        <button className="secondary" onClick={() => setOpen((v) => !v)}>{open ? "Ocultar" : "Ver retiros, anuladas y cierres"}</button>
       </div>
       {!open ? (
-        <p className="muted" style={{ margin: 0 }}>Cuánto tiene que haber en la caja fuerte, las ventas anuladas y cómo cerró cada cajera.</p>
+        <p className="muted" style={{ margin: 0 }}>Los retiros de dinero para contar, las ventas anuladas y cómo cerró cada cajera.</p>
       ) : loading && closes.length === 0 ? (
         <p className="muted">Cargando…</p>
       ) : (
         <>
-          {safes.length === 0 ? (
-            <p className="muted">Todavía no hay caja fuerte: se crea sola con el primer "Guardar en caja fuerte" de Mostrador.</p>
-          ) : (
-            safes.map((safe) => <SafeBlock key={safe.id} safe={safe} onMessage={onMessage} adjust={adjust} onChanged={reload} />)
+          <WithdrawalsBlock branchId={branchId} pending={pending} counts={counts} onMessage={onMessage} onChanged={reload} />
+          <ScaleCloseToggle enabled={scaleCloseControl} onChange={onScaleCloseControlChange} onMessage={onMessage} />
+          {safes.length > 0 && (
+            <>
+              <p className="muted" style={{ margin: "0 0 6px", fontSize: 13 }}>
+                Caja fuerte del sistema anterior: los retiros nuevos ya no van acá, la plata queda en Efectivo. Para pasar este saldo a Efectivo, hacé una transferencia en Tesorería.
+              </p>
+              {safes.map((safe) => <SafeBlock key={safe.id} safe={safe} onMessage={onMessage} adjust={adjust} onChanged={reload} />)}
+            </>
           )}
 
           <VoidPinBlock onMessage={onMessage} onChange={onVoidPinChange} />
@@ -373,7 +484,7 @@ export function CashControlPanel({ branchId, onMessage, adjust, onVoidPinChange,
                     <th className="num">Primer conteo</th>
                     <th className="num">Al cerrar</th>
                     <th className="num">Controles</th>
-                    <th className="num">A caja fuerte</th>
+                    <th className="num">Retiros</th>
                     <th>Otros medios</th>
                   </tr>
                 </thead>

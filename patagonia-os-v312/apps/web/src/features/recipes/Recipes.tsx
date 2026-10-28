@@ -6,6 +6,7 @@ import { parseAmount } from "../../lib/money";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { createProduct, listProductsForBranch } from "../inventory/inventory-service";
 import { applyRecipeToProduct, deleteRecipe, listRecipes, saveRecipe, setRecipeKind, type Recipe, type RecipeKind } from "./recipes-service";
+import { quantityNumber } from "../sale/quantity";
 import { checkPrice, comboDiscountPct, comboRetailTotal, formatCost, type PriceCheck, parseRecipeDraft, suggestedYieldKg, summarizeRecipe, type RecipeDraft } from "./recipe-view";
 
 // Recetas (fichas técnicas): milanesas, hamburguesas y demás productos que se
@@ -61,7 +62,7 @@ function fmtNum(value: number, max = 3): string {
 }
 
 const num = (raw: string) => {
-  const value = Number(raw);
+  const value = quantityNumber(raw);
   return Number.isFinite(value) ? value : 0;
 };
 
@@ -110,9 +111,10 @@ export function Recipes() {
   const [busy, setBusy] = useState(false);
 
   const [editing, setEditing] = useState<{ recipeId: string | null; kind: RecipeKind; draft: RecipeDraft } | null>(null);
-  const [applying, setApplying] = useState<{ recipeId: string; price: string } | null>(null);
-  /** "Probá un precio de venta": lo que escribe la persona para ver cuánto gana. */
-  const [tryPrice, setTryPrice] = useState("");
+  /** "Lo vendés a $": arranca con el precio de hoy del producto; si se cambia, se carga en el producto al guardar. */
+  const [sellPrice, setSellPrice] = useState("");
+  /** "Rinde el lote" sigue solo la suma de los kilos de los insumos hasta que la persona lo cambia (productos por kg). */
+  const [yieldAuto, setYieldAuto] = useState(true);
   const [showNewProduct, setShowNewProduct] = useState(false);
   const [npCode, setNpCode] = useState("");
   const [npName, setNpName] = useState("");
@@ -158,6 +160,14 @@ export function Recipes() {
     });
   }, [draft, productsById]);
 
+  // Al elegir (o cambiar) el producto terminado, "Lo vendés a" arranca con su precio de hoy.
+  const finishedId = finished?.id;
+  useEffect(() => {
+    const price = finishedId ? productsById.get(finishedId)?.priceRetail ?? 0 : 0;
+    setSellPrice(price > 0 ? String(price).replace(".", ",") : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [finishedId]);
+
   function updateDraft(patch: Partial<RecipeDraft>) {
     setEditing((current) => (current ? { ...current, draft: { ...current.draft, ...patch } } : current));
   }
@@ -176,23 +186,21 @@ export function Recipes() {
 
   function startNew(kind: RecipeKind = "receta") {
     setMessage("");
-    setApplying(null);
+    setYieldAuto(kind !== "combo");
     setNpUnit(kind === "combo" ? "unit" : "kg");
-    setTryPrice("");
     setEditing({ recipeId: null, kind, draft: emptyDraft(kind) });
   }
 
   function startEdit(recipe: Recipe) {
     setMessage("");
-    setApplying(null);
-    setTryPrice("");
+    const sum = suggestedYieldKg(recipe.items, productsById);
+    setYieldAuto(recipe.kind === "receta" && productsById.get(recipe.productId)?.unit === "kg" && Math.abs(sum - recipe.yieldQty) < 0.0005);
     setEditing({ recipeId: recipe.id, kind: recipe.kind, draft: draftFromRecipe(recipe) });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
   function closeEditor() {
     setEditing(null);
-    setApplying(null);
     setShowNewProduct(false);
   }
 
@@ -261,22 +269,6 @@ export function Recipes() {
     }
   }
 
-  async function handleOpenApply() {
-    setMessage("");
-    setBusy(true);
-    try {
-      const id = await persist();
-      if (!id || !preview || !finished) return;
-      const tried = parseAmount(tryPrice);
-      const suggested = Number.isFinite(tried) && tried > 0 ? tried : preview.suggestedPrice ?? finished.priceRetail;
-      setApplying({ recipeId: id, price: String(suggested).replace(".", ",") });
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo guardar la receta.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
   async function applyToProduct(recipeId: string, price: number | null, unitCostForDemo: number) {
     if (!isSupabaseConfigured) {
       const recipe = recipes.find((r) => r.id === recipeId);
@@ -288,43 +280,38 @@ export function Recipes() {
     return result;
   }
 
-  async function handleConfirmApply(withPrice: boolean) {
-    if (!applying || !preview || !finished) return;
-    let price: number | null = null;
-    if (withPrice) {
-      price = parseAmount(applying.price);
-      if (!Number.isFinite(price) || price < 0) {
-        setMessage("El precio no es válido.");
-        return;
-      }
-    }
-    setBusy(true);
+  /** Guarda la receta y deja el producto con el costo de la receta; el precio solo si se cambió "Lo vendés a". */
+  async function handleSaveAndApply() {
+    if (!finished) return;
+    const price = parseAmount(sellPrice);
+    const priceChanged = Number.isFinite(price) && price > 0 && Math.abs(price - finished.priceRetail) >= 0.005;
     setMessage("");
+    setBusy(true);
     try {
-      const result = await applyToProduct(applying.recipeId, price, preview.unitCost);
+      const id = await persist();
+      if (!id || !preview) return;
+      const result = await applyToProduct(id, priceChanged ? price : null, preview.unitCost);
       setMessage(
-        withPrice
+        priceChanged
           ? `Listo: ${finished.name} ahora cuesta ${formatCost(result.cost)} y se vende a ${formatCost(result.price)}.`
-          : `Listo: el costo de ${finished.name} ahora es ${formatCost(result.cost)} (el precio no se tocó).`
+          : `Listo: el costo de ${finished.name} ahora es ${formatCost(result.cost)} (el precio sigue igual).`
       );
-      setApplying(null);
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo aplicar la receta.");
+      setMessage(err instanceof Error ? err.message : "No se pudo guardar.");
     } finally {
       setBusy(false);
     }
   }
 
-  async function handleQuickUpdate(recipe: Recipe, withPrice: boolean) {
+  async function handleQuickUpdate(recipe: Recipe) {
     const summary = summarizeRecipe(recipe, productsById);
     const product = productsById.get(recipe.productId);
     if (!product) return;
-    const price = withPrice ? summary.cost.suggestedPrice : null;
     setBusy(true);
     setMessage("");
     try {
-      const result = await applyToProduct(recipe.id, price, summary.cost.unitCost);
-      setMessage(withPrice ? `${product.name}: costo ${formatCost(result.cost)}, precio ${formatCost(result.price)}.` : `${product.name}: costo actualizado a ${formatCost(result.cost)}.`);
+      const result = await applyToProduct(recipe.id, null, summary.cost.unitCost);
+      setMessage(`${product.name}: costo actualizado a ${formatCost(result.cost)}.`);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo actualizar.");
     } finally {
@@ -377,8 +364,22 @@ export function Recipes() {
   const yieldSuggestion = draft && finished?.unit === "kg" ? suggestedYieldKg(draft.items.map((item) => ({ ingredientProductId: item.ingredientProductId, quantity: num(item.quantity) })), productsById) : 0;
   const currentMargin = finished && finished.cost > 0 ? marginPercent(finished.cost, finished.priceRetail) : null;
   const isCombo = editing?.kind === "combo";
+  // La merma no se pide más (2026-10-27, dueño: "mucha info al pedo"); se muestra solo si la receta ya tiene alguna.
+  const showWaste = !isCombo && !!draft?.items.some((item) => num(item.wastePct) > 0);
   const comboRetail = draft && isCombo ? comboRetailTotal(draft.items.map((item) => ({ ingredientProductId: item.ingredientProductId, quantity: num(item.quantity) })), productsById) : 0;
   const comboCurrentDiscount = finished && isCombo ? comboDiscountPct(finished.priceRetail, comboRetail) : null;
+  const yieldIsAuto = yieldAuto && !isCombo && finished?.unit === "kg";
+  // Rinde automático = lo que suman los insumos en kg (1 kg de suprema + 1 kg de pan rallado = 2 kg).
+  useEffect(() => {
+    if (!yieldIsAuto || !draft) return;
+    const auto = yieldSuggestion > 0 ? String(yieldSuggestion).replace(".", ",") : "";
+    if (draft.yieldQty !== auto) updateDraft({ yieldQty: auto });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [yieldIsAuto, yieldSuggestion]);
+  // Insumos y rinde muy distintos (ej. 0,05 kg de insumos que "rinden" 1 kg): casi siempre es un error de tipeo.
+  const yieldValue = draft ? num(draft.yieldQty) : 0;
+  const yieldLooksWrong = !yieldIsAuto && !isCombo && finished?.unit === "kg" && yieldSuggestion > 0 && yieldValue > 0
+    && (yieldValue > yieldSuggestion * 1.5 || yieldValue < yieldSuggestion * 0.5);
 
   return (
     <>
@@ -387,7 +388,7 @@ export function Recipes() {
           <p className="eyebrow">PRODUCTO Y STOCK</p>
           <h1>Recetas</h1>
           <p className="muted">
-            Armá milanesas, hamburguesas y otros productos con sus insumos, la merma y lo que rinde el lote, o combos de varios productos: el sistema calcula el costo real y un precio sugerido.
+            Armá milanesas, chorizos, hamburguesas y otros productos con sus insumos y lo que rinde el lote, o combos de varios productos: el sistema calcula el costo real y cuánto ganás.
           </p>
         </div>
         {!editing && (
@@ -455,9 +456,10 @@ export function Recipes() {
                   <thead>
                     <tr>
                       <th>{isCombo ? "Producto" : "Insumo"}</th>
-                      <th className="num">{isCombo ? "Cantidad" : "Cantidad que queda en el producto"}</th>
-                      {isCombo ? <th className="num">Suelto sale</th> : <th className="num">Merma %</th>}
-                      {!isCombo && <th className="num">Hay que comprar</th>}
+                      <th className="num">{isCombo ? "Cantidad" : "Cantidad que lleva"}</th>
+                      {isCombo && <th className="num">Suelto sale</th>}
+                      {showWaste && <th className="num">Merma %</th>}
+                      {showWaste && <th className="num">Hay que comprar</th>}
                       <th className="num">Costo</th>
                       <th></th>
                     </tr>
@@ -484,9 +486,10 @@ export function Recipes() {
                             />{" "}
                             {product ? UNIT_SHORT[product.unit] : ""}
                           </td>
-                          {isCombo ? (
+                          {isCombo && (
                             <td className="num">{product && num(item.quantity) > 0 ? formatCost(num(item.quantity) * product.priceRetail) : "-"}</td>
-                          ) : (
+                          )}
+                          {showWaste && (
                             <>
                               <td className="num">
                                 <input
@@ -515,13 +518,22 @@ export function Recipes() {
               )}
               {draft.items.length === 0 && <p className="muted" style={{ marginTop: 8 }}>{isCombo ? "Todavía no agregaste productos." : "Todavía no agregaste insumos."}</p>}
 
-              <p className="pos-section-label" style={{ marginTop: 18 }}>{isCombo ? "3. Costos extra y margen" : "3. Rinde, costos extra y margen"}</p>
+              <p className="pos-section-label" style={{ marginTop: 18 }}>{isCombo ? "3. Otros costos" : "3. Rinde y otros costos"}</p>
               <div className="cash-banner-form" style={{ flexWrap: "wrap", alignItems: "flex-end" }}>
                 {!isCombo && (
                   <label className="muted">
                     Rinde el lote ({unitLabel})
                     <br />
-                    <input type="text" inputMode="decimal" value={draft.yieldQty} onChange={(e) => updateDraft({ yieldQty: e.target.value })} style={{ width: 130 }} />
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={draft.yieldQty}
+                      onChange={(e) => {
+                        setYieldAuto(false);
+                        updateDraft({ yieldQty: e.target.value });
+                      }}
+                      style={{ width: 130 }}
+                    />
                   </label>
                 )}
                 <label className="muted">
@@ -529,21 +541,20 @@ export function Recipes() {
                   <br />
                   <input type="text" inputMode="decimal" placeholder="0" value={draft.extraCost} onChange={(e) => updateDraft({ extraCost: e.target.value })} style={{ width: 170 }} />
                 </label>
-                <label className="muted">
-                  Margen que querés ganar %
-                  <br />
-                  <input type="number" min="0" step="0.1" placeholder="ej. 45" value={draft.marginPct} onChange={(e) => updateDraft({ marginPct: e.target.value })} style={{ width: 150 }} />
-                </label>
               </div>
-              {!isCombo && yieldSuggestion > 0 && num(draft.yieldQty) !== yieldSuggestion && (
+              {yieldIsAuto && yieldSuggestion > 0 && (
                 <p className="muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
-                  Si el lote rinde lo mismo que los kilos que quedan en el producto ({fmtNum(yieldSuggestion)} kg):{" "}
-                  <button className="secondary" onClick={() => updateDraft({ yieldQty: String(yieldSuggestion) })}>usar {fmtNum(yieldSuggestion)} kg</button>
+                  Rinde = lo que suman los insumos ({fmtNum(yieldSuggestion)} kg). Si al final sale otra cantidad, cambialo.
                 </p>
               )}
-              <p className="muted" style={{ margin: "8px 0 0", fontSize: 13, display: isCombo ? "none" : undefined }}>
-                Ejemplo: 10 kg de nalga que quedan en las milanesas, con 8% de merma al limpiar, se pagan como 10,87 kg. El margen es sobre el costo, igual que en Stock.
-              </p>
+              {!yieldIsAuto && !isCombo && finished.unit === "kg" && yieldSuggestion > 0 && Math.abs(yieldValue - yieldSuggestion) >= 0.0005 && (
+                <p className={yieldLooksWrong ? "message warning" : "muted"} style={{ margin: "8px 0 0", fontSize: 13 }}>
+                  {yieldLooksWrong
+                    ? `Ponés ${fmtNum(yieldSuggestion)} kg de insumos y rinde ${fmtNum(yieldValue)} kg: revisá las cantidades. `
+                    : `Los insumos suman ${fmtNum(yieldSuggestion)} kg. `}
+                  <button className="secondary" onClick={() => setYieldAuto(true)}>Usar la suma ({fmtNum(yieldSuggestion)} kg)</button>
+                </p>
+              )}
               <textarea
                 placeholder={isCombo ? "Notas (opcional): qué días se ofrece, para quién…" : "Notas (opcional): cómo se prepara, quién la hace…"}
                 value={draft.notes}
@@ -576,13 +587,6 @@ export function Recipes() {
                   </>
                 )}
                 <div>
-                  <span className="muted">Precio sugerido</span>
-                  <strong>{preview.suggestedPrice !== null ? formatCost(preview.suggestedPrice) : "poné un margen"}</strong>
-                  {isCombo && preview.suggestedPrice !== null && comboDiscountPct(preview.suggestedPrice, comboRetail) !== null && (
-                    <span className="muted">{discountText(comboDiscountPct(preview.suggestedPrice, comboRetail)!)}</span>
-                  )}
-                </div>
-                <div>
                   <span className="muted">Hoy en el producto</span>
                   <strong>
                     {formatCost(finished.cost)} → {formatCost(finished.priceRetail)}
@@ -593,18 +597,19 @@ export function Recipes() {
               </div>
               <div className="pos-adjust-card" style={{ marginTop: 10, display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
                 <label style={{ fontWeight: 700 }}>
-                  Probá un precio de venta ${" "}
+                  Lo vendés a ${" "}
                   <input
                     type="text"
                     inputMode="decimal"
                     autoComplete="off"
-                    placeholder={preview.suggestedPrice !== null ? String(Math.round(preview.suggestedPrice)) : "ej. 25000"}
-                    value={tryPrice}
-                    onChange={(e) => setTryPrice(e.target.value)}
+                    placeholder="ej. 13000"
+                    value={sellPrice}
+                    onFocus={(e) => e.target.select()}
+                    onChange={(e) => setSellPrice(e.target.value)}
                     style={{ width: 140 }}
                   />
                 </label>
-                <PriceCheckText check={checkPrice(parseAmount(tryPrice), preview.unitCost, isCombo ? comboRetail : 0)} per={isCombo ? "combo" : finished.unit === "kg" ? "kg" : finished.unit === "box" ? "caja" : "unidad"} />
+                <PriceCheckText check={checkPrice(parseAmount(sellPrice), preview.unitCost, isCombo ? comboRetail : 0)} per={isCombo ? "combo" : finished.unit === "kg" ? "kg" : finished.unit === "box" ? "caja" : "unidad"} />
               </div>
               {draft.items.some((item) => (productsById.get(item.ingredientProductId)?.cost ?? 0) <= 0) && (
                 <div className="message warning" style={{ marginTop: 10 }}>
@@ -612,30 +617,24 @@ export function Recipes() {
                 </div>
               )}
 
-              {applying ? (
-                <div className="pos-adjust-card" style={{ marginTop: 14 }}>
-                  <p style={{ margin: "0 0 8px", fontWeight: 700 }}>
-                    Aplicar a {finished.name}: costo {formatCost(finished.cost)} → {formatCost(preview.unitCost)}
-                  </p>
-                  <div className="cash-banner-form" style={{ flexWrap: "wrap", alignItems: "center" }}>
-                    <label className="muted">
-                      Precio de venta $ (podés redondearlo){" "}
-                      <input type="text" inputMode="decimal" value={applying.price} onChange={(e) => setApplying({ ...applying, price: e.target.value })} style={{ width: 130 }} />
-                    </label>
-                    <PriceCheckText check={checkPrice(parseAmount(applying.price), preview.unitCost, isCombo ? comboRetail : 0)} per={isCombo ? "combo" : finished.unit === "kg" ? "kg" : finished.unit === "box" ? "caja" : "unidad"} />
-                    <button disabled={busy} onClick={() => void handleConfirmApply(true)}>Aplicar costo y precio</button>
-                    <button className="secondary" disabled={busy} onClick={() => void handleConfirmApply(false)}>Aplicar solo el costo</button>
-                    <button className="secondary" onClick={() => setApplying(null)}>Cancelar</button>
+              {(() => {
+                const price = parseAmount(sellPrice);
+                const priceChanged = Number.isFinite(price) && price > 0 && Math.abs(price - finished.priceRetail) >= 0.005;
+                return (
+                  <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 14, alignItems: "center" }}>
+                    <button disabled={busy || preview.unitCost <= 0} onClick={() => void handleSaveAndApply()}>
+                      {busy ? "Guardando…" : priceChanged ? "Guardar y actualizar costo y precio" : "Guardar y actualizar el costo"}
+                    </button>
+                    <button className="secondary" disabled={busy} onClick={() => void handleSave()}>{isCombo ? "Guardar solo el combo" : "Guardar solo la receta"}</button>
+                    {preview.unitCost > 0 && (
+                      <span className="muted" style={{ fontSize: 13 }}>
+                        {finished.name} queda con costo {formatCost(preview.unitCost)}
+                        {priceChanged ? ` y precio ${formatCost(price)}` : " (el precio no cambia)"}.
+                      </span>
+                    )}
                   </div>
-                </div>
-              ) : (
-                <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 14 }}>
-                  <button disabled={busy} onClick={() => void handleSave()}>{busy ? "Guardando…" : isCombo ? "Guardar combo" : "Guardar receta"}</button>
-                  <button className="secondary" disabled={busy || preview.unitCost <= 0} onClick={() => void handleOpenApply()}>
-                    Guardar y cargar costo y precio en el producto…
-                  </button>
-                </div>
-              )}
+                );
+              })()}
             </>
           )}
         </section>
@@ -643,8 +642,7 @@ export function Recipes() {
 
       <section className="panel">
         <div className="panel-title">
-          <h2>Recetas cargadas</h2>
-          <span>{loading ? "Cargando…" : recipes.length}</span>
+          <h2>Recetas cargadas <span className="muted" style={{ fontSize: 14, fontWeight: 500 }}>{loading ? "Cargando…" : recipes.length}</span></h2>
         </div>
 
         {outdatedCount > 0 && (
@@ -663,14 +661,15 @@ export function Recipes() {
         )}
 
         {recipes.length > 0 && (
+          <div className="table-scroll">
           <table className="data-table">
             <thead>
               <tr>
                 <th>Producto</th>
-                <th className="num">Rinde</th>
-                <th className="num">Costo por la receta hoy</th>
-                <th className="num">Costo cargado</th>
-                <th className="num">Precio de venta</th>
+                <th className="num hide-md">Rinde</th>
+                <th className="num hide-sm" title="Lo que cuesta hacerla hoy, con los precios actuales de los insumos">Costo hoy</th>
+                <th className="num hide-md" title="El costo que tiene hoy el producto en Stock">Costo cargado</th>
+                <th className="num">Venta</th>
                 <th className="num">Margen</th>
                 <th>Estado</th>
                 <th></th>
@@ -683,9 +682,9 @@ export function Recipes() {
                 return (
                   <tr key={recipe.id}>
                     <td>
-                      {recipe.kind === "combo" && <span className="status-pill" style={{ marginRight: 6 }}>Combo</span>}
-                      {product?.name ?? "Producto no encontrado"}{" "}
-                      <span className="muted">({recipe.items.length} {recipe.kind === "combo" ? "productos" : "insumos"})</span>
+                      {recipe.kind === "combo" && <span className="badge brand" style={{ marginRight: 6 }}>Combo</span>}
+                      <strong>{product?.name ?? "Producto no encontrado"}</strong>{" "}
+                      <span className="muted" style={{ fontSize: 12 }}>({recipe.items.length} {recipe.kind === "combo" ? "productos" : "insumos"})</span>
                       {recipe.kind === "combo" && product && (() => {
                         const suelto = comboRetailTotal(recipe.items, productsById);
                         const discount = comboDiscountPct(product.priceRetail, suelto);
@@ -696,37 +695,37 @@ export function Recipes() {
                         ) : null;
                       })()}
                     </td>
-                    <td className="num">{recipe.kind === "combo" ? "1 combo" : `${fmtNum(recipe.yieldQty)} ${product ? UNIT_SHORT[product.unit] : ""}`}</td>
-                    <td className="num">{summary.cost.unitCost > 0 ? formatCost(summary.cost.unitCost) : "-"}</td>
-                    <td className="num">{product ? formatCost(summary.loadedCost) : "-"}</td>
+                    <td className="num hide-md">{recipe.kind === "combo" ? "1 combo" : `${fmtNum(recipe.yieldQty)} ${product ? UNIT_SHORT[product.unit] : ""}`}</td>
+                    <td className="num hide-sm">{summary.cost.unitCost > 0 ? formatCost(summary.cost.unitCost) : "-"}</td>
+                    <td className="num hide-md">{product ? formatCost(summary.loadedCost) : "-"}</td>
                     <td className="num">{product ? formatCost(product.priceRetail) : "-"}</td>
                     <td className="num">{margin !== null ? `${fmtNum(margin, 1)}%` : "-"}</td>
                     <td>
                       {summary.zeroCostIngredients.length > 0 || summary.missingIngredients > 0 ? (
-                        <span className="status-pill">Insumos sin costo</span>
+                        <span className="badge danger">Insumos sin costo</span>
                       ) : summary.drift ? (
-                        <span className="status-pill">Costo desactualizado</span>
+                        <span className="badge warn">Costo desactualizado</span>
                       ) : (
-                        <span className="muted">Al día</span>
+                        <span className="badge ok">Al día</span>
+                      )}
+                      {summary.drift && (
+                        <span className="cell-sub">
+                          <button className="link-button" style={{ fontSize: 12 }} disabled={busy} onClick={() => void handleQuickUpdate(recipe)}>Actualizar costo</button>
+                        </span>
                       )}
                     </td>
                     <td>
-                      <button className="secondary" disabled={busy} onClick={() => startEdit(recipe)}>Editar</button>{" "}
-                      {summary.drift && (
-                        <>
-                          <button disabled={busy} onClick={() => void handleQuickUpdate(recipe, false)}>Actualizar costo</button>{" "}
-                          {recipe.marginPct !== null && (
-                            <button disabled={busy} onClick={() => void handleQuickUpdate(recipe, true)}>Actualizar costo y precio</button>
-                          )}{" "}
-                        </>
-                      )}
-                      <button className="danger" disabled={busy} onClick={() => void handleDelete(recipe)}>Borrar</button>
+                      <div className="row-actions">
+                        <button className="secondary" disabled={busy} onClick={() => startEdit(recipe)}>Editar</button>
+                        <button className="danger" disabled={busy} onClick={() => void handleDelete(recipe)}>Borrar</button>
+                      </div>
                     </td>
                   </tr>
                 );
               })}
             </tbody>
           </table>
+          </div>
         )}
       </section>
     </>

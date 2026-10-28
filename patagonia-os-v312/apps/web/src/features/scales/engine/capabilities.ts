@@ -8,6 +8,8 @@
  * Fuentes: docs/BALANZAS_KRETZ.md, docs/SYSTEL_INFORME.md, CLAUDE.md (secciones de balanzas).
  */
 
+import type { ModelLimits } from "./preflight";
+
 export type Evidence = "real" | "simulado" | "no";
 
 export type ScaleModelId = "kretz-report-lt" | "kretz-aura" | "kretz-otra" | "systel-cuora-max" | "systel-otra";
@@ -96,4 +98,32 @@ export const SCALE_CAPABILITIES: Record<ScaleModelId, ScaleCapabilities> = {
 /** Puede escribir esta función en la balanza (solo lo comprobado en una real). */
 export function canWrite(model: ScaleModelId, what: "sendProducts" | "itemBarcodes"): boolean {
   return SCALE_CAPABILITIES[model][what] === "real";
+}
+
+/**
+ * Límites de cada modelo para la revisión previa (preflight.ts). Un solo lugar por modelo: el envío, la revisión y la
+ * pantalla leen de acá. Las Systel completan los límites con lo que informa cada balanza (layout, decimales, formato
+ * de etiqueta), ver `systelLimits`.
+ */
+
+/** Etiqueta 2-3-7 que Patagonia les configura a las Kretz (1070 "2002005"): el producto va en 3 cifras. */
+export const KRETZ_LABEL_MAX_CODE = 999;
+
+export const MODEL_LIMITS: Partial<Record<ScaleModelId, ModelLimits>> = {
+  // Campo "Código de PLU" de 5 cifras (5002), precio de 6 en pesos enteros, nombre de 26.
+  "kretz-report-lt": { maxCode: 99999, labelMaxCode: KRETZ_LABEL_MAX_CODE, priceDecimals: 0, maxPriceRaw: 999999, nameLength: 26 },
+  // PLU hasta 9999, tipo D/C en pesos enteros, nombre de 16 (Pollo y mar, real).
+  "kretz-aura": { maxCode: 9999, labelMaxCode: KRETZ_LABEL_MAX_CODE, priceDecimals: 0, maxPriceRaw: 999999, nameLength: 16 }
+};
+
+/** Límites de una Systel según lo que leyó de la balanza. */
+export function systelLimits(info: { maxPlu: number; maxCode: number }, priceDecimals: number, labelFormats: (string | null | undefined)[]): ModelLimits {
+  const label = labelFormats.map((f) => (f && /P+/.exec(f) ? Math.pow(10, /P+/.exec(f)![0].length) - 1 : null)).filter((x): x is number => x !== null);
+  return {
+    maxCode: Math.min(info.maxPlu, info.maxCode),
+    labelMaxCode: label.length ? Math.min(...label) : null,
+    priceDecimals: priceDecimals === 2 ? 2 : 0,
+    maxPriceRaw: 999999,
+    nameLength: 18
+  };
 }

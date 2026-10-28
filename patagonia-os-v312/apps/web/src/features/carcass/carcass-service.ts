@@ -1,4 +1,4 @@
-import type { CarcassBatch, CarcassCut } from "@patagonia/domain";
+import type { CarcassBatch, CarcassCut, CarcassFillSource } from "@patagonia/domain";
 import { supabase } from "../../lib/supabase";
 
 interface CarcassBatchRow {
@@ -12,6 +12,13 @@ interface CarcassBatchRow {
   notes: string | null;
   created_at: string;
   purchase_item_id?: string | null;
+  fill_source?: { kind: string; batches?: number; min?: number; max?: number } | null;
+}
+
+function mapFillSource(raw: CarcassBatchRow["fill_source"]): CarcassFillSource | undefined {
+  if (raw?.kind === "learned") return { kind: "learned", batches: Number(raw.batches ?? 0), min: Number(raw.min ?? 0), max: Number(raw.max ?? 0) };
+  if (raw?.kind === "template") return { kind: "template" };
+  return undefined;
 }
 
 function mapBatch(row: CarcassBatchRow): CarcassBatch {
@@ -25,7 +32,8 @@ function mapBatch(row: CarcassBatchRow): CarcassBatch {
     totalCost: Number(row.total_cost),
     notes: row.notes ?? undefined,
     createdAt: row.created_at,
-    purchaseItemId: row.purchase_item_id ?? undefined
+    purchaseItemId: row.purchase_item_id ?? undefined,
+    fillSource: mapFillSource(row.fill_source)
   };
 }
 
@@ -34,7 +42,7 @@ export async function listCarcassBatches(branchId: string): Promise<CarcassBatch
 
   const { data, error } = await supabase
     .from("carcass_batches")
-    .select("id,branch_id,batch_date,animal_type,supplier_id,total_weight,total_cost,notes,created_at,purchase_item_id")
+    .select("id,branch_id,batch_date,animal_type,supplier_id,total_weight,total_cost,notes,created_at,purchase_item_id,fill_source")
     .eq("branch_id", branchId)
     .order("batch_date", { ascending: false });
 
@@ -86,6 +94,7 @@ interface CarcassCutRow {
   weight: number;
   unit_price: number;
   line_total: number;
+  from_template?: boolean;
 }
 
 function mapCut(row: CarcassCutRow): CarcassCut {
@@ -96,7 +105,8 @@ function mapCut(row: CarcassCutRow): CarcassCut {
     productId: row.product_id ?? undefined,
     weight: Number(row.weight),
     unitPrice: Number(row.unit_price),
-    lineTotal: Number(row.line_total)
+    lineTotal: Number(row.line_total),
+    fromTemplate: row.from_template ?? false
   };
 }
 
@@ -105,7 +115,7 @@ export async function listCarcassCuts(batchId: string): Promise<CarcassCut[]> {
 
   const { data, error } = await supabase
     .from("carcass_cuts")
-    .select("id,batch_id,cut_name,product_id,weight,unit_price,line_total")
+    .select("id,batch_id,cut_name,product_id,weight,unit_price,line_total,from_template")
     .eq("batch_id", batchId)
     .order("line_total", { ascending: false });
 
@@ -145,3 +155,56 @@ export async function deleteCarcassCut(cutId: string): Promise<void> {
   if (error) throw error;
 }
 
+
+export interface CarcassBatchTotals {
+  /** Lo que vale vendido (Σ kilos × precio). */
+  value: number;
+  weight: number;
+  cuts: number;
+  /** Cortes con kilos pero sin precio (no unidos a un producto de Stock). */
+  unpriced: number;
+  /** Cortes que repartió el sistema y nadie corrigió (0 con cortes = pesada de verdad). */
+  estimated: number;
+}
+
+/** Totales de los cortes de varias reses a la vez, para la lista (ganás $… sin abrir cada una). */
+export async function listCarcassBatchTotals(batchIds: string[]): Promise<Map<string, CarcassBatchTotals>> {
+  const totals = new Map<string, CarcassBatchTotals>();
+  if (!supabase || batchIds.length === 0) return totals;
+
+  const { data, error } = await supabase
+    .from("carcass_cuts")
+    .select("batch_id,weight,unit_price,line_total,from_template")
+    .in("batch_id", batchIds);
+
+  if (error) throw error;
+  for (const row of (data ?? []) as Array<{ batch_id: string; weight: number; unit_price: number; line_total: number; from_template: boolean }>) {
+    const prev = totals.get(row.batch_id) ?? { value: 0, weight: 0, cuts: 0, unpriced: 0, estimated: 0 };
+    const weight = Number(row.weight);
+    totals.set(row.batch_id, {
+      value: prev.value + Number(row.line_total),
+      weight: prev.weight + weight,
+      cuts: prev.cuts + 1,
+      unpriced: prev.unpriced + (Number(row.unit_price) <= 0 && weight > 0 ? 1 : 0),
+      estimated: prev.estimated + (row.from_template ? 1 : 0)
+    });
+  }
+  return totals;
+}
+
+/** Reparte una res sin cortes: con el promedio de las pesadas de verdad parecidas o con los cortes de siempre (mig 163). */
+export async function fillCarcassBatch(batchId: string, useDefaults: boolean): Promise<{ cuts: number; source?: CarcassFillSource }> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.rpc("fill_carcass_batch", { p_batch_id: batchId, p_use_defaults: useDefaults });
+  if (error) throw error;
+  return { cuts: Number(data?.cuts ?? 0), source: mapFillSource(data?.source ?? null) };
+}
+
+/** "Listo, la pesé": todos los cortes de la res pasan a ser pesados de verdad. */
+export async function markCarcassBatchWeighed(batchId: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { error } = await supabase.rpc("mark_carcass_batch_weighed", { p_batch_id: batchId });
+  if (error) throw error;
+}

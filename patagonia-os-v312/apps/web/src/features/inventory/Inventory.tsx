@@ -40,6 +40,7 @@ function formatMoney(value: number) {
 }
 
 const UNIT_LABELS: Record<Product["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
+const PRODUCT_COLS = 8;
 
 interface DraftProduct {
   code: string;
@@ -810,8 +811,8 @@ export function Inventory() {
 
       <section className="panel">
         <div className="panel-title">
-          <h2>Productos</h2>
-          <span>{loading ? "Cargando…" : `${visibleProducts.length} productos`}</span>
+          <h2>Productos <span className="muted" style={{ fontSize: 14, fontWeight: 500 }}>{loading ? "Cargando…" : `${visibleProducts.length} productos`}</span></h2>
+          {!showNewForm && <button onClick={() => setShowNewForm(true)}>+ Agregar producto</button>}
         </div>
 
         <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 14 }}>
@@ -913,365 +914,283 @@ export function Inventory() {
           </div>
         )}
 
-        {showNewForm ? (
-          <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 16 }}>
-            <input
-              placeholder="Código o escaneá"
-              title="Escribí el código o escaneá el código de barras del producto con la pistola"
-              autoFocus
-              autoComplete="off"
-              value={newDraft.code}
-              onChange={(e) => setNewDraft({ ...newDraft, code: e.target.value })}
-              onKeyDown={(e) => {
-                // La pistola manda el código y un Enter: pasa al nombre.
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  newNameRef.current?.focus();
-                }
-              }}
-              style={{ width: 150 }}
-            />
-            <input ref={newNameRef} placeholder="Nombre" value={newDraft.name} onChange={(e) => setNewDraft({ ...newDraft, name: e.target.value })} />
-            <select value={newDraft.categoryId} onChange={(e) => setNewDraft({ ...newDraft, categoryId: e.target.value })}>
-              <option value="">Sin categoría</option>
-              {categories.map((c) => (
-                <option key={c.id} value={c.id}>{c.name}</option>
-              ))}
-            </select>
-            <select value={newDraft.unit} onChange={(e) => setNewDraft({ ...newDraft, unit: e.target.value as Product["unit"] })}>
-              <option value="kg">kg</option>
-              <option value="unit">unidad</option>
-              <option value="box">caja</option>
-            </select>
-            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 12 }}>
-              Costo
-              <input
-                type="text"
-                inputMode="decimal"
-                placeholder="Costo"
-                value={newDraft.cost}
-                onChange={(e) => onCostOrMarginChange(newDraft, setNewDraft, "cost")(e.target.value)}
-                style={{ width: 100 }}
-              />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 12 }}>
-              Margen %
-              <input
-                type="text"
-                inputMode="decimal"
-                placeholder="ej. 35"
-                value={newDraft.margin}
-                onChange={(e) => onCostOrMarginChange(newDraft, setNewDraft, "margin")(e.target.value)}
-                style={{ width: 90 }}
-              />
-            </label>
-            <label style={{ display: "flex", flexDirection: "column", gap: 2, fontSize: 12 }}>
-              Precio venta
-              <input
-                type="text"
-                inputMode="decimal"
-                placeholder="Precio venta"
-                value={newDraft.priceRetail}
-                onChange={(e) => onPriceChange(newDraft, setNewDraft)(e.target.value)}
-                style={{ width: 100 }}
-              />
-            </label>
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder="Stock mínimo"
-              title="Solo para que avise en Inicio cuando quede poco. No es el stock."
-              value={newDraft.minStock}
-              onChange={(e) => setNewDraft({ ...newDraft, minStock: e.target.value })}
-              style={{ width: 100 }}
-            />
-            <input
-              type="text"
-              inputMode="decimal"
-              placeholder={newDraft.unit === "kg" ? "Stock hoy (kg)" : "Stock hoy (unidades)"}
-              value={newDraft.stock}
-              onChange={(e) => setNewDraft({ ...newDraft, stock: e.target.value })}
-              style={{ width: 120 }}
-            />
-            <select value={newDraft.vatRate} onChange={(e) => setNewDraft({ ...newDraft, vatRate: e.target.value })} title="IVA del producto para la factura">
-              <option value="">IVA {productVatLabel(null, generalVatRate).toLowerCase()}</option>
-              {PRODUCT_VAT_OPTIONS.map((r) => (
-                <option key={r} value={String(r)}>IVA {vatPercentLabel(r)}</option>
-              ))}
-            </select>
-            <button onClick={handleCreate}>Guardar producto</button>
-            <button className="secondary" onClick={() => { setShowNewForm(false); setNewDraft(emptyDraft()); }}>Cancelar</button>
+        {showNewForm && (
+          <div className="form-box">
+            <h3 style={{ margin: "0 0 10px" }}>Producto nuevo</h3>
+            <div className="form-grid">
+              <label title="Escribí el código o escaneá el código de barras del producto con la pistola">
+                Código o código de barras
+                <input
+                  placeholder="Escaneá con la pistola"
+                  autoFocus
+                  autoComplete="off"
+                  value={newDraft.code}
+                  onChange={(e) => setNewDraft({ ...newDraft, code: e.target.value })}
+                  onKeyDown={(e) => {
+                    // La pistola manda el código y un Enter: pasa al nombre.
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      newNameRef.current?.focus();
+                    }
+                  }}
+                />
+              </label>
+              <label className="span-2">Nombre<input ref={newNameRef} value={newDraft.name} onChange={(e) => setNewDraft({ ...newDraft, name: e.target.value })} /></label>
+              <label>
+                Categoría
+                <select value={newDraft.categoryId} onChange={(e) => setNewDraft({ ...newDraft, categoryId: e.target.value })}>
+                  <option value="">Sin categoría</option>
+                  {categories.map((c) => (
+                    <option key={c.id} value={c.id}>{c.name}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                Unidad
+                <select value={newDraft.unit} onChange={(e) => setNewDraft({ ...newDraft, unit: e.target.value as Product["unit"] })}>
+                  <option value="kg">kg</option>
+                  <option value="unit">unidad</option>
+                  <option value="box">caja</option>
+                </select>
+              </label>
+              <label>
+                Costo $
+                <input type="text" inputMode="decimal" value={newDraft.cost} onChange={(e) => onCostOrMarginChange(newDraft, setNewDraft, "cost")(e.target.value)} />
+              </label>
+              <label>
+                Margen %
+                <input type="text" inputMode="decimal" placeholder="ej. 35" value={newDraft.margin} onChange={(e) => onCostOrMarginChange(newDraft, setNewDraft, "margin")(e.target.value)} />
+              </label>
+              <label>
+                Precio de venta $
+                <input type="text" inputMode="decimal" value={newDraft.priceRetail} onChange={(e) => onPriceChange(newDraft, setNewDraft)(e.target.value)} />
+              </label>
+              <label>
+                IVA
+                <select value={newDraft.vatRate} onChange={(e) => setNewDraft({ ...newDraft, vatRate: e.target.value })} title="IVA del producto para la factura">
+                  <option value="">{productVatLabel(null, generalVatRate)}</option>
+                  {PRODUCT_VAT_OPTIONS.map((r) => (
+                    <option key={r} value={String(r)}>{vatPercentLabel(r)}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                {newDraft.unit === "kg" ? "Stock hoy (kg)" : "Stock hoy (unidades)"}
+                <input type="text" inputMode="decimal" value={newDraft.stock} onChange={(e) => setNewDraft({ ...newDraft, stock: e.target.value })} />
+              </label>
+              <label title="Solo para que avise en Inicio cuando quede poco. No es el stock.">
+                Mínimo (aviso)
+                <input type="text" inputMode="decimal" value={newDraft.minStock} onChange={(e) => setNewDraft({ ...newDraft, minStock: e.target.value })} />
+              </label>
+            </div>
+            <div className="form-actions">
+              <button onClick={handleCreate}>Guardar producto</button>
+              <button className="secondary" onClick={() => { setShowNewForm(false); setNewDraft(emptyDraft()); }}>Cancelar</button>
+            </div>
             {(() => {
               const taken = productWithCode(products, newDraft.code);
-              return taken ? (
-                <p className="message warning" style={{ flexBasis: "100%", margin: 0 }}>
-                  El código {taken.code} ya es de "{taken.name}".
-                </p>
-              ) : null;
+              return taken ? <p className="message warning" style={{ margin: "8px 0 0" }}>El código {taken.code} ya es de "{taken.name}".</p> : null;
             })()}
-            <p className="muted" style={{ flexBasis: "100%", margin: 0, fontSize: 12 }}>
+            <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
               Código: escribilo o escaneá el código de barras con la pistola (así Mostrador lo encuentra al escanearlo). Precio: poné el costo y el margen (ej. 35) y el precio de venta se calcula solo; o poné el precio y te muestra el margen.
             </p>
           </div>
-        ) : (
-          <button className="secondary" style={{ marginBottom: 16 }} onClick={() => setShowNewForm(true)}>
-            + Agregar producto
-          </button>
         )}
 
-        <div style={{ overflowX: "auto" }}>
-        <table className="data-table">
+        {/* Tabla de productos (rediseño 2026-10-27): 8 columnas para que entre en una notebook de 1366 sin
+            scroll. La categoría ya es el título de cada grupo, la unidad va con el stock, el IVA debajo del
+            precio y "Inactivo" junto al nombre. Editar y Ajustar stock se abren en un panel debajo de la fila. */}
+        <div className="table-scroll">
+        <table className="data-table products-table">
           <thead>
             <tr>
-              <th>Código</th>
+              <th className="hide-sm">Código</th>
               <th>Producto</th>
-              <th>Categoría</th>
-              <th>Unidad</th>
-              <th className="num">Costo</th>
-              <th className="num">Margen</th>
+              <th className="num hide-sm">Costo</th>
+              <th className="num hide-sm">Margen</th>
               <th className="num">Venta</th>
-              <th>IVA</th>
               <th className="num">Stock</th>
-              <th className="num" title="Avisa en Inicio cuando el stock queda en este número o menos. No es el stock.">Mínimo</th>
-              <th>Estado</th>
+              <th className="num hide-md" title="Avisa en Inicio cuando el stock queda en este número o menos. No es el stock.">Mínimo</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {groupedProducts.map((group) => (
               <Fragment key={group.key}>
-                <tr>
-                  <td colSpan={12} style={{ fontWeight: 700, background: "#f7f7f8", padding: "8px 10px" }}>
+                <tr className="group-row">
+                  <td colSpan={PRODUCT_COLS}>
                     {group.label} <span className="muted" style={{ fontWeight: 400 }}>({group.products.length})</span>
                   </td>
                 </tr>
-                {group.products.map((product) => (
+                {group.products.map((product) => {
+                  const editing = editingId === product.id;
+                  const adjusting = adjustingId === product.id;
+                  const inactive = !(product.active ?? true);
+                  return (
               <Fragment key={product.id}>
-              <tr>
-                {editingId === product.id ? (
-                  <>
-                    <td><input value={editDraft.code} title="Código o código de barras (se puede escanear)" onChange={(e) => setEditDraft({ ...editDraft, code: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }} style={{ width: 130 }} /></td>
-                    <td><input value={editDraft.name} onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} /></td>
-                    <td>
-                      <select value={editDraft.categoryId} onChange={(e) => setEditDraft({ ...editDraft, categoryId: e.target.value })}>
-                        <option value="">Sin categoría</option>
-                        {categories.map((c) => (
-                          <option key={c.id} value={c.id}>{c.name}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <select value={editDraft.unit} onChange={(e) => setEditDraft({ ...editDraft, unit: e.target.value as Product["unit"] })}>
-                        <option value="kg">kg</option>
-                        <option value="unit">unidad</option>
-                        <option value="box">caja</option>
-                      </select>
-                    </td>
-                    <td>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        className="num"
-                        value={editDraft.cost}
-                        onChange={(e) => onCostOrMarginChange(editDraft, setEditDraft, "cost")(e.target.value)}
-                        style={{ width: 90 }}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        className="num"
-                        value={editDraft.margin}
-                        onChange={(e) => onCostOrMarginChange(editDraft, setEditDraft, "margin")(e.target.value)}
-                        style={{ width: 70 }}
-                      />
-                    </td>
-                    <td>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        className="num"
-                        value={editDraft.priceRetail}
-                        onChange={(e) => onPriceChange(editDraft, setEditDraft)(e.target.value)}
-                        style={{ width: 90 }}
-                      />
-                    </td>
-                    <td>
-                      <select value={editDraft.vatRate} onChange={(e) => setEditDraft({ ...editDraft, vatRate: e.target.value })}>
-                        <option value="">{productVatLabel(null, generalVatRate)}</option>
-                        {PRODUCT_VAT_OPTIONS.map((r) => (
-                          <option key={r} value={String(r)}>{vatPercentLabel(r)}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="num">
+              <tr className={editing || adjusting ? "row-editing" : undefined}>
+                <td className="hide-sm">{product.code}</td>
+                <td>
+                  {/* El nombre abre Editar: en pantallas chicas la columna de botones puede quedar fuera de vista. */}
+                  <button className="link-button" title="Editar este producto" onClick={() => startEdit(product)}>{product.name}</button>
+                  {inactive && <span className="badge" style={{ marginLeft: 6 }}>Inactivo</span>}
+                  {presentationsOf(product.id).length > 0 && (
+                    <span className="cell-sub">
                       {product.stockSourceId ? (
-                        product.stock
+                        <>+ {presentationsOf(product.id).length} {presentationsOf(product.id).length === 1 ? "presentación" : "presentaciones"} con otro precio</>
                       ) : (
-                        <>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            className="num"
-                            title="El stock que hay hoy. Si lo cambiás, queda registrado como ajuste de stock."
-                            value={editDraft.stock}
-                            onFocus={(e) => e.target.select()}
-                            onChange={(e) => setEditDraft({ ...editDraft, stock: e.target.value })}
-                            style={{ width: 80 }}
-                          />
-                          <div className="muted" style={{ fontSize: 11 }}>{UNIT_LABELS[editDraft.unit]}</div>
-                        </>
-                      )}
-                    </td>
-                    <td>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        className="num"
-                        title="Solo para que avise en Inicio cuando quede poco. No es el stock."
-                        value={editDraft.minStock}
-                        onChange={(e) => setEditDraft({ ...editDraft, minStock: e.target.value })}
-                        style={{ width: 70 }}
-                      />
-                    </td>
-                    <td>
-                      <select value={editDraft.active ? "1" : "0"} onChange={(e) => setEditDraft({ ...editDraft, active: e.target.value === "1" })}>
-                        <option value="1">Activo</option>
-                        <option value="0">Inactivo</option>
-                      </select>
-                    </td>
-                    <td>
-                      <button onClick={handleUpdate}>Guardar</button>{" "}
-                      <button className="secondary" onClick={() => setEditingId(null)}>Cancelar</button>
-                      <div style={{ marginTop: 8, display: "flex", gap: 10, flexWrap: "wrap" }}>
-                        {(product.active ?? true) && (
-                          <button className="link-button" onClick={() => { setEditingId(null); void handleToggleActive(product); }}>Dar de baja</button>
-                        )}
-                        <button className="link-button" onClick={() => { setEditingId(null); void handleDelete(product); }}>Eliminar</button>
-                      </div>
-                    </td>
-                  </>
-                ) : adjustingId === product.id ? (
-                  <>
-                    <td>{product.code}</td>
-                    <td>{product.name}</td>
-                    <td>{categoryName(product.categoryId)}</td>
-                    <td>{UNIT_LABELS[product.unit]}</td>
-                    <td className="num">{formatMoney(product.cost)}</td>
-                    <td className="num">{marginPercent(product.cost, product.priceRetail)}%</td>
-                    <td className="num">{formatMoney(product.priceRetail)}</td>
-                    <td>{productVatLabel(vatRates[product.id], generalVatRate)}</td>
-                    <td className="num">
-                      <div className="muted" style={{ fontSize: 11 }}>¿Cuánto hay?</div>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        className="num"
-                        autoFocus
-                        value={adjustCounted}
-                        onFocus={(e) => e.target.select()}
-                        onChange={(e) => setAdjustCounted(e.target.value)}
-                        style={{ width: 80, borderColor: "#8b1e1e" }}
-                      />
-                      <div className="muted" style={{ fontSize: 11 }}>registrado: {product.stock} {UNIT_LABELS[product.unit]}</div>
-                    </td>
-                    <td className="num">{product.minStock}</td>
-                    <td colSpan={2}>
-                      <input
-                        placeholder="Motivo (ej. conteo, merma)"
-                        value={adjustReason}
-                        onChange={(e) => setAdjustReason(e.target.value)}
-                        style={{ width: "100%", marginBottom: 6 }}
-                      />
-                      <button onClick={handleAdjustStock}>Guardar ajuste</button>{" "}
-                      <button className="secondary" onClick={() => setAdjustingId(null)}>Cancelar</button>
-                    </td>
-                  </>
-                ) : (
-                  <>
-                    <td>{product.code}</td>
-                    <td>
-                      {/* El nombre abre Editar: en pantallas chicas la columna de botones queda a la derecha, fuera de vista. */}
-                      <button className="link-button" title="Editar este producto" onClick={() => startEdit(product)}>{product.name}</button>
-                      {presentationsOf(product.id).length > 0 && (
-                        <div className="muted" style={{ fontSize: 11 }}>
+                        <button className="link-button" style={{ fontSize: 12 }} onClick={() => openPresentations(product)}>
                           + {presentationsOf(product.id).length} {presentationsOf(product.id).length === 1 ? "presentación" : "presentaciones"} con otro precio
-                        </div>
+                        </button>
                       )}
-                    </td>
-                    <td>{categoryName(product.categoryId)}</td>
-                    <td>{UNIT_LABELS[product.unit]}</td>
-                    <td className="num">{formatMoney(product.cost)}</td>
-                    <td className="num">{marginPercent(product.cost, product.priceRetail)}%</td>
-                    <td className="num">{formatMoney(product.priceRetail)}</td>
-                    <td className={vatRates[product.id] == null ? "muted" : undefined}>{productVatLabel(vatRates[product.id], generalVatRate)}</td>
-                    <td className="num">
-                      {product.stock} {product.stock < 0 || (product.minStock > 0 && product.stock <= product.minStock) ? "⚠" : ""}
-                      {/* Solo productos por kilo (envasados al vacío): en uno por unidad, paquete = unidad y se confundía con el stock (real M2, 24/10). */}
-                      {showPackages && !product.stockSourceId && product.unit === "kg" && (
-                        <div style={{ fontSize: 12 }}>
-                          {packages[product.id] !== undefined ? (
-                            <>
-                              <strong>{packages[product.id]}</strong> {packages[product.id] === 1 ? "paquete" : "paquetes"}{" "}
-                              <button className="link-button" onClick={() => void handlePackages(product, "envasado")}>Envasé</button>{" · "}
-                              <button className="link-button" onClick={() => void handlePackages(product, "conteo")}>Contar</button>{" · "}
-                              <button className="link-button" onClick={() => void handleClearPackages(product)}>Borrar</button>
-                            </>
-                          ) : (
-                            <button className="link-button" onClick={() => void handlePackages(product, "conteo")}>Contar paquetes</button>
-                          )}
-                        </div>
-                      )}
-                      {product.stockSourceId && (
-                        <div className="muted" style={{ fontSize: 11 }}>
-                          usa stock de {productById.get(product.stockSourceId)?.name ?? "otro producto"}
-                        </div>
-                      )}
-                    </td>
-                    <td className="num">{product.minStock}</td>
-                    <td>{(product.active ?? true) ? "Activo" : "Inactivo"}</td>
-                    <td>
-                      <button className="secondary" onClick={() => startEdit(product)}>Editar</button>{" "}
-                      {!(product.active ?? true) && (
+                    </span>
+                  )}
+                </td>
+                <td className="num hide-sm">{formatMoney(product.cost)}</td>
+                <td className="num hide-sm">{marginPercent(product.cost, product.priceRetail)}%</td>
+                <td className="num">
+                  {formatMoney(product.priceRetail)}
+                  <span className="cell-sub">IVA {productVatLabel(vatRates[product.id], generalVatRate)}</span>
+                </td>
+                <td className="num">
+                  <span className={product.stock < 0 ? "num-negative" : undefined}>
+                    {product.stock} {UNIT_LABELS[product.unit]}
+                  </span>
+                  {product.stock < 0 || (product.minStock > 0 && product.stock <= product.minStock) ? " ⚠" : ""}
+                  {/* Solo productos por kilo (envasados al vacío): en uno por unidad, paquete = unidad y se confundía con el stock (real M2, 24/10). */}
+                  {showPackages && !product.stockSourceId && product.unit === "kg" && (
+                    <div style={{ fontSize: 12, fontWeight: 500 }}>
+                      {packages[product.id] !== undefined ? (
                         <>
-                          <button className="secondary" onClick={() => void handleToggleActive(product)}>Reactivar</button>{" "}
+                          <strong>{packages[product.id]}</strong> {packages[product.id] === 1 ? "paquete" : "paquetes"}{" "}
+                          <button className="link-button" onClick={() => void handlePackages(product, "envasado")}>Envasé</button>{" · "}
+                          <button className="link-button" onClick={() => void handlePackages(product, "conteo")}>Contar</button>{" · "}
+                          <button className="link-button" onClick={() => void handleClearPackages(product)}>Borrar</button>
                         </>
+                      ) : (
+                        <button className="link-button" onClick={() => void handlePackages(product, "conteo")}>Contar paquetes</button>
                       )}
-                      {product.stockSourceId ? null : (
-                        <>
-                          <button className="secondary" onClick={() => startAdjustStock(product)}>Ajustar stock</button>
-                          {/* Solo en los que ya tienen: para vincular la primera, Editar → bloque "Stock". */}
-                          {presentationsOf(product.id).length > 0 && (
-                            <>
-                              {" "}
-                              <button className="secondary" onClick={() => openPresentations(product)}>
-                                Presentaciones ({presentationsOf(product.id).length})
-                              </button>
-                            </>
-                          )}
-                        </>
-                      )}
-                    </td>
-                  </>
-                )}
+                    </div>
+                  )}
+                  {product.stockSourceId && (
+                    <span className="cell-sub">usa stock de {productById.get(product.stockSourceId)?.name ?? "otro producto"}</span>
+                  )}
+                </td>
+                <td className="num hide-md">{product.minStock}</td>
+                <td>
+                  <div className="row-actions">
+                    <button className="secondary" onClick={() => (editing ? setEditingId(null) : startEdit(product))}>{editing ? "Cerrar" : "Editar"}</button>
+                    {inactive && <button className="secondary" onClick={() => void handleToggleActive(product)}>Reactivar</button>}
+                    {!product.stockSourceId && (
+                      <button className="secondary" title="Ajustar el stock con lo que contaste" onClick={() => (adjusting ? setAdjustingId(null) : startAdjustStock(product))}>Ajustar</button>
+                    )}
+                  </div>
+                </td>
               </tr>
-              {editingId === product.id && (
-                <tr>
-                  <td colSpan={12} style={{ background: "#fafafa", padding: "10px 14px" }}>
-                    {renderStockBlock(product)}
+              {editing && (
+                <tr className="row-editor">
+                  <td colSpan={PRODUCT_COLS}>
+                    <div className="form-grid">
+                      <label title="Código o código de barras (se puede escanear)">Código<input value={editDraft.code} onChange={(e) => setEditDraft({ ...editDraft, code: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }} /></label>
+                      <label className="span-2">Nombre<input value={editDraft.name} onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} /></label>
+                      <label>
+                        Categoría
+                        <select value={editDraft.categoryId} onChange={(e) => setEditDraft({ ...editDraft, categoryId: e.target.value })}>
+                          <option value="">Sin categoría</option>
+                          {categories.map((c) => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Unidad
+                        <select value={editDraft.unit} onChange={(e) => setEditDraft({ ...editDraft, unit: e.target.value as Product["unit"] })}>
+                          <option value="kg">kg</option>
+                          <option value="unit">unidad</option>
+                          <option value="box">caja</option>
+                        </select>
+                      </label>
+                      <label>
+                        Costo $
+                        <input type="text" inputMode="decimal" className="num" value={editDraft.cost} onChange={(e) => onCostOrMarginChange(editDraft, setEditDraft, "cost")(e.target.value)} />
+                      </label>
+                      <label>
+                        Margen %
+                        <input type="text" inputMode="decimal" className="num" value={editDraft.margin} onChange={(e) => onCostOrMarginChange(editDraft, setEditDraft, "margin")(e.target.value)} />
+                      </label>
+                      <label>
+                        Precio de venta $
+                        <input type="text" inputMode="decimal" className="num" value={editDraft.priceRetail} onChange={(e) => onPriceChange(editDraft, setEditDraft)(e.target.value)} />
+                      </label>
+                      <label>
+                        IVA
+                        <select value={editDraft.vatRate} onChange={(e) => setEditDraft({ ...editDraft, vatRate: e.target.value })}>
+                          <option value="">{productVatLabel(null, generalVatRate)}</option>
+                          {PRODUCT_VAT_OPTIONS.map((r) => (
+                            <option key={r} value={String(r)}>{vatPercentLabel(r)}</option>
+                          ))}
+                        </select>
+                      </label>
+                      {!product.stockSourceId && (
+                        <label title="El stock que hay hoy. Si lo cambiás, queda registrado como ajuste de stock.">
+                          Stock hoy ({UNIT_LABELS[editDraft.unit]})
+                          <input type="text" inputMode="decimal" className="num" value={editDraft.stock} onFocus={(e) => e.target.select()} onChange={(e) => setEditDraft({ ...editDraft, stock: e.target.value })} />
+                        </label>
+                      )}
+                      <label title="Solo para que avise en Inicio cuando quede poco. No es el stock.">
+                        Mínimo (aviso)
+                        <input type="text" inputMode="decimal" className="num" value={editDraft.minStock} onChange={(e) => setEditDraft({ ...editDraft, minStock: e.target.value })} />
+                      </label>
+                      <label>
+                        Estado
+                        <select value={editDraft.active ? "1" : "0"} onChange={(e) => setEditDraft({ ...editDraft, active: e.target.value === "1" })}>
+                          <option value="1">Activo</option>
+                          <option value="0">Inactivo</option>
+                        </select>
+                      </label>
+                    </div>
+                    <div className="form-actions">
+                      <button onClick={handleUpdate}>Guardar</button>
+                      <button className="secondary" onClick={() => setEditingId(null)}>Cancelar</button>
+                      <span className="spacer" />
+                      {(product.active ?? true) && (
+                        <button className="link-button" onClick={() => { setEditingId(null); void handleToggleActive(product); }}>Dar de baja</button>
+                      )}
+                      <button className="link-button" onClick={() => { setEditingId(null); void handleDelete(product); }}>Eliminar</button>
+                    </div>
+                    <div style={{ marginTop: 14, paddingTop: 12, borderTop: "1px solid #e5e7eb" }}>{renderStockBlock(product)}</div>
                   </td>
                 </tr>
               )}
-              {presentationsOfId === product.id && editingId !== product.id && !product.stockSourceId && (
-                <tr>
-                  <td colSpan={12} style={{ background: "#fafafa", padding: "10px 14px" }}>
-                    {renderPresentationsPanel(product)}
+              {adjusting && (
+                <tr className="row-editor">
+                  <td colSpan={PRODUCT_COLS}>
+                    <div className="form-grid">
+                      <label>
+                        ¿Cuánto hay? ({UNIT_LABELS[product.unit]})
+                        <input type="text" inputMode="decimal" className="num" autoFocus value={adjustCounted} onFocus={(e) => e.target.select()} onChange={(e) => setAdjustCounted(e.target.value)} />
+                      </label>
+                      <label className="span-2">
+                        Motivo
+                        <input placeholder="Ej. conteo, merma" value={adjustReason} onChange={(e) => setAdjustReason(e.target.value)} />
+                      </label>
+                      <span className="muted" style={{ alignSelf: "center", fontSize: 13 }}>Registrado: {product.stock} {UNIT_LABELS[product.unit]}</span>
+                    </div>
+                    <div className="form-actions">
+                      <button onClick={handleAdjustStock}>Guardar ajuste</button>
+                      <button className="secondary" onClick={() => setAdjustingId(null)}>Cancelar</button>
+                    </div>
                   </td>
+                </tr>
+              )}
+              {presentationsOfId === product.id && !editing && !product.stockSourceId && (
+                <tr className="row-editor">
+                  <td colSpan={PRODUCT_COLS}>{renderPresentationsPanel(product)}</td>
                 </tr>
               )}
               </Fragment>
-                ))}
+                  );
+                })}
               </Fragment>
             ))}
           </tbody>

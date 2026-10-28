@@ -74,8 +74,9 @@ describe("[SIMULADO, registros REALES] Mi balanza con una Systel Cuora Max: Pata
     assert.equal(prep.ready, 1); // 13
     assert.equal(prep.writes, 4); // 1 (nombre), 4 (precio), 86 (código de barras), 78 (nuevo)
     assert.deepEqual(prep.pending.map((x) => x.code), [97]);
-    assert.ok(prep.notes.some((n) => /1 producto no tiene precio/.test(n)));
-    assert.ok(prep.notes.some((n) => /1 producto tiene un código que no sirve/.test(n)));
+    // Etapa 1: cada producto que no va, con su motivo (antes era un conteo en las notas).
+    assert.equal(prep.skipped?.filter((x) => /no tiene precio/.test(x.reason)).length, 1);
+    assert.equal(prep.skipped?.filter((x) => /código/.test(x.reason)).length, 1);
     assert.ok(prep.notes.some((n) => /La balanza tiene 1 producto que no está en Patagonia: no se toca/.test(n))); // el 98
   });
 
@@ -181,6 +182,10 @@ describe("[SIMULADO, registros REALES] Mi balanza con una Systel Cuora Max: Pata
     const prep = await new SystelSession(f, 20, ctx(PRODUCTS), lab(deps)).prepare(noop);
     assert.equal(prep.model, "systel-otra");
     assert.equal(prep.canWrite, false);
+    // Mensaje honesto (real Giuseppe 27/10): no promete que soporte "la habilita en unos minutos", porque no hay con qué.
+    assert.match(prep.blocker!, /todavía no está comprobado/);
+    assert.match(prep.blocker!, /no se le mandó nada/);
+    assert.doesNotMatch(prep.blocker!, /unos minutos/);
   });
 
   it("un cajero no puede mandar productos (tiene que ser el dueño o un administrador)", async () => {
@@ -302,6 +307,16 @@ describe("[SIMULADO] Mi balanza con una Kretz Report", () => {
     assert.equal(out.ok, true);
     assert.equal(out.verified, 1);
     assert.deepEqual(sent, ["11"]);
+  });
+
+  it("un código de 4 cifras no se manda: la etiqueta 2-3-7 lleva 3 (auditoría 28/10, M2)", async () => {
+    const { io, sent } = reportIO({});
+    const s = new KretzSession("kretz-report-lt", ctx([P("a", "151", "Salchicha", "kg", 6000), P("b", "1510", "Largo", "kg", 6000)]), "datos", io);
+    const prep = await s.prepare(noop);
+    assert.deepEqual(prep.skipped?.map((x) => x.code), ["1510"]);
+    assert.match(prep.skipped![0].reason, /más de 3 cifras/);
+    await s.sync(prep, noop);
+    assert.deepEqual(sent, ["151"]);
   });
 
   it("balanza nueva: el producto de ejemplo de fábrica (\"NOMBRE\") se reemplaza solo, sin tildar nada (real M2 Alimentos)", async () => {
@@ -496,6 +511,12 @@ describe("[SIMULADO] Conectar balanza", () => {
     rememberScale({ model: "kretz-aura", label: "Kretz Aura", family: "kretz", usb: "0403:6001", connectedAt: "", syncedAt: null });
     assert.deepEqual(familyOrder("0403:6001", loadRememberedScale()), ["kretz", "systel"]);
     assert.equal(friendlyKind(new Error("The port is already open.")), "puerto_ocupado");
+    // Auditoría 28/10: sin internet ya no se muestra como "otra pestaña usa la balanza".
+    const fetchErr = new TypeError("NetworkError when attempting to fetch resource.");
+    assert.equal(friendlyKind(fetchErr), "sin_internet");
+    const winErr = new Error("Failed to open serial port.");
+    winErr.name = "NetworkError";
+    assert.equal(friendlyKind(winErr), "puerto_otro_programa");
     assert.ok(!/Error|undefined|properties/.test(friendlyMessage(new TypeError("Cannot read properties of undefined"))));
   });
 });
@@ -515,5 +536,18 @@ describe("[SIMULADO, registros REALES] Systel que solo atiende pedidos al genera
     assert.equal(f.plus.get(4)!.slice(23, 29), "005400", "precio nuevo en la balanza");
     assert.equal(f.plus.get(78)!.slice(5, 23), "ARABES            ", "producto nuevo creado");
     assert.equal((s.supportInfo() as { direccion_pedidos: number }).direccion_pedidos, 0);
+  });
+});
+
+describe("Systel: nunca redondea el precio (auditoría 28/10)", () => {
+  it("con centavos en una balanza sin decimales, o más caro de lo que entra: se omite con el motivo", async () => {
+    const { planSystelPush } = await import("./adapters/systel-push");
+    const plan = planSystelPush([], "max62", 0, [
+      { id: "a", code: "5", name: "Con centavos", byWeight: true, price: 4599.5 },
+      { id: "b", code: "6", name: "Carísimo", byWeight: true, price: 1_500_000 }
+    ]);
+    assert.deepEqual(plan.map((p) => p.action), ["omitir", "omitir"]);
+    assert.match(plan[0].reason, /centavos/);
+    assert.match(plan[1].reason, /máximo \$999\.999/);
   });
 });

@@ -1,3 +1,4 @@
+import { cachedScaleConfig, scaleConfigLoaded, scaleConfigOnError, SCALE_CONFIG_UNKNOWN_MESSAGE, type ScaleConfigState } from "./scale-config-cache";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Settings } from "lucide-react";
 import * as Sentry from "@sentry/react";
@@ -48,7 +49,7 @@ export function Sale() {
   const [cashiers, setCashiers] = useState<PosCashier[]>([]);
   const [openCashierId, setOpenCashierId] = useState("");
   const [openCashierPin, setOpenCashierPin] = useState("");
-  const { suppliers } = useSuppliers();
+  const { suppliers, create: createSupplier } = useSuppliers();
   const { employees } = useEmployees();
   // "treasury.manage" (dueño/admin) da acceso a la pantalla completa de
   // Tesorería; "pos.treasury" es más angosto y solo destraba estos botones
@@ -88,6 +89,9 @@ export function Sale() {
   const [openingCashInput, setOpeningCashInput] = useState("");
   const [showCloseConfirm, setShowCloseConfirm] = useState(false);
   const [closeSummary, setCloseSummary] = useState<CloseShiftResult | null>(null);
+  // "Controlar la balanza al cerrar" (migración 164): de la empresa; el dueño lo cambia en "Control de caja".
+  const [scaleCloseOverride, setScaleCloseOverride] = useState<boolean | null>(null);
+  const scaleCloseControl = scaleCloseOverride ?? (profile?.features?.includes("control_balanza") ?? false);
   const [closeDetail, setCloseDetail] = useState<PosShiftSale[]>([]);
   /** Foto de los "Movimiento de caja" (egresos a la caja fuerte, ingresos,
    * traspasos) del turno que se acaba de cerrar -- para que el dueño pueda
@@ -261,19 +265,20 @@ export function Sale() {
 
   useEffect(() => {
     if (!isSupabaseConfigured || !branchId) return;
+    // Nunca el formato de fábrica a ciegas: mientras carga, el último de esta computadora; si falla y no hay, no se
+    // leen etiquetas y se avisa (auditoría 28/10: con el de fábrica una etiqueta 1-6-5 se leía como otro producto).
+    const apply = (s: ScaleConfigState) => {
+      setScaleConfig(s.config);
+      setScaleConfigCalibrated(s.calibrated);
+    };
+    const cached = cachedScaleConfig(branchId);
+    if (cached) apply(cached);
     void getBranchScaleConfig(branchId)
-      .then((config) => {
-        if (config) {
-          setScaleConfig(config);
-          setScaleConfigCalibrated(true);
-        } else {
-          setScaleConfig(DEFAULT_SCALE_CONFIG);
-          setScaleConfigCalibrated(false);
-        }
-      })
+      .then((config) => apply(scaleConfigLoaded(branchId, config)))
       .catch(() => {
-        setScaleConfig(DEFAULT_SCALE_CONFIG);
-        setScaleConfigCalibrated(false);
+        const s = scaleConfigOnError(branchId);
+        apply(s);
+        if (s.unknown) setMessage(SCALE_CONFIG_UNKNOWN_MESSAGE);
       });
   }, [branchId]);
 
@@ -446,22 +451,22 @@ export function Sale() {
     await autoPrintMovementReceipt(data);
   }
 
-  /** Papelito del retiro a caja fuerte: se imprime SIEMPRE (aunque "Imprimir
-   * automáticamente" esté apagado), porque va adentro de la caja fuerte con
-   * la plata y es lo que el dueño compara al contarla. */
+  /** Papelito del retiro de dinero: se imprime SIEMPRE (aunque "Imprimir
+   * automáticamente" esté apagado), porque va junto con la plata y es lo que
+   * el dueño compara al contar los retiros. */
   async function publishSafeDeposit(deposit: SafeDepositResult) {
     const data: MovementReceiptState = {
-      title: `RETIRO A CAJA FUERTE N.º ${deposit.number}`,
+      title: `RETIRO DE DINERO N.º ${deposit.number}`,
       date: deposit.createdAt,
       amount: deposit.amount,
-      accountName: `${deposit.fromAccountName} -> ${deposit.safeAccountName}`,
-      detail: "Guardar este papel adentro de la caja fuerte junto con la plata.",
+      accountName: deposit.safeAccountName ? `${deposit.fromAccountName} -> ${deposit.safeAccountName}` : deposit.fromAccountName,
+      detail: "Guardar este papel junto con la plata retirada.",
       counterpartLabel: "Cajera",
       counterpartName: deposit.employeeName ?? profile?.full_name ?? "-"
     };
     setReceipt(null);
     setMovementReceipt(data);
-    setMessage(`Retiro N.º ${deposit.number} anotado: ${formatMoney(deposit.amount)} a la caja fuerte. Guardá el papelito con la plata.`);
+    setMessage(`Retiro N.º ${deposit.number} anotado: ${formatMoney(deposit.amount)}. Guardá el papelito con la plata.`);
     await autoPrintMovementReceipt(data, true);
   }
 
@@ -1060,6 +1065,7 @@ Cancelar = es el mismo papel: no cobrar.`)) {
         onScaleConfigChange={(config) => {
           setScaleConfig(config ?? DEFAULT_SCALE_CONFIG);
           setScaleConfigCalibrated(config !== null);
+          if (branchId) scaleConfigLoaded(branchId, config);
         }}
         mostradorPin={mostradorPin}
         onPinChange={setMostradorPinValue}
@@ -1100,7 +1106,7 @@ Cancelar = es el mismo papel: no cobrar.`)) {
 
       {shift && shift.id !== "demo-shift" && Date.now() - new Date(shift.openedAt).getTime() > STALE_SHIFT_HOURS * 3_600_000 && (
         <div className="message warning">
-          <strong>Este turno está abierto desde el {formatShiftStart(shift.openedAt)}.</strong> La plata de estas ventas no llega a Tesorería hasta que lo cierres, y el arqueo de caja pierde sentido. Cerralo con el botón "Cerrar turno" de la derecha y abrí uno nuevo.
+          <strong>Este turno está abierto desde el {formatShiftStart(shift.openedAt)}.</strong> La plata de estas ventas no llega a Tesorería hasta que lo cierres, y el arqueo de caja pierde sentido. Cerralo con el botón "Cerrar caja" de la derecha y abrí uno nuevo.
         </div>
       )}
 
@@ -1213,6 +1219,8 @@ Cancelar = es el mismo papel: no cobrar.`)) {
               if (shift && isSupabaseConfigured) setShiftSales(await listPosShiftSales(shift.id));
             }}
             onSafeDeposit={publishSafeDeposit}
+            scaleCloseControl={scaleCloseControl}
+            onCreateSupplier={async (name) => (await createSupplier({ name, category: "" })).id}
             onMessage={setMessage}
             publishReceipt={publishMovementReceipt}
           />
@@ -1220,7 +1228,15 @@ Cancelar = es el mismo papel: no cobrar.`)) {
       )}
 
       {canSeeShiftTotals && isSupabaseConfigured && branchId && (
-        <CashControlPanel branchId={branchId} onMessage={setMessage} adjust={adjust} onVoidPinChange={setVoidPinRequired} refreshKey={shiftSales.length - activeShiftSales.length} />
+        <CashControlPanel
+          branchId={branchId}
+          onMessage={setMessage}
+          adjust={adjust}
+          onVoidPinChange={setVoidPinRequired}
+          refreshKey={shiftSales.length - activeShiftSales.length}
+          scaleCloseControl={scaleCloseControl}
+          onScaleCloseControlChange={setScaleCloseOverride}
+        />
       )}
 
       {receipt && (
@@ -1243,7 +1259,23 @@ Cancelar = es el mismo papel: no cobrar.`)) {
         />
       )}
 
-      {closeSummary && (
+      {closeSummary && !canSeeShiftTotals && (
+        <section className="panel" style={{ marginTop: 18 }}>
+          <h2 style={{ marginTop: 0 }}>Caja cerrada</h2>
+          {closeSummary.difference === null ? (
+            <p className="muted">Se cerró sin contar el efectivo.</p>
+          ) : Math.abs(closeSummary.difference) < 1 ? (
+            <p className="num-positive" style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>Dio bien</p>
+          ) : (
+            <p className={closeSummary.difference < 0 ? "num-negative" : "num-positive"} style={{ fontSize: 22, fontWeight: 800, margin: 0 }}>
+              {closeSummary.difference < 0 ? `Faltan ${formatMoney(-closeSummary.difference)}` : `Sobran ${formatMoney(closeSummary.difference)}`}
+            </p>
+          )}
+          <p className="muted" style={{ marginBottom: 0 }}>El dueño ve el detalle en "Control de caja".</p>
+        </section>
+      )}
+
+      {closeSummary && canSeeShiftTotals && (
         <CloseSummaryView
           summary={closeSummary}
           accounts={accounts}

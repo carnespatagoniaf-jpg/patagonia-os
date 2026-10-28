@@ -1,4 +1,4 @@
-import { FriendlyError, friendlyKind } from "./friendly";
+import { FriendlyError, friendlyKind, isPortOpenError } from "./friendly";
 import { familyOrder, loadRememberedScale, rememberScale, usbKeyOf } from "./memory";
 import type { EngineContext, ProgressFn, ScaleAdapter, ScaleSession } from "./types";
 
@@ -53,7 +53,7 @@ export async function connectScale(ctx: EngineContext, onProgress: ProgressFn, d
       }
     } catch (err) {
       // Puerto tomado por otra pestaña/programa: no tiene sentido probar otra marca.
-      if (friendlyKind(err) === "puerto_ocupado") throw err instanceof FriendlyError ? err : new FriendlyError("puerto_ocupado", String(err));
+      if (isPortOpenError(err)) throw err instanceof FriendlyError ? err : new FriendlyError(friendlyKind(err), String(err));
       errors.push(`${adapter.family}: ${err instanceof Error ? err.message : String(err)}`);
     }
   }
