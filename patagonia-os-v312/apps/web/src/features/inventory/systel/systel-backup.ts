@@ -74,6 +74,19 @@ export async function takeSystelBackup(client: SystelClient, onProgress: (text: 
     if (plu) backup.plus.push(plu);
     else backup.unreadable.push(entry.number);
   }
+  // Los que no se pudieron leer se piden una vez más al final (real Giuseppe: se cortó la conexión a mitad y los
+  // productos que seguían quedaron sin leer, aunque la balanza contestaba).
+  if (backup.unreadable.length > 0) {
+    onProgress(`Volviendo a leer ${backup.unreadable.length} productos…`);
+    const retry = backup.unreadable;
+    backup.unreadable = [];
+    for (const number of retry) {
+      const plu = await client.readPlu(detected.layout, number);
+      if (plu) backup.plus.push(plu);
+      else backup.unreadable.push(number);
+    }
+    backup.plus.sort((a, b) => a.number - b.number);
+  }
   backup.complete = backup.unreadable.length === 0;
   backup.detail = backup.complete ? `${backup.plus.length} productos respaldados` : `no se pudieron leer ${backup.unreadable.length} productos (${backup.unreadable.slice(0, 10).join(", ")}…)`;
   return backup;

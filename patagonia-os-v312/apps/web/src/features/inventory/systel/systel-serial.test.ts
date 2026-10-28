@@ -107,3 +107,63 @@ describe("desconexión del cable", () => {
     await link.close();
   });
 });
+
+/**
+ * Como un puerto real de Chrome: abrirlo dos veces da "The port is already open". `failNextClose` simula un cierre
+ * que no termina (el puerto sigue abierto), lo que dejó a Giuseppe (27 y 28/10) sin leer 54 a 80 productos.
+ */
+class StrictPort {
+  private stream: ReadableStream<Uint8Array> | null = null;
+  private controller: ReadableStreamDefaultController<Uint8Array> | null = null;
+  private isOpen = false;
+  writable: WritableStream<Uint8Array> | null = null;
+  failNextClose = false;
+  opens = 0;
+  /** Como Chrome: con el puerto abierto, si la lectura anterior se canceló, da una nueva. */
+  get readable(): ReadableStream<Uint8Array> | null {
+    if (!this.isOpen) return null;
+    if (!this.stream) {
+      this.stream = new ReadableStream<Uint8Array>({
+        start: (c) => { this.controller = c; },
+        cancel: () => { this.stream = null; this.controller = null; }
+      });
+    }
+    return this.stream;
+  }
+  async open() {
+    if (this.isOpen) throw new Error("Failed to execute 'open' on 'SerialPort': The port is already open.");
+    this.opens += 1;
+    this.isOpen = true;
+    this.writable = new WritableStream<Uint8Array>({
+      write: () => {
+        setTimeout(() => this.controller?.enqueue(reply(20, 23, "00D")), 2);
+      }
+    });
+  }
+  async close() {
+    if (this.failNextClose) {
+      this.failNextClose = false;
+      throw new Error("Failed to execute 'close' on 'SerialPort': the port is busy");
+    }
+    this.isOpen = false;
+    this.stream = null;
+    this.writable = null;
+  }
+}
+
+describe("conexión cortada a mitad de la lectura (real Giuseppe 27-28/10)", () => {
+  it("si el cierre no terminó y el puerto sigue abierto, se vuelve a usar en vez de fallar con 'already open'", async () => {
+    const port = new StrictPort();
+    const link = new SerialSystelLink(port as unknown as SerialPort);
+    await link.connect();
+    const client = new SystelClient(link, { address: 20 });
+    assert.ok(await client.ping(), "primera lectura");
+    port.failNextClose = true;
+    await link.close(); // algo de afuera cierra la conexión y el puerto queda abierto
+    assert.ok(await client.ping(), "después del corte sigue leyendo");
+    assert.ok(await client.ping());
+    assert.ok(link.events.some((e) => e.kind === "abrir" && /se vuelve a usar/.test(e.detail)));
+    assert.ok(link.events.some((e) => e.kind === "cerrar" && e.detail.length > 0), "anota quién cerró");
+    await link.close();
+  });
+});
