@@ -1,6 +1,7 @@
 import type { Product } from "@patagonia/domain";
 import { POS_LAST_RECEIPT_KEY } from "../../lib/pos-receipt-storage";
 import type { InvoicePrint } from "../invoicing/invoicing-view";
+import { productPrice, scaleAmountForList } from "../pricing/price-lists";
 
 // Tipos, constantes y funciones sueltas de Mostrador (sin React), separados de
 // Sale.tsx para que la pantalla no sea un solo archivo de miles de líneas.
@@ -31,11 +32,37 @@ export interface TicketLine {
   scaleCode?: number | null;
   /** Producto detallado de un ticket de TOTAL (ticket-detail.ts): la clave de la línea de ese TOTAL. */
   detailOf?: string;
+  /** Lista de precios con la que se cobra (Mayorista, migración 166). Sin lista = minorista. */
+  priceListId?: string;
+  /** Precio minorista por unidad (el de la balanza): con lista, unitPrice es el de la lista. */
+  retailPrice?: number;
 }
 
-/** Importe de una línea antes de descuentos: el de la balanza si vino de un ticket leído de ella. */
-export function lineGross(l: Pick<TicketLine, "quantity" | "unitPrice" | "scaleAmount">): number {
-  return l.scaleAmount ?? l.quantity * l.unitPrice;
+/**
+ * Importe de una línea antes de descuentos: el de la balanza si vino de un ticket leído de ella.
+ * Con lista de precios, el importe de la balanza se cobra en proporción (igual que pos_list_scale_amount).
+ */
+export function lineGross(l: Pick<TicketLine, "quantity" | "unitPrice" | "scaleAmount" | "priceListId" | "retailPrice">): number {
+  if (l.scaleAmount !== undefined) {
+    return l.priceListId && l.retailPrice ? scaleAmountForList(l.scaleAmount, l.retailPrice, l.unitPrice) : l.scaleAmount;
+  }
+  return l.quantity * l.unitPrice;
+}
+
+/**
+ * Pone (o saca) una lista de precios en una línea de producto. Siempre parte de los datos de origen
+ * (precio minorista e importe de la balanza), así aplicarla dos veces o sacarla deja todo igual.
+ * Las etiquetas de Systel que esperan su TOTAL y las líneas a mano no cambian.
+ */
+export function withPriceList(l: TicketLine, product: Product | undefined, listId: string | null): TicketLine {
+  if (l.kind !== "product" || !product || l.scalePending) return l;
+  const retail = l.retailPrice ?? (l.scaleAmount !== undefined ? product.priceRetail : l.unitPrice);
+  if (!listId) {
+    if (l.priceListId === undefined && l.retailPrice === undefined) return l;
+    const { priceListId: _list, retailPrice: _retail, ...rest } = l;
+    return { ...rest, unitPrice: l.scaleAmount !== undefined ? l.scaleAmount / l.quantity : retail };
+  }
+  return { ...l, priceListId: listId, retailPrice: retail, unitPrice: productPrice(product, listId) };
 }
 
 export interface PaymentRow {

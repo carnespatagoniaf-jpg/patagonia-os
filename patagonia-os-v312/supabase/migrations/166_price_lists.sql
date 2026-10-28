@@ -421,6 +421,10 @@ begin
   if v_matches is null then
     return jsonb_build_object('ok', true);
   end if;
+  -- Sin PIN escrito todavía: solo avisa que hace falta (no cuenta como intento fallido).
+  if nullif(trim(coalesce(p_pin, '')), '') is null then
+    return jsonb_build_object('ok', false, 'need_pin', true);
+  end if;
   if public.pos_void_pin_locked(v_company_id) then
     return jsonb_build_object('ok', false, 'error', 'Demasiados intentos con el PIN equivocado. Esperá 15 minutos.');
   end if;

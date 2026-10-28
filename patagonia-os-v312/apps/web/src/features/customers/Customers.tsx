@@ -32,6 +32,8 @@ import { canAccessPage, planAllows } from "../auth/permissions";
 import { ChequeFields, EMPTY_CHEQUE, readChequeForm, type ChequeForm } from "../cheques/ChequeFields";
 import { receiveCustomerCheque } from "../cheques/cheques-service";
 import { cleanCuit } from "../cheques/cheque-logic";
+import { listPriceLists, setCustomerPriceList } from "../pricing/price-lists-service";
+import { activeList, productPrice, type PriceList } from "../pricing/price-lists";
 
 /** Valor del selector "Entra a…" para cobrar con cheque (migración 150). */
 const CHEQUE_OPTION = "__cheque";
@@ -144,9 +146,15 @@ export function Customers() {
   const [openingDate, setOpeningDate] = useState(todayIso());
   const printSectionRef = useRef<HTMLDivElement | null>(null);
 
+  // Listas de precios (Mayorista, migración 166): el cliente que tiene una compra a esos precios.
+  const [priceLists, setPriceLists] = useState<PriceList[]>([]);
+  const [newPriceListId, setNewPriceListId] = useState("");
+  const [editPriceListId, setEditPriceListId] = useState("");
+
   useEffect(() => {
     if (!branchId) return;
     void listProductsForBranch(branchId).then(setProducts);
+    if (isSupabaseConfigured) void listPriceLists().then(setPriceLists).catch(() => setPriceLists([]));
   }, [branchId]);
 
   useEffect(() => {
@@ -180,7 +188,7 @@ export function Customers() {
         return current.map((l) => (l.key === existing.key ? { ...l, quantity: l.quantity + 1 } : l));
       }
       const key = current.some((l) => l.key === product.id) ? `${product.id}-${Date.now()}` : product.id;
-      return [...current, { key, productId: product.id, name: product.name, unit: product.unit, quantity: 1, unitPrice: product.priceRetail }];
+      return [...current, { key, productId: product.id, name: product.name, unit: product.unit, quantity: 1, unitPrice: productPrice(product, customerList?.id) }];
     });
     setChargeSearch("");
   }
@@ -260,6 +268,19 @@ export function Customers() {
   const [editNotes, setEditNotes] = useState("");
 
   const selectedCustomer = customers.find((c) => c.id === selectedId) ?? null;
+  const activePriceLists = priceLists.filter((l) => l.active);
+  const customerList = activeList(priceLists, selectedCustomer?.priceListId);
+  const canSetPriceList = activePriceLists.length > 0 && (profile?.role === "owner" || profile?.role === "admin");
+
+  // Si cambia el cliente (o su lista), los productos ya cargados en la venta toman su precio.
+  useEffect(() => {
+    setChargeCart((current) =>
+      current.map((l) => {
+        const product = l.productId ? products.find((p) => p.id === l.productId) : undefined;
+        return product ? { ...l, unitPrice: productPrice(product, customerList?.id) } : l;
+      })
+    );
+  }, [customerList?.id, products]);
 
   // Datos fiscales del cliente (los de su última factura) para no volver a escribirlos.
   useEffect(() => {
@@ -290,6 +311,7 @@ export function Customers() {
       setEditProvince(selectedCustomer.province ?? "");
       setEditTermDays(selectedCustomer.paymentTermDays ? String(selectedCustomer.paymentTermDays) : "");
       setEditActive(selectedCustomer.active);
+      setEditPriceListId(selectedCustomer.priceListId ?? "");
       setEditingCustomer(false);
     }
   }, [selectedCustomer]);
@@ -337,6 +359,10 @@ export function Customers() {
         paymentTermDays: termDays,
         active: editActive
       });
+      if (canSetPriceList && editPriceListId !== (selectedCustomer.priceListId ?? "")) {
+        await setCustomerPriceList(selectedCustomer.id, editPriceListId || null);
+        await reload();
+      }
       setEditingCustomer(false);
       if (!editActive) setSelectedId(null);
       setMessage(editActive ? "Cliente actualizado." : "Cliente eliminado.");
@@ -409,6 +435,10 @@ export function Customers() {
         locality: locality.trim() || undefined,
         province: province.trim() || undefined
       });
+      if (canSetPriceList && newPriceListId) {
+        await setCustomerPriceList(result.id, newPriceListId);
+        await reload();
+      }
       const opening = parseAmount(openingBalance || "0") || 0;
       if (opening > 0) {
         await addCharge({ customerId: result.id, chargeDate: todayIso(), amount: opening, reason: "Saldo anterior" });
@@ -420,6 +450,7 @@ export function Customers() {
       setLocality("");
       setProvince("");
       setOpeningBalance("");
+      setNewPriceListId("");
       selectCustomer(result.id);
       const created = result.number !== undefined ? `Cliente creado: es el N.º ${result.number}.` : "Cliente creado.";
       setMessage(opening > 0 ? `${created} Arranca debiendo ${formatMoney(opening)} (saldo anterior).` : created);
@@ -798,7 +829,10 @@ export function Customers() {
                   return (
                     <tr key={c.id} className={c.id === selectedId ? "row-selected" : "row-clickable"} onClick={() => selectCustomer(c.id)} style={status === "overdue" && c.id !== selectedId ? { background: "#fdecea" } : undefined}>
                       <td><b>{c.number ?? "—"}</b></td>
-                      <td>{c.name}</td>
+                      <td>
+                        {c.name}
+                        {activeList(priceLists, c.priceListId) && <span className="badge" style={{ marginLeft: 6 }}>{activeList(priceLists, c.priceListId)!.name}</span>}
+                      </td>
                       <td>
                         <span style={{ display: "inline-block", padding: "1px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: badge.bg, color: badge.color, whiteSpace: "nowrap" }}>
                           {status === "clear" && c.balance <= -1 ? "A favor" : badge.label}
@@ -834,6 +868,17 @@ export function Customers() {
                 Saldo anterior (opcional)
                 <input type="text" inputMode="decimal" placeholder="Lo que ya te debe" value={openingBalance} onChange={(e) => setOpeningBalance(e.target.value)} />
               </label>
+              {canSetPriceList && (
+                <label title="Con una lista, sus ventas salen solas a esos precios">
+                  Precio
+                  <select value={newPriceListId} onChange={(e) => setNewPriceListId(e.target.value)}>
+                    <option value="">Minorista</option>
+                    {activePriceLists.map((l) => (
+                      <option key={l.id} value={l.id}>{l.name}</option>
+                    ))}
+                  </select>
+                </label>
+              )}
             </div>
             <div className="form-actions">
               <button disabled={busy} onClick={handleCreateCustomer}>Agregar cliente</button>
@@ -853,6 +898,7 @@ export function Customers() {
               <span>Pagado <b>{formatMoney(balance?.totalPaid ?? 0)}</b></span>
               <strong>Saldo (te debe) <b>{formatMoney(balance?.balance ?? 0)}</b></strong>
               <span>Plazo de pago <b>{selectedCustomer.paymentTermDays ? `${selectedCustomer.paymentTermDays} días` : "sin definir"}</b></span>
+              {activePriceLists.length > 0 && <span>Precio <b>{customerList?.name ?? "Minorista"}</b></span>}
               {(selectedCustomer.locality || selectedCustomer.province) && (
                 <span>Ubicación <b>{[selectedCustomer.locality, selectedCustomer.province].filter(Boolean).join(", ")}</b></span>
               )}
@@ -868,6 +914,17 @@ export function Customers() {
                 <label>Provincia<input value={editProvince} onChange={(e) => setEditProvince(e.target.value)} /></label>
                 <label>Nota<input value={editNotesField} onChange={(e) => setEditNotesField(e.target.value)} /></label>
                 <label>Plazo de pago (días)<input type="number" value={editTermDays} onChange={(e) => setEditTermDays(e.target.value)} /></label>
+                {canSetPriceList && (
+                  <label title="Con una lista, sus ventas salen solas a esos precios">
+                    Precio
+                    <select value={editPriceListId} onChange={(e) => setEditPriceListId(e.target.value)}>
+                      <option value="">Minorista</option>
+                      {activePriceLists.map((l) => (
+                        <option key={l.id} value={l.id}>{l.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
                 <label>
                   Estado
                   <select value={editActive ? "1" : "0"} onChange={(e) => setEditActive(e.target.value === "1")}>
@@ -959,7 +1016,7 @@ export function Customers() {
                     {chargeMatches.map((product) => (
                       <button key={product.id} type="button" className="pos-dropdown-item" onClick={() => addProductToCharge(product)}>
                         <span>{product.name} <span className="muted">({UNIT_LABELS[product.unit]})</span></span>
-                        <strong>{formatMoney(product.priceRetail)}</strong>
+                        <strong>{formatMoney(productPrice(product, customerList?.id))}</strong>
                       </button>
                     ))}
                   </div>

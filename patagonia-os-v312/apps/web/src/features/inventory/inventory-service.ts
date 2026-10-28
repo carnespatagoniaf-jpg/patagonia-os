@@ -1,5 +1,6 @@
 import type { Product } from "@patagonia/domain";
 import { supabase } from "../../lib/supabase";
+import { listProductListPrices } from "../pricing/price-lists-service";
 
 export async function listProductsForBranch(branchId: string, includeInactive = false): Promise<Product[]> {
   if (!supabase) return [];
@@ -7,6 +8,8 @@ export async function listProductsForBranch(branchId: string, includeInactive = 
   // Supabase devuelve como máximo 1000 filas por consulta: se pide por páginas
   // (orden estable por nombre + id) para no cortar el catálogo en silencio.
   const PAGE_SIZE = 1000;
+  // Precios por lista (Mayorista, migración 166) en paralelo: si la empresa no tiene listas viene vacío.
+  const listPricesPromise = listProductListPrices().catch(() => new Map<string, Record<string, { price: number; manual: boolean }>>());
   const rows: {
     id: string; code: string; name: string; unit: Product["unit"]; cost: number | string; price_retail: number | string;
     min_stock: number | string; stock: number | string; active: boolean; category_id: string | null;
@@ -28,6 +31,7 @@ export async function listProductsForBranch(branchId: string, includeInactive = 
     if (!data || data.length < PAGE_SIZE) break;
   }
 
+  const listPrices = await listPricesPromise;
   return rows.map((row) => ({
     id: row.id,
     code: row.code,
@@ -40,7 +44,8 @@ export async function listProductsForBranch(branchId: string, includeInactive = 
     active: row.active,
     categoryId: row.category_id ?? undefined,
     stockSourceId: row.stock_source_id ?? undefined,
-    stockFactor: row.stock_source_id ? Number(row.stock_factor ?? 1) : undefined
+    stockFactor: row.stock_source_id ? Number(row.stock_factor ?? 1) : undefined,
+    listPrices: listPrices.get(row.id)
   }));
 }
 

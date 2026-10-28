@@ -25,6 +25,8 @@ export interface Product {
   stockSourceId?: string;
   /** Cuánto del principal descuenta cada unidad de esta presentación (1 si es la misma unidad). */
   stockFactor?: number;
+  /** Precio en cada lista de precios activa (ej. Mayorista), por id de lista. manual = escrito a mano (no sale de la regla). */
+  listPrices?: Record<string, { price: Money; manual: boolean }>;
 }
 
 export interface CartItem {
@@ -462,6 +464,8 @@ export interface Customer {
   province?: string;
   paymentTermDays?: number;
   active: boolean;
+  /** Lista de precios del cliente (ej. Mayorista, migración 166); sin lista = minorista. */
+  priceListId?: string;
 }
 
 export interface CustomerCharge {

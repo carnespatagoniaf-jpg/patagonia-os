@@ -33,6 +33,9 @@ const SHOW_SYSTEL_PANEL = false;
 /** Laboratorio Systel (balanza de banco): solo en una compilación con VITE_SYSTEL_LAB=1; la de producción no lo trae. */
 const SystelLabPanel = import.meta.env.VITE_SYSTEL_LAB === "1" ? lazy(() => import("./systel/SystelLabPanel")) : null;
 import { PriceTools } from "./PriceTools";
+import { PriceListsPanel } from "../pricing/PriceListsPanel";
+import { listPriceLists, setProductListPrices } from "../pricing/price-lists-service";
+import { ruleLabel, rulePrice, type PriceList } from "../pricing/price-lists";
 import { quantityNumber } from "../sale/quantity";
 
 function formatMoney(value: number) {
@@ -56,6 +59,8 @@ interface DraftProduct {
   vatRate: string;
   active: boolean;
   categoryId: string;
+  /** Precio escrito a mano en cada lista (Mayorista…); "" = sale de la regla de la lista. */
+  listPrices: Record<string, string>;
 }
 
 /** Cantidad escrita por una persona: en kilos "0,750" = 0,75; en unidades "1.008" = mil ocho (punto de miles). */
@@ -65,7 +70,7 @@ function typedCount(unit: Product["unit"], raw: string): number {
 }
 
 function emptyDraft(): DraftProduct {
-  return { code: "", name: "", unit: "kg", cost: "", margin: "", priceRetail: "", minStock: "", stock: "", active: true, categoryId: "", vatRate: "" };
+  return { code: "", name: "", unit: "kg", cost: "", margin: "", priceRetail: "", minStock: "", stock: "", active: true, categoryId: "", vatRate: "", listPrices: {} };
 }
 
 /** Bloque "Stock" de la ficha: stock propio o descuenta de otro producto (el principal). */
@@ -107,7 +112,8 @@ function draftFromProduct(p: Product): DraftProduct {
     stock: String(p.stock),
     active: p.active ?? true,
     categoryId: p.categoryId ?? "",
-    vatRate: ""
+    vatRate: "",
+    listPrices: Object.fromEntries(Object.entries(p.listPrices ?? {}).filter(([, v]) => v.manual).map(([id, v]) => [id, moneyToInput(v.price)]))
   };
 }
 
@@ -154,18 +160,26 @@ export function Inventory() {
   /** Paquetes por producto (a pedido: companies.features 'paquetes', migración 157). Solo los que ya se contaron. */
   const showPackages = Boolean(profile?.features?.includes("paquetes"));
   const [packages, setPackages] = useState<Record<string, number>>({});
+  // Listas de precios (Mayorista, migración 166). Sin listas, la pantalla queda como siempre.
+  const [priceLists, setPriceLists] = useState<PriceList[]>([]);
+  const [showPriceLists, setShowPriceLists] = useState(false);
+  const activeLists = priceLists.filter((l) => l.active);
+  const canManageLists = (profile?.role === "owner" || profile?.role === "admin") && planAllows(profile, "full");
+  const productCols = PRODUCT_COLS + activeLists.length;
 
 
   async function reload() {
     if (!isSupabaseConfigured || !branchId) return;
     setLoading(true);
     try {
-      const [list, rates, packs] = await Promise.all([
+      const [list, rates, packs, lists] = await Promise.all([
         listProductsForBranch(branchId, true),
         listProductVatRates().catch(() => ({})),
-        showPackages ? listProductPackages(branchId).catch(() => ({})) : Promise.resolve({})
+        showPackages ? listProductPackages(branchId).catch(() => ({})) : Promise.resolve({}),
+        listPriceLists().catch(() => [] as PriceList[])
       ]);
       setProducts(list);
+      setPriceLists(lists);
       setVatRates(rates);
       setPackages(packs);
     } finally {
@@ -394,6 +408,48 @@ export function Inventory() {
     return (value: string) => setDraft(onPrice(draft, value));
   }
 
+  /** Precios a mano por lista escritos en el formulario → lo que hay que mandar (null = vuelve a la regla). */
+  function listPriceChanges(draft: DraftProduct, original?: Product): { listId: string; price: number | null }[] {
+    const changes: { listId: string; price: number | null }[] = [];
+    for (const l of activeLists) {
+      const typed = (draft.listPrices[l.id] ?? "").trim();
+      const wanted = typed ? parseAmount(typed) : null;
+      if (wanted !== null && (!Number.isFinite(wanted) || wanted < 0)) throw new Error(`Precio ${l.name} inválido.`);
+      const current = original?.listPrices?.[l.id]?.manual ? original.listPrices[l.id].price : null;
+      if (wanted !== current) changes.push({ listId: l.id, price: wanted });
+    }
+    return changes;
+  }
+
+  /** Casilleros de cada lista (Mayorista…) en Agregar/Editar: vacío = sale de la regla. */
+  function renderListPriceInputs(draft: DraftProduct, setDraft: (d: DraftProduct) => void, isPresentation: boolean) {
+    return activeLists.map((l) => {
+      const cost = draft.cost.trim() ? parseAmount(draft.cost) : 0;
+      const retail = draft.priceRetail.trim() ? parseAmount(draft.priceRetail) : 0;
+      const ruled = rulePrice(l, Number.isFinite(cost) ? cost : 0, Number.isFinite(retail) ? retail : 0, isPresentation);
+      const typed = (draft.listPrices[l.id] ?? "").trim();
+      const shown = typed ? parseAmount(typed) : ruled;
+      const margin = cost > 0 && Number.isFinite(shown) ? marginPercent(cost, shown) : null;
+      return (
+        <label key={l.id} title={isPresentation ? "Oferta / presentación: sin precio a mano se cobra su precio de venta" : `Vacío = ${ruleLabel(l)}`}>
+          Precio {l.name} $
+          <input
+            type="text"
+            inputMode="decimal"
+            className="num"
+            placeholder={ruled > 0 ? formatMoney(ruled) : "Regla"}
+            value={draft.listPrices[l.id] ?? ""}
+            onChange={(e) => setDraft({ ...draft, listPrices: { ...draft.listPrices, [l.id]: e.target.value } })}
+          />
+          <span className="cell-sub">
+            {typed ? "a mano" : isPresentation ? "oferta: su precio" : ruleLabel(l)}
+            {margin !== null ? ` · margen ${margin}%` : ""}
+          </span>
+        </label>
+      );
+    });
+  }
+
   async function handleCreate() {
     try {
       if (!branchId) throw new Error("Tu usuario no tiene sucursal asignada.");
@@ -420,6 +476,8 @@ export function Inventory() {
       });
       const newVat = vatFromSelect(newDraft.vatRate);
       if (newVat !== null) await setProductsVatRate({ codes: [newDraft.code.trim()], rate: newVat });
+      const newListPrices = listPriceChanges(newDraft);
+      if (newListPrices.length > 0) await setProductListPrices(newListPrices.map((c) => ({ ...c, productId: created.id })));
       if (initialStock > 0) await adjustProductStock({ branchId, productId: created.id, countedQuantity: initialStock, reason: "Stock inicial al crear el producto" });
       setNewDraft(emptyDraft());
       setShowNewForm(false);
@@ -478,6 +536,8 @@ export function Inventory() {
       });
       const wantedVat = vatFromSelect(editDraft.vatRate);
       if (wantedVat !== (vatRates[editingId] ?? null)) await setProductsVatRate({ productIds: [editingId], rate: wantedVat });
+      const editListPrices = listPriceChanges(editDraft, original);
+      if (editListPrices.length > 0) await setProductListPrices(editListPrices.map((c) => ({ ...c, productId: editingId })));
       let linkMessage = "";
       if (wantedStock !== null && original && wantedStock !== Number(original.stock)) {
         const r = await adjustProductStock({ branchId, productId: editingId, countedQuantity: wantedStock, reason: "Corrección de stock desde Editar" });
@@ -846,6 +906,11 @@ export function Inventory() {
           <button className="secondary" onClick={() => setShowCategoryManager((v) => !v)}>
             {showCategoryManager ? "Ocultar categorías" : "Gestionar categorías"}
           </button>
+          {canManageLists && (
+            <button className="secondary" onClick={() => setShowPriceLists((v) => !v)}>
+              {showPriceLists ? "Ocultar listas de precios" : activeLists.length > 0 ? "Listas de precios" : "Precio mayorista"}
+            </button>
+          )}
           {inactiveCount > 0 && (
             <label className="muted" style={{ display: "flex", gap: 6, alignItems: "center" }}>
               <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
@@ -855,6 +920,8 @@ export function Inventory() {
         </div>
 
         <PriceTools products={products} categories={categories} onApplied={reload} />
+
+        {showPriceLists && canManageLists && <PriceListsPanel lists={priceLists} onChanged={reload} onMessage={setMessage} />}
 
         {showCategoryManager && (
           <div className="panel" style={{ marginBottom: 16, padding: 14 }}>
@@ -962,9 +1029,10 @@ export function Inventory() {
                 <input type="text" inputMode="decimal" placeholder="ej. 35" value={newDraft.margin} onChange={(e) => onCostOrMarginChange(newDraft, setNewDraft, "margin")(e.target.value)} />
               </label>
               <label>
-                Precio de venta $
+                {activeLists.length > 0 ? "Precio minorista $" : "Precio de venta $"}
                 <input type="text" inputMode="decimal" value={newDraft.priceRetail} onChange={(e) => onPriceChange(newDraft, setNewDraft)(e.target.value)} />
               </label>
+              {renderListPriceInputs(newDraft, setNewDraft, false)}
               <label>
                 IVA
                 <select value={newDraft.vatRate} onChange={(e) => setNewDraft({ ...newDraft, vatRate: e.target.value })} title="IVA del producto para la factura">
@@ -1008,7 +1076,10 @@ export function Inventory() {
               <th>Producto</th>
               <th className="num hide-sm">Costo</th>
               <th className="num hide-sm">Margen</th>
-              <th className="num">Venta</th>
+              <th className="num">{activeLists.length > 0 ? "Minorista" : "Venta"}</th>
+              {activeLists.map((l) => (
+                <th key={l.id} className="num">{l.name}</th>
+              ))}
               <th className="num">Stock</th>
               <th className="num hide-md" title="Avisa en Inicio cuando el stock queda en este número o menos. No es el stock.">Mínimo</th>
               <th></th>
@@ -1018,7 +1089,7 @@ export function Inventory() {
             {groupedProducts.map((group) => (
               <Fragment key={group.key}>
                 <tr className="group-row">
-                  <td colSpan={PRODUCT_COLS}>
+                  <td colSpan={productCols}>
                     {group.label} <span className="muted" style={{ fontWeight: 400 }}>({group.products.length})</span>
                   </td>
                 </tr>
@@ -1052,6 +1123,15 @@ export function Inventory() {
                   {formatMoney(product.priceRetail)}
                   <span className="cell-sub">IVA {productVatLabel(vatRates[product.id], generalVatRate)}</span>
                 </td>
+                {activeLists.map((l) => {
+                  const lp = product.listPrices?.[l.id];
+                  return (
+                    <td key={l.id} className="num">
+                      {formatMoney(lp?.price ?? product.priceRetail)}
+                      {lp?.manual ? <span className="cell-sub">a mano</span> : product.stockSourceId ? <span className="cell-sub">oferta</span> : null}
+                    </td>
+                  );
+                })}
                 <td className="num">
                   <span className={product.stock < 0 ? "num-negative" : undefined}>
                     {product.stock} {UNIT_LABELS[product.unit]}
@@ -1089,7 +1169,7 @@ export function Inventory() {
               </tr>
               {editing && (
                 <tr className="row-editor">
-                  <td colSpan={PRODUCT_COLS}>
+                  <td colSpan={productCols}>
                     <div className="form-grid">
                       <label title="Código o código de barras (se puede escanear)">Código<input value={editDraft.code} onChange={(e) => setEditDraft({ ...editDraft, code: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") e.preventDefault(); }} /></label>
                       <label className="span-2">Nombre<input value={editDraft.name} onChange={(e) => setEditDraft({ ...editDraft, name: e.target.value })} /></label>
@@ -1119,9 +1199,10 @@ export function Inventory() {
                         <input type="text" inputMode="decimal" className="num" value={editDraft.margin} onChange={(e) => onCostOrMarginChange(editDraft, setEditDraft, "margin")(e.target.value)} />
                       </label>
                       <label>
-                        Precio de venta $
+                        {activeLists.length > 0 ? "Precio minorista $" : "Precio de venta $"}
                         <input type="text" inputMode="decimal" className="num" value={editDraft.priceRetail} onChange={(e) => onPriceChange(editDraft, setEditDraft)(e.target.value)} />
                       </label>
+                      {renderListPriceInputs(editDraft, setEditDraft, Boolean(product.stockSourceId || editLink.linked))}
                       <label>
                         IVA
                         <select value={editDraft.vatRate} onChange={(e) => setEditDraft({ ...editDraft, vatRate: e.target.value })}>
@@ -1164,7 +1245,7 @@ export function Inventory() {
               )}
               {adjusting && (
                 <tr className="row-editor">
-                  <td colSpan={PRODUCT_COLS}>
+                  <td colSpan={productCols}>
                     <div className="form-grid">
                       <label>
                         ¿Cuánto hay? ({UNIT_LABELS[product.unit]})
@@ -1185,7 +1266,7 @@ export function Inventory() {
               )}
               {presentationsOfId === product.id && !editing && !product.stockSourceId && (
                 <tr className="row-editor">
-                  <td colSpan={PRODUCT_COLS}>{renderPresentationsPanel(product)}</td>
+                  <td colSpan={productCols}>{renderPresentationsPanel(product)}</td>
                 </tr>
               )}
               </Fragment>

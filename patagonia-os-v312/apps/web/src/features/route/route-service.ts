@@ -2,6 +2,7 @@ import { supabase } from "../../lib/supabase";
 import { listProductsForBranch } from "../inventory/inventory-service";
 import { listCustomersWithBalance } from "../customers/customers-service";
 import { listTreasuryAccounts } from "../shifts/treasury-service";
+import { listPriceLists } from "../pricing/price-lists-service";
 import type { QueuedRouteSale, RouteCustomer, RouteProduct } from "./route-logic";
 
 /** Venta en ruta (migración 161). Cada camión es una sucursal con is_vehicle. */
@@ -49,17 +50,23 @@ export async function listBranchesSplit(): Promise<{ vehicles: Vehicle[]; depots
 }
 
 export async function loadRouteCatalog(vehicleId: string): Promise<RouteCatalog> {
-  const [products, customers, accounts] = await Promise.all([
+  const [products, customers, accounts, priceLists] = await Promise.all([
     listProductsForBranch(vehicleId),
     listCustomersWithBalance(),
-    listTreasuryAccounts(vehicleId)
+    listTreasuryAccounts(vehicleId),
+    listPriceLists().catch(() => [])
   ]);
+  const activeListName = new Map(priceLists.filter((l) => l.active).map((l) => [l.id, l.name]));
   return {
     vehicleId,
     loadedAt: new Date().toISOString(),
     // El vendedor nunca ve el costo: no se guarda en el teléfono.
-    products: products.map((p) => ({ id: p.id, code: p.code, name: p.name, unit: p.unit === "kg" ? "kg" : "unit", price: p.priceRetail, stock: p.stock })),
-    customers: customers.filter((c) => c.active !== false).map((c) => ({ id: c.id, name: c.name, number: c.number, phone: c.phone, balance: c.balance })),
+    products: products.map((p) => ({
+      id: p.id, code: p.code, name: p.name, unit: p.unit === "kg" ? "kg" : "unit", price: p.priceRetail, stock: p.stock,
+      ...(p.listPrices ? { listPrices: Object.fromEntries(Object.entries(p.listPrices).map(([id, v]) => [id, v.price])) } : {})
+    })),
+    customers: customers.filter((c) => c.active !== false).map((c) => ({ id: c.id, name: c.name, number: c.number, phone: c.phone, balance: c.balance,
+      ...(c.priceListId && activeListName.has(c.priceListId) ? { priceListId: c.priceListId, priceListName: activeListName.get(c.priceListId) } : {}) })),
     accounts: accounts
       .filter((a) => !a.isSafe)
       .map((a) => ({ id: a.id, name: a.name, isCash: a.paymentMethod === "cash", own: a.branchId === vehicleId }))

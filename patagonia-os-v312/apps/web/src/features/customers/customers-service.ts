@@ -12,6 +12,7 @@ interface CustomerRow {
   province: string | null;
   payment_term_days: number | null;
   active: boolean;
+  price_list_id?: string | null;
 }
 
 function mapCustomer(row: CustomerRow): Customer {
@@ -25,19 +26,25 @@ function mapCustomer(row: CustomerRow): Customer {
     locality: row.locality ?? undefined,
     province: row.province ?? undefined,
     paymentTermDays: row.payment_term_days ?? undefined,
-    active: row.active
+    active: row.active,
+    priceListId: row.price_list_id ?? undefined
   };
 }
 
 export async function listCustomers(includeInactive = false): Promise<Customer[]> {
   if (!supabase) return [];
 
-  let query = supabase.from("customers").select("id,branch_id,number,name,phone,notes,locality,province,payment_term_days,active").order("name");
-  if (!includeInactive) query = query.eq("active", true);
-
-  const { data, error } = await query;
+  const BASE = "id,branch_id,number,name,phone,notes,locality,province,payment_term_days,active";
+  const run = (columns: string) => {
+    let query = supabase!.from("customers").select(columns).order("name");
+    if (!includeInactive) query = query.eq("active", true);
+    return query;
+  };
+  let { data, error } = await run(`${BASE},price_list_id`);
+  // Antes de la migración 166 la columna no existe: se lee como siempre.
+  if (error && (error.code === "42703" || error.code === "PGRST204")) ({ data, error } = await run(BASE));
   if (error) throw error;
-  return (data ?? []).map(mapCustomer);
+  return ((data ?? []) as unknown as CustomerRow[]).map(mapCustomer);
 }
 
 export interface CreateCustomerInput {
