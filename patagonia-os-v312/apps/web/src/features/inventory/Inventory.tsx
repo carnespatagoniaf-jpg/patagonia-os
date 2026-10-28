@@ -422,32 +422,49 @@ export function Inventory() {
   }
 
   /** Casilleros de cada lista (Mayorista…) en Agregar/Editar: vacío = sale de la regla. */
-  function renderListPriceInputs(draft: DraftProduct, setDraft: (d: DraftProduct) => void, isPresentation: boolean) {
+  function listPriceInfo(draft: DraftProduct, isPresentation: boolean) {
+    const cost = draft.cost.trim() ? parseAmount(draft.cost) : 0;
+    const retail = draft.priceRetail.trim() ? parseAmount(draft.priceRetail) : 0;
     return activeLists.map((l) => {
-      const cost = draft.cost.trim() ? parseAmount(draft.cost) : 0;
-      const retail = draft.priceRetail.trim() ? parseAmount(draft.priceRetail) : 0;
       const ruled = rulePrice(l, Number.isFinite(cost) ? cost : 0, Number.isFinite(retail) ? retail : 0, isPresentation);
       const typed = (draft.listPrices[l.id] ?? "").trim();
       const shown = typed ? parseAmount(typed) : ruled;
       const margin = cost > 0 && Number.isFinite(shown) ? marginPercent(cost, shown) : null;
-      return (
-        <label key={l.id} title={isPresentation ? "Oferta / presentación: sin precio a mano se cobra su precio de venta" : `Vacío = ${ruleLabel(l)}`}>
-          Precio {l.name} $
-          <input
-            type="text"
-            inputMode="decimal"
-            className="num"
-            placeholder={ruled > 0 ? formatMoney(ruled) : "Regla"}
-            value={draft.listPrices[l.id] ?? ""}
-            onChange={(e) => setDraft({ ...draft, listPrices: { ...draft.listPrices, [l.id]: e.target.value } })}
-          />
-          <span className="cell-sub">
-            {typed ? "a mano" : isPresentation ? "oferta: su precio" : ruleLabel(l)}
-            {margin !== null ? ` · margen ${margin}%` : ""}
-          </span>
-        </label>
-      );
+      return { list: l, ruled, typed, margin };
     });
+  }
+
+  function renderListPriceInputs(draft: DraftProduct, setDraft: (d: DraftProduct) => void, isPresentation: boolean) {
+    return listPriceInfo(draft, isPresentation).map(({ list: l, ruled }) => (
+      <label key={l.id} title={isPresentation ? "Oferta / presentación: sin precio a mano se cobra su precio de venta" : `Vacío = ${ruleLabel(l)}`}>
+        Precio {l.name} $
+        <input
+          type="text"
+          inputMode="decimal"
+          className="num"
+          placeholder={ruled > 0 ? formatMoney(ruled) : "Regla"}
+          value={draft.listPrices[l.id] ?? ""}
+          onChange={(e) => setDraft({ ...draft, listPrices: { ...draft.listPrices, [l.id]: e.target.value } })}
+        />
+      </label>
+    ));
+  }
+
+  /** Debajo del formulario: de dónde sale cada precio de lista y su margen. */
+  function renderListPriceHint(draft: DraftProduct, isPresentation: boolean) {
+    const info = listPriceInfo(draft, isPresentation);
+    if (info.length === 0) return null;
+    return (
+      <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
+        {info
+          .map(({ list: l, ruled, typed, margin }) => {
+            const how = typed ? "escrito a mano" : isPresentation ? "oferta: se cobra su precio" : `${ruleLabel(l)} = ${formatMoney(ruled)}`;
+            return `${l.name}: ${how}${margin !== null ? `, margen ${String(margin).replace(".", ",")}%` : ""}`;
+          })
+          .join(" · ")}
+        {". Dejalo vacío para que se calcule solo; escribí un precio solo si este producto necesita otro."}
+      </p>
+    );
   }
 
   async function handleCreate() {
@@ -1051,6 +1068,7 @@ export function Inventory() {
                 <input type="text" inputMode="decimal" value={newDraft.minStock} onChange={(e) => setNewDraft({ ...newDraft, minStock: e.target.value })} />
               </label>
             </div>
+            {renderListPriceHint(newDraft, false)}
             <div className="form-actions">
               <button onClick={handleCreate}>Guardar producto</button>
               <button className="secondary" onClick={() => { setShowNewForm(false); setNewDraft(emptyDraft()); }}>Cancelar</button>
@@ -1230,6 +1248,7 @@ export function Inventory() {
                         </select>
                       </label>
                     </div>
+                    {renderListPriceHint(editDraft, Boolean(product.stockSourceId || editLink.linked))}
                     <div className="form-actions">
                       <button onClick={handleUpdate}>Guardar</button>
                       <button className="secondary" onClick={() => setEditingId(null)}>Cancelar</button>
