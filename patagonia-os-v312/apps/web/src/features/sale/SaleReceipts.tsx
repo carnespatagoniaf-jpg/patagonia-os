@@ -159,7 +159,10 @@ export function CloseSummaryView({ summary, accounts, adjustments, vales, suppli
             {summary.breakdown.cashInflows > 0 && (
               <p style={{ margin: "4px 0" }}>+ Ingresos de caja: <strong>{formatMoney(summary.breakdown.cashInflows)}</strong></p>
             )}
-            <p style={{ margin: "4px 0" }}>- Salidas de efectivo (vales, pagos, egresos): <strong>{formatMoney(summary.breakdown.cashOutflows)}</strong></p>
+            <p style={{ margin: "4px 0" }}>- Salidas de efectivo (vales, pagos, gastos, retiros): <strong>{formatMoney(summary.breakdown.cashOutflows)}</strong></p>
+            {summary.breakdown.cashWithdrawals > 0 && (
+              <p className="muted" style={{ margin: "0 0 4px 12px", fontSize: 13 }}>de eso, retiros de dinero (papelitos): {formatMoney(summary.breakdown.cashWithdrawals)}</p>
+            )}
           </>
         )}
         <p style={{ margin: "4px 0" }}>Efectivo esperado: <strong>{formatMoney(summary.expectedCash)}</strong></p>

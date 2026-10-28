@@ -87,8 +87,8 @@ export interface SafeDepositResult {
   fromAccountName: string;
 }
 
-/** "Guardar en caja fuerte": traspaso Efectivo -> Caja fuerte con número
- * correlativo para el papelito que va adentro con la plata. */
+/** "Retiro de dinero" (migración 164): anota el retiro con número correlativo para el papelito. La plata sigue
+ * siendo Efectivo de Tesorería (ya no pasa a una cuenta "Caja fuerte"). */
 export async function registerPosSafeDeposit(posShiftId: string, amount: number, fromAccountId?: string | null): Promise<SafeDepositResult> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("register_pos_safe_deposit", {
@@ -103,7 +103,7 @@ export async function registerPosSafeDeposit(posShiftId: string, amount: number,
     amount: Number(data.amount),
     createdAt: data.created_at,
     employeeName: data.employee_name ?? null,
-    safeAccountName: data.safe_account_name ?? "Caja fuerte",
+    safeAccountName: data.safe_account_name ?? "",
     fromAccountName: data.from_account_name ?? "Efectivo"
   };
 }
@@ -154,6 +154,8 @@ export interface CloseShiftResult {
     /** Salidas del turno (vales, pagos, egresos) cargadas contra cuentas
      * que NO son efectivo -- no se restan del efectivo esperado. */
     noncashOutflows: number;
+    /** Retiros de dinero (papelitos, migración 164): ya están dentro de cashOutflows. */
+    cashWithdrawals: number;
   } | null;
 }
 
@@ -184,7 +186,8 @@ export async function closePosShift(shiftId: string, closingCountedCash?: number
             cashInflows: Number(data.cash_inflows ?? 0),
             cashVales: Number(data.cash_vales ?? 0),
             cashSupplierPayments: Number(data.cash_supplier_payments ?? 0),
-            noncashOutflows: Number(data.noncash_outflows ?? 0)
+            noncashOutflows: Number(data.noncash_outflows ?? 0),
+            cashWithdrawals: Number(data.cash_withdrawals ?? 0)
           }
         : null
   };
@@ -276,7 +279,7 @@ export async function listPosShiftAdjustments(posShiftId: string): Promise<PosSh
     .from("treasury_movements")
     .select("id,direction,amount,movement_type,notes,created_at,treasury_accounts(name)")
     .or(`and(reference_type.eq.pos_shift,reference_id.eq.${posShiftId}),pos_shift_id.eq.${posShiftId}`)
-    .in("movement_type", ["ajuste", "transferencia"])
+    .in("movement_type", ["ajuste", "transferencia", "gasto"])
     .order("created_at");
 
   if (error) throw error;
@@ -603,4 +606,51 @@ export async function getPeriodResult(branchId: string, fromDate: string, toDate
   const { data, error } = await supabase.rpc("period_result_report", { p_branch_id: branchId, p_from: fromDate, p_to: toDate });
   if (error) throw error;
   return parsePeriodResult(data);
+}
+
+/** "Gasto del local" desde el turno (migración 164): sale del Efectivo del turno. */
+export async function registerPosShiftExpense(posShiftId: string, amount: number, category: string, description: string): Promise<{ id: string; accountName: string }> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { data, error } = await supabase.rpc("register_pos_shift_expense", {
+    p_pos_shift_id: posShiftId,
+    p_amount: amount,
+    p_category: category,
+    p_description: description
+  });
+  if (error) throw error;
+  return { id: data.id, accountName: data.account_name ?? "Efectivo" };
+}
+
+export interface PosShiftWithdrawal {
+  id: string;
+  number: number;
+  amount: number;
+  createdAt: string;
+}
+
+/** Retiros de dinero de un turno (los nuevos, que no mueven plata entre cuentas). */
+export async function listPosShiftWithdrawals(posShiftId: string): Promise<PosShiftWithdrawal[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from("pos_safe_deposits")
+    .select("id,number,amount,created_at")
+    .eq("pos_shift_id", posShiftId)
+    .is("out_movement_id", null)
+    .is("voided_at", null)
+    .order("number");
+  if (error) return [];
+  return ((data ?? []) as Array<{ id: string; number: number; amount: number; created_at: string }>).map((r) => ({
+    id: r.id,
+    number: Number(r.number),
+    amount: Number(r.amount),
+    createdAt: r.created_at
+  }));
+}
+
+export async function voidPosCashWithdrawal(id: string, authPin: string | null): Promise<{ ok: boolean; error?: string }> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { data, error } = await supabase.rpc("void_pos_cash_withdrawal", { p_id: id, p_auth_pin: authPin });
+  if (error) throw error;
+  const result = (data ?? {}) as { ok?: boolean; error?: string };
+  return { ok: result.ok === true, error: result.error };
 }

@@ -1115,3 +1115,12 @@ input[type="file"], main textarea { max-width: 100%; }
 }
 .carcass-note.ok { background: var(--ok-soft); color: var(--ok); font-weight: 600; }
 .carcass-batch-tags { display: flex; gap: 4px; flex-wrap: wrap; }
+/* Mostrador: "Sacar plata del cajón" (migración 164). */
+.cash-out-menu, .cash-out-form { display: grid; gap: 8px; padding: 12px; border: 1px solid var(--line); border-radius: var(--r); background: var(--surface-2); }
+.cash-out-option {
+  display: grid; gap: 2px; text-align: left; width: 100%; background: var(--surface); color: var(--ink);
+  border: 2px solid var(--line); border-radius: var(--r); padding: 10px 12px; font-weight: 400;
+}
+.cash-out-option:hover:not(:disabled) { border-color: var(--brand); background: var(--brand-soft); color: var(--ink); }
+.cash-out-option strong { font-size: 15px; }
+.cash-out-option small { color: var(--muted); font-size: 12.5px; }

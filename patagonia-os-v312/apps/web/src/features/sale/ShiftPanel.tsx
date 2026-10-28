@@ -1,4 +1,4 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import type { TreasuryAccount } from "@patagonia/domain";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { parseAmount } from "../../lib/money";
@@ -8,7 +8,7 @@ import type { useSuppliers } from "../purchases/useSuppliers";
 import type { useEmployees } from "../employees/useEmployees";
 import type { useTreasury } from "../shifts/useTreasury";
 import { registerEmployeeValeFromPosShift, type PosShiftVale } from "../employees/employees-service";
-import { registerPosSafeDeposit, registerPosShiftTransfer, type PosCashier, type PosShift, type PosShiftAdjustment, type PosShiftSale, type SafeDepositResult } from "./pos-shift-service";
+import { listPosShiftWithdrawals, registerPosSafeDeposit, registerPosShiftExpense, registerPosShiftTransfer, voidPosCashWithdrawal, type PosShiftWithdrawal, type PosCashier, type PosShift, type PosShiftAdjustment, type PosShiftSale, type SafeDepositResult } from "./pos-shift-service";
 import { BlindCloseForm } from "./BlindCloseForm";
 import { formatShiftStart, type MovementReceiptState } from "./sale-model";
 import type { Product } from "@patagonia/domain";
@@ -290,18 +290,44 @@ function CajaMovementForm({ visible, shift, accounts, adjust, onMessage, publish
   );
 }
 
-function SupplierPaymentForm({ visible, shift, accounts, suppliers, onMessage, publishReceipt, onClose }: FormCommon & { suppliers: Suppliers }) {
+/** Las cuentas de efectivo (sale del cajón). Mostrador ya no recibe las de caja fuerte. */
+function cashAccountsOf(accounts: TreasuryAccount[]) {
+  return accounts.filter((a) => a.paymentMethod === "cash");
+}
+
+function SupplierPaymentForm({ visible, shift, accounts, suppliers, onCreateSupplier, onMessage, publishReceipt, onClose }: FormCommon & {
+  suppliers: Suppliers;
+  /** "+ Proveedor nuevo" (el químico o la papelera casi nunca están cargados): devuelve el id. */
+  onCreateSupplier: (name: string) => Promise<string>;
+}) {
+  const cash = cashAccountsOf(accounts);
   const [supplierId, setSupplierId] = useState("");
-  const [accountId, setAccountId] = useState("");
+  const [pickedAccountId, setAccountId] = useState("");
+  const accountId = pickedAccountId || (cash.length === 1 ? cash[0].id : "");
   const [amountInput, setAmountInput] = useState("");
   const [notes, setNotes] = useState("");
   const [busy, setBusy] = useState(false);
+  const [newName, setNewName] = useState<string | null>(null);
+
+  async function handleCreateSupplier() {
+    const name = (newName ?? "").trim();
+    if (!name) { onMessage("Escribí el nombre del proveedor."); return; }
+    setBusy(true);
+    try {
+      setSupplierId(await onCreateSupplier(name));
+      setNewName(null);
+    } catch (err) {
+      onMessage(`No se pudo agregar el proveedor. ${errorDetail(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handleSupplierPayment() {
     onMessage("");
     if (!shift) { onMessage("No hay un turno abierto."); return; }
     if (!supplierId) { onMessage("Elegí un proveedor."); return; }
-    if (!accountId) { onMessage("Elegí una cuenta."); return; }
+    if (!accountId) { onMessage("Elegí de qué caja sale la plata."); return; }
     const amount = parseAmount(amountInput || "0") || 0;
     if (!(amount > 0)) { onMessage("El monto debe ser mayor que cero."); return; }
     setBusy(true);
@@ -339,32 +365,46 @@ function SupplierPaymentForm({ visible, shift, accounts, suppliers, onMessage, p
 
   if (!visible) return null;
   return (
-    <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
-      <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
-        <option value="">Proveedor…</option>
-        {suppliers.map((s) => (
-          <option key={s.id} value={s.id}>{s.name}</option>
-        ))}
-      </select>
-      <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-        <option value="">Pagar desde…</option>
-        {accounts.map((a) => (
-          <option key={a.id} value={a.id}>{a.name}</option>
-        ))}
-      </select>
+    <div style={{ display: "grid", gap: 8 }}>
+      {newName === null ? (
+        <div style={{ display: "flex", gap: 8 }}>
+          <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)} style={{ flex: 1, minWidth: 0 }}>
+            <option value="">¿A qué proveedor?</option>
+            {suppliers.map((s) => (
+              <option key={s.id} value={s.id}>{s.name}</option>
+            ))}
+          </select>
+          <button type="button" className="secondary" onClick={() => setNewName("")}>+ Nuevo</button>
+        </div>
+      ) : (
+        <div style={{ display: "flex", gap: 8 }}>
+          <input autoFocus placeholder="Nombre (ej. Química del Sur)" value={newName} onChange={(e) => setNewName(e.target.value)} style={{ flex: 1, minWidth: 0 }} />
+          <button type="button" disabled={busy} onClick={() => void handleCreateSupplier()}>Agregar</button>
+          <button type="button" className="secondary" onClick={() => setNewName(null)}>×</button>
+        </div>
+      )}
+      {cash.length > 1 && (
+        <select value={pickedAccountId} onChange={(e) => setAccountId(e.target.value)}>
+          <option value="">¿De qué caja sale?</option>
+          {cash.map((a) => (
+            <option key={a.id} value={a.id}>{a.name}</option>
+          ))}
+        </select>
+      )}
       <input
         type="text"
         inputMode="decimal"
-        placeholder="Monto"
+        placeholder="Monto $"
         value={amountInput}
         onChange={(e) => setAmountInput(e.target.value)}
+        style={{ fontSize: 18 }}
       />
       <input
-        placeholder="Nota (opcional)"
+        placeholder="Nota (opcional, ej. factura 1234)"
         value={notes}
         onChange={(e) => setNotes(e.target.value)}
       />
-      <button disabled={busy} onClick={handleSupplierPayment}>{busy ? "Guardando…" : "Registrar"}</button>
+      <button disabled={busy} onClick={handleSupplierPayment}>{busy ? "Guardando…" : "Pagar"}</button>
     </div>
   );
 }
@@ -373,8 +413,10 @@ function EmployeeValeForm({ visible, shift, accounts, employees, onMessage, publ
   employees: Employees;
   onMovementsChanged: () => Promise<void>;
 }) {
+  const cash = cashAccountsOf(accounts);
   const [employeeId, setEmployeeId] = useState("");
-  const [accountId, setAccountId] = useState("");
+  const [pickedAccountId, setAccountId] = useState("");
+  const accountId = pickedAccountId || (cash.length === 1 ? cash[0].id : "");
   const [amountInput, setAmountInput] = useState("");
   const [detail, setDetail] = useState("");
   const [busy, setBusy] = useState(false);
@@ -383,7 +425,7 @@ function EmployeeValeForm({ visible, shift, accounts, employees, onMessage, publ
     onMessage("");
     if (!shift) { onMessage("No hay un turno abierto."); return; }
     if (!employeeId) { onMessage("Elegí un empleado."); return; }
-    if (!accountId) { onMessage("Elegí una cuenta."); return; }
+    if (!accountId) { onMessage("Elegí de qué caja sale la plata."); return; }
     const amount = parseAmount(amountInput || "0") || 0;
     if (!(amount > 0)) { onMessage("El monto debe ser mayor que cero."); return; }
     setBusy(true);
@@ -422,25 +464,28 @@ function EmployeeValeForm({ visible, shift, accounts, employees, onMessage, publ
 
   if (!visible) return null;
   return (
-    <div style={{ marginTop: 14, display: "grid", gap: 8 }}>
+    <div style={{ display: "grid", gap: 8 }}>
       <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
-        <option value="">Empleado…</option>
+        <option value="">¿A qué empleado?</option>
         {employees.map((e) => (
           <option key={e.id} value={e.id}>{e.fullName}</option>
         ))}
       </select>
-      <select value={accountId} onChange={(e) => setAccountId(e.target.value)}>
-        <option value="">Sale de…</option>
-        {accounts.map((a) => (
-          <option key={a.id} value={a.id}>{a.name}</option>
-        ))}
-      </select>
+      {cash.length > 1 && (
+        <select value={pickedAccountId} onChange={(e) => setAccountId(e.target.value)}>
+          <option value="">¿De qué caja sale?</option>
+          {cash.map((a) => (
+            <option key={a.id} value={a.id}>{a.name}</option>
+          ))}
+        </select>
+      )}
       <input
         type="text"
         inputMode="decimal"
-        placeholder="Monto"
+        placeholder="Monto $"
         value={amountInput}
         onChange={(e) => setAmountInput(e.target.value)}
+        style={{ fontSize: 18 }}
       />
       <input
         placeholder="Detalle (opcional)"
@@ -448,13 +493,13 @@ function EmployeeValeForm({ visible, shift, accounts, employees, onMessage, publ
         onChange={(e) => setDetail(e.target.value)}
       />
       <p className="muted" style={{ margin: 0, fontSize: 12 }}>Se descuenta de la próxima liquidación de sueldo del empleado.</p>
-      <button disabled={busy} onClick={handleEmployeeVale}>{busy ? "Guardando…" : "Registrar"}</button>
+      <button disabled={busy} onClick={handleEmployeeVale}>{busy ? "Guardando…" : "Dar el vale"}</button>
     </div>
   );
 }
 
-/** "Guardar en caja fuerte": solo el monto. Imprime el papelito con número
- * que va adentro de la caja fuerte junto con la plata (migración 117). */
+/** "Retiro de dinero" (migración 164): solo el monto. Imprime el papelito con número que va con la plata; el dueño
+ * después cuenta los papelitos. La plata sigue siendo Efectivo de Tesorería. */
 function SafeDepositForm({ visible, shift, accounts, onMessage, onDone, onMovementsChanged, onClose }: {
   visible: boolean;
   shift: PosShift;
@@ -464,7 +509,7 @@ function SafeDepositForm({ visible, shift, accounts, onMessage, onDone, onMoveme
   onMovementsChanged: () => Promise<void>;
   onClose: () => void;
 }) {
-  const cashAccounts = accounts.filter((a) => a.paymentMethod === "cash");
+  const cashAccounts = cashAccountsOf(accounts);
   const [amountInput, setAmountInput] = useState("");
   const [fromAccountId, setFromAccountId] = useState("");
   const [busy, setBusy] = useState(false);
@@ -472,7 +517,7 @@ function SafeDepositForm({ visible, shift, accounts, onMessage, onDone, onMoveme
   async function handleSave() {
     onMessage("");
     const amount = parseAmount(amountInput || "0") || 0;
-    if (!(amount > 0)) { onMessage("Poné cuánta plata guardás en la caja fuerte."); return; }
+    if (!(amount > 0)) { onMessage("Poné cuánta plata retirás."); return; }
     if (cashAccounts.length > 1 && !fromAccountId) { onMessage("Elegí de qué caja sale la plata."); return; }
     setBusy(true);
     try {
@@ -482,7 +527,7 @@ function SafeDepositForm({ visible, shift, accounts, onMessage, onDone, onMoveme
       setAmountInput("");
       onClose();
     } catch (err) {
-      onMessage(`No se pudo anotar el retiro a la caja fuerte. ${errorDetail(err)}`);
+      onMessage(`No se pudo anotar el retiro. ${errorDetail(err)}`);
     } finally {
       setBusy(false);
     }
@@ -490,32 +535,96 @@ function SafeDepositForm({ visible, shift, accounts, onMessage, onDone, onMoveme
 
   if (!visible) return null;
   return (
-    <div className="panel" style={{ padding: 12, display: "grid", gap: 8 }}>
-      <p style={{ margin: 0, fontWeight: 700 }}>¿Cuánto guardás en la caja fuerte?</p>
+    <div style={{ display: "grid", gap: 8 }}>
       {cashAccounts.length > 1 && (
         <select value={fromAccountId} onChange={(e) => setFromAccountId(e.target.value)}>
-          <option value="">Sale de…</option>
+          <option value="">¿De qué caja sale?</option>
           {cashAccounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
       )}
       <input
         type="text"
         inputMode="decimal"
-        placeholder="Monto"
+        placeholder="¿Cuánto retirás? $"
         autoFocus
         value={amountInput}
         onChange={(e) => setAmountInput(e.target.value)}
         onKeyDown={(e) => { if (e.key === "Enter") void handleSave(); }}
         style={{ fontSize: 18 }}
       />
-      <p className="muted" style={{ margin: 0, fontSize: 12 }}>Sale un papelito con número: va adentro de la caja fuerte junto con la plata.</p>
-      <div style={{ display: "flex", gap: 8 }}>
-        <button disabled={busy} onClick={handleSave}>{busy ? "Guardando…" : "Listo, guardado"}</button>
-        <button className="secondary" onClick={onClose}>Cancelar</button>
-      </div>
+      <p className="muted" style={{ margin: 0, fontSize: 12 }}>Sale un papelito con número: va junto con la plata. El dueño después cuenta los papelitos.</p>
+      <button disabled={busy} onClick={handleSave}>{busy ? "Guardando…" : "Retirar"}</button>
     </div>
   );
 }
+
+/** Gastos rápidos: un toque y queda la descripción y la categoría. */
+const EXPENSE_PRESETS: Array<{ label: string; category: string }> = [
+  { label: "Hielo", category: "insumos" },
+  { label: "Bolsas", category: "insumos" },
+  { label: "Limpieza", category: "insumos" },
+  { label: "Librería", category: "insumos" },
+  { label: "Flete", category: "servicios" },
+  { label: "Otro", category: "otro" }
+];
+
+/** "Gasto del local" (migración 164): sale del Efectivo del turno. */
+function ExpenseForm({ shift, onMessage, publishReceipt, onMovementsChanged, onClose }: {
+  shift: PosShift;
+  onMessage: (message: string) => void;
+  publishReceipt: (data: MovementReceiptState) => Promise<void>;
+  onMovementsChanged: () => Promise<void>;
+  onClose: () => void;
+}) {
+  const [preset, setPreset] = useState<string>("");
+  const [detail, setDetail] = useState("");
+  const [amountInput, setAmountInput] = useState("");
+  const [busy, setBusy] = useState(false);
+  const chosen = EXPENSE_PRESETS.find((p) => p.label === preset);
+
+  async function handleSave() {
+    onMessage("");
+    if (!chosen) { onMessage("Tocá en qué se gastó."); return; }
+    const description = detail.trim() || (chosen.label === "Otro" ? "" : chosen.label);
+    if (!description) { onMessage("Escribí en qué se gastó."); return; }
+    const amount = parseAmount(amountInput || "0") || 0;
+    if (!(amount > 0)) { onMessage("El monto debe ser mayor que cero."); return; }
+    setBusy(true);
+    try {
+      const result = await registerPosShiftExpense(shift.id, amount, chosen.category, description);
+      await publishReceipt({ title: "GASTO DEL LOCAL", date: new Date().toISOString(), amount, accountName: result.accountName, detail: description });
+      await onMovementsChanged();
+      onMessage(`Gasto anotado: ${description} ${formatMoney(amount)}.`);
+      onClose();
+    } catch (err) {
+      onMessage(`No se pudo anotar el gasto. ${errorDetail(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 8 }}>
+      <div className="type-chips compact" style={{ margin: 0 }}>
+        {EXPENSE_PRESETS.map((p) => (
+          <button key={p.label} type="button" className={`type-chip${preset === p.label ? " active" : ""}`} onClick={() => setPreset(p.label)}>{p.label}</button>
+        ))}
+      </div>
+      <input placeholder={chosen?.label === "Otro" ? "¿En qué se gastó?" : "Detalle (opcional)"} value={detail} onChange={(e) => setDetail(e.target.value)} />
+      <input type="text" inputMode="decimal" placeholder="Monto $" value={amountInput} onChange={(e) => setAmountInput(e.target.value)} style={{ fontSize: 18 }} />
+      <button disabled={busy} onClick={handleSave}>{busy ? "Guardando…" : "Anotar el gasto"}</button>
+    </div>
+  );
+}
+
+type CashOutKind = "proveedor" | "vale" | "gasto" | "retiro";
+
+const CASH_OUT_OPTIONS: Array<{ kind: CashOutKind; title: string; hint: string }> = [
+  { kind: "proveedor", title: "Pagarle a un proveedor", hint: "Químico, papelera, pollero" },
+  { kind: "vale", title: "Vale a un empleado", hint: "Se descuenta del sueldo" },
+  { kind: "gasto", title: "Gasto del local", hint: "Hielo, bolsas, flete" },
+  { kind: "retiro", title: "Retiro de dinero", hint: "Imprime el papelito numerado" }
+];
 
 /* ------------------------------ panel ------------------------------ */
 
@@ -574,8 +683,12 @@ export interface ShiftPanelProps {
   onConfirmClose: (countedCash: number, declaredAccounts: Record<string, string>) => void;
   onCancelClose: () => void;
   onSalesChanged: () => Promise<void>;
-  /** Papelito del retiro a caja fuerte: se muestra e imprime siempre. */
+  /** Papelito del retiro de dinero: se muestra e imprime siempre. */
   onSafeDeposit: (deposit: SafeDepositResult) => Promise<void>;
+  /** "Controlar la balanza al cerrar" (companies.features 'control_balanza', migración 164): si no, ni el control ni "Anular ticket de balanza". */
+  scaleCloseControl: boolean;
+  /** "+ Nuevo" proveedor desde "Pagarle a un proveedor": devuelve el id. */
+  onCreateSupplier: (name: string) => Promise<string>;
 
   onMessage: (message: string) => void;
   publishReceipt: (data: MovementReceiptState) => Promise<void>;
@@ -588,16 +701,32 @@ export function ShiftPanel(p: ShiftPanelProps) {
   // Decomiso (migraciones 151 y 152): todos los planes.
   const [showWaste, setShowWaste] = useState(false);
   const [voidingSaleId, setVoidingSaleId] = useState<string | null>(null);
-  const [showSafeForm, setShowSafeForm] = useState(false);
+  // "Sacar plata del cajón": null = cerrado, "menu" = las 4 opciones, o la elegida.
+  const [cashOut, setCashOut] = useState<null | "menu" | CashOutKind>(null);
+  const [showMore, setShowMore] = useState(false);
   const [scaleControlStatus, setScaleControlStatus] = useState({ needed: false, saved: false });
+  const [withdrawals, setWithdrawals] = useState<PosShiftWithdrawal[]>([]);
+  const [withdrawalsKey, setWithdrawalsKey] = useState(0);
   // Con una lista o un formulario abierto, el panel se ensancha (styles.css, .pos-grid:has(...)).
   const expanded = Boolean(
-    p.showShiftMovements || p.showMovementsList || p.showCajaForm || p.showSupplierForm || p.showValeForm ||
-    p.showCloseConfirm || p.pinPromptFor || showSafeForm || showScaleVoid || showWaste || voidingSaleId
+    p.showShiftMovements || p.showMovementsList || cashOut ||
+    p.showCloseConfirm || p.pinPromptFor || showScaleVoid || showWaste || voidingSaleId
   );
+
+  // Retiros de este turno, para la lista "Ver movimientos de caja" (anular uno mal cargado).
+  useEffect(() => {
+    if (!canManageTreasury || !p.showMovementsList || !isSupabaseConfigured) return;
+    listPosShiftWithdrawals(shift.id).then(setWithdrawals).catch(() => setWithdrawals([]));
+  }, [canManageTreasury, p.showMovementsList, shift.id, withdrawalsKey]);
+
+  async function movementsChanged() {
+    setWithdrawalsKey((k) => k + 1);
+    await p.onMovementsChanged();
+  }
 
   function confirmCloseWithScaleCheck(countedCash: number, declaredAccounts: Record<string, string>) {
     if (
+      p.scaleCloseControl &&
       scaleControlStatus.needed &&
       !scaleControlStatus.saved &&
       !window.confirm("No cargaste el control de la balanza (el TOTAL DEL DIA que imprime la balanza). ¿Cerrar el turno igual?")
@@ -631,68 +760,88 @@ export function ShiftPanel(p: ShiftPanelProps) {
       )}
 
       <div className="shift-actions">
-        {canManageTreasury && (
-          <button
-            className="pos-toolbar-btn wide"
-            style={{ border: "2px solid #2563eb", color: "#1d4ed8", fontWeight: 700 }}
-            onClick={() => setShowSafeForm((v) => !v)}
-          >
-            {showSafeForm ? "Cancelar caja fuerte" : "Guardar en caja fuerte"}
-          </button>
-        )}
-        {canManageTreasury && (
-          <SafeDepositForm
-            visible={showSafeForm}
-            shift={shift}
-            accounts={p.accounts}
-            onMessage={p.onMessage}
-            onDone={p.onSafeDeposit}
-            onMovementsChanged={p.onMovementsChanged}
-            onClose={() => setShowSafeForm(false)}
-          />
-        )}
-        {canSeeShiftTotals && (
-          <button className="pos-toolbar-btn" onClick={p.onToggleShiftTotals}>
-            {p.showShiftTotals ? "Ocultar total del turno" : "Ver total del turno"}
-          </button>
-        )}
-        {canSeeShiftTotals && (
-          <button className="pos-toolbar-btn" onClick={() => p.onRequestReveal("movements")}>
-            {p.showShiftMovements ? "Ocultar movimientos" : "Ver movimientos"}
-          </button>
-        )}
-        {canManageTreasury && (
-          <button className="pos-toolbar-btn" onClick={() => p.onRequestReveal("caja")}>
-            {p.showMovementsList ? "Ocultar caja/vales" : "Ver movimientos de caja"}
-          </button>
-        )}
-        {p.pinPromptFor && <PinPrompt pin={p.mostradorPin} onSuccess={p.onPinSuccess} onCancel={p.onPinCancel} />}
-        {canManageTreasury && (
-          <button className="pos-toolbar-btn" onClick={p.onToggleCajaForm}>
-            {p.showCajaForm ? "Cancelar movimiento de caja" : "+ Movimiento de caja"}
-          </button>
-        )}
-        {canManageTreasury && (
-          <button className="pos-toolbar-btn" onClick={p.onToggleSupplierForm}>
-            {p.showSupplierForm ? "Cancelar pago a proveedor" : "+ Pago a proveedor"}
-          </button>
-        )}
-        {canManageTreasury && p.canUseEmployees && (
-          <button className="pos-toolbar-btn" onClick={p.onToggleValeForm}>
-            {p.showValeForm ? "Cancelar vale a empleado" : "+ Vale a empleado"}
-          </button>
-        )}
-        <button className="pos-toolbar-btn" onClick={() => setShowScaleVoid((v) => !v)}>
-          {showScaleVoid ? "Cerrar anular ticket de balanza" : "Anular ticket de balanza"}
+        <button
+          className="pos-toolbar-btn wide"
+          style={{ border: "2px solid #2563eb", color: "#1d4ed8", fontWeight: 700 }}
+          onClick={() => setCashOut((v) => (v ? null : "menu"))}
+        >
+          {cashOut ? "Cancelar" : "Sacar plata del cajón"}
         </button>
-        <button className="pos-toolbar-btn" onClick={() => setShowWaste((v) => !v)}>
-          {showWaste ? "Cerrar decomiso" : "Decomiso"}
-        </button>
+        {cashOut === "menu" && (
+          <div className="cash-out-menu">
+            <p style={{ margin: 0, fontWeight: 700 }}>¿Para qué?</p>
+            {CASH_OUT_OPTIONS.filter((o) => o.kind !== "vale" || p.canUseEmployees).map((o) => (
+              <button key={o.kind} type="button" className="cash-out-option" onClick={() => setCashOut(o.kind)}>
+                <strong>{o.title}</strong>
+                <small>{o.hint}</small>
+              </button>
+            ))}
+          </div>
+        )}
+        {cashOut && cashOut !== "menu" && (
+          <div className="cash-out-form">
+            <p style={{ margin: 0, fontWeight: 700 }}>
+              {CASH_OUT_OPTIONS.find((o) => o.kind === cashOut)?.title}{" "}
+              <button type="button" className="link-button" onClick={() => setCashOut("menu")}>Cambiar</button>
+            </p>
+            {cashOut === "proveedor" && (
+              <SupplierPaymentForm {...form} visible suppliers={p.suppliers} onCreateSupplier={p.onCreateSupplier} onClose={() => setCashOut(null)} />
+            )}
+            {cashOut === "vale" && (
+              <EmployeeValeForm {...form} visible employees={p.employees} onMovementsChanged={movementsChanged} onClose={() => setCashOut(null)} />
+            )}
+            {cashOut === "gasto" && (
+              <ExpenseForm shift={shift} onMessage={p.onMessage} publishReceipt={p.publishReceipt} onMovementsChanged={movementsChanged} onClose={() => setCashOut(null)} />
+            )}
+            {cashOut === "retiro" && (
+              <SafeDepositForm
+                visible
+                shift={shift}
+                accounts={p.accounts}
+                onMessage={p.onMessage}
+                onDone={p.onSafeDeposit}
+                onMovementsChanged={movementsChanged}
+                onClose={() => setCashOut(null)}
+              />
+            )}
+          </div>
+        )}
         {!p.showCloseConfirm && (
           <button className="pos-toolbar-btn wide" onClick={p.onRequestClose}>
-            Cerrar turno
+            Cerrar caja
           </button>
         )}
+        <button className="pos-toolbar-btn" onClick={() => setShowMore((v) => !v)}>
+          Más {showMore ? "▴" : "▾"}
+        </button>
+        {showMore && (
+          <>
+            <button className="pos-toolbar-btn" onClick={() => setShowWaste((v) => !v)}>
+              {showWaste ? "Cerrar decomiso" : "Decomiso"}
+            </button>
+            {p.scaleCloseControl && (
+              <button className="pos-toolbar-btn" onClick={() => setShowScaleVoid((v) => !v)}>
+                {showScaleVoid ? "Cerrar anular ticket de balanza" : "Anular ticket de balanza"}
+              </button>
+            )}
+            {canSeeShiftTotals && (
+              <button className="pos-toolbar-btn" onClick={p.onToggleShiftTotals}>
+                {p.showShiftTotals ? "Ocultar total del turno" : "Ver total del turno"}
+              </button>
+            )}
+            {canSeeShiftTotals && (
+              <button className="pos-toolbar-btn" onClick={() => p.onRequestReveal("movements")}>
+                {p.showShiftMovements ? "Ocultar ventas" : "Ver ventas (anular)"}
+              </button>
+            )}
+            {canManageTreasury && (
+              <button className="pos-toolbar-btn" onClick={() => p.onRequestReveal("caja")}>
+                {p.showMovementsList ? "Ocultar lo que salió" : "Ver lo que salió del cajón"}
+              </button>
+            )}
+          </>
+        )}
+        {p.pinPromptFor && <PinPrompt pin={p.mostradorPin} onSuccess={p.onPinSuccess} onCancel={p.onPinCancel} />}
       </div>
 
       {canSeeShiftTotals && p.showShiftMovements && (
@@ -767,6 +916,44 @@ export function ShiftPanel(p: ShiftPanelProps) {
             <p className="muted" style={{ fontSize: 13 }}>Sin movimientos de caja en este turno.</p>
           )}
 
+          <p className="muted" style={{ margin: "14px 0 6px", fontWeight: 700, fontSize: 12, textTransform: "uppercase" }}>Retiros de dinero</p>
+          {withdrawals.length > 0 ? (
+            <table className="data-table">
+              <thead>
+                <tr><th>Hora</th><th>Papelito</th><th className="num">Monto</th><th></th></tr>
+              </thead>
+              <tbody>
+                {withdrawals.map((w) => (
+                  <tr key={w.id}>
+                    <td>{new Date(w.createdAt).toLocaleTimeString("es-AR")}</td>
+                    <td>N.º {w.number}</td>
+                    <td className="num">{formatMoney(w.amount)}</td>
+                    <td>
+                      <ConfirmDelete
+                        label="Anular retiro"
+                        pinRequired={p.voidPinRequired}
+                        busy={false}
+                        onConfirm={async (pin) => {
+                          try {
+                            const result = await voidPosCashWithdrawal(w.id, pin);
+                            if (!result.ok) return result.error ?? "No se pudo anular.";
+                            await movementsChanged();
+                            p.onMessage(`Retiro N.º ${w.number} anulado.`);
+                            return null;
+                          } catch (err) {
+                            return err instanceof Error ? err.message : "No se pudo anular.";
+                          }
+                        }}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="muted" style={{ fontSize: 13 }}>Sin retiros en este turno.</p>
+          )}
+
           <p className="muted" style={{ margin: "14px 0 6px", fontWeight: 700, fontSize: 12, textTransform: "uppercase" }}>Vales a empleados</p>
           {p.posShiftVales.length > 0 ? (
             <table className="data-table">
@@ -800,13 +987,6 @@ export function ShiftPanel(p: ShiftPanelProps) {
         </div>
       )}
 
-      {canManageTreasury && (
-        <>
-          <CajaMovementForm {...form} visible={p.showCajaForm} adjust={p.adjust} onMovementsChanged={p.onMovementsChanged} onClose={p.onToggleCajaForm} />
-          <SupplierPaymentForm {...form} visible={p.showSupplierForm} suppliers={p.suppliers} onClose={p.onToggleSupplierForm} />
-          <EmployeeValeForm {...form} visible={p.showValeForm} employees={p.employees} onMovementsChanged={p.onMovementsChanged} onClose={p.onToggleValeForm} />
-        </>
-      )}
 
       <ScaleVoidForm
         visible={showScaleVoid}
@@ -829,15 +1009,16 @@ export function ShiftPanel(p: ShiftPanelProps) {
 
       {p.showCloseConfirm && (
         <div style={{ marginTop: 14 }}>
-          <ScaleCloseControl shift={shift} onStatusChange={setScaleControlStatus} />
+          {p.scaleCloseControl && <ScaleCloseControl shift={shift} onStatusChange={setScaleControlStatus} />}
           <BlindCloseForm
+            oneShot={!canSeeShiftTotals}
             shift={shift}
             accounts={p.accounts}
             cashiers={p.cashiers}
             shiftSales={p.shiftSales}
             busy={p.busy}
             onSalesChanged={p.onSalesChanged}
-            onRequestSafeDeposit={() => setShowSafeForm(true)}
+            onRequestSafeDeposit={() => setCashOut("retiro")}
             onConfirmClose={confirmCloseWithScaleCheck}
             onCancel={p.onCancelClose}
           />

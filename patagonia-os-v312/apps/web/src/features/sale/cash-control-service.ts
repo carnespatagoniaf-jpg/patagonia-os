@@ -189,3 +189,76 @@ export async function setEmployeePosPin(employeeId: string, pin: string | null):
   const { error } = await supabase.rpc("set_employee_pos_pin", { p_employee_id: employeeId, p_pin: pin });
   if (error) throw error;
 }
+
+// Retiros de dinero (migración 164): la plata sigue en Efectivo; el dueño cuenta los papelitos.
+
+export interface PendingWithdrawal {
+  id: string;
+  number: number;
+  amount: number;
+  createdAt: string;
+  employeeName: string | null;
+}
+
+/** Retiros nuevos de la sucursal que el dueño todavía no contó. */
+export async function listPendingWithdrawals(branchId: string): Promise<PendingWithdrawal[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from("pos_safe_deposits")
+    .select("id,number,amount,created_at,employees(full_name)")
+    .eq("branch_id", branchId)
+    .is("out_movement_id", null)
+    .is("voided_at", null)
+    .is("count_id", null)
+    .order("number");
+  if (error) throw error;
+  return ((data ?? []) as unknown as Array<{ id: string; number: number; amount: number; created_at: string; employees: { full_name: string } | null }>).map((r) => ({
+    id: r.id,
+    number: Number(r.number),
+    amount: Number(r.amount),
+    createdAt: r.created_at,
+    employeeName: r.employees?.full_name ?? null
+  }));
+}
+
+export interface WithdrawalCount {
+  id: string;
+  numbers: number[];
+  expected: number;
+  counted: number;
+  difference: number;
+  createdAt: string;
+}
+
+export async function listWithdrawalCounts(branchId: string, limit = 5): Promise<WithdrawalCount[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from("pos_cash_withdrawal_counts")
+    .select("id,numbers,expected,counted,difference,created_at")
+    .eq("branch_id", branchId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) return [];
+  return ((data ?? []) as Array<{ id: string; numbers: number[]; expected: number; counted: number; difference: number; created_at: string }>).map((r) => ({
+    id: r.id,
+    numbers: r.numbers.map(Number),
+    expected: Number(r.expected),
+    counted: Number(r.counted),
+    difference: Number(r.difference),
+    createdAt: r.created_at
+  }));
+}
+
+export async function countCashWithdrawals(branchId: string, counted: number, notes?: string): Promise<{ numbers: number[]; expected: number; difference: number }> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { data, error } = await supabase.rpc("count_cash_withdrawals", { p_branch_id: branchId, p_counted: counted, p_notes: notes ?? null });
+  if (error) throw error;
+  return { numbers: (data.numbers ?? []).map(Number), expected: Number(data.expected), difference: Number(data.difference) };
+}
+
+/** "Controlar la balanza al cerrar" (companies.features 'control_balanza'). */
+export async function setScaleCloseControl(enabled: boolean): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("set_scale_close_control", { p_enabled: enabled });
+  if (error) throw error;
+}

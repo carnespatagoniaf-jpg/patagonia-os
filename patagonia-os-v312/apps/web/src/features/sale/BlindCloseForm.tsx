@@ -25,6 +25,9 @@ export interface BlindCloseFormProps {
   /** Cerrar de verdad, con el efectivo contado y los totales declarados. */
   onConfirmClose: (countedCash: number, declaredAccounts: Record<string, string>) => void;
   onCancel: () => void;
+  /** Cajera (sin "Control de caja"): cuenta UNA vez y se cierra; no ve cuánto tendría que dar (2026-10-28, como en
+   * un supermercado). El detalle y las correcciones las ve el dueño en "Control de caja". */
+  oneShot?: boolean;
 }
 
 function diffClass(diff: number | null) {
@@ -74,7 +77,12 @@ export function BlindCloseForm(p: BlindCloseFormProps) {
     setChecking(true);
     try {
       const cashier = needsCashier ? { employeeId: cashierId, pin: pin.trim() } : null;
-      setResult(await checkPosShiftCount(p.shift.id, built.payload, cashier));
+      const checked = await checkPosShiftCount(p.shift.id, built.payload, cashier);
+      if (p.oneShot) {
+        p.onConfirmClose(checked.cashDeclared, Object.fromEntries(checked.accounts.filter((r) => r.declared !== null).map((r) => [r.accountId, String(r.declared)])));
+        return;
+      }
+      setResult(checked);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudo controlar la caja.");
     } finally {
@@ -159,7 +167,7 @@ export function BlindCloseForm(p: BlindCloseFormProps) {
         ))}
         {error && <p className="num-negative" style={{ margin: 0 }}>{error}</p>}
         <div style={{ display: "flex", gap: 8 }}>
-          <button disabled={checking || p.busy} onClick={runCheck}>{checking ? "Controlando…" : "Controlar"}</button>
+          <button disabled={checking || p.busy} onClick={runCheck}>{checking || p.busy ? "Cerrando…" : p.oneShot ? "Cerrar caja" : "Controlar"}</button>
           <button className="secondary" onClick={p.onCancel}>Cancelar</button>
         </div>
       </div>
@@ -229,7 +237,7 @@ export function BlindCloseForm(p: BlindCloseFormProps) {
       {cashShort && swaps.length === 0 && (
         <div className="panel" style={{ padding: 12 }}>
           <p style={{ margin: "0 0 6px" }}>
-            Falta {formatMoney(-result.cashDifference)} de efectivo. ¿Guardaste plata en la caja fuerte y no la anotaste?
+            Falta {formatMoney(-result.cashDifference)} de efectivo. ¿Retiraste plata y no la anotaste?
           </p>
           <button
             className="secondary"
@@ -238,14 +246,14 @@ export function BlindCloseForm(p: BlindCloseFormProps) {
               p.onRequestSafeDeposit();
             }}
           >
-            Sí, anotar lo que guardé
+            Sí, anotar el retiro
           </button>
         </div>
       )}
 
       {error && <p className="num-negative" style={{ margin: 0 }}>{error}</p>}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-        <button disabled={p.busy} onClick={confirmClose}>{p.busy ? "Cerrando…" : ok ? "Cerrar turno" : "Cerrar igual con diferencia"}</button>
+        <button disabled={p.busy} onClick={confirmClose}>{p.busy ? "Cerrando…" : ok ? "Cerrar caja" : "Cerrar igual con diferencia"}</button>
         <button className="secondary" onClick={() => setResult(null)}>Volver a contar</button>
         <button className="secondary" onClick={p.onCancel}>Cancelar</button>
       </div>
