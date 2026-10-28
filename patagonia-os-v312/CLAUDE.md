@@ -107,7 +107,7 @@ Key invariants (see `docs/ARCHITECTURE.md`, though it predates several modules b
 - Cart rows that store a NUMBER use the shared `components/QuantityInput.tsx`: it accepts a comma or a dot, is empty after clearing instead of "0", and selects everything on focus.
 - Fields that store a STRING are parsed with `quantityNumber()` (`features/sale/quantity.ts`): it works like `Number()` (so "" is still 0) but takes "0,750" as 0.75.
 
-Use `parseQuantity()` when an empty field must be NaN. None of these is `parseAmount` (money), where "1.200" means twelve hundred.
+Use `parseQuantity()` when an empty field must be NaN. None of these is `parseAmount` (money), where "1.200" means twelve hundred. **Prefilling a money field** from a number: use `amountInputText(n)` ("14315,25"), never `String(n)`. Since 2026-10-28 `parseAmount` also reads a single dot followed by 1–2 digits ("14315.25") as a decimal, because Stock → Editar had turned a cost of 14315.25 into $1.431.525.
 
 ## Cash control: safe, blind close, cashier PIN (migration 117, LIVE 2026-10-13)
 
