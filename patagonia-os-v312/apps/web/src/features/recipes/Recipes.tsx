@@ -6,6 +6,7 @@ import { parseAmount } from "../../lib/money";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { createProduct, listProductsForBranch } from "../inventory/inventory-service";
 import { applyRecipeToProduct, deleteRecipe, listRecipes, saveRecipe, setRecipeKind, type Recipe, type RecipeKind } from "./recipes-service";
+import { quantityNumber } from "../sale/quantity";
 import { checkPrice, comboDiscountPct, comboRetailTotal, formatCost, type PriceCheck, parseRecipeDraft, suggestedYieldKg, summarizeRecipe, type RecipeDraft } from "./recipe-view";
 
 // Recetas (fichas técnicas): milanesas, hamburguesas y demás productos que se
@@ -61,7 +62,7 @@ function fmtNum(value: number, max = 3): string {
 }
 
 const num = (raw: string) => {
-  const value = Number(raw);
+  const value = quantityNumber(raw);
   return Number.isFinite(value) ? value : 0;
 };
 
@@ -112,6 +113,8 @@ export function Recipes() {
   const [editing, setEditing] = useState<{ recipeId: string | null; kind: RecipeKind; draft: RecipeDraft } | null>(null);
   /** "Lo vendés a $": arranca con el precio de hoy del producto; si se cambia, se carga en el producto al guardar. */
   const [sellPrice, setSellPrice] = useState("");
+  /** "Rinde el lote" sigue solo la suma de los kilos de los insumos hasta que la persona lo cambia (productos por kg). */
+  const [yieldAuto, setYieldAuto] = useState(true);
   const [showNewProduct, setShowNewProduct] = useState(false);
   const [npCode, setNpCode] = useState("");
   const [npName, setNpName] = useState("");
@@ -183,12 +186,15 @@ export function Recipes() {
 
   function startNew(kind: RecipeKind = "receta") {
     setMessage("");
+    setYieldAuto(kind !== "combo");
     setNpUnit(kind === "combo" ? "unit" : "kg");
     setEditing({ recipeId: null, kind, draft: emptyDraft(kind) });
   }
 
   function startEdit(recipe: Recipe) {
     setMessage("");
+    const sum = suggestedYieldKg(recipe.items, productsById);
+    setYieldAuto(recipe.kind === "receta" && productsById.get(recipe.productId)?.unit === "kg" && Math.abs(sum - recipe.yieldQty) < 0.0005);
     setEditing({ recipeId: recipe.id, kind: recipe.kind, draft: draftFromRecipe(recipe) });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
@@ -362,6 +368,18 @@ export function Recipes() {
   const showWaste = !isCombo && !!draft?.items.some((item) => num(item.wastePct) > 0);
   const comboRetail = draft && isCombo ? comboRetailTotal(draft.items.map((item) => ({ ingredientProductId: item.ingredientProductId, quantity: num(item.quantity) })), productsById) : 0;
   const comboCurrentDiscount = finished && isCombo ? comboDiscountPct(finished.priceRetail, comboRetail) : null;
+  const yieldIsAuto = yieldAuto && !isCombo && finished?.unit === "kg";
+  // Rinde automático = lo que suman los insumos en kg (1 kg de suprema + 1 kg de pan rallado = 2 kg).
+  useEffect(() => {
+    if (!yieldIsAuto || !draft) return;
+    const auto = yieldSuggestion > 0 ? String(yieldSuggestion).replace(".", ",") : "";
+    if (draft.yieldQty !== auto) updateDraft({ yieldQty: auto });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [yieldIsAuto, yieldSuggestion]);
+  // Insumos y rinde muy distintos (ej. 0,05 kg de insumos que "rinden" 1 kg): casi siempre es un error de tipeo.
+  const yieldValue = draft ? num(draft.yieldQty) : 0;
+  const yieldLooksWrong = !yieldIsAuto && !isCombo && finished?.unit === "kg" && yieldSuggestion > 0 && yieldValue > 0
+    && (yieldValue > yieldSuggestion * 1.5 || yieldValue < yieldSuggestion * 0.5);
 
   return (
     <>
@@ -506,7 +524,16 @@ export function Recipes() {
                   <label className="muted">
                     Rinde el lote ({unitLabel})
                     <br />
-                    <input type="text" inputMode="decimal" value={draft.yieldQty} onChange={(e) => updateDraft({ yieldQty: e.target.value })} style={{ width: 130 }} />
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={draft.yieldQty}
+                      onChange={(e) => {
+                        setYieldAuto(false);
+                        updateDraft({ yieldQty: e.target.value });
+                      }}
+                      style={{ width: 130 }}
+                    />
                   </label>
                 )}
                 <label className="muted">
@@ -515,10 +542,17 @@ export function Recipes() {
                   <input type="text" inputMode="decimal" placeholder="0" value={draft.extraCost} onChange={(e) => updateDraft({ extraCost: e.target.value })} style={{ width: 170 }} />
                 </label>
               </div>
-              {!isCombo && yieldSuggestion > 0 && num(draft.yieldQty) !== yieldSuggestion && (
+              {yieldIsAuto && yieldSuggestion > 0 && (
                 <p className="muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
-                  Si el lote rinde lo mismo que los kilos que quedan en el producto ({fmtNum(yieldSuggestion)} kg):{" "}
-                  <button className="secondary" onClick={() => updateDraft({ yieldQty: String(yieldSuggestion) })}>usar {fmtNum(yieldSuggestion)} kg</button>
+                  Rinde = lo que suman los insumos ({fmtNum(yieldSuggestion)} kg). Si al final sale otra cantidad, cambialo.
+                </p>
+              )}
+              {!yieldIsAuto && !isCombo && finished.unit === "kg" && yieldSuggestion > 0 && Math.abs(yieldValue - yieldSuggestion) >= 0.0005 && (
+                <p className={yieldLooksWrong ? "message warning" : "muted"} style={{ margin: "8px 0 0", fontSize: 13 }}>
+                  {yieldLooksWrong
+                    ? `Ponés ${fmtNum(yieldSuggestion)} kg de insumos y rinde ${fmtNum(yieldValue)} kg: revisá las cantidades. `
+                    : `Los insumos suman ${fmtNum(yieldSuggestion)} kg. `}
+                  <button className="secondary" onClick={() => setYieldAuto(true)}>Usar la suma ({fmtNum(yieldSuggestion)} kg)</button>
                 </p>
               )}
               <textarea
