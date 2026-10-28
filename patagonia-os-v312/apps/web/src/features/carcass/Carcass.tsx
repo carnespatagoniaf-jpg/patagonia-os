@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
-import type { CarcassBatch, CarcassCut, CarcassCutTemplate, Product } from "@patagonia/domain";
-import { allocateCarcassCost, carcassTemplateCutWeight, marginPercent } from "@patagonia/domain";
+import type { CarcassBatch, CarcassCut, CarcassCutTemplate, CarcassFillSource, Product } from "@patagonia/domain";
+import { allocateCarcassCost, marginPercent } from "@patagonia/domain";
 import { useCarcass } from "./useCarcass";
 import { useCarcassTemplates } from "./useCarcassTemplates";
-import { listCarcassBatchTotals, type CarcassBatchTotals } from "./carcass-service";
+import { fillCarcassBatch, listCarcassBatchTotals, markCarcassBatchWeighed, type CarcassBatchTotals } from "./carcass-service";
 import { applyDefaultCarcassCuts, listDefaultCarcassCuts, type DefaultCarcassCut } from "./carcass-templates-service";
 import { animalTypeLabel, buildTypeChips, carcassNorm, carcassTypeKey, findSameType, initialType } from "./carcass-types";
 import { useSuppliers } from "../purchases/useSuppliers";
@@ -44,7 +44,7 @@ function readRefWeight(type: string): string {
 const sameKey = (a: string, b: string) => carcassTypeKey(a) === carcassTypeKey(b);
 
 export function Carcass() {
-  const { batches, loading, error, saveBatch, removeBatch, cuts: loadedCuts, cutsLoading, loadCuts, saveCut, saveCutSilent, removeCut } = useCarcass();
+  const { batches, loading, error, reload: reloadBatches, saveBatch, removeBatch, cuts: loadedCuts, cutsLoading, loadCuts, saveCut, removeCut } = useCarcass();
   const { templates, reload: reloadTemplates, save: saveTemplate, remove: removeTemplate } = useCarcassTemplates();
   const { suppliers } = useSuppliers();
   const { branchId } = useActiveBranch();
@@ -165,7 +165,8 @@ export function Carcass() {
         value: cuts.reduce((s, c) => s + c.lineTotal, 0),
         weight: cuts.reduce((s, c) => s + c.weight, 0),
         cuts: cuts.length,
-        unpriced: cuts.filter((c) => c.unitPrice <= 0 && c.weight > 0).length
+        unpriced: cuts.filter((c) => c.unitPrice <= 0 && c.weight > 0).length,
+        estimated: cuts.filter((c) => c.fromTemplate).length
       };
     }
     return totals.get(batch.id);
@@ -212,7 +213,8 @@ export function Carcass() {
   const unpricedCuts = cuts.filter((c) => c.unitPrice <= 0 && c.weight > 0).length;
   const cutsWeight = cuts.reduce((s, c) => s + c.weight, 0);
   const yieldPct = selectedBatch && selectedBatch.totalWeight > 0 ? Math.round((cutsWeight / selectedBatch.totalWeight) * 1000) / 10 : 0;
-  const allFromTemplate = cuts.length > 0 && typeTemplates.length > 0 && cuts.every((c) => typeTemplates.some((t) => carcassNorm(t.cutName) === carcassNorm(c.cutName)));
+  // Cortes que repartió el sistema y nadie corrigió; 0 (con cortes) = pesada de verdad, sirve para aprender.
+  const estimatedCuts = cuts.filter((c) => c.fromTemplate).length;
 
   async function updateCut(cut: CarcassCut, changes: Partial<Pick<CarcassCut, "weight" | "unitPrice" | "productId">>) {
     if (!selectedBatch) return;
@@ -291,29 +293,39 @@ export function Carcass() {
 
   // ---------- Res cargada a mano ----------
 
-  /** Reparte una res con los cortes de siempre (si no hay y useDefaults, primero copia los típicos). */
-  async function fillFromTemplates(batchId: string, type: string, weight: number, useDefaults: boolean): Promise<number> {
-    let rows = templates.filter((t) => sameKey(t.animalType, type));
-    if (rows.length === 0 && useDefaults && defaults.some((d) => d.typeKey === carcassTypeKey(type))) {
-      await applyDefaultCarcassCuts(type);
-      rows = (await reloadTemplates()).filter((t) => sameKey(t.animalType, type));
-    }
-    if (rows.length === 0) return 0;
+  /** Reparte una res sin cortes en la base: promedio de las pesadas parecidas o cortes de siempre (con useDefaults,
+   * si no hay, primero copia los típicos). */
+  async function fillBatch(batchId: string, useDefaults: boolean): Promise<{ cuts: number; source?: CarcassFillSource }> {
     try {
-      for (const t of rows) {
-        const product = t.productId ? products.find((p) => p.id === t.productId) : undefined;
-        await saveCutSilent({
-          batchId,
-          cutName: t.cutName,
-          productId: t.productId,
-          weight: carcassTemplateCutWeight(weight, t.yieldPercent),
-          unitPrice: product?.priceRetail ?? 0
-        });
-      }
+      const result = await fillCarcassBatch(batchId, useDefaults);
+      if (useDefaults && typeTemplates.length === 0) await reloadTemplates();
+      return result;
     } finally {
-      await loadCuts(batchId);
+      await Promise.all([loadCuts(batchId), reloadBatches()]);
     }
-    return rows.length;
+  }
+
+  function fillMessage(result: { cuts: number; source?: CarcassFillSource }) {
+    if (result.cuts === 0) return `No hay cortes de siempre de ${label}: cargá los cortes abajo.`;
+    if (result.source?.kind === "learned") {
+      return `Repartida en ${result.cuts} cortes con el promedio de tus ${result.source.batches} pesadas de ${formatKg(result.source.min)} a ${formatKg(result.source.max)} kg.`;
+    }
+    return `Repartida en ${result.cuts} cortes con tus cortes de siempre. Si la pesaste, corregí los kilos.`;
+  }
+
+  async function handleMarkWeighed() {
+    if (!selectedBatch) return;
+    setBusy(true);
+    try {
+      await markCarcassBatchWeighed(selectedBatch.id);
+      await loadCuts(selectedBatch.id);
+      void refreshTotals();
+      setMessage("Listo: quedó como pesada. Las próximas de peso parecido se van a repartir con lo que pesaste.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo guardar.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   function openBatchForm(batch?: CarcassBatch) {
@@ -345,8 +357,7 @@ export function Carcass() {
       setSelectedId(result.id);
       if (!editingBatchId) {
         // Los típicos solos solo la primera vez (igual que una compra): quien ya cargaba a mano sigue igual.
-        const n = await fillFromTemplates(result.id, selectedType, weight, typeBatches.length === 0);
-        setMessage(n > 0 ? `Listo: repartida en ${n} cortes. Si pesaste, corregí los kilos.` : "Listo. Cargá los cortes abajo.");
+        setMessage(fillMessage(await fillBatch(result.id, typeBatches.length === 0)));
       } else {
         setMessage("Res corregida.");
       }
@@ -371,11 +382,9 @@ export function Carcass() {
 
   async function handleRefill() {
     if (!selectedBatch) return;
-    if (cuts.length > 0 && !window.confirm("Esta res ya tiene cortes. ¿Agregar igual los de siempre? Pueden quedar repetidos.")) return;
     setBusy(true);
     try {
-      const n = await fillFromTemplates(selectedBatch.id, selectedBatch.animalType, selectedBatch.totalWeight, true);
-      setMessage(n > 0 ? `Repartida en ${n} cortes.` : `No hay cortes de siempre de ${label}.`);
+      setMessage(fillMessage(await fillBatch(selectedBatch.id, true)));
       void refreshTotals();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo repartir.");
@@ -580,7 +589,10 @@ export function Carcass() {
                 <button key={b.id} type="button" className={`carcass-batch${b.id === selectedId ? " selected" : ""}`} onClick={() => setSelectedId(b.id)}>
                   <span>
                     <strong>{shortDate(b.batchDate)} · {formatKg(b.totalWeight)} kg</strong>
-                    {supplier && <span className="badge brand">{supplier}</span>}
+                    <span className="carcass-batch-tags">
+                      {supplier && <span className="badge brand">{supplier}</span>}
+                      {t && t.cuts > 0 && t.estimated === 0 && <span className="badge ok">Pesada</span>}
+                    </span>
                   </span>
                   <span className="num">
                     <strong>{formatMoney(b.totalCost)}</strong>
@@ -757,7 +769,20 @@ export function Carcass() {
                   {unpricedCuts === 1 ? "1 corte no tiene" : `${unpricedCuts} cortes no tienen`} precio: elegí su producto de Stock en la tabla (o poné el precio), si no "Ganás" queda más bajo de lo real.
                 </div>
               )}
-              {allFromTemplate && <p className="muted no-print" style={{ margin: "0 0 8px", fontSize: 13 }}>Repartida con tus cortes de siempre. Si pesaste, corregí los kilos.</p>}
+              {cuts.length > 0 && estimatedCuts === 0 && (
+                <p className="carcass-note ok no-print">✓ Pesada de verdad: las próximas de peso parecido se reparten con lo que pesaste.</p>
+              )}
+              {estimatedCuts > 0 && (
+                <div className="carcass-note no-print">
+                  <span>
+                    {selectedBatch.fillSource?.kind === "learned"
+                      ? `Repartida con el promedio de tus ${selectedBatch.fillSource.batches} pesadas de ${formatKg(selectedBatch.fillSource.min)} a ${formatKg(selectedBatch.fillSource.max)} kg.`
+                      : "Repartida con tus cortes de siempre."}{" "}
+                    Si la pesaste, corregí los kilos y tocá <strong>Listo, la pesé</strong>: así las próximas salen más exactas.
+                  </span>
+                  <button type="button" className="secondary" disabled={busy} onClick={() => void handleMarkWeighed()}>Listo, la pesé</button>
+                </div>
+              )}
 
               {cuts.length === 0 && !cutsLoading && (
                 <div className="carcass-box no-print" style={{ marginBottom: 12 }}>

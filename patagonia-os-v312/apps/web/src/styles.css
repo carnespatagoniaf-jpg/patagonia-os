@@ -1108,3 +1108,10 @@ input[type="file"], main textarea { max-width: 100%; }
 .purchase-carcass-question { display: block; font-size: 12.5px; font-weight: 700; color: var(--ink-2); }
 .purchase-carcass-kg { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; margin: 2px 0 4px; }
 .purchase-carcass-kg input { width: 100px; }
+/* Despiece: de dónde salió el reparto y "Listo, la pesé" (migración 163). */
+.carcass-note {
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  margin: 0 0 10px; padding: 9px 12px; border-radius: var(--r); background: var(--surface-2); font-size: 13.5px; color: var(--ink-2);
+}
+.carcass-note.ok { background: var(--ok-soft); color: var(--ok); font-weight: 600; }
+.carcass-batch-tags { display: flex; gap: 4px; flex-wrap: wrap; }
