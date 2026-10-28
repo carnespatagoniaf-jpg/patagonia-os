@@ -1,0 +1,40 @@
+# Volver la página a una versión anterior (Netlify), en segundos. No toca la base de datos.
+# Actions → "Volver atrás" → Run workflow. Sin id: vuelve a la versión publicada antes de la actual.
+# Los ids de cada versión están en el resumen de cada corrida de "Publicar".
+name: Volver atrás
+
+on:
+  workflow_dispatch:
+    inputs:
+      deploy_id:
+        description: "Id de la versión a la que volver (vacío = la anterior a la actual)"
+        required: false
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: publicar
+  cancel-in-progress: false
+
+jobs:
+  volver:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: produccion
+    defaults:
+      run:
+        working-directory: patagonia-os-v312
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Volver
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          DEPLOY_ID: ${{ inputs.deploy_id }}
+        run: |
+          if [ -n "$DEPLOY_ID" ] && ! printf '%s' "$DEPLOY_ID" | grep -Eq '^[a-f0-9]{24}$'; then echo "::error::Id inválido."; exit 1; fi
+          node scripts/deploy-netlify.mjs rollback $DEPLOY_ID
