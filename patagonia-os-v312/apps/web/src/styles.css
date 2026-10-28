@@ -845,3 +845,6 @@ a.button-link:hover { background: #731818; }
 @media print {
   .frigo-labels { grid-template-columns: repeat(2, 1fr); }
 }
+/* Panel de plataforma: pantallas a pedido de cada cliente (companies.features). */
+.admin-features { border-top: 1px solid #edf0f4; padding-top: 8px; }
+.admin-features summary { cursor: pointer; font-size: 14px; }

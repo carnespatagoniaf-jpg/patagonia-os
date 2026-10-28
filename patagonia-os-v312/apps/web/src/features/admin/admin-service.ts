@@ -200,6 +200,32 @@ export async function listCompanyPlans(): Promise<Record<string, CompanyPlanInfo
   return result;
 }
 
+/** Pantallas a pedido (companies.features). La base acepta solo estas claves (set_company_feature, migración 160). */
+export const COMPANY_FEATURES: { key: string; label: string; short: string }[] = [
+  { key: "frigorifico", label: "Frigorífico (stock por tropa, garrón y kilo)", short: "Frigorífico" },
+  { key: "cuentas", label: "Reporte de cuentas", short: "Cuentas" },
+  { key: "gastos", label: "Gastos", short: "Gastos" },
+  { key: "reporte_ventas", label: "Reporte de ventas (ventas a cuenta con detalle)", short: "Reporte de ventas" },
+  { key: "ventas_detalle", label: "Descuento o recargo y detalle en ventas a cuenta", short: "Detalle en ventas" },
+  { key: "paquetes", label: "Paquetes (cortes envasados) en Stock", short: "Paquetes" }
+];
+
+export async function listCompanyFeatures(): Promise<Record<string, string[]>> {
+  if (!supabase) return {};
+  const { data, error } = await supabase.rpc("list_company_features");
+  if (error) throw error;
+  const result: Record<string, string[]> = {};
+  for (const row of (data ?? []) as { company_id: string; features: string[] | null }[]) result[row.company_id] = row.features ?? [];
+  return result;
+}
+
+export async function setCompanyFeature(companyId: string, feature: string, enabled: boolean): Promise<string[]> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { data, error } = await supabase.rpc("set_company_feature", { p_company_id: companyId, p_feature: feature, p_enabled: enabled });
+  if (error) throw error;
+  return (data ?? []) as string[];
+}
+
 export async function setCompanyPlan(companyId: string, plan: Plan): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 

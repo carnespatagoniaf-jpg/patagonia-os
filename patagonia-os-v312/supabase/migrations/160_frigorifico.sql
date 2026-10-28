@@ -1,8 +1,8 @@
 -- Frigorífico (a pedido, 2026-10-27): stock de medias reses por tropa, garrón
 -- y kilo. Solo lo ve una empresa con 'frigorifico' en companies.features
--- (igual que 'cuentas' y 'gastos', migración 143). Se activa a mano:
---   update public.companies set features = array_append(features, 'frigorifico')
---   where id = '<empresa>' and not 'frigorifico' = any(features);
+-- (igual que 'cuentas' y 'gastos', migración 143). Se activa desde el panel de
+-- plataforma: tarjeta del cliente → "Pantallas a pedido" → Frigorífico
+-- (set_company_feature, punto 11 de abajo).
 --
 -- Ciclo:
 --   1) DT de carga (frigo_dts): qué y cuántos animales se van a faenar.
@@ -574,6 +574,60 @@ revoke all on function public.frigo_create_salida(uuid, date, text, uuid, uuid, 
 grant execute on function public.frigo_create_salida(uuid, date, text, uuid, uuid, uuid, numeric, uuid[], text) to authenticated;
 revoke all on function public.frigo_void_salida(uuid, text) from public, anon;
 grant execute on function public.frigo_void_salida(uuid, text) to authenticated;
+
+-- 11) Pantallas a pedido desde el panel de plataforma ---------------------
+-- Antes companies.features se cambiaba a mano con SQL. Ahora el administrador
+-- de plataforma lo tilda en la tarjeta de cada cliente. Solo claves conocidas,
+-- para que un error de tipeo no deje una pantalla prendida que no existe.
+
+create or replace function public.list_company_features()
+returns table (company_id uuid, features text[])
+language plpgsql
+stable
+security definer
+set search_path = public
+as $$
+begin
+  if not public.am_i_platform_admin() then
+    raise exception 'No autorizado';
+  end if;
+  return query select c.id, c.features from public.companies c;
+end;
+$$;
+
+create or replace function public.set_company_feature(p_company_id uuid, p_feature text, p_enabled boolean)
+returns text[]
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_features text[];
+begin
+  if not public.am_i_platform_admin() then
+    raise exception 'No autorizado';
+  end if;
+  if p_feature is null or p_feature not in ('frigorifico', 'cuentas', 'gastos', 'reporte_ventas', 'ventas_detalle', 'paquetes') then
+    raise exception 'Pantalla inválida';
+  end if;
+  update public.companies
+  set features = case
+    when coalesce(p_enabled, false) then (select array(select distinct unnest(features || array[p_feature])))
+    else array_remove(features, p_feature)
+  end
+  where id = p_company_id
+  returning features into v_features;
+  if not found then
+    raise exception 'Cliente inválido';
+  end if;
+  return v_features;
+end;
+$$;
+
+revoke all on function public.list_company_features() from public, anon;
+grant execute on function public.list_company_features() to authenticated;
+revoke all on function public.set_company_feature(uuid, text, boolean) from public, anon;
+grant execute on function public.set_company_feature(uuid, text, boolean) to authenticated;
 
 notify pgrst, 'reload schema';
 
