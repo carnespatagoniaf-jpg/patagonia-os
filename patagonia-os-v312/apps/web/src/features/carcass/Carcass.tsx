@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
-import type { Product } from "@patagonia/domain";
-import { allocateCarcassCost, carcassCutLineTotal, carcassTemplateCutWeight, marginPercent } from "@patagonia/domain";
+import type { CarcassBatch, CarcassCut, CarcassCutTemplate, Product } from "@patagonia/domain";
+import { allocateCarcassCost, carcassTemplateCutWeight, marginPercent } from "@patagonia/domain";
 import { useCarcass } from "./useCarcass";
 import { useCarcassTemplates } from "./useCarcassTemplates";
+import { listCarcassBatchTotals, type CarcassBatchTotals } from "./carcass-service";
+import { applyDefaultCarcassCuts, listDefaultCarcassCuts, type DefaultCarcassCut } from "./carcass-templates-service";
+import { animalTypeLabel, buildTypeChips, carcassNorm, carcassTypeKey, findSameType, initialType } from "./carcass-types";
 import { useSuppliers } from "../purchases/useSuppliers";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { listProductsForBranch } from "../inventory/inventory-service";
@@ -14,819 +17,840 @@ function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
 }
 
-const ANIMAL_TYPES = ["Vaca / media res", "Cerdo", "Pollo", "Mocho"];
-const CUSTOM_OPTION = "__otro__";
-
-/**
- * Tipo de animal / mercadería: los de siempre + los nombres que el negocio ya
- * usó (en reses o plantillas) + "Escribir otro nombre…" (ej. "Media res de
- * cerdo", "Cordero"). El nombre es texto libre en la base; la plantilla de
- * cortes se busca por ese mismo nombre.
- */
-function AnimalTypePicker({ value, options, onChange }: { value: string; options: string[]; onChange: (value: string) => void }) {
-  const [typing, setTyping] = useState(false);
-  if (typing || !options.includes(value)) {
-    return (
-      <span style={{ display: "flex", gap: 6, alignItems: "center", minWidth: 0 }}>
-        <input
-          autoFocus={typing}
-          placeholder="Nombre (ej. Media res de cerdo)"
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          style={{ flex: 1, minWidth: 0 }}
-        />
-        <button
-          type="button"
-          className="secondary"
-          title="Elegir de la lista"
-          onClick={() => {
-            setTyping(false);
-            if (!options.includes(value)) onChange(options[0]);
-          }}
-        >
-          Lista
-        </button>
-      </span>
-    );
-  }
-  return (
-    <select
-      value={value}
-      onChange={(e) => {
-        if (e.target.value === CUSTOM_OPTION) {
-          setTyping(true);
-          onChange("");
-        } else {
-          onChange(e.target.value);
-        }
-      }}
-    >
-      {options.map((t) => (
-        <option key={t} value={t}>{t}</option>
-      ))}
-      <option value={CUSTOM_OPTION}>+ Escribir otro nombre…</option>
-    </select>
-  );
+function formatKg(value: number) {
+  return new Intl.NumberFormat("es-AR", { maximumFractionDigits: 3 }).format(value);
 }
 
+function shortDate(iso: string) {
+  const [, m, d] = iso.split("-");
+  return d && m ? `${d}/${m}` : iso;
+}
+
+/** Peso de "uno típico" si el negocio no puso el suyo (solo para mostrar los cortes de siempre en kilos). */
+const TYPICAL_WEIGHT: Record<string, number> = { mediares: 110, cerdo: 90, pollo: 20 };
+
+function refWeightStorageKey(type: string) {
+  return `patagonia-carcass-ref-weight-${type}`;
+}
+
+function readRefWeight(type: string): string {
+  try {
+    return localStorage.getItem(refWeightStorageKey(type)) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+const sameKey = (a: string, b: string) => carcassTypeKey(a) === carcassTypeKey(b);
+
 export function Carcass() {
-  const { batches, loading, error, saveBatch, removeBatch, cuts, cutsLoading, loadCuts, saveCut, saveCutSilent, removeCut } = useCarcass();
-  const { templates, save: saveTemplate, remove: removeTemplate } = useCarcassTemplates();
+  const { batches, loading, error, saveBatch, removeBatch, cuts: loadedCuts, cutsLoading, loadCuts, saveCut, saveCutSilent, removeCut } = useCarcass();
+  const { templates, reload: reloadTemplates, save: saveTemplate, remove: removeTemplate } = useCarcassTemplates();
   const { suppliers } = useSuppliers();
   const { branchId } = useActiveBranch();
   const [products, setProducts] = useState<Product[]>([]);
+  const [defaults, setDefaults] = useState<DefaultCarcassCut[]>([]);
+  const [totals, setTotals] = useState<Map<string, CarcassBatchTotals>>(new Map());
 
   const [message, setMessage] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  // Qué se desposta: los botones de arriba.
+  const [selectedType, setSelectedType] = useState("");
+  const [extraTypes, setExtraTypes] = useState<string[]>([]);
+  const [showMore, setShowMore] = useState(false);
+  const [adding, setAdding] = useState(false);
+  const [newTypeName, setNewTypeName] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
+  const [showTemplates, setShowTemplates] = useState(false);
+  const [showMoreOptions, setShowMoreOptions] = useState(false);
+
+  // Res cargada a mano (sin factura): escondida en "Más opciones".
   const [showBatchForm, setShowBatchForm] = useState(false);
   const [editingBatchId, setEditingBatchId] = useState<string | null>(null);
   const [batchDate, setBatchDate] = useState(todayIso());
-  const [animalType, setAnimalType] = useState(ANIMAL_TYPES[0]);
   const [supplierId, setSupplierId] = useState("");
   const [totalWeight, setTotalWeight] = useState("");
   const [pricePerKg, setPricePerKg] = useState("");
-  const [batchBoxCount, setBatchBoxCount] = useState("1");
-  const [batchBoxWeight, setBatchBoxWeight] = useState("");
 
   const [cutName, setCutName] = useState("");
   const [cutWeight, setCutWeight] = useState("");
   const [cutPrice, setCutPrice] = useState("");
-  const [cutProductId, setCutProductId] = useState("");
-  const [editingCutId, setEditingCutId] = useState<string | null>(null);
 
-  const [showTemplates, setShowTemplates] = useState(false);
-  const [templateAnimalType, setTemplateAnimalType] = useState(ANIMAL_TYPES[0]);
-  const [newTplCutName, setNewTplCutName] = useState("");
-  const [newTplYield, setNewTplYield] = useState("");
-  const [newTplProductId, setNewTplProductId] = useState("");
-  const [generatingCuts, setGeneratingCuts] = useState(false);
-  const [generateProgress, setGenerateProgress] = useState("");
-  const [editingTemplateId, setEditingTemplateId] = useState<string | null>(null);
-  const [editTplCutName, setEditTplCutName] = useState("");
-  const [editTplYield, setEditTplYield] = useState("");
-  const [editTplProductId, setEditTplProductId] = useState("");
-
-  // Un carnicero piensa en kilos, no en %: se puede cargar cada corte de la
-  // plantilla directo en kg de un animal "de referencia" (ej. "mi mocho
-  // pesa 100 kg"), y acá se convierte a % para guardarlo -- la plantilla
-  // sigue siendo en % puertas adentro porque después se aplica a reses de
-  // cualquier peso real, no solo al de referencia. Queda guardado en este
-  // navegador por tipo de animal, para no tener que volver a escribirlo.
-  const [yieldInputMode, setYieldInputMode] = useState<"kg" | "percent">(() => {
-    try {
-      return localStorage.getItem("patagonia-carcass-yield-mode") === "percent" ? "percent" : "kg";
-    } catch {
-      return "kg";
-    }
-  });
-  const [templateRefWeight, setTemplateRefWeight] = useState("");
-
-  useEffect(() => {
-    if (selectedId) void loadCuts(selectedId);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedId]);
+  const [refWeight, setRefWeight] = useState("");
+  const [tplName, setTplName] = useState("");
+  const [tplKg, setTplKg] = useState("");
+  const [tplProductId, setTplProductId] = useState("");
 
   useEffect(() => {
     if (!branchId) return;
     listProductsForBranch(branchId).then(setProducts).catch(() => setProducts([]));
   }, [branchId]);
 
-  const selectedBatch = batches.find((b) => b.id === selectedId) ?? null;
-
-  // Los de siempre primero, después los nombres propios que ya se usaron.
-  const animalTypeOptions = useMemo(() => {
-    const seen = new Set(ANIMAL_TYPES.map((t) => t.toLowerCase()));
-    const own: string[] = [];
-    for (const name of [...batches.map((b) => b.animalType), ...templates.map((t) => t.animalType)]) {
-      const clean = name.trim();
-      if (clean && !seen.has(clean.toLowerCase())) {
-        seen.add(clean.toLowerCase());
-        own.push(clean);
-      }
-    }
-    return [...ANIMAL_TYPES, ...own.sort((a, b) => a.localeCompare(b, "es"))];
-  }, [batches, templates]);
-
-  const cutsTotal = useMemo(() => cuts.reduce((sum, c) => sum + c.lineTotal, 0), [cuts]);
-  const previewCutTotal = carcassCutLineTotal({
-    weight: Number.isFinite(quantityNumber(cutWeight)) ? quantityNumber(cutWeight || "0") : 0,
-    unitPrice: Number.isFinite(parseAmount(cutPrice || "0")) ? parseAmount(cutPrice || "0") : 0
-  });
-
-  const weightValue = quantityNumber(totalWeight || "0");
-  const pricePerKgValue = parseAmount(pricePerKg || "0");
-  const computedTotalCost = Number.isFinite(weightValue) && Number.isFinite(pricePerKgValue) ? weightValue * pricePerKgValue : 0;
-  const batchBoxTotal = Math.round((Number(batchBoxCount) || 0) * (quantityNumber(batchBoxWeight) || 0) * 1000) / 1000;
-
-  // Mismo peso de referencia que "Peso de referencia" en la Plantilla de
-  // cortes (misma clave de localStorage por tipo de animal) -- si ya lo
-  // cargaste ahí, acá aparece solo. Sirve para lo que se compra por unidad
-  // igual (ej. cajones de pollo de 20 kg cada uno): poné cuántos cajones y
-  // el sistema calcula el peso total.
   useEffect(() => {
-    if (!showBatchForm) return;
-    try {
-      setBatchBoxWeight(localStorage.getItem(`patagonia-carcass-ref-weight-${animalType}`) ?? "");
-    } catch {
-      setBatchBoxWeight("");
-    }
-  }, [animalType, showBatchForm]);
+    listDefaultCarcassCuts().then(setDefaults).catch(() => setDefaults([]));
+  }, []);
 
-  function handleBatchBoxWeightChange(value: string) {
-    setBatchBoxWeight(value);
-    try {
-      localStorage.setItem(`patagonia-carcass-ref-weight-${animalType}`, value);
-    } catch {
-      // sin localStorage no se recuerda entre sesiones, no es grave
-    }
-  }
+  useEffect(() => {
+    listCarcassBatchTotals(batches.map((b) => b.id)).then(setTotals).catch(() => setTotals(new Map()));
+  }, [batches]);
 
-  function resetBatchForm() {
-    setEditingBatchId(null);
-    setBatchDate(todayIso());
-    setAnimalType(ANIMAL_TYPES[0]);
-    setBatchBoxCount("1");
-    setSupplierId("");
-    setTotalWeight("");
-    setPricePerKg("");
+  const chips = useMemo(
+    () => buildTypeChips(batches.map((b) => b.animalType), [...templates.map((t) => t.animalType), ...extraTypes]),
+    [batches, templates, extraTypes]
+  );
+
+  // Al abrir: el animal de la última res.
+  useEffect(() => {
+    if (selectedType || loading) return;
+    setSelectedType(initialType(chips, batches[0]?.animalType));
+  }, [chips, batches, loading, selectedType]);
+
+  const typeBatches = useMemo(() => batches.filter((b) => sameKey(b.animalType, selectedType)), [batches, selectedType]);
+  const typeTemplates = useMemo(
+    () => templates.filter((t) => sameKey(t.animalType, selectedType)).sort((a, b) => a.sortOrder - b.sortOrder),
+    [templates, selectedType]
+  );
+  const typeDefaults = useMemo(() => defaults.filter((d) => d.typeKey === carcassTypeKey(selectedType)), [defaults, selectedType]);
+  const label = animalTypeLabel(selectedType);
+
+  // Al cambiar de animal: la última res de ese animal.
+  useEffect(() => {
+    setSelectedId(typeBatches[0]?.id ?? null);
     setShowBatchForm(false);
-  }
+    setRefWeight(readRefWeight(selectedType));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedType]);
 
-  function startEditBatch(batchId: string) {
-    const batch = batches.find((b) => b.id === batchId);
-    if (!batch) return;
-    setEditingBatchId(batchId);
-    setBatchDate(batch.batchDate);
-    setAnimalType(batch.animalType);
-    setSupplierId(batch.supplierId ?? "");
-    setTotalWeight(String(batch.totalWeight));
-    setPricePerKg(batch.totalWeight > 0 ? String(Math.round((batch.totalCost / batch.totalWeight) * 100) / 100) : "");
-    setShowBatchForm(true);
-  }
-
-  async function generateCutsFromTemplate(batchId: string, forAnimalType: string, forTotalWeight: number) {
-    const templateRows = templates.filter((t) => t.animalType === forAnimalType);
-    if (templateRows.length === 0) return 0;
-
-    setGeneratingCuts(true);
-    try {
-      // Se guardan todos sin recargar la tabla entre uno y otro (antes se
-      // recargaba y reordenaba después de cada corte, y se veía trabado).
-      try {
-        for (const [index, t] of templateRows.entries()) {
-          setGenerateProgress(`${index + 1}/${templateRows.length}`);
-          const product = t.productId ? products.find((p) => p.id === t.productId) : undefined;
-          await saveCutSilent({
-            batchId,
-            cutName: t.cutName,
-            productId: t.productId,
-            weight: carcassTemplateCutWeight(forTotalWeight, t.yieldPercent),
-            unitPrice: product?.priceRetail ?? 0
-          });
-        }
-      } finally {
-        await loadCuts(batchId);
-      }
-      return templateRows.length;
-    } finally {
-      setGeneratingCuts(false);
-      setGenerateProgress("");
-    }
-  }
-
-  async function handleSaveBatch() {
-    try {
-      if (!animalType.trim()) throw new Error("Escribí qué es (ej. Media res de cerdo).");
-      if (!Number.isFinite(weightValue) || weightValue <= 0) throw new Error("Ingresá el peso total.");
-      if (!Number.isFinite(pricePerKgValue) || pricePerKgValue < 0) throw new Error("Ingresá el precio por kg.");
-      const result = await saveBatch({
-        id: editingBatchId ?? undefined,
-        batchDate,
-        animalType,
-        supplierId: supplierId || undefined,
-        totalWeight: weightValue,
-        totalCost: computedTotalCost
-      });
-      const wasEditing = !!editingBatchId;
-      resetBatchForm();
-      setSelectedId(result.id);
-
-      if (!wasEditing) {
-        const generated = await generateCutsFromTemplate(result.id, animalType, weightValue);
-        setMessage(
-          generated > 0
-            ? `Res cargada y ${generated} cortes generados desde la plantilla de "${animalType}" — revisá los pesos con la balanza real.`
-            : `Res cargada. No hay plantilla de cortes para "${animalType}" todavía (podés cargar una en "Plantillas de despiece").`
-        );
-      } else {
-        setMessage("Res actualizada.");
-      }
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo guardar la res.");
-    }
-  }
-
-  async function handleDeleteBatch(id: string) {
-    if (!window.confirm("¿Seguro que querés eliminar esta res? Se borran también sus cortes cargados. No se puede deshacer.")) return;
-    try {
-      await removeBatch(id);
-      if (selectedId === id) setSelectedId(null);
-      setMessage("Res eliminada.");
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo eliminar.");
-    }
-  }
-
-  async function handleSaveCut() {
-    try {
-      if (!selectedBatch) return;
-      if (!cutName.trim()) throw new Error("Ingresá el nombre del corte.");
-      const weight = quantityNumber(cutWeight);
-      const price = parseAmount(cutPrice);
-      if (!Number.isFinite(weight) || weight <= 0) throw new Error("Ingresá el peso del corte.");
-      if (!Number.isFinite(price) || price < 0) throw new Error("Ingresá el precio de venta.");
-
-      await saveCut({
-        id: editingCutId ?? undefined,
-        batchId: selectedBatch.id,
-        cutName: cutName.trim(),
-        productId: cutProductId || undefined,
-        weight,
-        unitPrice: price
-      });
-      setCutName("");
-      setCutWeight("");
-      setCutPrice("");
-      setCutProductId("");
-      setEditingCutId(null);
-      setMessage(cutProductId ? "Corte guardado y sumado al stock." : "Corte guardado.");
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo guardar el corte.");
-    }
-  }
-
-  function startEditCut(cutId: string) {
-    const cut = cuts.find((c) => c.id === cutId);
-    if (!cut) return;
-    setEditingCutId(cutId);
-    setCutName(cut.cutName);
-    setCutWeight(String(cut.weight));
-    setCutPrice(String(cut.unitPrice));
-    setCutProductId(cut.productId ?? "");
-  }
-
-  async function handleDeleteCut(cutId: string) {
-    if (!window.confirm("¿Seguro que querés eliminar este corte? No se puede deshacer.")) return;
-    try {
-      if (!selectedBatch) return;
-      await removeCut(cutId, selectedBatch.id);
-      setMessage("Corte eliminado.");
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo eliminar.");
-    }
-  }
-
-  async function handleGenerateCutsForSelectedBatch() {
-    if (!selectedBatch) return;
-    if (cuts.length > 0) {
-      if (!window.confirm("Esta res ya tiene cortes cargados. ¿Agregar igual los de la plantilla? Puede duplicar cortes.")) return;
-    }
-    const generated = await generateCutsFromTemplate(selectedBatch.id, selectedBatch.animalType, selectedBatch.totalWeight);
-    setMessage(
-      generated > 0
-        ? `${generated} cortes generados desde la plantilla — revisá los pesos con la balanza real.`
-        : `No hay plantilla de cortes para "${selectedBatch.animalType}" todavía.`
-    );
-  }
-
-  const templatesForType = templates.filter((t) => t.animalType === templateAnimalType);
-  const templateYieldSum = templatesForType.reduce((sum, t) => sum + t.yieldPercent, 0);
-  const refWeight = quantityNumber(templateRefWeight) || 0;
-
-  // Trae/guarda el peso de referencia de este tipo de animal, por navegador
-  // -- así cada tipo (Mocho, Cerdo, Pollo...) recuerda el suyo.
   useEffect(() => {
-    try {
-      setTemplateRefWeight(localStorage.getItem(`patagonia-carcass-ref-weight-${templateAnimalType}`) ?? "");
-    } catch {
-      setTemplateRefWeight("");
-    }
-  }, [templateAnimalType]);
+    if (!selectedId && typeBatches.length > 0) setSelectedId(typeBatches[0].id);
+  }, [typeBatches, selectedId]);
 
-  function handleRefWeightChange(value: string) {
-    setTemplateRefWeight(value);
-    try {
-      localStorage.setItem(`patagonia-carcass-ref-weight-${templateAnimalType}`, value);
-    } catch {
-      // sin localStorage no se recuerda entre sesiones, no es grave
-    }
-  }
+  useEffect(() => {
+    if (selectedId) void loadCuts(selectedId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId]);
 
-  function handleYieldModeChange(mode: "kg" | "percent") {
-    setYieldInputMode(mode);
-    try {
-      localStorage.setItem("patagonia-carcass-yield-mode", mode);
-    } catch {
-      // no es grave
-    }
-  }
+  const selectedBatch = typeBatches.find((b) => b.id === selectedId) ?? null;
+  // Solo los de la res elegida (al cambiar de res, los de la anterior siguen un momento hasta que llegan los nuevos).
+  const cuts = useMemo(() => loadedCuts.filter((c) => c.batchId === selectedId), [loadedCuts, selectedId]);
 
-  /** Convierte lo que escribió la persona (kg o %, según el modo elegido) al
-   * % que en verdad guarda la plantilla. En modo kg hace falta el peso de
-   * referencia. */
-  function parseYieldInput(raw: string): number {
-    const value = quantityNumber(raw);
-    if (yieldInputMode === "percent") {
-      if (!Number.isFinite(value) || value <= 0 || value > 100) throw new Error("Ingresá un % de rendimiento válido.");
-      return value;
-    }
-    if (refWeight <= 0) throw new Error(`Primero poné el peso de referencia del "${templateAnimalType}" (arriba), para poder cargar los cortes en kg.`);
-    if (!Number.isFinite(value) || value <= 0) throw new Error("Ingresá un peso en kg válido.");
-    const pct = (value / refWeight) * 100;
-    if (pct > 100) throw new Error(`Ese corte pesaría más que el animal entero de referencia (${refWeight} kg).`);
-    return pct;
-  }
-
-  /** Kg que representa un % con el peso de referencia actual, para mostrarlo
-   * al lado del % guardado (aunque se esté en modo %, así uno ve la
-   * equivalencia). null si todavía no hay peso de referencia cargado. */
-  function yieldPercentToKg(pct: number): number | null {
-    if (refWeight <= 0) return null;
-    return Math.round(((pct / 100) * refWeight) * 1000) / 1000;
-  }
-
-  async function handleAddTemplateCut() {
-    try {
-      if (!templateAnimalType.trim()) throw new Error("Escribí para qué es la plantilla (ej. Media res de cerdo).");
-      if (!newTplCutName.trim()) throw new Error("Ingresá el nombre del corte.");
-      const yieldPercent = parseYieldInput(newTplYield);
-      await saveTemplate({
-        animalType: templateAnimalType,
-        cutName: newTplCutName.trim(),
-        yieldPercent,
-        productId: newTplProductId || undefined,
-        sortOrder: templatesForType.length
-      });
-      setNewTplCutName("");
-      setNewTplYield("");
-      setNewTplProductId("");
-      setMessage("Corte agregado a la plantilla.");
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo agregar el corte a la plantilla.");
-    }
-  }
-
-  function startEditTemplateCut(t: (typeof templatesForType)[number]) {
-    setEditingTemplateId(t.id);
-    setEditTplCutName(t.cutName);
-    const kg = yieldInputMode === "kg" ? yieldPercentToKg(t.yieldPercent) : null;
-    setEditTplYield(kg !== null ? String(kg) : String(t.yieldPercent));
-    setEditTplProductId(t.productId ?? "");
-  }
-
-  async function handleSaveTemplateEdit(id: string, sortOrder: number) {
-    try {
-      if (!editTplCutName.trim()) throw new Error("Ingresá el nombre del corte.");
-      const yieldPercent = parseYieldInput(editTplYield);
-      await saveTemplate({
-        id,
-        animalType: templateAnimalType,
-        cutName: editTplCutName.trim(),
-        yieldPercent,
-        productId: editTplProductId || undefined,
-        sortOrder
-      });
-      setEditingTemplateId(null);
-      setMessage("Corte de la plantilla actualizado.");
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo guardar el cambio.");
-    }
-  }
-
-  async function handleDeleteTemplateCut(id: string) {
-    if (!window.confirm("¿Seguro que querés quitar este corte de la plantilla?")) return;
-    try {
-      await removeTemplate(id);
-      setMessage("Corte quitado de la plantilla.");
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo quitar.");
-    }
-  }
-
-  const cutsWeightTotal = cuts.reduce((sum, c) => sum + c.weight, 0);
-  const yieldSoFar = selectedBatch && selectedBatch.totalWeight > 0 ? Math.round((cutsWeightTotal / selectedBatch.totalWeight) * 1000) / 10 : 0;
-
-  const gananciaTotal = selectedBatch ? cutsTotal - selectedBatch.totalCost : 0;
-  // Costo real de cada corte de esta res (la compra repartida por lo que vale cada corte). Misma cuenta que la base.
-  const realCosts = useMemo(() => (selectedBatch ? allocateCarcassCost(selectedBatch.totalCost, cuts) : []), [selectedBatch, cuts]);
-  // El costo pasa solo a Stock al guardar cada corte (migración 123): se recargan los productos para mostrar el de hoy.
+  // El costo de cada corte pasa solo a Stock (migración 123): se recargan los productos para mostrar el de hoy.
   useEffect(() => {
     if (!branchId || !selectedBatch) return;
     listProductsForBranch(branchId).then(setProducts).catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cuts, selectedBatch?.totalCost]);
-  const margenTotal = selectedBatch ? marginPercent(selectedBatch.totalCost, cutsTotal) : 0;
 
-  function handlePrint() {
-    window.print();
+  const productsByNorm = useMemo(() => {
+    const map = new Map<string, Product[]>();
+    for (const p of products) {
+      const key = carcassNorm(p.name);
+      map.set(key, [...(map.get(key) ?? []), p]);
+    }
+    return map;
+  }, [products]);
+  const sortedProducts = useMemo(() => [...products].sort((a, b) => a.name.localeCompare(b.name, "es")), [products]);
+
+  /** El producto que se llama igual que el corte, si hay uno solo. */
+  function productForName(name: string): Product | undefined {
+    const found = productsByNorm.get(carcassNorm(name)) ?? [];
+    return found.length === 1 ? found[0] : undefined;
   }
+
+  function totalsFor(batch: CarcassBatch): CarcassBatchTotals | undefined {
+    if (batch.id === selectedBatch?.id && !cutsLoading && (cuts.length > 0 || !totals.has(batch.id))) {
+      return {
+        value: cuts.reduce((s, c) => s + c.lineTotal, 0),
+        weight: cuts.reduce((s, c) => s + c.weight, 0),
+        cuts: cuts.length,
+        unpriced: cuts.filter((c) => c.unitPrice <= 0 && c.weight > 0).length
+      };
+    }
+    return totals.get(batch.id);
+  }
+
+  function supplierName(id?: string) {
+    return id ? suppliers.find((s) => s.id === id)?.name : undefined;
+  }
+
+  async function refreshTotals() {
+    setTotals(await listCarcassBatchTotals(batches.map((b) => b.id)).catch(() => totals));
+  }
+
+  // ---------- Qué se desposta ----------
+
+  function chooseType(type: string) {
+    setSelectedType(type);
+    setShowMore(false);
+    setAdding(false);
+    setMessage("");
+  }
+
+  const sameAsNew = newTypeName.trim() ? findSameType(newTypeName, chips.all) : undefined;
+
+  function addType(useExisting: boolean) {
+    const name = newTypeName.trim();
+    if (!name) return;
+    if (useExisting && sameAsNew) {
+      chooseType(sameAsNew);
+    } else {
+      setExtraTypes((prev) => [...prev, name]);
+      chooseType(name);
+    }
+    setNewTypeName("");
+  }
+
+  // ---------- Cortes de una res ----------
+
+  const selectedTotals = selectedBatch ? totalsFor(selectedBatch) : undefined;
+  const value = selectedTotals?.value ?? 0;
+  const ganancia = selectedBatch ? value - selectedBatch.totalCost : 0;
+  const realCosts = useMemo(() => (selectedBatch ? allocateCarcassCost(selectedBatch.totalCost, cuts) : []), [selectedBatch, cuts]);
+  const costPerKgByProduct = useMemo(() => new Map(realCosts.map((l) => [l.productId, l.costPerKg])), [realCosts]);
+  const unpricedCuts = cuts.filter((c) => c.unitPrice <= 0 && c.weight > 0).length;
+  const cutsWeight = cuts.reduce((s, c) => s + c.weight, 0);
+  const yieldPct = selectedBatch && selectedBatch.totalWeight > 0 ? Math.round((cutsWeight / selectedBatch.totalWeight) * 1000) / 10 : 0;
+  const allFromTemplate = cuts.length > 0 && typeTemplates.length > 0 && cuts.every((c) => typeTemplates.some((t) => carcassNorm(t.cutName) === carcassNorm(c.cutName)));
+
+  async function updateCut(cut: CarcassCut, changes: Partial<Pick<CarcassCut, "weight" | "unitPrice" | "productId">>) {
+    if (!selectedBatch) return;
+    try {
+      await saveCut({
+        id: cut.id,
+        batchId: selectedBatch.id,
+        cutName: cut.cutName,
+        productId: changes.productId ?? cut.productId,
+        weight: changes.weight ?? cut.weight,
+        unitPrice: changes.unitPrice ?? cut.unitPrice
+      });
+      setMessage("");
+      void refreshTotals();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo guardar el corte.");
+    }
+  }
+
+  function handleWeightBlur(cut: CarcassCut, raw: string) {
+    const weight = quantityNumber(raw);
+    if (!Number.isFinite(weight) || weight < 0) {
+      setMessage("Los kilos no son un número válido.");
+      return;
+    }
+    if (Math.abs(weight - cut.weight) < 0.0005) return;
+    void updateCut(cut, { weight });
+  }
+
+  function handlePriceBlur(cut: CarcassCut, raw: string) {
+    const price = parseAmount(raw || "0");
+    if (!Number.isFinite(price) || price < 0) {
+      setMessage("El precio no es un número válido.");
+      return;
+    }
+    if (Math.abs(price - cut.unitPrice) < 0.005) return;
+    void updateCut(cut, { unitPrice: price });
+  }
+
+  function handleLinkProduct(cut: CarcassCut, productId: string) {
+    const product = products.find((p) => p.id === productId);
+    if (!product) return;
+    void updateCut(cut, { productId, unitPrice: cut.unitPrice > 0 ? cut.unitPrice : product.priceRetail });
+  }
+
+  async function handleDeleteCut(cut: CarcassCut) {
+    if (!selectedBatch || !window.confirm(`¿Quitar "${cut.cutName}" de esta res?`)) return;
+    try {
+      await removeCut(cut.id, selectedBatch.id);
+      void refreshTotals();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo quitar.");
+    }
+  }
+
+  async function handleAddCut() {
+    if (!selectedBatch) return;
+    try {
+      const name = cutName.trim();
+      if (!name) throw new Error("Escribí el corte.");
+      const weight = quantityNumber(cutWeight);
+      if (!Number.isFinite(weight) || weight <= 0) throw new Error("Poné los kilos del corte.");
+      const product = productForName(name);
+      const price = cutPrice.trim() ? parseAmount(cutPrice) : product?.priceRetail ?? NaN;
+      if (!Number.isFinite(price) || price < 0) throw new Error(`Poné el precio de venta de "${name}" (no hay un producto de Stock que se llame así).`);
+      await saveCut({ batchId: selectedBatch.id, cutName: name, productId: product?.id, weight, unitPrice: price });
+      setCutName("");
+      setCutWeight("");
+      setCutPrice("");
+      setMessage(product ? `"${name}" agregado y sumado al stock.` : `"${name}" agregado.`);
+      void refreshTotals();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo agregar el corte.");
+    }
+  }
+
+  // ---------- Res cargada a mano ----------
+
+  /** Reparte una res con los cortes de siempre (si no hay y useDefaults, primero copia los típicos). */
+  async function fillFromTemplates(batchId: string, type: string, weight: number, useDefaults: boolean): Promise<number> {
+    let rows = templates.filter((t) => sameKey(t.animalType, type));
+    if (rows.length === 0 && useDefaults && defaults.some((d) => d.typeKey === carcassTypeKey(type))) {
+      await applyDefaultCarcassCuts(type);
+      rows = (await reloadTemplates()).filter((t) => sameKey(t.animalType, type));
+    }
+    if (rows.length === 0) return 0;
+    try {
+      for (const t of rows) {
+        const product = t.productId ? products.find((p) => p.id === t.productId) : undefined;
+        await saveCutSilent({
+          batchId,
+          cutName: t.cutName,
+          productId: t.productId,
+          weight: carcassTemplateCutWeight(weight, t.yieldPercent),
+          unitPrice: product?.priceRetail ?? 0
+        });
+      }
+    } finally {
+      await loadCuts(batchId);
+    }
+    return rows.length;
+  }
+
+  function openBatchForm(batch?: CarcassBatch) {
+    setEditingBatchId(batch?.id ?? null);
+    setBatchDate(batch?.batchDate ?? todayIso());
+    setSupplierId(batch?.supplierId ?? "");
+    setTotalWeight(batch ? String(batch.totalWeight) : "");
+    setPricePerKg(batch && batch.totalWeight > 0 ? String(Math.round((batch.totalCost / batch.totalWeight) * 100) / 100) : "");
+    setShowBatchForm(true);
+  }
+
+  async function handleSaveBatch() {
+    try {
+      const weight = quantityNumber(totalWeight || "0");
+      const price = parseAmount(pricePerKg || "0");
+      if (!Number.isFinite(weight) || weight <= 0) throw new Error("Poné el peso total.");
+      if (!Number.isFinite(price) || price <= 0) throw new Error("Poné el precio por kg.");
+      setBusy(true);
+      const result = await saveBatch({
+        id: editingBatchId ?? undefined,
+        batchDate,
+        animalType: selectedType,
+        supplierId: supplierId || undefined,
+        totalWeight: weight,
+        totalCost: weight * price
+      });
+      setShowBatchForm(false);
+      setShowMoreOptions(false);
+      setSelectedId(result.id);
+      if (!editingBatchId) {
+        // Los típicos solos solo la primera vez (igual que una compra): quien ya cargaba a mano sigue igual.
+        const n = await fillFromTemplates(result.id, selectedType, weight, typeBatches.length === 0);
+        setMessage(n > 0 ? `Listo: repartida en ${n} cortes. Si pesaste, corregí los kilos.` : "Listo. Cargá los cortes abajo.");
+      } else {
+        setMessage("Res corregida.");
+      }
+      void refreshTotals();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo guardar.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDeleteBatch(batch: CarcassBatch) {
+    if (!window.confirm("¿Quitar esta res y sus cortes? No se puede deshacer.")) return;
+    try {
+      await removeBatch(batch.id);
+      setSelectedId(null);
+      setMessage("Res quitada.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo quitar.");
+    }
+  }
+
+  async function handleRefill() {
+    if (!selectedBatch) return;
+    if (cuts.length > 0 && !window.confirm("Esta res ya tiene cortes. ¿Agregar igual los de siempre? Pueden quedar repetidos.")) return;
+    setBusy(true);
+    try {
+      const n = await fillFromTemplates(selectedBatch.id, selectedBatch.animalType, selectedBatch.totalWeight, true);
+      setMessage(n > 0 ? `Repartida en ${n} cortes.` : `No hay cortes de siempre de ${label}.`);
+      void refreshTotals();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo repartir.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ---------- Cortes de siempre ----------
+
+  const refKg = quantityNumber(refWeight) > 0 ? quantityNumber(refWeight) : TYPICAL_WEIGHT[carcassTypeKey(selectedType)] ?? (typeBatches[0]?.totalWeight || 100);
+  const pctToKg = (pct: number) => Math.round(((pct / 100) * refKg) * 1000) / 1000;
+  const templateSum = typeTemplates.reduce((s, t) => s + t.yieldPercent, 0);
+  const templatesWithoutProduct = typeTemplates.filter((t) => !t.productId).length;
+
+  function handleRefWeightChange(value: string) {
+    setRefWeight(value);
+    try {
+      localStorage.setItem(refWeightStorageKey(selectedType), value);
+    } catch {
+      // sin localStorage no se recuerda, no es grave
+    }
+  }
+
+  function kgToPct(raw: string): number {
+    const kg = quantityNumber(raw);
+    if (!Number.isFinite(kg) || kg <= 0) throw new Error("Poné los kilos del corte.");
+    const pct = Math.round((kg / refKg) * 10000) / 100;
+    if (pct > 100) throw new Error(`Ese corte pesaría más que uno entero (${formatKg(refKg)} kg).`);
+    return Math.max(pct, 0.01);
+  }
+
+  async function updateTemplate(t: CarcassCutTemplate, changes: { kg?: string; productId?: string }) {
+    try {
+      const yieldPercent = changes.kg !== undefined ? kgToPct(changes.kg) : t.yieldPercent;
+      if (changes.kg !== undefined && Math.abs(yieldPercent - t.yieldPercent) < 0.005) return;
+      await saveTemplate({
+        id: t.id,
+        animalType: t.animalType,
+        cutName: t.cutName,
+        yieldPercent,
+        productId: changes.productId !== undefined ? changes.productId || undefined : t.productId,
+        sortOrder: t.sortOrder
+      });
+      setMessage("");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo guardar.");
+    }
+  }
+
+  async function handleAddTemplate() {
+    try {
+      const name = tplName.trim();
+      if (!name) throw new Error("Escribí el corte.");
+      const yieldPercent = kgToPct(tplKg);
+      const product = tplProductId ? products.find((p) => p.id === tplProductId) : productForName(name);
+      await saveTemplate({
+        animalType: typeTemplates[0]?.animalType ?? selectedType,
+        cutName: name,
+        yieldPercent,
+        productId: product?.id,
+        sortOrder: (typeTemplates[typeTemplates.length - 1]?.sortOrder ?? 0) + 1
+      });
+      setTplName("");
+      setTplKg("");
+      setTplProductId("");
+      setMessage("");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo agregar.");
+    }
+  }
+
+  async function handleDeleteTemplate(t: CarcassCutTemplate) {
+    if (!window.confirm(`¿Sacar "${t.cutName}" de los cortes de siempre?`)) return;
+    try {
+      await removeTemplate(t.id);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo sacar.");
+    }
+  }
+
+  async function handleUseDefaults() {
+    setBusy(true);
+    try {
+      const n = await applyDefaultCarcassCuts(selectedType);
+      await reloadTemplates();
+      setShowTemplates(true);
+      setMessage(n > 0 ? `Listo: ${n} cortes típicos de ${label}. Corregí los kilos o el producto si en tu negocio es distinto.` : "Ya tenías cortes de siempre.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudieron cargar los cortes típicos.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ---------- Titular ----------
+
+  const latestWithCuts = typeBatches.find((b) => (totalsFor(b)?.cuts ?? 0) > 0);
+  const latestTotals = latestWithCuts ? totalsFor(latestWithCuts) : undefined;
+  const latestGain = latestWithCuts && latestTotals ? latestTotals.value - latestWithCuts.totalCost : 0;
+
+  const suggestionNames = useMemo(() => {
+    const names = new Set<string>();
+    typeTemplates.forEach((t) => names.add(t.cutName));
+    typeDefaults.forEach((d) => names.add(d.cutName));
+    return [...names];
+  }, [typeTemplates, typeDefaults]);
 
   return (
     <>
       <header className="page-header">
         <div>
           <p className="eyebrow">DESPIECE</p>
-          <h1>Despiece y rendimiento</h1>
-          <p className="muted">Cargá el peso y precio por kg de la res completa, y el peso/precio de venta de cada corte, para ver la ganancia real de esa compra.</p>
+          <h1>Despiece</h1>
+          {latestWithCuts && latestTotals && (
+            <p className="carcass-headline">
+              Tu última {label.toLowerCase()} ({shortDate(latestWithCuts.batchDate)}) te dejó{" "}
+              <strong className={latestGain < 0 ? "num-negative" : "num-positive"}>{formatMoney(latestGain)}</strong>
+              {latestTotals.value > 0 && ` (${marginPercent(latestWithCuts.totalCost, latestTotals.value)}%)`}
+              {latestTotals.unpriced > 0 && <span className="muted"> · faltan precios de {latestTotals.unpriced} cortes</span>}
+            </p>
+          )}
         </div>
-        <button className="secondary" onClick={() => setShowTemplates((v) => !v)}>
-          {showTemplates ? "Ocultar plantillas" : "Plantillas de despiece"}
-        </button>
       </header>
 
       {message && <div className="message">{message}</div>}
       {error && <div className="message warning">{error}</div>}
 
-      {showTemplates && (
-        <section className="panel" style={{ marginBottom: 18 }}>
-          <div className="panel-title">
-            <h2>Plantilla de cortes esperados</h2>
-          </div>
-          <p className="muted" style={{ marginTop: -8, marginBottom: 14 }}>
-            Cargá una vez, por tipo de animal, qué cortes esperás y cuánto pesa cada uno. Al cargar una res nueva de ese tipo, se generan solos con el peso proporcional — vos después los ajustás con la balanza real. No hace falta que sumen el peso entero: el resto queda como merma esperada (hueso, grasa, descarte).
-          </p>
-          <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10, alignItems: "center" }}>
-            <AnimalTypePicker value={templateAnimalType} options={animalTypeOptions} onChange={setTemplateAnimalType} />
-            <label className="muted" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              Cargar cortes en:
-              <select value={yieldInputMode} onChange={(e) => handleYieldModeChange(e.target.value as "kg" | "percent")}>
-                <option value="kg">Kilos</option>
-                <option value="percent">%</option>
-              </select>
-            </label>
-            {yieldInputMode === "kg" && (
-              <label className="muted" style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                Peso de referencia de un "{templateAnimalType}" (kg)
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder="ej. 100"
-                  value={templateRefWeight}
-                  onChange={(e) => handleRefWeightChange(e.target.value)}
-                  style={{ width: 90 }}
-                />
-              </label>
+      <p className="carcass-question">¿Qué despostás?</p>
+      <div className="type-chips">
+        {chips.visible.map((type) => (
+          <button key={type} type="button" className={`type-chip${sameKey(type, selectedType) ? " active" : ""}`} onClick={() => chooseType(type)}>
+            {animalTypeLabel(type)}
+          </button>
+        ))}
+        {chips.more.length > 0 && (
+          <span className="type-chip-more">
+            <button
+              type="button"
+              className={`type-chip${chips.more.some((t) => sameKey(t, selectedType)) ? " active" : ""}`}
+              onClick={() => setShowMore((v) => !v)}
+            >
+              {chips.more.find((t) => sameKey(t, selectedType)) ? animalTypeLabel(chips.more.find((t) => sameKey(t, selectedType))!) : "Más"} ▾
+            </button>
+            {showMore && (
+              <span className="type-chip-menu">
+                {chips.more.map((type) => (
+                  <button key={type} type="button" onClick={() => chooseType(type)}>{animalTypeLabel(type)}</button>
+                ))}
+              </span>
             )}
-          </div>
-          {yieldInputMode === "kg" && (
-            <p className="muted" style={{ marginTop: -4, marginBottom: 14, fontSize: 13 }}>
-              Poné el peso típico de un "{templateAnimalType}" (por ejemplo, si tus mochos rondan los 100 kg, poné 100). Con eso ya podés cargar cada corte directo en kilos — el sistema hace la cuenta del % solo, y cuando cargues una res real de otro peso, ajusta los kilos de cada corte en proporción.
-            </p>
-          )}
-
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Corte</th>
-                <th className="num">{yieldInputMode === "kg" ? "Peso (kg)" : "% del peso"}</th>
-                {yieldInputMode === "percent" && refWeight > 0 && <th className="num">≈ kg</th>}
-                <th>Producto (stock)</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {templatesForType.map((t) =>
-                editingTemplateId === t.id ? (
-                  <tr key={t.id}>
-                    <td><input value={editTplCutName} onChange={(e) => setEditTplCutName(e.target.value)} /></td>
-                    <td className="num">
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        value={editTplYield}
-                        onChange={(e) => setEditTplYield(e.target.value)}
-                        style={{ width: 80, textAlign: "right" }}
-                      />
-                    </td>
-                    {yieldInputMode === "percent" && refWeight > 0 && <td className="num muted">{yieldPercentToKg(t.yieldPercent)}</td>}
-                    <td>
-                      <select value={editTplProductId} onChange={(e) => setEditTplProductId(e.target.value)}>
-                        <option value="">Sin producto (no suma stock)</option>
-                        {products.map((product) => (
-                          <option key={product.id} value={product.id}>{product.name}</option>
-                        ))}
-                      </select>
-                    </td>
-                    <td>
-                      <button onClick={() => handleSaveTemplateEdit(t.id, t.sortOrder)}>Guardar</button>{" "}
-                      <button className="secondary" onClick={() => setEditingTemplateId(null)}>Cancelar</button>
-                    </td>
-                  </tr>
-                ) : (
-                  <tr key={t.id}>
-                    <td>{t.cutName}</td>
-                    <td className="num">
-                      {yieldInputMode === "kg" ? (yieldPercentToKg(t.yieldPercent) ?? `${t.yieldPercent}%`) : `${t.yieldPercent}%`}
-                    </td>
-                    {yieldInputMode === "percent" && refWeight > 0 && <td className="num muted">{yieldPercentToKg(t.yieldPercent)}</td>}
-                    <td>{t.productId ? (products.find((p) => p.id === t.productId)?.name ?? "Sí") : "-"}</td>
-                    <td>
-                      <button className="secondary" onClick={() => startEditTemplateCut(t)}>Editar</button>{" "}
-                      <button className="danger" onClick={() => handleDeleteTemplateCut(t.id)}>Quitar</button>
-                    </td>
-                  </tr>
-                )
-              )}
-            </tbody>
-          </table>
-          {templatesForType.length === 0 && <p className="muted">Todavía no hay cortes en la plantilla de "{templateAnimalType}".</p>}
-          {templatesForType.length > 0 && (
-            <p className="muted" style={{ marginTop: 8 }}>
-              Suma de la plantilla: {templateYieldSum}% del peso total
-              {refWeight > 0 && ` (≈ ${yieldPercentToKg(templateYieldSum)} kg de ${refWeight} kg)`} — el resto queda como merma esperada (hueso, grasa, descarte).
-            </p>
-          )}
-
-          <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 16 }}>
-            <input placeholder="Corte (ej. Bola de lomo)" value={newTplCutName} onChange={(e) => setNewTplCutName(e.target.value)} />
+          </span>
+        )}
+        {!adding && (
+          <button type="button" className="type-chip add" onClick={() => setAdding(true)}>+ Agregar</button>
+        )}
+      </div>
+      {adding && (
+        <div className="form-box carcass-add-type">
+          <div className="row-actions" style={{ justifyContent: "flex-start", flexWrap: "wrap" }}>
             <input
-              type="text"
-              inputMode="decimal"
-              placeholder={yieldInputMode === "kg" ? "Peso (kg)" : "% del peso"}
-              value={newTplYield}
-              onChange={(e) => setNewTplYield(e.target.value)}
-              style={{ width: 120 }}
+              autoFocus
+              autoComplete="off"
+              placeholder="Ej. Capón, Cordero"
+              value={newTypeName}
+              onChange={(e) => setNewTypeName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter" && !sameAsNew) addType(false); }}
+              style={{ maxWidth: 260 }}
             />
-            <select value={newTplProductId} onChange={(e) => setNewTplProductId(e.target.value)}>
-              <option value="">Sin producto (no suma stock)</option>
-              {products.map((product) => (
-                <option key={product.id} value={product.id}>{product.name}</option>
-              ))}
-            </select>
-            <button onClick={handleAddTemplateCut}>Agregar a la plantilla</button>
+            {!sameAsNew && <button type="button" disabled={!newTypeName.trim()} onClick={() => addType(false)}>Agregar</button>}
+            <button type="button" className="secondary" onClick={() => { setAdding(false); setNewTypeName(""); }}>Cancelar</button>
           </div>
-        </section>
+          {sameAsNew && (
+            <div className="carcass-same-type">
+              Ya tenés <strong>{animalTypeLabel(sameAsNew)}</strong>. ¿Es lo mismo?
+              <div className="row-actions" style={{ justifyContent: "flex-start", marginTop: 8 }}>
+                <button type="button" onClick={() => addType(true)}>Sí, usar {animalTypeLabel(sameAsNew)}</button>
+                <button type="button" className="secondary" onClick={() => addType(false)}>No, es otra cosa</button>
+              </div>
+            </div>
+          )}
+        </div>
       )}
 
-      <div className="content-grid">
+      <div className="carcass-grid">
         <section className="panel">
           <div className="panel-title">
-            <h2>Reses cargadas <span className="muted" style={{ fontSize: 14, fontWeight: 500 }}>{loading ? "Cargando…" : batches.length}</span></h2>
-            {!showBatchForm && <button onClick={() => setShowBatchForm(true)}>+ Agregar res</button>}
+            <h2>{label} que entró</h2>
           </div>
-          <p className="muted" style={{ marginTop: 0, fontSize: 13 }}>
-            Despiece es para saber cuánto rindió y cuánto te costó cada corte. La factura del proveedor va en <strong>Compras</strong>:
-            marcá la línea "Para despostar" y la res aparece sola acá (con plantilla, ya repartida en cortes). Una res cargada acá no genera deuda con el proveedor.
-          </p>
+          {loading && <p className="muted">Cargando…</p>}
+          {!loading && typeBatches.length === 0 && (
+            <p className="muted">
+              Todavía no hay {label.toLowerCase()}. Cargá la factura en <strong>Compras</strong> y marcá el renglón "Para despostar": aparece acá sola.
+            </p>
+          )}
+          <div className="carcass-batches">
+            {typeBatches.map((b) => {
+              const t = totalsFor(b);
+              const gain = t ? t.value - b.totalCost : 0;
+              const supplier = supplierName(b.supplierId);
+              return (
+                <button key={b.id} type="button" className={`carcass-batch${b.id === selectedId ? " selected" : ""}`} onClick={() => setSelectedId(b.id)}>
+                  <span>
+                    <strong>{shortDate(b.batchDate)} · {formatKg(b.totalWeight)} kg</strong>
+                    {supplier && <span className="badge brand">{supplier}</span>}
+                  </span>
+                  <span className="num">
+                    <strong>{formatMoney(b.totalCost)}</strong>
+                    {t && t.cuts > 0 ? (
+                      <small className={gain < 0 ? "num-negative" : "num-positive"}>ganás {formatMoney(gain)}</small>
+                    ) : (
+                      <small className="muted">sin cortes</small>
+                    )}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="carcass-box">
+            <div>
+              <strong>Cortes de siempre</strong>
+              <small className="muted">
+                {typeTemplates.length > 0
+                  ? `${typeTemplates.length} cortes · uno típico pesa ${formatKg(refKg)} kg`
+                  : typeDefaults.length > 0
+                    ? `Todavía no los usás. Hay ${typeDefaults.length} cortes típicos listos.`
+                    : "Todavía no hay. Cargalos para que cada compra se reparta sola."}
+              </small>
+            </div>
+            <button type="button" className="secondary" onClick={() => setShowTemplates((v) => !v)}>{showTemplates ? "Cerrar" : "Ver"}</button>
+          </div>
+
+          <button type="button" className="link-button carcass-more" onClick={() => setShowMoreOptions((v) => !v)}>
+            Más opciones {showMoreOptions ? "▾" : "▸"}
+          </button>
+          {showMoreOptions && !showBatchForm && (
+            <div className="row-actions" style={{ justifyContent: "flex-start", marginTop: 6 }}>
+              <button type="button" className="secondary" onClick={() => openBatchForm()}>Cargar {label.toLowerCase()} sin factura</button>
+            </div>
+          )}
           {showBatchForm && (
-            <div className="form-box">
-              <h3 style={{ margin: "0 0 10px" }}>{editingBatchId ? "Corregir res" : "Res nueva"}</h3>
+            <div className="form-box" style={{ marginTop: 10 }}>
+              <h3 style={{ margin: "0 0 4px" }}>{editingBatchId ? "Corregir" : `${label} sin factura`}</h3>
+              <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>No genera deuda con el proveedor. Si tenés factura, cargala en Compras.</p>
               <div className="form-grid">
                 <label>Fecha<input type="date" value={batchDate} onChange={(e) => setBatchDate(e.target.value)} /></label>
-                <label>Tipo<AnimalTypePicker value={animalType} options={animalTypeOptions} onChange={setAnimalType} /></label>
-                <label className="span-2">
-                  Proveedor (opcional, solo como dato)
+                <label>
+                  Proveedor
                   <select value={supplierId} onChange={(e) => setSupplierId(e.target.value)}>
                     <option value="">Sin proveedor</option>
-                    {suppliers.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}</option>
-                    ))}
+                    {suppliers.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
                   </select>
                 </label>
                 <label>Peso total (kg)<input type="text" inputMode="decimal" value={totalWeight} onChange={(e) => setTotalWeight(e.target.value)} /></label>
                 <label>Precio por kg ($)<input type="text" inputMode="decimal" value={pricePerKg} onChange={(e) => setPricePerKg(e.target.value)} /></label>
               </div>
-              <div className="cash-banner-form" style={{ marginTop: 10, alignItems: "center" }}>
-                <span className="muted" style={{ fontSize: 13 }}>¿Varias unidades iguales (ej. cajones de pollo)?</span>
-                <input type="number" min="1" step="1" value={batchBoxCount} onChange={(e) => setBatchBoxCount(e.target.value)} style={{ width: 55 }} />
-                <span className="muted">de</span>
+              <div className="form-actions">
+                <button type="button" disabled={busy} onClick={handleSaveBatch}>{busy ? "Guardando…" : "Guardar"}</button>
+                <button type="button" className="secondary" onClick={() => setShowBatchForm(false)}>Cancelar</button>
+              </div>
+            </div>
+          )}
+        </section>
+
+        <div className="carcass-right">
+          {showTemplates && (
+            <section className="panel">
+              <div className="panel-title">
+                <h2>Cortes de siempre · {label}</h2>
+                <button type="button" className="secondary" onClick={() => setShowTemplates(false)}>Cerrar</button>
+              </div>
+              <p className="muted" style={{ marginTop: -6 }}>Cada compra de {label.toLowerCase()} se reparte sola en estos cortes, en proporción a lo que pesa.</p>
+              {typeTemplates.length === 0 && typeDefaults.length > 0 && (
+                <div className="carcass-box" style={{ marginBottom: 12 }}>
+                  <div>
+                    <strong>Usar los cortes típicos</strong>
+                    <small className="muted">{typeDefaults.map((d) => d.cutName).join(", ")}</small>
+                  </div>
+                  <button type="button" disabled={busy} onClick={handleUseDefaults}>Usar estos</button>
+                </div>
+              )}
+              <label className="carcass-ref">
+                Uno típico pesa
+                <input type="text" inputMode="decimal" placeholder={formatKg(refKg)} value={refWeight} onChange={(e) => handleRefWeightChange(e.target.value)} />
+                kg
+              </label>
+              {typeTemplates.length > 0 && (
+                <div className="table-scroll">
+                  <table className="data-table">
+                    <thead>
+                      <tr><th>Corte</th><th className="num">Kilos</th><th>Producto de Stock</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                      {typeTemplates.map((t) => (
+                        <tr key={`${t.id}-${t.yieldPercent}-${t.productId ?? ""}-${refKg}`}>
+                          <td>{t.cutName}</td>
+                          <td className="num">
+                            <input
+                              className="carcass-kg"
+                              type="text"
+                              inputMode="decimal"
+                              defaultValue={formatKg(pctToKg(t.yieldPercent))}
+                              onFocus={(e) => e.target.select()}
+                              onBlur={(e) => void updateTemplate(t, { kg: e.target.value })}
+                            />
+                          </td>
+                          <td>
+                            <select value={t.productId ?? ""} onChange={(e) => void updateTemplate(t, { productId: e.target.value })}>
+                              <option value="">Sin producto (no suma stock)</option>
+                              {sortedProducts.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                            </select>
+                          </td>
+                          <td>
+                            <div className="row-actions">
+                              <button type="button" className="danger" aria-label={`Sacar ${t.cutName}`} onClick={() => void handleDeleteTemplate(t)}>✕</button>
+                            </div>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+              {typeTemplates.length > 0 && (
+                <p className="muted" style={{ fontSize: 13 }}>
+                  Suman {formatKg(pctToKg(templateSum))} kg de {formatKg(refKg)} ({Math.round(templateSum * 10) / 10}%). El resto es hueso, grasa y merma.
+                  {templatesWithoutProduct > 0 && <> <strong>{templatesWithoutProduct} sin producto:</strong> no suman stock ni tienen precio.</>}
+                </p>
+              )}
+              <div className="carcass-add-row">
+                <input autoComplete="off" list="carcass-cut-names" placeholder="Corte" value={tplName} onChange={(e) => setTplName(e.target.value)} />
+                <input type="text" inputMode="decimal" placeholder="Kilos" value={tplKg} onChange={(e) => setTplKg(e.target.value)} />
+                <select value={tplProductId} onChange={(e) => setTplProductId(e.target.value)}>
+                  <option value="">Producto (el que se llame igual)</option>
+                  {sortedProducts.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+                <button type="button" onClick={() => void handleAddTemplate()}>Agregar</button>
+              </div>
+            </section>
+          )}
+
+          {!showTemplates && !selectedBatch && (
+            <section className="panel">
+              <p className="muted">Tocá una compra de la izquierda para ver cuánto te dejó.</p>
+            </section>
+          )}
+
+          {!showTemplates && selectedBatch && (
+            <section className="panel print-area">
+              <div className="panel-title">
+                <h2>
+                  {label} del {shortDate(selectedBatch.batchDate)} · {formatKg(selectedBatch.totalWeight)} kg
+                  {supplierName(selectedBatch.supplierId) && <span className="muted" style={{ fontWeight: 500 }}> · {supplierName(selectedBatch.supplierId)}</span>}
+                </h2>
+                <div className="row-actions no-print">
+                  {!selectedBatch.purchaseItemId && (
+                    <>
+                      <button type="button" className="secondary" onClick={() => { setShowMoreOptions(true); openBatchForm(selectedBatch); }}>Corregir</button>
+                      <button type="button" className="danger" onClick={() => void handleDeleteBatch(selectedBatch)}>Quitar</button>
+                    </>
+                  )}
+                  <button type="button" className="secondary" onClick={() => window.print()}>Imprimir</button>
+                </div>
+              </div>
+
+              <div className="kpi-grid carcass-kpis">
+                <div className="kpi-card"><span>Pagaste</span><strong>{formatMoney(selectedBatch.totalCost)}</strong></div>
+                <div className="kpi-card"><span>Vale vendido</span><strong>{cutsLoading ? "…" : formatMoney(value)}</strong></div>
+                <div className="kpi-card">
+                  <span>Ganás</span>
+                  <strong className={ganancia < 0 ? "num-negative" : "num-positive"}>{cutsLoading ? "…" : formatMoney(ganancia)}</strong>
+                  {value > 0 && <small>{marginPercent(selectedBatch.totalCost, value)}%</small>}
+                </div>
+              </div>
+
+              {unpricedCuts > 0 && (
+                <div className="message warning no-print">
+                  {unpricedCuts === 1 ? "1 corte no tiene" : `${unpricedCuts} cortes no tienen`} precio: elegí su producto de Stock en la tabla (o poné el precio), si no "Ganás" queda más bajo de lo real.
+                </div>
+              )}
+              {allFromTemplate && <p className="muted no-print" style={{ margin: "0 0 8px", fontSize: 13 }}>Repartida con tus cortes de siempre. Si pesaste, corregí los kilos.</p>}
+
+              {cuts.length === 0 && !cutsLoading && (
+                <div className="carcass-box no-print" style={{ marginBottom: 12 }}>
+                  <div>
+                    <strong>Sin cortes</strong>
+                    <small className="muted">{typeTemplates.length > 0 || typeDefaults.length > 0 ? "Repartila con los cortes de siempre o cargalos abajo." : "Cargá los cortes abajo."}</small>
+                  </div>
+                  {(typeTemplates.length > 0 || typeDefaults.length > 0) && (
+                    <button type="button" disabled={busy} onClick={() => void handleRefill()}>{busy ? "Repartiendo…" : "Repartir"}</button>
+                  )}
+                </div>
+              )}
+
+              {cuts.length > 0 && (
+                <div className="table-scroll">
+                  <table className="data-table">
+                    <thead>
+                      <tr><th>Corte</th><th className="num">Kilos</th><th className="num">Precio venta</th><th className="num">Te cuesta el kg</th><th className="no-print"></th></tr>
+                    </thead>
+                    <tbody>
+                      {cuts.map((cut) => {
+                        const costKg = cut.productId ? costPerKgByProduct.get(cut.productId) : undefined;
+                        return (
+                          <tr key={`${cut.id}-${cut.weight}-${cut.unitPrice}-${cut.productId ?? ""}`}>
+                            <td>
+                              {cut.cutName}
+                              {!cut.productId && (
+                                <select className="carcass-link no-print" defaultValue="" onChange={(e) => handleLinkProduct(cut, e.target.value)}>
+                                  <option value="" disabled>Elegí el producto…</option>
+                                  {sortedProducts.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                                </select>
+                              )}
+                            </td>
+                            <td className="num">
+                              <input
+                                className="carcass-kg"
+                                type="text"
+                                inputMode="decimal"
+                                defaultValue={formatKg(cut.weight)}
+                                onFocus={(e) => e.target.select()}
+                                onBlur={(e) => handleWeightBlur(cut, e.target.value)}
+                              />
+                            </td>
+                            <td className="num">
+                              <input
+                                className="carcass-price"
+                                type="text"
+                                inputMode="decimal"
+                                defaultValue={cut.unitPrice > 0 ? String(cut.unitPrice) : ""}
+                                placeholder="$"
+                                onFocus={(e) => e.target.select()}
+                                onBlur={(e) => handlePriceBlur(cut, e.target.value)}
+                              />
+                            </td>
+                            <td className="num">{costKg !== undefined && cut.unitPrice > 0 ? formatMoney(costKg) : <span className="muted">—</span>}</td>
+                            <td className="no-print">
+                              <div className="row-actions">
+                                <button type="button" className="danger" aria-label={`Quitar ${cut.cutName}`} onClick={() => void handleDeleteCut(cut)}>✕</button>
+                              </div>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                      <tr>
+                        <td colSpan={5} className="muted" style={{ fontSize: 13 }}>
+                          Rindió {formatKg(cutsWeight)} de {formatKg(selectedBatch.totalWeight)} kg ({yieldPct}%)
+                        </td>
+                      </tr>
+                    </tbody>
+                  </table>
+                </div>
+              )}
+
+              <div className="carcass-add-row no-print">
+                <input autoComplete="off" list="carcass-cut-names" placeholder="Corte" value={cutName} onChange={(e) => setCutName(e.target.value)} />
+                <input type="text" inputMode="decimal" placeholder="Kilos" value={cutWeight} onChange={(e) => setCutWeight(e.target.value)} />
                 <input
                   type="text"
                   inputMode="decimal"
-                  placeholder={`peso c/u "${animalType}" (kg)`}
-                  value={batchBoxWeight}
-                  onChange={(e) => handleBatchBoxWeightChange(e.target.value)}
-                  style={{ width: 150 }}
+                  placeholder={productForName(cutName) ? `$ ${productForName(cutName)!.priceRetail}` : "Precio $/kg"}
+                  value={cutPrice}
+                  onChange={(e) => setCutPrice(e.target.value)}
                 />
-                <span className="muted">kg</span>
-                <button
-                  type="button"
-                  className="secondary"
-                  disabled={batchBoxTotal <= 0}
-                  onClick={() => setTotalWeight(String(batchBoxTotal))}
-                >
-                  Usar como peso total ({batchBoxTotal} kg)
-                </button>
+                <button type="button" onClick={() => void handleAddCut()}>Agregar corte</button>
               </div>
-              <div className="form-actions">
-                <button onClick={handleSaveBatch}>{editingBatchId ? "Guardar cambio" : "Guardar res"}</button>
-                <button className="secondary" onClick={resetBatchForm}>Cancelar</button>
-                <span className="muted" style={{ fontSize: 13 }}>Costo total calculado: {formatMoney(computedTotalCost)}</span>
-              </div>
-            </div>
+            </section>
           )}
-
-          {batches.length > 0 && <p className="muted" style={{ margin: "0 0 6px", fontSize: 12 }}>Tocá una res para ver su resumen y sus cortes.</p>}
-          <div className="table-scroll">
-          <table className="data-table">
-            <thead>
-              <tr><th>Fecha</th><th>Tipo</th><th className="num">Peso</th><th className="num hide-sm">$/kg</th><th className="num">Compra</th><th></th></tr>
-            </thead>
-            <tbody>
-              {batches.map((b) => (
-                <tr key={b.id} className={selectedId === b.id ? "row-selected" : "row-clickable"} onClick={() => setSelectedId(b.id)}>
-                  <td style={{ whiteSpace: "nowrap" }}>{b.batchDate}</td>
-                  <td style={{ minWidth: 105 }}>{b.animalType}</td>
-                  <td className="num">{b.totalWeight} kg</td>
-                  <td className="num hide-sm">{formatMoney(b.totalWeight > 0 ? b.totalCost / b.totalWeight : 0)}</td>
-                  <td className="num">{formatMoney(b.totalCost)}</td>
-                  <td onClick={(e) => e.stopPropagation()}>
-                    <div className="row-actions">
-                      {b.purchaseItemId ? (
-                        <span className="muted" style={{ fontSize: 12 }} title="Esta res vino de Compras: se corrige allá">De Compras</span>
-                      ) : (
-                        <>
-                          <button className="secondary" onClick={() => startEditBatch(b.id)}>Editar</button>
-                          <button className="danger" onClick={() => handleDeleteBatch(b.id)}>Quitar</button>
-                        </>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          </div>
-          {batches.length === 0 && !loading && <p className="muted">Todavía no cargaste ninguna res.</p>}
-
-        </section>
-
-        <section className="panel">
-          <div className="panel-title">
-            <h2>Resumen</h2>
-          </div>
-          {!selectedBatch && <p className="muted">Elegí una res para ver el detalle.</p>}
-          {selectedBatch && (
-            <div className="kpi-grid compact">
-              <div className="kpi-card">
-                <span>Compra</span>
-                <strong>{formatMoney(selectedBatch.totalCost)}</strong>
-              </div>
-              <div className="kpi-card">
-                <span>Venta (cortes)</span>
-                <strong>{cutsLoading ? "…" : formatMoney(cutsTotal)}</strong>
-              </div>
-              <div className="kpi-card">
-                <span>Ganancia</span>
-                <strong className={gananciaTotal < 0 ? "num-negative" : "num-positive"}>{formatMoney(gananciaTotal)}</strong>
-              </div>
-              <div className="kpi-card">
-                <span>Margen</span>
-                <strong className={margenTotal < 0 ? "num-negative" : "num-positive"}>{margenTotal}%</strong>
-              </div>
-              <div className="kpi-card">
-                <span>Rendimiento cargado</span>
-                <strong>{yieldSoFar}%</strong>
-                <small>{cutsWeightTotal} kg de {selectedBatch.totalWeight} kg</small>
-              </div>
-            </div>
-          )}
-        </section>
+        </div>
       </div>
 
-      {selectedBatch && (
-        <section className="panel print-area" style={{ marginTop: 18 }}>
-          <div className="panel-title">
-            <h2>Cortes de {selectedBatch.animalType} — {selectedBatch.batchDate}</h2>
-            <div className="no-print" style={{ display: "flex", gap: 8 }}>
-              <button className="secondary" disabled={generatingCuts} onClick={handleGenerateCutsForSelectedBatch}>
-                {generatingCuts ? `Generando… ${generateProgress}` : "Generar cortes desde plantilla"}
-              </button>
-              <button className="secondary" onClick={handlePrint}>Imprimir</button>
-            </div>
-          </div>
-          <p className="muted print-only-header">
-            Compra {formatMoney(selectedBatch.totalCost)} · Venta {formatMoney(cutsTotal)} · Ganancia {formatMoney(gananciaTotal)} ({margenTotal}%)
-          </p>
-          <div className="form-grid no-print" style={{ marginBottom: 4 }}>
-            <label>Corte<input placeholder="Ej. Asado" value={cutName} onChange={(e) => setCutName(e.target.value)} /></label>
-            <label>Peso (kg)<input type="text" inputMode="decimal" value={cutWeight} onChange={(e) => setCutWeight(e.target.value)} /></label>
-            <label>Precio venta ($/kg)<input type="text" inputMode="decimal" value={cutPrice} onChange={(e) => setCutPrice(e.target.value)} /></label>
-            <label className="span-2">
-              Producto de Stock
-              <select value={cutProductId} onChange={(e) => setCutProductId(e.target.value)}>
-                <option value="">Sin producto (no suma stock)</option>
-                {products.map((product) => (
-                  <option key={product.id} value={product.id}>{product.name}</option>
-                ))}
-              </select>
-            </label>
-            <div className="row-actions" style={{ justifyContent: "flex-start" }}>
-            <button onClick={handleSaveCut}>{editingCutId ? "Guardar cambio" : "Agregar corte"}</button>
-            {editingCutId && (
-              <button className="secondary" onClick={() => { setEditingCutId(null); setCutName(""); setCutWeight(""); setCutPrice(""); setCutProductId(""); }}>Cancelar</button>
-            )}
-            </div>
-          </div>
-          <p className="muted no-print" style={{ marginBottom: 14 }}>
-            Subtotal de este corte: {formatMoney(previewCutTotal)}
-            {" · "}Si el corte no tiene producto asociado, no suma stock — creá el producto en Stock primero si querés que este corte lo alimente.
-          </p>
-
-          <table className="data-table">
-            <thead>
-              <tr><th>Corte</th><th className="num">Peso</th><th className="num hide-sm">Precio/kg</th><th className="num">Subtotal</th><th className="hide-md">Stock</th><th className="no-print"></th></tr>
-            </thead>
-            <tbody>
-              {cuts.map((cut) => (
-                <tr key={cut.id}>
-                  <td>{cut.cutName}</td>
-                  <td className="num">{cut.weight} kg</td>
-                  <td className="num hide-sm">{formatMoney(cut.unitPrice)}</td>
-                  <td className="num">{formatMoney(cut.lineTotal)}</td>
-                  <td className="hide-md">{cut.productId ? (products.find((p) => p.id === cut.productId)?.name ?? "Sí") : "-"}</td>
-                  <td className="no-print">
-                    <div className="row-actions">
-                      <button className="secondary" onClick={() => startEditCut(cut.id)}>Editar</button>
-                      <button className="danger" onClick={() => handleDeleteCut(cut.id)}>Quitar</button>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          {cuts.length === 0 && !cutsLoading && <p className="muted">Todavía no cargaste ningún corte.</p>}
-
-          {realCosts.length > 0 && (
-            <div className="no-print" style={{ marginTop: 20 }}>
-              <h3 style={{ margin: "0 0 6px" }}>Costo real de cada corte</h3>
-              <p className="muted" style={{ margin: "0 0 10px", fontSize: 13 }}>
-                Lo que pagaste por la res, repartido según lo que vale cada corte: el que se vende más caro carga más costo por kilo, y lo que no se vende (hueso, grasa) no carga costo. Pasa solo a Stock cada vez que guardás un corte (si el producto salió en una res más nueva, manda la más nueva).
-              </p>
-              <table className="data-table">
-                <thead>
-                  <tr><th>Producto</th><th className="num">Kilos</th><th className="num">Costo hoy en Stock</th><th className="num">Costo real (esta res)</th></tr>
-                </thead>
-                <tbody>
-                  {realCosts.map((l) => {
-                    const product = products.find((p) => p.id === l.productId);
-                    const byKg = product?.unit === "kg";
-                    return (
-                      <tr key={l.productId}>
-                        <td>{product?.name ?? "Producto"}</td>
-                        <td className="num">{l.weight} kg</td>
-                        <td className="num">{product ? formatMoney(product.cost) : "-"}</td>
-                        <td className="num">{byKg ? <strong>{formatMoney(l.costPerKg)}</strong> : <span className="muted">no se vende por kilo</span>}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </section>
-      )}
+      <datalist id="carcass-cut-names">
+        {suggestionNames.map((name) => <option key={name} value={name} />)}
+      </datalist>
     </>
   );
 }

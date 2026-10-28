@@ -1042,3 +1042,69 @@ input[type="file"], main textarea { max-width: 100%; }
   .data-table:not(.no-stack) .cell-sub { white-space: normal; }
   .table-scroll { overflow-x: visible; margin: 0; padding: 0; }
 }
+
+/* Despiece (2026-10-27): qué se desposta arriba, compras a la izquierda, la res elegida a la derecha. */
+.carcass-headline { margin: 6px 0 0; font-size: 17px; color: var(--ink-2); }
+.carcass-headline strong { font-size: 19px; }
+.carcass-question { margin: 0 0 8px; font-weight: 700; color: var(--ink); }
+.type-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; align-items: center; }
+.type-chip {
+  background: var(--surface); color: var(--ink); border: 2px solid var(--line); border-radius: 12px;
+  padding: 9px 18px; font-size: 16px; font-weight: 700; min-height: 44px; cursor: pointer;
+}
+.type-chip:hover:not(.active) { border-color: var(--brand-line); background: var(--surface); color: var(--ink); }
+.type-chip.active { background: var(--brand); border-color: var(--brand); color: #fff; }
+.type-chip.add { border-style: dashed; color: var(--muted); font-weight: 600; }
+.type-chip-more { position: relative; display: inline-block; }
+.type-chip-menu {
+  position: absolute; top: calc(100% + 4px); left: 0; z-index: 20; min-width: 180px; display: grid;
+  background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); box-shadow: var(--shadow); padding: 4px;
+}
+.type-chip-menu button { background: none; color: var(--ink); border: 0; text-align: left; padding: 9px 12px; font-size: 15px; font-weight: 600; border-radius: 8px; }
+.type-chip-menu button:hover { background: var(--surface-2); color: var(--ink); }
+.carcass-add-type { margin: -6px 0 16px; max-width: 560px; }
+.carcass-same-type { margin-top: 10px; background: var(--warn-soft); border: 1px solid #f5c98b; border-radius: var(--r); padding: 10px 12px; }
+.carcass-grid { display: grid; grid-template-columns: minmax(280px, 360px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.carcass-right { display: grid; gap: 16px; min-width: 0; }
+.carcass-right > .panel + .panel { margin-top: 0; }
+.carcass-batches { display: grid; gap: 8px; }
+.carcass-batch {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px; width: 100%; text-align: left;
+  background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r); padding: 10px 12px; font-weight: 400;
+}
+.carcass-batch:hover:not(.selected) { background: var(--surface-2); color: var(--ink); border-color: var(--line); }
+.carcass-batch.selected { border: 2px solid var(--brand); background: var(--brand-soft); padding: 9px 11px; }
+.carcass-batch > span { display: grid; gap: 3px; justify-items: start; min-width: 0; }
+.carcass-batch > span.num { justify-items: end; }
+.carcass-batch small { font-size: 12px; }
+.carcass-box {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  margin-top: 12px; padding: 10px 12px; border-radius: var(--r); background: var(--surface-2);
+}
+.carcass-box > div { display: grid; gap: 2px; min-width: 0; }
+.carcass-box small { font-size: 12.5px; }
+.carcass-more { margin-top: 12px; }
+.carcass-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-bottom: 12px; }
+.carcass-kpis .kpi-card { background: var(--surface-2); box-shadow: none; border: 0; padding: 14px; }
+.carcass-kg { width: 84px; text-align: right; }
+.carcass-price { width: 104px; text-align: right; }
+.carcass-link { display: block; margin-top: 4px; max-width: 220px; font-size: 13px; padding: 4px 6px; }
+.carcass-ref { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; font-size: 14px; }
+.carcass-ref input { width: 90px; }
+.carcass-add-row { display: grid; grid-template-columns: minmax(0, 1.4fr) 90px minmax(0, 1fr) auto; gap: 8px; margin-top: 12px; }
+@media (max-width: 900px) {
+  .carcass-grid { grid-template-columns: 1fr; }
+}
+@media (max-width: 600px) {
+  .carcass-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .carcass-kpis .kpi-card { padding: 10px 8px; }
+  .carcass-kpis .kpi-card > strong { font-size: 16px; }
+  .carcass-add-row { grid-template-columns: 1fr 1fr; }
+  .type-chip { padding: 8px 14px; font-size: 15px; }
+}
+/* Compras: renglón "Para despostar" con los mismos botones que Despiece. */
+.type-chips.compact { gap: 6px; margin: 4px 0 6px; }
+.type-chips.compact .type-chip { min-height: 34px; padding: 5px 12px; font-size: 14px; border-radius: 10px; }
+.purchase-carcass-question { display: block; font-size: 12.5px; font-weight: 700; color: var(--ink-2); }
+.purchase-carcass-kg { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13px; margin: 2px 0 4px; }
+.purchase-carcass-kg input { width: 100px; }

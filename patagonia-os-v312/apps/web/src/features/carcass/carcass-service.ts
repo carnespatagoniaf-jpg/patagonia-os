@@ -145,3 +145,36 @@ export async function deleteCarcassCut(cutId: string): Promise<void> {
   if (error) throw error;
 }
 
+
+export interface CarcassBatchTotals {
+  /** Lo que vale vendido (Σ kilos × precio). */
+  value: number;
+  weight: number;
+  cuts: number;
+  /** Cortes con kilos pero sin precio (no unidos a un producto de Stock). */
+  unpriced: number;
+}
+
+/** Totales de los cortes de varias reses a la vez, para la lista (ganás $… sin abrir cada una). */
+export async function listCarcassBatchTotals(batchIds: string[]): Promise<Map<string, CarcassBatchTotals>> {
+  const totals = new Map<string, CarcassBatchTotals>();
+  if (!supabase || batchIds.length === 0) return totals;
+
+  const { data, error } = await supabase
+    .from("carcass_cuts")
+    .select("batch_id,weight,unit_price,line_total")
+    .in("batch_id", batchIds);
+
+  if (error) throw error;
+  for (const row of (data ?? []) as Array<{ batch_id: string; weight: number; unit_price: number; line_total: number }>) {
+    const prev = totals.get(row.batch_id) ?? { value: 0, weight: 0, cuts: 0, unpriced: 0 };
+    const weight = Number(row.weight);
+    totals.set(row.batch_id, {
+      value: prev.value + Number(row.line_total),
+      weight: prev.weight + weight,
+      cuts: prev.cuts + 1,
+      unpriced: prev.unpriced + (Number(row.unit_price) <= 0 && weight > 0 ? 1 : 0)
+    });
+  }
+  return totals;
+}

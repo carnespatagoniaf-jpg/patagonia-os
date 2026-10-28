@@ -65,3 +65,36 @@ export async function deleteCarcassCutTemplate(id: string): Promise<void> {
   const { error } = await supabase.rpc("delete_carcass_cut_template", { p_template_id: id });
   if (error) throw error;
 }
+
+export interface DefaultCarcassCut {
+  typeKey: string;
+  cutName: string;
+  yieldPercent: number;
+}
+
+/** Los cortes típicos que trae el sistema (migración 162), para mostrarlos antes de usarlos. */
+export async function listDefaultCarcassCuts(): Promise<DefaultCarcassCut[]> {
+  if (!supabase) return [];
+
+  const { data, error } = await supabase
+    .from("carcass_default_cut_templates")
+    .select("type_key,cut_name,yield_percent,sort_order")
+    .order("type_key")
+    .order("sort_order");
+
+  if (error) return [];
+  return ((data ?? []) as Array<{ type_key: string; cut_name: string; yield_percent: number }>).map((row) => ({
+    typeKey: row.type_key,
+    cutName: row.cut_name,
+    yieldPercent: Number(row.yield_percent)
+  }));
+}
+
+/** Copia los cortes típicos a los cortes de siempre de la empresa para ese animal. Devuelve cuántos copió. */
+export async function applyDefaultCarcassCuts(animalType: string): Promise<number> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.rpc("use_default_carcass_cuts", { p_animal_type: animalType });
+  if (error) throw error;
+  return Number(data ?? 0);
+}

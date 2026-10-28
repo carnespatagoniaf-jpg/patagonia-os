@@ -13,14 +13,18 @@ export function useCarcassTemplates() {
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [error, setError] = useState<string | null>(null);
 
-  const reload = useCallback(async () => {
-    if (!isSupabaseConfigured) return;
+  // Devuelve la lista nueva, para usarla enseguida (ej. repartir una res recién copiados los cortes típicos).
+  const reload = useCallback(async (): Promise<CarcassCutTemplate[]> => {
+    if (!isSupabaseConfigured) return [];
     setLoading(true);
     setError(null);
     try {
-      setTemplates(await listCarcassCutTemplates());
+      const list = await listCarcassCutTemplates();
+      setTemplates(list);
+      return list;
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudieron cargar las plantillas.");
+      return [];
     } finally {
       setLoading(false);
     }
@@ -47,5 +51,5 @@ export function useCarcassTemplates() {
     [reload]
   );
 
-  return { templates, loading, error, save, remove };
+  return { templates, loading, error, reload, save, remove };
 }

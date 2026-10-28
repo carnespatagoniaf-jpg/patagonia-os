@@ -25,6 +25,9 @@ import { chequeTitle, formatDay, type Cheque } from "../cheques/cheque-logic";
 const OWN_CHEQUE_OPTION = "__own_cheque";
 const ENDORSE_PREFIX = "__endorse:";
 import { useCarcassTemplates } from "../carcass/useCarcassTemplates";
+import { listDefaultCarcassCuts, type DefaultCarcassCut } from "../carcass/carcass-templates-service";
+import { listCarcassBatches } from "../carcass/carcass-service";
+import { animalTypeLabel, buildTypeChips, carcassTypeKey, findSameType, type TypeChips } from "../carcass/carcass-types";
 
 interface DraftLine {
   key: string;
@@ -44,7 +47,46 @@ function emptyLine(): DraftLine {
   return { key: crypto.randomUUID(), productId: "", description: "", quantity: "", unit: "kg", unitPrice: "", carcass: false, animalType: "", carcassWeight: "" };
 }
 
-const DEFAULT_ANIMAL_TYPES = ["Vaca / media res", "Cerdo", "Pollo", "Mocho"];
+/**
+ * Qué se desposta en un renglón "Para despostar": los mismos botones que Despiece. Se toca uno; "Otro" deja
+ * escribir, y si ya existe uno igual ("MEDIA" = Media res) usa ese, para no llenar Despiece de repetidos.
+ */
+function CarcassTypePicker({ value, chips, onChange }: { value: string; chips: TypeChips; onChange: (value: string) => void }) {
+  const isChip = (t: string) => chips.visible.some((c) => carcassTypeKey(c) === carcassTypeKey(t));
+  const [typing, setTyping] = useState(() => value.trim() !== "" && !isChip(value));
+  return (
+    <div className="type-chips compact">
+      {chips.visible.map((type) => (
+        <button
+          key={type}
+          type="button"
+          className={`type-chip${!typing && value && carcassTypeKey(value) === carcassTypeKey(type) ? " active" : ""}`}
+          onClick={() => { setTyping(false); onChange(type); }}
+        >
+          {animalTypeLabel(type)}
+        </button>
+      ))}
+      {typing ? (
+        <input
+          autoFocus
+          autoComplete="off"
+          list="purchase-animal-types"
+          placeholder="¿Qué es?"
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={() => {
+            const same = value.trim() ? findSameType(value, chips.all) : undefined;
+            if (same) onChange(same);
+            if (same && isChip(same)) setTyping(false);
+          }}
+          style={{ maxWidth: 170 }}
+        />
+      ) : (
+        <button type="button" className="type-chip add" onClick={() => { setTyping(true); onChange(""); }}>Otro</button>
+      )}
+    </div>
+  );
+}
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10);
@@ -119,15 +161,39 @@ export function Purchases() {
   // Para despostar: solo quien tiene Despiece (plan Estándar o más).
   const canCarcass = can(profile, "carcass.manage");
   const { templates } = useCarcassTemplates();
-  const animalTypes = useMemo(() => {
-    const seen = new Map<string, string>();
-    for (const name of [...DEFAULT_ANIMAL_TYPES, ...templates.map((t) => t.animalType)]) {
-      if (name.trim() && !seen.has(name.trim().toLowerCase())) seen.set(name.trim().toLowerCase(), name.trim());
-    }
-    return [...seen.values()];
-  }, [templates]);
+  const [defaultCuts, setDefaultCuts] = useState<DefaultCarcassCut[]>([]);
+  // Lo que el negocio ya desposta (todas sus reses): para los botones y para saber si es la primera vez.
+  const [carcassBatchTypes, setCarcassBatchTypes] = useState<string[]>([]);
+  useEffect(() => {
+    if (!canCarcass || !isSupabaseConfigured) return;
+    listDefaultCarcassCuts().then(setDefaultCuts).catch(() => setDefaultCuts([]));
+  }, [canCarcass]);
+  useEffect(() => {
+    if (!canCarcass || !isSupabaseConfigured || !branchId) return;
+    listCarcassBatches(branchId)
+      .then((list) => setCarcassBatchTypes(list.map((b) => b.animalType)))
+      .catch(() => setCarcassBatchTypes([]));
+  }, [canCarcass, branchId, purchases]);
   const templateCutsFor = (animalType: string) =>
-    templates.filter((t) => t.animalType.trim().toLowerCase() === animalType.trim().toLowerCase()).length;
+    templates.filter((t) => carcassTypeKey(t.animalType) === carcassTypeKey(animalType)).length;
+  /** Sin cortes de siempre, la PRIMERA vez que se desposta ese animal se usan los típicos (migración 162). */
+  const defaultCutsFor = (animalType: string) =>
+    carcassBatchTypes.some((t) => carcassTypeKey(t) === carcassTypeKey(animalType))
+      ? 0
+      : defaultCuts.filter((d) => d.typeKey === carcassTypeKey(animalType)).length;
+  // Lo que este proveedor ya trajo para despostar, el último primero: "Compras se acuerda".
+  const supplierCarcassTypes = useMemo(() => {
+    const dateOf = new Map(purchases.map((p) => [p.id, p.purchaseDate]));
+    return Object.values(items)
+      .flat()
+      .filter((i) => i.carcassAnimalType)
+      .sort((a, b) => (dateOf.get(b.purchaseId) ?? "").localeCompare(dateOf.get(a.purchaseId) ?? ""))
+      .map((i) => i.carcassAnimalType as string);
+  }, [items, purchases]);
+  const animalChips = useMemo(
+    () => buildTypeChips([...supplierCarcassTypes, ...carcassBatchTypes], templates.map((t) => t.animalType)),
+    [supplierCarcassTypes, carcassBatchTypes, templates]
+  );
 
   const [products, setProducts] = useState<Product[]>(isSupabaseConfigured ? [] : demoProducts);
   const [updateCosts, setUpdateCosts] = useState(true);
@@ -897,27 +963,29 @@ export function Purchases() {
                     <div className="purchase-line-product">
                       {line.carcass ? (
                         <>
-                          <input
-                            list="purchase-animal-types"
-                            placeholder="¿Qué es? (Pollo, Vaca…)"
-                            value={line.animalType}
-                            onChange={(e) => updateLine(line.key, { animalType: e.target.value })}
-                          />
+                          <span className="purchase-carcass-question">¿Qué despostás?</span>
+                          <CarcassTypePicker value={line.animalType} chips={animalChips} onChange={(animalType) => updateLine(line.key, { animalType })} />
                           {line.unit === "unit" && (
-                            <input
-                              type="text"
-                              inputMode="decimal"
-                              placeholder="Kilos en total"
-                              value={line.carcassWeight}
-                              onFocus={(e) => e.target.select()}
-                              onChange={(e) => updateLine(line.key, { carcassWeight: e.target.value })}
-                              style={{ marginTop: 4 }}
-                            />
+                            <label className="purchase-carcass-kg">
+                              ¿Cuántos kilos son{line.quantity.trim() ? ` los ${line.quantity.trim()}` : ""} en total?
+                              <input
+                                type="text"
+                                inputMode="decimal"
+                                placeholder="kg"
+                                value={line.carcassWeight}
+                                onFocus={(e) => e.target.select()}
+                                onChange={(e) => updateLine(line.key, { carcassWeight: e.target.value })}
+                              />
+                            </label>
                           )}
-                          <small className="muted">
-                            {line.animalType.trim() && templateCutsFor(line.animalType) > 0
-                              ? `Se reparte solo en ${templateCutsFor(line.animalType)} cortes y entran a Stock.`
-                              : "Aparece en Despiece para cargar los cortes (con una plantilla de cortes se reparte solo)."}
+                          <small className={line.animalType.trim() && (templateCutsFor(line.animalType) > 0 || defaultCutsFor(line.animalType) > 0) ? "num-positive" : "muted"}>
+                            {!line.animalType.trim()
+                              ? "Tocá qué es."
+                              : templateCutsFor(line.animalType) > 0
+                                ? `✓ Se reparte solo en ${templateCutsFor(line.animalType)} cortes y entran a Stock.`
+                                : defaultCutsFor(line.animalType) > 0
+                                  ? `✓ Se reparte solo en los ${defaultCutsFor(line.animalType)} cortes típicos de ${animalTypeLabel(line.animalType).toLowerCase()}.`
+                                  : "Aparece en Despiece para cargar los cortes."}
                           </small>
                         </>
                       ) : selectedProduct ? (
@@ -965,7 +1033,14 @@ export function Purchases() {
                             checked={line.carcass}
                             style={{ width: "auto", margin: 0 }}
                             onChange={(e) => updateLine(line.key, e.target.checked
-                              ? { carcass: true, productId: "", animalType: line.animalType || line.description }
+                              ? {
+                                  carcass: true,
+                                  productId: "",
+                                  animalType: line.animalType
+                                    || (line.description.trim() ? findSameType(line.description, animalChips.all) : undefined)
+                                    || supplierCarcassTypes[0]
+                                    || ""
+                                }
                               : { carcass: false })}
                           />
                           <span>Para despostar</span>
@@ -998,7 +1073,7 @@ export function Purchases() {
               })}
             </div>
             <datalist id="purchase-animal-types">
-              {animalTypes.map((name) => <option key={name} value={name} />)}
+              {animalChips.all.map((name) => <option key={name} value={name} />)}
             </datalist>
             <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
               Para una descripción libre (sin elegir un producto de la lista): escribí el nombre y tocá afuera o Esc.
