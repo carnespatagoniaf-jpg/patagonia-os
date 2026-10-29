@@ -27,7 +27,7 @@ const PRODUCTS = [
 const ctx = (products = PRODUCTS): EngineContext => ({ branchId: "b1", products, online: true });
 
 function eldorado(opts: { typeByteAccepted?: "ascii" | "binario" } = {}) {
-  const f = new FakeCuora("max7", { address: 20, protocol: "0070", capacity: 3000, typeByteAccepted: opts.typeByteAccepted ?? "ascii", loteNulOnWrite: true });
+  const f = new FakeCuora("max7", { address: 20, protocol: "0070", capacity: 3000, typeByteAccepted: opts.typeByteAccepted ?? "ascii", loteZerosOnWrite: true });
   for (const [n, raw] of ELDORADO) f.plus.set(n, raw);
   return f;
 }
@@ -115,6 +115,31 @@ describe("[SIMULADO, registros REALES de El Dorado] Cuora Max firmware 7.0: prue
     for (const [n, raw] of ELDORADO) assert.equal(f.plus.get(n), raw, `PLU ${n} intacto`);
     assert.equal(f.plus.has(1002), false);
     assert.equal(calls.catalog, undefined);
+  });
+
+  it("REAL 29/10: lo que mandó Patagonia y lo que releyó la balanza de El Dorado cuentan como iguales (lote en blanco → ceros)", async () => {
+    const { sameRecord } = await import("./adapters/systel-push");
+    const body = "0030001PRUEBA PATAGONIA  000001" + "0".repeat(54) + "003000040000P00000000N" + " ".repeat(30) + "0".repeat(60);
+    const sent = body + " ".repeat(12) + "1" + "20PPPPCCCCCCN";
+    const back = body + " 00000000000" + "\u0001" + "20PPPPCCCCCCN";
+    assert.equal(sent.length, 223);
+    assert.equal(sameRecord("max7", sent, back), true);
+    // Un lote de verdad distinto sigue frenando.
+    assert.equal(sameRecord("max7", sent, body + "LOTE12345678" + "\u0001" + "20PPPPCCCCCCN"), false);
+    // Y cualquier otra diferencia también (precio).
+    assert.equal(sameRecord("max7", sent, back.replace("000001", "000002")), false);
+  });
+
+  it("la balanza ya tiene el producto de prueba de un intento anterior: lo reusa (ahora a $2) y sigue", async () => {
+    const f = eldorado();
+    const prev = "0030001PRUEBA PATAGONIA  000001" + "0".repeat(54) + "003000040000P00000000N" + " ".repeat(30) + "0".repeat(60) + " 00000000000" + "\u0001" + "20PPPPCCCCCCN";
+    f.plus.set(3000, prev);
+    const { deps } = fakeDb();
+    const s = new SystelSession(f, 20, ctx(), deps);
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, true, out.message);
+    assert.equal(f.plus.get(3000)!.slice(25, 31), "000002");
+    assert.equal(f.plus.get(2005)!.slice(25, 31), "012500");
   });
 
   it("la segunda vez en la misma computadora no repite la prueba", async () => {

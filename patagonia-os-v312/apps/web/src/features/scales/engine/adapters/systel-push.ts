@@ -94,8 +94,14 @@ export function sameRecord(layout: SystelLayout, expected: string, actual: strin
   const pd = LAYOUT_INFO[layout].pluDigits;
   const end = expected[expected.length - 1] === "N" ? expected.length - 1 : expected.length - 101;
   const typeAt = end - 13;
+  const loteFrom = end - 25;
+  // REAL (El Dorado 29/10, Cuora Max firmware 7.0): un lote mandado en blanco ("            ") se relee como
+  // " 00000000000". Lote vacío = solo espacios, ceros o 0x00, en cualquier combinación: es el mismo "sin lote".
+  const emptyLote = (s: string) => /^[ 0\u0000]{12}$/.test(s.slice(loteFrom, typeAt));
+  const skipLote = emptyLote(expected) && emptyLote(actual);
   for (let i = 0; i < expected.length; i++) {
     if (i === pd || i === typeAt) continue;
+    if (skipLote && i >= loteFrom && i < typeAt) continue;
     if (!sameIgnoringLotePadding(expected[i], actual[i], i, end)) return false;
   }
   const a = pluEanSetting(expected);

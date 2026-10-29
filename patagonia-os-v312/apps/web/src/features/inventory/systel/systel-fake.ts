@@ -44,7 +44,7 @@ export class FakeCuora implements SystelLink {
 
   constructor(
     readonly layout: SystelLayout,
-    readonly options: { address?: number; decimals?: number; capacity?: number; writeChecksum?: boolean; typeByteAccepted?: "binario" | "ascii"; typeHighBits?: number; loteNulOnWrite?: boolean; protocol?: string; /** Solo pruebas: no atiende pedidos hechos a su número (sí al general 0). Caso a cubrir: balanza nueva de Los gringos, 19/10. */ deafToOwnNumber?: boolean } = {}
+    readonly options: { address?: number; decimals?: number; capacity?: number; writeChecksum?: boolean; typeByteAccepted?: "binario" | "ascii"; typeHighBits?: number; loteNulOnWrite?: boolean; loteZerosOnWrite?: boolean; protocol?: string; /** Solo pruebas: no atiende pedidos hechos a su número (sí al general 0). Caso a cubrir: balanza nueva de Los gringos, 19/10. */ deafToOwnNumber?: boolean } = {}
   ) {}
 
   get address(): number {
@@ -171,6 +171,11 @@ export class FakeCuora implements SystelLink {
         if (this.layout !== "cuora2" && this.options.loteNulOnWrite) {
           const end2 = rec[rec.length - 1] === "N" ? rec.length - 1 : rec.length - 101;
           if (rec[end2 - 14] === " ") rec = rec.slice(0, end2 - 14) + String.fromCharCode(0) + rec.slice(end2 - 13);
+        }
+        // REAL (El Dorado 29/10, firmware 7.0): un lote en blanco se guarda como " 00000000000".
+        if (this.layout !== "cuora2" && this.options.loteZerosOnWrite) {
+          const end3 = rec[rec.length - 1] === "N" ? rec.length - 1 : rec.length - 101;
+          if (/^[ \u0000]{12}$/.test(rec.slice(end3 - 25, end3 - 13))) rec = rec.slice(0, end3 - 25) + " 00000000000" + rec.slice(end3 - 13);
         }
         const fixed = info.pluDigits + 1 + 18 + info.priceLists * (this.layout === "max7" ? 12 : 6) + info.codeDigits + 2 + 4 + 1 + info.tareDigits;
         const tail = rec.slice(fixed);
