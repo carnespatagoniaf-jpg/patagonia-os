@@ -391,11 +391,14 @@ export function Carcass() {
   }
 
   async function handleDeleteBatch(batch: CarcassBatch) {
-    if (!window.confirm("¿Quitar esta res y sus cortes? No se puede deshacer.")) return;
+    const question = batch.purchaseItemId
+      ? "Esta res vino de una compra. Si la quitás, también se anula esa compra (deja de contar en lo que le debés al proveedor) y se borran sus cortes y su stock. No se puede deshacer. ¿Quitarla?"
+      : "¿Quitar esta res y sus cortes? No se puede deshacer.";
+    if (!window.confirm(question)) return;
     try {
       await removeBatch(batch.id);
       setSelectedId(null);
-      setMessage("Res quitada.");
+      setMessage(batch.purchaseItemId ? "Res quitada y su compra anulada." : "Res quitada.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo quitar.");
     }
@@ -766,11 +769,10 @@ export function Carcass() {
                 </h2>
                 <div className="row-actions no-print">
                   {!selectedBatch.purchaseItemId && (
-                    <>
-                      <button type="button" className="secondary" onClick={() => { setShowMoreOptions(true); openBatchForm(selectedBatch); }}>Corregir</button>
-                      <button type="button" className="danger" onClick={() => void handleDeleteBatch(selectedBatch)}>Quitar</button>
-                    </>
+                    <button type="button" className="secondary" onClick={() => { setShowMoreOptions(true); openBatchForm(selectedBatch); }}>Corregir</button>
                   )}
+                  {/* También la que vino de una compra (171): se anula esa compra y se borra de todos lados. */}
+                  <button type="button" className="danger" onClick={() => void handleDeleteBatch(selectedBatch)}>Quitar</button>
                   <button type="button" className="secondary" onClick={() => window.print()}>Imprimir</button>
                 </div>
               </div>
