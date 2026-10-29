@@ -5,7 +5,9 @@ import { useAuth } from "../auth/AuthProvider";
 import { releaseSerialEverywhere } from "../inventory/kretz/serial-tabs";
 import { connectBranchScale, type BranchConnectResult } from "./engine/connect-branch";
 import { isPhoneOrTablet, PHONE_OR_TABLET_MESSAGE } from "./engine/device";
-import { markSynced } from "./engine/engine";
+import { markSynced, pickNetworkScaleNext } from "./engine/engine";
+import { netAgentVersion, parseNetKey, rememberNetAddress, type NetAddress } from "../inventory/kretz/net-port";
+import { NetworkScaleSetup } from "./NetworkScaleSetup";
 import { adaptersForChoice } from "./engine/live";
 import { ALREADY_SAME, friendlyKind, friendlyMessage } from "./engine/friendly";
 import { choiceLabel, SCALE_CHOICES, type ScaleChoice } from "./engine/choice";
@@ -31,6 +33,7 @@ import { submitScaleSupportReport } from "./support-service";
 type Phase =
   | { kind: "inicio" }
   | { kind: "elegir_marca" }
+  | { kind: "red" }
   | { kind: "trabajando"; stage: "conectar" | "sincronizar"; step: EngineStep; text: string; done?: number; total?: number }
   | { kind: "listo_para_sincronizar"; prepared: PreparedSync }
   | { kind: "listo"; message: string; pending: PendingItem[]; model: string; skipped?: ProductProblem[] }
@@ -61,6 +64,8 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
   /** Para volver a dibujar los pasos después de guardar uno en esta computadora. */
   const [, setInstallTick] = useState(0);
   const ctxRef = useRef<BranchConnectResult | null>(null);
+  /** Al agregar una Report por cable de red: su dirección (para "Probar de nuevo"). */
+  const netRef = useRef<NetAddress | null>(null);
 
   const reload = useCallback(async () => {
     if (!branchId || !isSupabaseConfigured) {
@@ -228,7 +233,9 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       else setPhase({ kind: "listo_para_sincronizar", prepared });
     } catch (err) {
       const kind = friendlyKind(err);
-      setPhase({ kind: "error", message: connectErrorMessage(err, choice), canPick: kind === "elegir_cable" || kind === "no_contesta" || kind === "otra_balanza", canRelease: kind === "balanza_ocupada" && !allowSystelRelease && canManage });
+      const net = parseNetKey(diag.usb as string | null | undefined);
+      const message = net ? await netConnectMessage(err, net) : connectErrorMessage(err, choice);
+      setPhase({ kind: "error", message, canPick: kind === "elegir_cable" || kind === "no_contesta" || kind === "otra_balanza", canRelease: kind === "balanza_ocupada" && !allowSystelRelease && canManage });
       recordInstall(target?.key, { lastError: friendlyMessage(err).slice(0, 200), lastErrorAt: new Date().toISOString() });
       reportAndShow("conectar", err, diag);
     }
@@ -329,6 +336,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     void closeSession();
     setActiveKey(null);
     setNewChoice(null);
+    netRef.current = null;
     setPhase({ kind: "inicio" });
   }
 
@@ -394,15 +402,31 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
                 key={c.id}
                 className="my-scale-choice"
                 // La lista de cables de Chrome se abre con este mismo click.
-                onClick={() => handleConnectNew(c.id)}
+                onClick={() => {
+                  netRef.current = null;
+                  handleConnectNew(c.id);
+                }}
               >
                 <strong>{c.label}</strong>
                 <span>{c.hint}</span>
               </button>
             ))}
           </div>
+          <button className="my-scale-link" onClick={() => setPhase({ kind: "red" })}>Mi Kretz Report está conectada por cable de red (sin Bluetooth ni USB)</button>
           <button className="secondary" onClick={backToList}>Volver</button>
         </div>
+      )}
+
+      {phase.kind === "red" && (
+        <NetworkScaleSetup
+          onBack={() => setPhase({ kind: "elegir_marca" })}
+          onConnect={(a) => {
+            // La balanza por red es "un cable más": se recuerda en esta computadora y se conecta como cualquier Report.
+            netRef.current = a;
+            rememberNetAddress(a);
+            handleConnectNew("kretz-report");
+          }}
+        />
       )}
 
       {working && (
@@ -520,6 +544,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
 
   function handleConnectNew(choice: ScaleChoice) {
     setNewChoice(choice);
+    if (netRef.current) pickNetworkScaleNext(netRef.current);
     void handleConnect(null, true, choice);
   }
 }
@@ -550,6 +575,18 @@ function InstallChecklist({ record, onRefresh }: { record: InstallRecord; onRefr
 }
 
 /** El error al conectar, nombrando la balanza que eligió el cliente y qué revisar en ESA balanza. */
+/** Report por cable de red: si el programa de la PC no está, o la balanza no contesta por la red. */
+async function netConnectMessage(err: unknown, net: { host: string; port: number }): Promise<string> {
+  const version = await netAgentVersion();
+  if (version === null) {
+    return "El programa de Patagonia no está funcionando en esta computadora (es el que habla con la balanza por la red). Volvé a abrir el instalador (Agregar balanza → Kretz por cable de red) o reiniciá la computadora, y probá de nuevo.";
+  }
+  if (friendlyKind(err) === "no_contesta") {
+    return `La balanza aceptó la conexión por la red (${net.host}) pero no le contestó a Patagonia. En el menú de la balanza, Configuración de Red, revisá que el puerto sea ${net.port}, que no esté abierto iTegra en otra computadora, y probá de nuevo.`;
+  }
+  return `No se pudo hablar con la balanza por la red (${net.host}, puerto ${net.port}). Revisá que esté prendida y el cable de red enchufado (la lucecita verde al lado del cable tiene que estar prendida), y probá de nuevo.`;
+}
+
 function connectErrorMessage(err: unknown, choice: ScaleChoice | null): string {
   // Desde la tablet la lista de cables sale vacía y el cliente la cierra: el motivo real es el aparato, no la elección.
   if (isPhoneOrTablet() && (friendlyKind(err) === "sin_eleccion" || friendlyKind(err) === "sin_navegador")) return PHONE_OR_TABLET_MESSAGE;
@@ -557,7 +594,7 @@ function connectErrorMessage(err: unknown, choice: ScaleChoice | null): string {
   const label = choiceLabel(choice);
   if (choice === "kretz-report") {
     // Manual Kretz Report NX/LT: la LT va por Bluetooth o USB (sin adaptador), la NX por red. No usa adaptador USB a serie (DB9).
-    return `Tu ${label} no contestó. La Report LT se conecta por Bluetooth (emparejala en Windows y elegí "Puerto serie estándar a través de vínculo Bluetooth") o con su cable USB directo, no con un adaptador USB a serie DB9. La Report NX va por red: escribinos. Revisá también que no esté abierto iTegra.`;
+    return `Tu ${label} no contestó. La Report LT se conecta por Bluetooth (emparejala en Windows y elegí "Puerto serie estándar a través de vínculo Bluetooth") o con su cable USB directo, no con un adaptador USB a serie DB9. Si tu balanza va con cable de red, volvé a "Agregar balanza" y tocá "Mi Kretz Report está conectada por cable de red". Revisá también que no esté abierto iTegra.`;
   }
   const check = choice === "kretz-aura" ? "el cable enchufado y, en el menú de la balanza, COMUNI → MODO \"Datos\"" : "el cable USB enchufado y que no esté abierto el programa de la balanza";
   return `Tu ${label} no contestó. Revisá que esté prendida, ${check}, y probá de nuevo.`;

@@ -7,6 +7,7 @@ import { runAuraModelProbe, saveModelProbe, type ModelProbeResult } from "./kret
 import { AURA_BARCODE_CONFIG, readAuraList, runAuraSync, setAuraItemBarcodes, type AuraItemBarcodeResult, type AuraSyncItem, type AuraSyncResult } from "./kretz/aura-sync";
 import { getKretzModel, getSavedModelId } from "./kretz/models";
 import { buildKretzFrame, describeKretzCode } from "./kretz/kretz-frame";
+import { isNetPort } from "./kretz/net-port";
 
 /** Lo mínimo que hace falta de un producto para mandarlo a la balanza --
  * no el `Product` completo de @patagonia/domain. Así esta función sirve
@@ -212,6 +213,7 @@ const USB_SERIAL_CHIPS: Record<number, string> = {
 /** Qué puerto está elegido, en palabras (para la pantalla y para soporte). */
 export function describeScalePort(port: SerialPort | null): string {
   if (!port) return "ninguno";
+  if (isNetPort(port)) return `balanza por cable de red (${port.net.host}, puerto ${port.net.port})`;
   let info: SerialPortInfo = {};
   try {
     info = port.getInfo?.() ?? {};
@@ -495,7 +497,7 @@ export async function diagnoseScaleLink(
   const port = await pickPort();
   const portLabel = describeScalePort(port);
   cachedPortOpenKey = null;
-  const portsSeen = (await navigator.serial.getPorts()).map((p) => describeScalePort(p));
+  const portsSeen = (isScaleSerialSupported() ? await navigator.serial.getPorts() : []).map((p) => describeScalePort(p));
   const record = await runKretzDiscovery(port, portLabel, model, {
     portsSeen,
     releaseOtherTabs: options.releaseOtherTabs,

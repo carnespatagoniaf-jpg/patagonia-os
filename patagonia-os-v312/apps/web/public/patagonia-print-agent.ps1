@@ -18,7 +18,7 @@
 
 $ErrorActionPreference = "Stop"
 $Port = 9101
-$AgentVersion = 3
+$AgentVersion = 4
 
 Add-Type -TypeDefinition @'
 using System;
@@ -203,6 +203,206 @@ function Get-RawQueueName($p) {
   return $companion
 }
 
+# ---------------------------------------------------------------------------
+# Balanza por cable de red (Kretz Report con Ethernet, desde la version 4).
+# Chrome no puede abrir una conexion TCP: este programa la abre y le pasa los
+# bytes tal cual (el sistema arma y revisa cada trama, igual que por USB o
+# Bluetooth). Una sola conexion a la vez. Solo direcciones de la red local
+# (10.x, 172.16-31.x, 192.168.x, 169.254.x): nunca hacia internet.
+# ---------------------------------------------------------------------------
+$script:ScaleClient = $null
+$script:ScaleStream = $null
+$script:ScaleTarget = ""
+
+function Test-LocalScaleHost([string]$h) {
+  $ip = $null
+  if (-not [System.Net.IPAddress]::TryParse($h, [ref]$ip)) { return $false }
+  if ($ip.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) { return $false }
+  $b = $ip.GetAddressBytes()
+  if ($b[0] -eq 10) { return $true }
+  if ($b[0] -eq 172 -and $b[1] -ge 16 -and $b[1] -le 31) { return $true }
+  if ($b[0] -eq 192 -and $b[1] -eq 168) { return $true }
+  if ($b[0] -eq 169 -and $b[1] -eq 254) { return $true }
+  return $false
+}
+
+function Close-ScaleLink {
+  try { if ($script:ScaleStream) { $script:ScaleStream.Close() } } catch { }
+  try { if ($script:ScaleClient) { $script:ScaleClient.Close() } } catch { }
+  $script:ScaleClient = $null
+  $script:ScaleStream = $null
+  $script:ScaleTarget = ""
+}
+
+# Las direcciones IPv4 de esta PC (para saber si la balanza esta en la misma red).
+function Get-LocalIPv4 {
+  $out = @()
+  foreach ($nic in [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()) {
+    if ($nic.OperationalStatus -ne [System.Net.NetworkInformation.OperationalStatus]::Up) { continue }
+    if ($nic.NetworkInterfaceType -eq [System.Net.NetworkInformation.NetworkInterfaceType]::Loopback) { continue }
+    foreach ($u in $nic.GetIPProperties().UnicastAddresses) {
+      if ($u.Address.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) { continue }
+      $out += @{ name = [string]$nic.Name; kind = [string]$nic.NetworkInterfaceType; ip = $u.Address.ToString(); mask = [string]$u.IPv4Mask }
+    }
+  }
+  return ,$out
+}
+
+function Open-ScaleLink([string]$h, [int]$p) {
+  Close-ScaleLink
+  $c = New-Object System.Net.Sockets.TcpClient
+  $ar = $c.BeginConnect($h, $p, $null, $null)
+  if (-not $ar.AsyncWaitHandle.WaitOne(3000)) {
+    try { $c.Close() } catch { }
+    return "La balanza no contesta en $h (puerto $p)."
+  }
+  try {
+    $c.EndConnect($ar)
+  } catch {
+    try { $c.Close() } catch { }
+    return "La balanza rechazo la conexion en $h (puerto $p)."
+  }
+  $c.NoDelay = $true
+  $script:ScaleClient = $c
+  $script:ScaleStream = $c.GetStream()
+  $script:ScaleTarget = "${h}:$p"
+  return "OK"
+}
+
+# Lo que mando la balanza: espera hasta $ms el primer byte y despues junta lo
+# que siga llegando hasta 60 ms de silencio. closed = la balanza corto.
+function Read-ScaleLink([int]$ms) {
+  $buf = New-Object System.IO.MemoryStream
+  $tmp = New-Object byte[] 4096
+  $deadline = [DateTime]::UtcNow.AddMilliseconds($ms)
+  $lastData = $null
+  $closed = $false
+  while ($true) {
+    $now = [DateTime]::UtcNow
+    if ($script:ScaleStream.DataAvailable) {
+      $n = $script:ScaleStream.Read($tmp, 0, $tmp.Length)
+      if ($n -le 0) { $closed = $true; break }
+      $buf.Write($tmp, 0, $n)
+      $lastData = $now
+      continue
+    }
+    $sock = $script:ScaleClient.Client
+    if ($sock.Poll(0, [System.Net.Sockets.SelectMode]::SelectRead) -and $sock.Available -eq 0) { $closed = $true; break }
+    if ($lastData -ne $null -and ($now - $lastData).TotalMilliseconds -ge 60) { break }
+    if ($lastData -eq $null -and $now -ge $deadline) { break }
+    Start-Sleep -Milliseconds 5
+  }
+  return @{ data = [Convert]::ToBase64String($buf.ToArray()); closed = $closed }
+}
+
+# Busca balanzas en la red de cada placa de esta PC (las 254 direcciones de su
+# /24, en paralelo): las que aceptan conexion en ese puerto.
+function Find-ScaleHosts([int]$p) {
+  $found = @()
+  $tries = @()
+  foreach ($a in (Get-LocalIPv4)) {
+    if (-not (Test-LocalScaleHost $a.ip)) { continue }
+    $parts = $a.ip.Split('.')
+    $prefix = $parts[0] + '.' + $parts[1] + '.' + $parts[2] + '.'
+    for ($i = 1; $i -le 254; $i++) {
+      $target = $prefix + $i
+      $c = New-Object System.Net.Sockets.TcpClient
+      $tries += @{ ip = $target; client = $c; ar = $c.BeginConnect($target, $p, $null, $null) }
+    }
+  }
+  $until = [DateTime]::UtcNow.AddMilliseconds(1500)
+  while ([DateTime]::UtcNow -lt $until) {
+    if (@($tries | Where-Object { -not $_.ar.IsCompleted }).Count -eq 0) { break }
+    Start-Sleep -Milliseconds 50
+  }
+  foreach ($t in $tries) {
+    try {
+      if ($t.ar.IsCompleted) {
+        $t.client.EndConnect($t.ar)
+        if ($t.client.Connected) { $found += $t.ip }
+      }
+    } catch { }
+    try { $t.client.Close() } catch { }
+  }
+  return ,$found
+}
+
+function Handle-ScaleRequest($ctx, [string]$path, [string]$origin) {
+  $req = $ctx.Request
+  if (-not $origin) {
+    Send-Json $ctx 403 @{ ok = $false; error = "falta el origen" } $null
+    return
+  }
+  if ($path -eq "/scale/find") {
+    $p = 0
+    if (-not [int]::TryParse([string]$req.QueryString["port"], [ref]$p) -or $p -lt 1 -or $p -gt 65535) { $p = 1001 }
+    Send-Json $ctx 200 @{ ok = $true; port = $p; found = (Find-ScaleHosts $p); local = (Get-LocalIPv4) } $origin
+    return
+  }
+  if ($req.HttpMethod -ne "POST") {
+    Send-Json $ctx 405 @{ ok = $false; error = "metodo no permitido" } $origin
+    return
+  }
+  if ($path -eq "/scale/open") {
+    $h = [string]$req.QueryString["host"]
+    $p = 0
+    if (-not (Test-LocalScaleHost $h)) {
+      Send-Json $ctx 400 @{ ok = $false; error = "La direccion '$h' no es de la red local."; local = (Get-LocalIPv4) } $origin
+      return
+    }
+    if (-not [int]::TryParse([string]$req.QueryString["port"], [ref]$p) -or $p -lt 1 -or $p -gt 65535) {
+      Send-Json $ctx 400 @{ ok = $false; error = "Puerto invalido." } $origin
+      return
+    }
+    $r = Open-ScaleLink $h $p
+    if ($r -eq "OK") { Send-Json $ctx 200 @{ ok = $true; target = $script:ScaleTarget } $origin }
+    else { Send-Json $ctx 502 @{ ok = $false; error = $r; local = (Get-LocalIPv4) } $origin }
+    return
+  }
+  if ($path -eq "/scale/close") {
+    Close-ScaleLink
+    Send-Json $ctx 200 @{ ok = $true } $origin
+    return
+  }
+  if (-not $script:ScaleStream) {
+    Send-Json $ctx 409 @{ ok = $false; error = "La conexion con la balanza no esta abierta."; closed = $true } $origin
+    return
+  }
+  if ($path -eq "/scale/write") {
+    if ($req.ContentLength64 -gt 65536) {
+      Send-Json $ctx 413 @{ ok = $false; error = "demasiado grande" } $origin
+      return
+    }
+    $ms = New-Object System.IO.MemoryStream
+    $req.InputStream.CopyTo($ms)
+    $bytes = $ms.ToArray()
+    try {
+      $script:ScaleStream.Write($bytes, 0, $bytes.Length)
+      $script:ScaleStream.Flush()
+      Send-Json $ctx 200 @{ ok = $true; bytes = $bytes.Length } $origin
+    } catch {
+      Close-ScaleLink
+      Send-Json $ctx 502 @{ ok = $false; error = "Se corto la conexion con la balanza."; closed = $true } $origin
+    }
+    return
+  }
+  if ($path -eq "/scale/read") {
+    $wait = 0
+    if (-not [int]::TryParse([string]$req.QueryString["ms"], [ref]$wait) -or $wait -lt 0) { $wait = 300 }
+    if ($wait -gt 3000) { $wait = 3000 }
+    try {
+      $r = Read-ScaleLink $wait
+      if ($r.closed) { Close-ScaleLink }
+      Send-Json $ctx 200 @{ ok = $true; data = $r.data; closed = $r.closed } $origin
+    } catch {
+      Close-ScaleLink
+      Send-Json $ctx 502 @{ ok = $false; error = "Se corto la conexion con la balanza."; closed = $true } $origin
+    }
+    return
+  }
+  Send-Json $ctx 404 @{ ok = $false; error = "no existe" } $origin
+}
+
 function Handle-Request($ctx) {
   $req = $ctx.Request
   $origin = $req.Headers["Origin"]
@@ -301,6 +501,11 @@ function Handle-Request($ctx) {
     } else {
       Send-Json $ctx 500 @{ ok = $false; error = $result } $origin
     }
+    return
+  }
+
+  if ($path.StartsWith("/scale/")) {
+    Handle-ScaleRequest $ctx $path $origin
     return
   }
 

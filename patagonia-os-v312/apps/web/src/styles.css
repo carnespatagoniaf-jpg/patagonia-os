@@ -747,6 +747,8 @@ a.button-link:hover { background: #731818; }
 .my-scale-choice { display: grid; gap: 4px; text-align: left; padding: 16px 18px; border-radius: 14px; border: 2px solid #e5e7eb; background: white; cursor: pointer; }
 .my-scale-choice strong { font-size: 17px; color: #18202b; }
 .my-scale-choice span { font-size: 13px; color: #6b7280; }
+.my-scale-net-steps { margin: 0; padding-left: 20px; display: grid; gap: 6px; text-align: left; max-width: 640px; }
+.my-scale-link { background: none; border: none; color: #8b1e1e; text-decoration: underline; cursor: pointer; padding: 4px 0; font-size: 14px; }
 .my-scale-choice:hover, .my-scale-choice:focus-visible { border-color: #8b1e1e; }
 .my-scale-bar { width: 100%; max-width: 520px; height: 10px; border-radius: 999px; background: #f0f1f4; overflow: hidden; }
 .my-scale-bar > div { height: 100%; background: #8b1e1e; border-radius: 999px; transition: width .3s; }
