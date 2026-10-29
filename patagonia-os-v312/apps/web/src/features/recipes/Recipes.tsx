@@ -5,7 +5,7 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { parseAmount } from "../../lib/money";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { createProduct, listProductsForBranch } from "../inventory/inventory-service";
-import { applyRecipeToProduct, deleteRecipe, listRecipes, saveRecipe, setRecipeKind, type Recipe, type RecipeKind } from "./recipes-service";
+import { applyRecipeToProduct, deleteRecipe, listRecipes, saveRecipe, setRecipeDeductOnSale, setRecipeKind, type Recipe, type RecipeKind } from "./recipes-service";
 import { quantityNumber } from "../sale/quantity";
 import { checkPrice, comboDiscountPct, comboRetailTotal, formatCost, type PriceCheck, parseRecipeDraft, suggestedYieldKg, summarizeRecipe, type RecipeDraft } from "./recipe-view";
 
@@ -110,7 +110,7 @@ export function Recipes() {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  const [editing, setEditing] = useState<{ recipeId: string | null; kind: RecipeKind; draft: RecipeDraft } | null>(null);
+  const [editing, setEditing] = useState<{ recipeId: string | null; kind: RecipeKind; deductOnSale: boolean; draft: RecipeDraft } | null>(null);
   /** "Lo vendés a $": arranca con el precio de hoy del producto; si se cambia, se carga en el producto al guardar. */
   const [sellPrice, setSellPrice] = useState("");
   /** "Rinde el lote" sigue solo la suma de los kilos de los insumos hasta que la persona lo cambia (productos por kg). */
@@ -188,14 +188,14 @@ export function Recipes() {
     setMessage("");
     setYieldAuto(kind !== "combo");
     setNpUnit(kind === "combo" ? "unit" : "kg");
-    setEditing({ recipeId: null, kind, draft: emptyDraft(kind) });
+    setEditing({ recipeId: null, kind, deductOnSale: false, draft: emptyDraft(kind) });
   }
 
   function startEdit(recipe: Recipe) {
     setMessage("");
     const sum = suggestedYieldKg(recipe.items, productsById);
     setYieldAuto(recipe.kind === "receta" && productsById.get(recipe.productId)?.unit === "kg" && Math.abs(sum - recipe.yieldQty) < 0.0005);
-    setEditing({ recipeId: recipe.id, kind: recipe.kind, draft: draftFromRecipe(recipe) });
+    setEditing({ recipeId: recipe.id, kind: recipe.kind, deductOnSale: recipe.deductOnSale, draft: draftFromRecipe(recipe) });
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
@@ -243,14 +243,15 @@ export function Recipes() {
     if (!isSupabaseConfigured) {
       // Modo demo: se guarda solo en esta pantalla, sin base de datos.
       const id = editing.recipeId ?? `demo-${parsed.input.productId}`;
-      const saved: Recipe = { id, kind: editing.kind, ...parsed.input, updatedAt: new Date().toISOString() };
+      const saved: Recipe = { id, kind: editing.kind, deductOnSale: editing.deductOnSale, ...parsed.input, updatedAt: new Date().toISOString() };
       setRecipes((current) => [saved, ...current.filter((r) => r.id !== id)]);
       setEditing((current) => (current ? { ...current, recipeId: id } : current));
       return id;
     }
     const id = await saveRecipe(parsed.input);
-    const previousKind = recipes.find((r) => r.id === id)?.kind ?? "receta";
-    if (editing.kind !== previousKind) await setRecipeKind(id, editing.kind);
+    const previous = recipes.find((r) => r.id === id);
+    if (editing.kind !== (previous?.kind ?? "receta")) await setRecipeKind(id, editing.kind);
+    if (editing.deductOnSale !== (previous?.deductOnSale ?? false)) await setRecipeDeductOnSale(id, editing.deductOnSale);
     setRecipes(await listRecipes());
     setEditing((current) => (current ? { ...current, recipeId: id } : current));
     return id;
@@ -562,6 +563,24 @@ export function Recipes() {
                 style={{ width: "100%", marginTop: 10, minHeight: 50, padding: 10, border: "1px solid #d6dce5", borderRadius: 10, fontFamily: "inherit" }}
               />
 
+              <div className="pos-adjust-card" style={{ marginTop: 10 }}>
+                <label style={{ display: "flex", gap: 8, alignItems: "flex-start", fontWeight: 700 }}>
+                  <input
+                    type="checkbox"
+                    checked={editing.deductOnSale}
+                    onChange={(e) => setEditing((current) => (current ? { ...current, deductOnSale: e.target.checked } : current))}
+                    style={{ marginTop: 3 }}
+                  />
+                  {isCombo ? "Al vender el combo, descontar del stock los productos que lleva" : "Al venderlo, descontar del stock los insumos de la receta"}
+                </label>
+                <p className="muted" style={{ margin: "6px 0 0 24px", fontSize: 13 }}>
+                  {isCombo
+                    ? "Cada combo vendido en Mostrador o entregado a cuenta baja lo que lleva de cada producto."
+                    : "Cada kilo o unidad vendida en Mostrador o entregada a cuenta baja lo que lleva de cada insumo según la receta. No hace falta cargar lo que se elaboró."}{" "}
+                  Si se anula la venta, vuelve al stock. Se guarda con el botón de abajo.
+                </p>
+              </div>
+
               <div className="recipe-summary">
                 {isCombo ? (
                   <>
@@ -685,6 +704,7 @@ export function Recipes() {
                       {recipe.kind === "combo" && <span className="badge brand" style={{ marginRight: 6 }}>Combo</span>}
                       <strong>{product?.name ?? "Producto no encontrado"}</strong>{" "}
                       <span className="muted" style={{ fontSize: 12 }}>({recipe.items.length} {recipe.kind === "combo" ? "productos" : "insumos"})</span>
+                      {recipe.deductOnSale && <div className="muted" style={{ fontSize: 12 }}>Baja el stock al vender</div>}
                       {recipe.kind === "combo" && product && (() => {
                         const suelto = comboRetailTotal(recipe.items, productsById);
                         const discount = comboDiscountPct(product.priceRetail, suelto);
