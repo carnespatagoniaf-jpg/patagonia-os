@@ -17,23 +17,30 @@ export interface PosShift {
 export async function getOpenPosShift(branchId: string): Promise<PosShift | null> {
   if (!supabase) return null;
 
-  const { data, error } = await supabase
+  const columns = "id,opened_at,opening_cash,cashier_employee_id";
+  let result = await supabase
     .from("pos_shifts")
-    .select("id,opened_at,opening_cash,cashier_employee_id")
+    .select(`${columns},cashier_name`)
     .eq("branch_id", branchId)
     .eq("status", "open")
     .maybeSingle();
+  // Base sin la migración 172 (no tiene cashier_name): como antes.
+  if (result.error?.code === "42703") {
+    result = await supabase.from("pos_shifts").select(columns).eq("branch_id", branchId).eq("status", "open").maybeSingle();
+  }
 
+  const { data, error } = result;
   if (error) throw error;
   if (!data) return null;
-  const cashierEmployeeId = (data as { cashier_employee_id?: string | null }).cashier_employee_id ?? null;
-  let cashierName: string | null = null;
+  const row = data as { id: string; opened_at: string; opening_cash: number | null; cashier_employee_id?: string | null; cashier_name?: string | null };
+  const cashierEmployeeId = row.cashier_employee_id ?? null;
+  let cashierName: string | null = row.cashier_name?.trim() || null;
   if (cashierEmployeeId) {
     // Por RPC y no por embed: un plan sin Empleados lee la tabla vacía.
     const cashiers = await listPosCashiers(branchId).catch(() => []);
     cashierName = cashiers.find((c) => c.employeeId === cashierEmployeeId)?.fullName ?? null;
   }
-  return { id: data.id, openedAt: data.opened_at, openingCash: Number(data.opening_cash ?? 0), cashierEmployeeId, cashierName };
+  return { id: row.id, openedAt: row.opened_at, openingCash: Number(row.opening_cash ?? 0), cashierEmployeeId, cashierName };
 }
 
 export interface PosCashier {
@@ -57,7 +64,9 @@ export async function listPosCashiers(branchId: string | null): Promise<PosCashi
 export async function openPosShift(
   branchId: string,
   openingCash = 0,
-  cashier?: { employeeId: string; pin: string; fullName: string } | null
+  cashier?: { employeeId: string; pin: string; fullName: string } | null,
+  /** Nombre escrito a mano en "Inicio de caja" (migración 172): solo cuando no hay cajeras con PIN. */
+  cashierName?: string | null
 ): Promise<PosShift> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
@@ -66,14 +75,21 @@ export async function openPosShift(
     params.p_cashier_employee_id = cashier.employeeId;
     params.p_cashier_pin = cashier.pin;
   }
-  const { data, error } = await supabase.rpc("open_pos_shift", params);
+  const typedName = cashier ? null : cashierName?.trim().replace(/\s+/g, " ").slice(0, 60) || null;
+  if (typedName) params.p_cashier_name = typedName;
+  let { data, error } = await supabase.rpc("open_pos_shift", params);
+  // Base sin la migración 172: abre igual, sin el nombre.
+  if (error && typedName && (error.code === "PGRST202" || error.code === "42883")) {
+    delete params.p_cashier_name;
+    ({ data, error } = await supabase.rpc("open_pos_shift", params));
+  }
   if (error) throw error;
   return {
     id: data.id,
     openedAt: new Date().toISOString(),
     openingCash,
     cashierEmployeeId: cashier?.employeeId ?? null,
-    cashierName: cashier?.fullName ?? null
+    cashierName: cashier?.fullName ?? ((data as { cashier_name?: string | null }).cashier_name ?? null)
   };
 }
 
@@ -626,24 +642,31 @@ export interface PosShiftWithdrawal {
   number: number;
   amount: number;
   createdAt: string;
+  /** De un turno anterior que el dueño todavía no contó (no se anula desde acá: ese turno ya cerró). */
+  previousShift: boolean;
 }
 
-/** Retiros de dinero de un turno (los nuevos, que no mueven plata entre cuentas). */
-export async function listPosShiftWithdrawals(posShiftId: string): Promise<PosShiftWithdrawal[]> {
+/**
+ * Retiros de dinero para la lista de la caja: los de este turno y los de turnos anteriores de la sucursal
+ * que todavía no se contaron, así la lista no arranca de cero cada vez que se abre la caja.
+ */
+export async function listPosShiftWithdrawals(posShiftId: string, branchId: string): Promise<PosShiftWithdrawal[]> {
   if (!supabase) return [];
   const { data, error } = await supabase
     .from("pos_safe_deposits")
-    .select("id,number,amount,created_at")
-    .eq("pos_shift_id", posShiftId)
+    .select("id,number,amount,created_at,pos_shift_id")
+    .eq("branch_id", branchId)
     .is("out_movement_id", null)
     .is("voided_at", null)
+    .or(`pos_shift_id.eq.${posShiftId},count_id.is.null`)
     .order("number");
   if (error) return [];
-  return ((data ?? []) as Array<{ id: string; number: number; amount: number; created_at: string }>).map((r) => ({
+  return ((data ?? []) as Array<{ id: string; number: number; amount: number; created_at: string; pos_shift_id: string }>).map((r) => ({
     id: r.id,
     number: Number(r.number),
     amount: Number(r.amount),
-    createdAt: r.created_at
+    createdAt: r.created_at,
+    previousShift: r.pos_shift_id !== posShiftId
   }));
 }
 

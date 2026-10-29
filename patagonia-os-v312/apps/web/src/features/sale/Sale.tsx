@@ -52,6 +52,8 @@ export function Sale() {
   const [cashiers, setCashiers] = useState<PosCashier[]>([]);
   const [openCashierId, setOpenCashierId] = useState("");
   const [openCashierPin, setOpenCashierPin] = useState("");
+  // "Inicio de caja" sin cajeras con PIN: nombre de quien atiende, escrito a mano (migración 172).
+  const [openCashierName, setOpenCashierName] = useState("");
   const { suppliers, create: createSupplier } = useSuppliers();
   const { employees } = useEmployees();
   // "treasury.manage" (dueño/admin) da acceso a la pantalla completa de
@@ -537,7 +539,7 @@ export function Sale() {
     setMessage("");
     const openingCash = parseAmount(openingCashInput || "0") || 0;
     if (!isSupabaseConfigured) {
-      setShift({ id: "demo-shift", openedAt: new Date().toISOString(), openingCash });
+      setShift({ id: "demo-shift", openedAt: new Date().toISOString(), openingCash, cashierName: openCashierName.trim() || null });
       setShiftSales([]);
       setOpeningCashInput("");
       return;
@@ -550,10 +552,16 @@ export function Sale() {
     }
     setBusy(true);
     try {
-      setShift(await openPosShift(branchId, openingCash, cashier ? { employeeId: cashier.employeeId, pin: openCashierPin.trim(), fullName: cashier.fullName } : null));
+      setShift(await openPosShift(
+        branchId,
+        openingCash,
+        cashier ? { employeeId: cashier.employeeId, pin: openCashierPin.trim(), fullName: cashier.fullName } : null,
+        cashier ? null : openCashierName
+      ));
       setShiftSales([]);
       setOpeningCashInput("");
       setOpenCashierPin("");
+      setOpenCashierName("");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo abrir el turno.");
     } finally {
@@ -1171,6 +1179,16 @@ Cancelar = es el mismo papel: no cobrar.`)) {
                 />
               </>
             )}
+            {cashiers.length === 0 && (
+              <input
+                type="text"
+                placeholder="¿Quién atiende? (nombre)"
+                maxLength={60}
+                value={openCashierName}
+                onChange={(e) => setOpenCashierName(e.target.value)}
+                style={{ width: 200 }}
+              />
+            )}
             <label className="muted">Fondo inicial de caja $</label>
             <input
               type="text"
@@ -1203,6 +1221,7 @@ Cancelar = es el mismo papel: no cobrar.`)) {
           />
 
           <ShiftPanel
+            branchId={branchId ?? null}
             shift={shift}
             canSeeShiftTotals={canSeeShiftTotals}
             canManageTreasury={canManageTreasury}
