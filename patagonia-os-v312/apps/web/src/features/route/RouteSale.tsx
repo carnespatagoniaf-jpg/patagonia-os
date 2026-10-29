@@ -10,6 +10,7 @@ import { InvoiceRequestFields } from "../invoicing/InvoiceRequestFields";
 import { InvoicePaperFooter, InvoicePaperHeader } from "../invoicing/InvoicePaper";
 import {
   addLine,
+  routePrice,
   customerBalanceWithQueue,
   formatQty,
   lineTotal,
@@ -214,6 +215,17 @@ export function RouteSale() {
   const products = useMemo(() => stockAfterQueue(catalog?.products ?? [], myQueue), [catalog, myQueue]);
   const customers = catalog?.customers ?? [];
   const customer = customers.find((c) => c.id === customerId) ?? null;
+
+  // Cambió el cliente: el ticket toma su precio (mayorista si tiene lista), igual que la base al subirlo.
+  useEffect(() => {
+    setLines((current) =>
+      current.map((l) => {
+        const product = products.find((p) => p.id === l.productId);
+        return product ? { ...l, price: routePrice(product, customer) } : l;
+      })
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customer?.id, customer?.priceListId]);
   const total = ticketTotal(lines);
   const payAmount = payText.trim() === "" ? 0 : parseAmount(payText);
   const payAccount = catalog?.accounts.find((a) => a.id === payAccountId);
@@ -236,7 +248,7 @@ export function RouteSale() {
       setMessage("Poné la cantidad.");
       return;
     }
-    setLines((l) => addLine(l, picked, qty));
+    setLines((l) => addLine(l, { ...picked, price: routePrice(picked, customer) }, qty));
     setPicked(null);
     setQtyText("");
     setMessage("");
@@ -423,7 +435,7 @@ export function RouteSale() {
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
                 <div>
                   <b style={{ fontSize: 17 }}>{customer.name}</b>
-                  <div className="muted">Debe {money(customerBalanceWithQueue(customer, myQueue))}</div>
+                  <div className="muted">Debe {money(customerBalanceWithQueue(customer, myQueue))}{customer.priceListName ? ` · Precio ${customer.priceListName}` : ""}</div>
                 </div>
                 <button className="secondary" onClick={() => setCustomerId(null)}>Cambiar</button>
               </div>
@@ -456,7 +468,7 @@ export function RouteSale() {
             <h3 style={{ margin: 0 }}>2. Productos</h3>
             {picked ? (
               <div style={{ display: "grid", gap: 6 }}>
-                <b>{picked.name} · {money(picked.price)}{picked.unit === "kg" ? "/kg" : ""}</b>
+                <b>{picked.name} · {money(routePrice(picked, customer))}{picked.unit === "kg" ? "/kg" : ""}</b>
                 <span className="muted" style={{ fontSize: 13 }}>En el camión: {formatQty(picked.stock, picked.unit)}</span>
                 <div style={{ display: "flex", gap: 8 }}>
                   <input
@@ -471,7 +483,7 @@ export function RouteSale() {
                   />
                   <button onClick={confirmQuantity} style={{ flexShrink: 0 }}>Agregar</button>
                 </div>
-                {quantityNumber(qtyText) > 0 && <span>= {money(quantityNumber(qtyText) * picked.price)}</span>}
+                {quantityNumber(qtyText) > 0 && <span>= {money(quantityNumber(qtyText) * routePrice(picked, customer))}</span>}
                 <button className="link-button" style={{ justifySelf: "start" }} onClick={() => setPicked(null)}>Cancelar</button>
               </div>
             ) : (
@@ -481,7 +493,7 @@ export function RouteSale() {
                   {productMatches.map((p) => (
                     <button key={p.id} type="button" className="secondary" style={{ display: "flex", justifyContent: "space-between", padding: 12, textAlign: "left" }} onClick={() => pickProduct(p)}>
                       <span>{p.name}<span className="muted" style={{ fontSize: 12 }}> · quedan {formatQty(p.stock, p.unit)}</span></span>
-                      <strong>{money(p.price)}</strong>
+                      <strong>{money(routePrice(p, customer))}</strong>
                     </button>
                   ))}
                 </div>

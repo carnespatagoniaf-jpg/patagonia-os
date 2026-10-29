@@ -36,6 +36,9 @@ import { SaleTicketPanel } from "./SaleTicketPanel";
 import { useSaleTicket } from "./useSaleTicket";
 import { applySoldToStock } from "./sale-stock";
 import { getMostradorPin } from "./company-settings-service";
+import { PriceListToggle } from "../pricing/PriceListToggle";
+import { listPriceLists } from "../pricing/price-lists-service";
+import type { PriceList } from "../pricing/price-lists";
 import { buildCloseTicket as buildCloseTicketBytes, buildMovementTicket as buildMovementTicketBytes, buildReceiptTicket as buildReceiptTicketBytes } from "./sale-tickets";
 import { type ReceiptLine, type ReceiptState, type MovementReceiptState, STALE_SHIFT_HOURS, formatShiftStart, getAutoPrintEnabled, saveAutoPrintEnabled, loadStoredReceipt, saveStoredReceipt } from "./sale-model";
 
@@ -161,6 +164,12 @@ export function Sale() {
   const [scaleConfigCalibrated, setScaleConfigCalibrated] = useState(false);
 
 
+  // Listas de precios (Mayorista, migración 167): sin listas, Mostrador queda como siempre.
+  const [priceLists, setPriceLists] = useState<PriceList[]>([]);
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    listPriceLists().then((l) => setPriceLists(l.filter((x) => x.active))).catch(() => setPriceLists([]));
+  }, []);
   const ticket = useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot: SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? ""), scaleBranchId: branchId ?? null });
   const {
     cart,
@@ -658,7 +667,8 @@ export function Sale() {
         scaleTickets: l.scaleTickets,
         scaleAmount: l.scaleAmount,
         scaleTicket: l.scaleTicket,
-        ...(l.scalePaper ? { scaleCode: l.scaleCode ?? null } : {})
+        ...(l.scalePaper ? { scaleCode: l.scaleCode ?? null } : {}),
+        ...(l.kind === "product" && l.priceListId ? { priceListId: l.priceListId } : {})
       }));
       const paymentsPayload = isSplit
         ? payments.map((p) => ({ accountId: p.accountId, amount: parseAmount(p.amount || "0") || 0, reference: p.reference.trim() || undefined }))
@@ -1159,6 +1169,11 @@ Cancelar = es el mismo papel: no cobrar.`)) {
             accounts={accounts}
             busy={busy}
             onCheckout={checkout}
+            priceSlot={
+              priceLists.length > 0 ? (
+                <PriceListToggle lists={priceLists} value={ticket.priceListId} onChange={ticket.setPriceListId} disabled={busy} />
+              ) : null
+            }
             invoiceSlot={
               fiscal?.enabled && cart.length > 0 ? (
                 <InvoiceRequestFields issuer={fiscal.taxCondition} draft={invoiceDraft} total={total} onChange={setInvoiceDraft} />

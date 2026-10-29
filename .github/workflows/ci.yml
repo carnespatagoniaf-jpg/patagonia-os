@@ -1,24 +1,37 @@
-# Verificacion automatica: pruebas, tipos y compilacion en cada push a main y en cada PR.
+# Verificación automática: pruebas, tipos, compilación y migraciones en una base vacía.
+# Corre en cada push a cualquier rama y en cada PR. NO publica nada ni se conecta a
+# Supabase o Netlify: no usa ningún secreto.
 # El repo vive un nivel arriba de la carpeta del proyecto (patagonia-os-v312).
 name: CI
 
 on:
   push:
-    branches: [main]
   pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   verificar:
+    name: Pruebas, tipos y compilación
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: patagonia-os-v312
     steps:
       - uses: actions/checkout@v4
 
+      # Node 22: las pruebas de la web usan "node --test 'src/**/*.test.ts'", y Node 20
+      # no entiende ese patrón (por eso CI fallaba en todos los cambios desde octubre).
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
           cache-dependency-path: patagonia-os-v312/package-lock.json
 
@@ -31,5 +44,36 @@ jobs:
       - name: Tipos (web y api)
         run: npm run typecheck
 
+      # Sin claves de Supabase: compila en modo demo, solo para comprobar que compila.
       - name: Compilar
         run: npm run build
+
+  migraciones:
+    name: Migraciones desde cero + pruebas SQL
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: patagonia-os-v312
+    env:
+      PGHOST: localhost
+      PGPORT: 5432
+      PGUSER: postgres
+      PGPASSWORD: postgres
+      PGDATABASE: patagonia_ci
+    steps:
+      - uses: actions/checkout@v4
+      - name: Aplicar 001…última en una base vacía y correr tests/sql
+        run: bash scripts/ci/check-migrations.sh

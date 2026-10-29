@@ -10,6 +10,8 @@ export interface RouteProduct {
   unit: "kg" | "unit";
   price: number;
   stock: number;
+  /** Precio en cada lista de precios activa (Mayorista…), por id de lista. */
+  listPrices?: Record<string, number>;
 }
 
 export interface RouteCustomer {
@@ -18,6 +20,9 @@ export interface RouteCustomer {
   number?: number;
   phone?: string;
   balance: number;
+  /** Lista de precios del cliente (migración 167): compra a esos precios. */
+  priceListId?: string;
+  priceListName?: string;
 }
 
 export interface RouteLine {
@@ -79,6 +84,12 @@ export function saleError(lines: RouteLine[], payments: RoutePayment[], customer
   if (payments.some((p) => p.amount < 0 || !Number.isFinite(p.amount))) return "Revisá lo que cobraste.";
   if (paidTotal(payments) > ticketTotal(lines) + 0.5) return "Cobraste más que el total de la venta.";
   return null;
+}
+
+/** Precio para este cliente: el de su lista si tiene una (igual que la base al subir la venta). */
+export function routePrice(product: Pick<RouteProduct, "price" | "listPrices">, customer: Pick<RouteCustomer, "priceListId"> | null | undefined): number {
+  const listId = customer?.priceListId;
+  return listId ? product.listPrices?.[listId] ?? product.price : product.price;
 }
 
 /** Suma una línea al ticket; el mismo producto se junta en un solo renglón. */
