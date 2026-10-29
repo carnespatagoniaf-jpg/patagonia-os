@@ -377,18 +377,18 @@ export type CarcassCostMethod = "average" | "value";
 /**
  * Costo real de cada corte de una res. Dos formas (la misma cuenta, con el mismo redondeo, la hace la base en
  * carcass_apply_costs_core, migración 170: cambiar las dos juntas):
- * - "average" (la de siempre desde 2026-10-29, pedido del dueño: "si compro la media, el kilo de cada corte me sale
- *   lo mismo"): lo que se pagó ÷ los kilos de los cortes que se venden (con precio). Todos cuestan lo mismo por kilo;
- *   el hueso y la grasa sin precio son merma (costo 0). Cada corte deja su propio margen, positivo o negativo.
- * - "value" (empresas con 'costo_por_valor'): según lo que VALE cada corte (kilos × precio de venta), así el lomo carga
- *   más costo por kilo que la falda y todos dejan el mismo margen.
+ * - "value" (la de siempre): según lo que VALE cada corte (kilos × precio de venta), así el lomo carga más costo por
+ *   kilo que la falda y todos dejan el mismo margen.
+ * - "average" (empresas con 'costo_parejo', pedido de La cosa es con carne 2026-10-29: "si compro la media, el kilo
+ *   de cada corte me sale lo mismo"): lo que se pagó ÷ los kilos de los cortes que se venden (con precio). Todos
+ *   cuestan lo mismo por kilo; el hueso y la grasa sin precio son merma (costo 0). Cada corte deja su propio margen.
  * Si ningún corte tiene precio, en las dos se reparte por kilos. Los cortes sin producto también participan del
  * reparto (se llevan su parte), pero solo se devuelven los que tienen producto, agrupados por producto.
  */
 export function allocateCarcassCost(
   totalCost: Money,
   cuts: { productId?: string | null; weight: Quantity; unitPrice: Money }[],
-  method: CarcassCostMethod = "average"
+  method: CarcassCostMethod = "value"
 ): CarcassCostLine[] {
   const totalValue = cuts.reduce((s, c) => s + c.weight * c.unitPrice, 0);
   const totalWeight = cuts.reduce((s, c) => s + c.weight, 0);

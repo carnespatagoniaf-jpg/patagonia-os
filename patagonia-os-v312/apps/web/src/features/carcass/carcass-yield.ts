@@ -1,5 +1,6 @@
 // Rinde de un despiece: kilos aprovechables y su costo promedio. Lógica pura, sin Supabase.
-// Es solo informativo: el costo de cada corte se sigue repartiendo por lo que vale (allocateCarcassCost),
+// Por defecto el costo de cada corte se reparte por lo que vale (allocateCarcassCost); con "costo_parejo" (migración 170)
+// todos los cortes cuestan este promedio. Sin la opción esto es informativo,
 // porque si todos costaran lo mismo por kilo la falda daría pérdida y el lomo una ganancia enorme.
 
 export interface CarcassYield {

@@ -208,3 +208,12 @@ export async function markCarcassBatchWeighed(batchId: string): Promise<void> {
   const { error } = await supabase.rpc("mark_carcass_batch_weighed", { p_batch_id: batchId });
   if (error) throw error;
 }
+
+/** "Actualizar costos en Stock": escribe el costo por kilo de esta res en sus productos (migración 170). */
+export async function applyCarcassCosts(batchId: string): Promise<{ updated: number }> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+
+  const { data, error } = await supabase.rpc("apply_carcass_costs", { p_batch_id: batchId });
+  if (error) throw error;
+  return { updated: Array.isArray(data?.updated) ? data.updated.length : 0 };
+}

@@ -208,7 +208,8 @@ export const COMPANY_FEATURES: { key: string; label: string; short: string }[] =
   { key: "reporte_ventas", label: "Reporte de ventas (ventas a cuenta con detalle)", short: "Reporte de ventas" },
   { key: "ventas_detalle", label: "Descuento o recargo y detalle en ventas a cuenta", short: "Detalle en ventas" },
   { key: "paquetes", label: "Paquetes (cortes envasados) en Stock", short: "Paquetes" },
-  { key: "venta_ruta", label: "Venta en ruta y Camiones", short: "Venta en ruta" }
+  { key: "venta_ruta", label: "Venta en ruta y Camiones", short: "Venta en ruta" },
+  { key: "costo_parejo", label: "Despiece: costo parejo por kilo (todos los cortes cuestan lo mismo)", short: "Costo parejo" }
 ];
 
 export async function listCompanyFeatures(): Promise<Record<string, string[]>> {
