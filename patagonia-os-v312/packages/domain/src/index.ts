@@ -371,21 +371,36 @@ export interface CarcassCostLine {
   costPerKg: Money;
 }
 
+/** Cómo se reparte lo que se pagó por una res entre sus cortes. */
+export type CarcassCostMethod = "average" | "value";
+
 /**
- * Costo real de cada corte de una res: la compra se reparte según lo que VALE cada corte (kilos × precio de venta),
- * así el lomo carga más costo por kilo que el hueso, y lo que no se vende (precio 0) no carga costo. Si ningún corte
- * tiene precio, se reparte por kilos. Los cortes sin producto también participan del reparto (se llevan su parte),
- * pero solo se devuelven los que tienen producto, agrupados por producto.
- * La MISMA cuenta, con el mismo redondeo, la hace la base en apply_carcass_costs (migración 122): cambiar las dos juntas.
+ * Costo real de cada corte de una res. Dos formas (la misma cuenta, con el mismo redondeo, la hace la base en
+ * carcass_apply_costs_core, migración 170: cambiar las dos juntas):
+ * - "average" (la de siempre desde 2026-10-29, pedido del dueño: "si compro la media, el kilo de cada corte me sale
+ *   lo mismo"): lo que se pagó ÷ los kilos de los cortes que se venden (con precio). Todos cuestan lo mismo por kilo;
+ *   el hueso y la grasa sin precio son merma (costo 0). Cada corte deja su propio margen, positivo o negativo.
+ * - "value" (empresas con 'costo_por_valor'): según lo que VALE cada corte (kilos × precio de venta), así el lomo carga
+ *   más costo por kilo que la falda y todos dejan el mismo margen.
+ * Si ningún corte tiene precio, en las dos se reparte por kilos. Los cortes sin producto también participan del
+ * reparto (se llevan su parte), pero solo se devuelven los que tienen producto, agrupados por producto.
  */
-export function allocateCarcassCost(totalCost: Money, cuts: { productId?: string | null; weight: Quantity; unitPrice: Money }[]): CarcassCostLine[] {
+export function allocateCarcassCost(
+  totalCost: Money,
+  cuts: { productId?: string | null; weight: Quantity; unitPrice: Money }[],
+  method: CarcassCostMethod = "average"
+): CarcassCostLine[] {
   const totalValue = cuts.reduce((s, c) => s + c.weight * c.unitPrice, 0);
   const totalWeight = cuts.reduce((s, c) => s + c.weight, 0);
+  const sellableWeight = cuts.reduce((s, c) => (c.unitPrice > 0 ? s + c.weight : s), 0);
   const byProduct = new Map<string, { weight: number; value: number; cost: number }>();
   for (const c of cuts) {
     if (!c.productId) continue;
     const value = c.weight * c.unitPrice;
-    const share = totalValue > 0 ? (totalCost * value) / totalValue : totalWeight > 0 ? (totalCost * c.weight) / totalWeight : 0;
+    let share: number;
+    if (totalValue <= 0) share = totalWeight > 0 ? (totalCost * c.weight) / totalWeight : 0;
+    else if (method === "value") share = (totalCost * value) / totalValue;
+    else share = c.unitPrice > 0 && sellableWeight > 0 ? (totalCost * c.weight) / sellableWeight : 0;
     const prev = byProduct.get(c.productId) ?? { weight: 0, value: 0, cost: 0 };
     byProduct.set(c.productId, { weight: prev.weight + c.weight, value: prev.value + value, cost: prev.cost + share });
   }
