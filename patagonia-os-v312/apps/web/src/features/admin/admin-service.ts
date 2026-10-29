@@ -209,7 +209,8 @@ export const COMPANY_FEATURES: { key: string; label: string; short: string }[] =
   { key: "ventas_detalle", label: "Descuento o recargo y detalle en ventas a cuenta", short: "Detalle en ventas" },
   { key: "paquetes", label: "Paquetes (cortes envasados) en Stock", short: "Paquetes" },
   { key: "venta_ruta", label: "Venta en ruta y Camiones", short: "Venta en ruta" },
-  { key: "costo_parejo", label: "Despiece: costo parejo por kilo (todos los cortes cuestan lo mismo)", short: "Costo parejo" }
+  { key: "costo_parejo", label: "Despiece: costo parejo por kilo (todos los cortes cuestan lo mismo)", short: "Costo parejo" },
+  { key: "traer_balanza", label: "Mis balanzas: traer a Patagonia los productos de la balanza", short: "Traer de balanza" }
 ];
 
 export async function listCompanyFeatures(): Promise<Record<string, string[]>> {

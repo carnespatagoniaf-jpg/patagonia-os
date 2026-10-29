@@ -1,3 +1,4 @@
+import { parseAuraPlu } from "../../../inventory/kretz/aura-plu";
 import { planAuraSync, summarizeAuraPlan, type AuraSyncItem } from "../../../inventory/kretz/aura-sync";
 import { getStoredModelId, saveModelId } from "../../../inventory/kretz/models";
 import {
@@ -18,7 +19,7 @@ import { canWrite, MODEL_LIMITS, SCALE_CAPABILITIES, type ScaleModelId } from ".
 import { preflightProducts, type PreflightResult } from "../preflight";
 import { FRIENDLY_MESSAGES, FriendlyError, SENT_AND_CHECKED } from "../friendly";
 import { normalizeName } from "../matching";
-import type { EngineContext, EngineProduct, PendingItem, PreparedSync, ProductProblem, ProgressFn, ScaleAdapter, ScaleSession, SyncOutcome } from "../types";
+import type { EngineContext, EngineProduct, PendingItem, PreparedSync, ProductProblem, ProgressFn, ScaleAdapter, ScaleCatalogEntry, ScaleSession, SyncOutcome } from "../types";
 
 /**
  * Kretz (Report LT y Aura). Reutiliza, sin cambiarlos, los mismos caminos que usan los clientes hoy:
@@ -68,6 +69,17 @@ export class KretzSession implements ScaleSession {
     private readonly diagnostic: Record<string, unknown> = {}
   ) {
     this.label = SCALE_CAPABILITIES[model].label;
+  }
+
+  /** Aura: lo leído (D/C en pesos enteros, P/N con centavos). La Report no se lee entera: solo los números de Patagonia. */
+  scaleCatalog(): ScaleCatalogEntry[] | null {
+    if (this.state?.kind !== "aura") return null;
+    return this.state.records.flatMap((r) => {
+      const p = parseAuraPlu(r);
+      if (!p || !/^\d+$/.test(p.priceRaw.trim())) return [];
+      const cents = p.type === "P" || p.type === "N";
+      return [{ number: p.plu, name: p.name, byWeight: p.type === "D" || p.type === "P", price: cents ? Number(p.priceRaw) / 100 : Number(p.priceRaw) }];
+    });
   }
 
   private base(): Omit<PreparedSync, "scaleProducts" | "ready" | "writes" | "pending" | "upToDate"> {

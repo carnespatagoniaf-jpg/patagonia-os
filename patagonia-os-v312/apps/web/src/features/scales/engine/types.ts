@@ -95,6 +95,18 @@ export interface ScaleSession {
   identity?(): Record<string, unknown>;
   /** Cómo imprime los códigos según su configuración leída (Systel: E_P, E_U, E_S), o null. */
   codeFormats?(): { weighed: string | null; unit: string | null; total: string | null } | null;
+  /** Los productos que se leyeron de la balanza en `prepare` (para traerlos a Patagonia), o null si esta marca no la lee entera. */
+  scaleCatalog?(): ScaleCatalogEntry[] | null;
+}
+
+/** Un producto tal como está guardado en la balanza. */
+export interface ScaleCatalogEntry {
+  /** Número de producto en la balanza (en Patagonia es el código). */
+  number: number;
+  name: string;
+  byWeight: boolean;
+  /** En pesos. */
+  price: number;
 }
 
 /** Lo técnico de un intento de conexión, para el reporte a soporte (nunca se muestra al cliente). */

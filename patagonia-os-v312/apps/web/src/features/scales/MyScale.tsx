@@ -19,6 +19,8 @@ import { bindingFor, forgetBinding, saveBinding } from "./registry/local-binding
 import { setScaleLinks } from "./sale/scale-sale-service";
 import { compactSupportLog } from "./support-compact";
 import { submitScaleSupportReport } from "./support-service";
+import { planScaleImport } from "./engine/scale-import";
+import { importProducts } from "../import/import-service";
 
 /**
  * "Mis balanzas": la única pantalla de balanza que ve el cliente.
@@ -48,6 +50,8 @@ const CHOICE_FOR_TARGET: Record<ReturnType<typeof choiceForScale>, ScaleChoice> 
 export function MyScale({ products, branchId }: { products: EngineProduct[]; branchId: string | null }) {
   const { profile } = useAuth();
   const canManage = profile?.role === "owner" || profile?.role === "admin";
+  // "Traer productos de la balanza": solo empresas que lo pidieron (companies.features, migración 173).
+  const canImport = canManage && !!profile?.features?.includes("traer_balanza") && !!branchId && isSupabaseConfigured;
   const [scales, setScales] = useState<BranchScale[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [activeKey, setActiveKey] = useState<string | null>(null);
@@ -459,6 +463,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
               <span>En la balanza, {phase.prepared.pending.filter((p) => p.reason === "ocupado_en_balanza").length} números tienen otro producto. Reemplazarlos por los de Patagonia.</span>
             </label>
           )}
+          {canImport && <ImportFromScale session={session.current} products={products} branchId={branchId!} />}
           <Notes notes={phase.prepared.notes} />
           <ProblemList title="no van a la balanza" items={phase.prepared.skipped} />
           <ProblemList title="van con el nombre acortado" items={phase.prepared.warnings} />
@@ -478,6 +483,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
         <div className="my-scale-body">
           <p className="my-scale-status"><TriangleAlert size={20} /> Falta un paso en la balanza</p>
           <p>{phase.prepared.blocker}</p>
+          {canImport && <ImportFromScale session={session.current} products={products} branchId={branchId!} />}
           <div className="my-scale-actions">
             <button className="secondary" onClick={() => void handleConnect(active, false)}>Conectar otra vez</button>
             <button className="secondary" onClick={backToList}>Volver a mis balanzas</button>
@@ -495,6 +501,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
         <div className="my-scale-body">
           <p className="my-scale-status ok"><CheckCircle2 size={22} /> {phase.message}</p>
           <InstallChecklist record={installOf(active)} onRefresh={() => void reload()} />
+          {canImport && <ImportFromScale session={session.current} products={products} branchId={branchId!} />}
           {phase.pending.length > 0 && active && <PendingReview items={phase.pending} products={products} branchId={branchId} scaleKey={active.key} />}
           <ProblemList title="no van a la balanza" items={phase.skipped} />
           <div className="my-scale-actions">
@@ -750,5 +757,63 @@ function PendingReview({ items, products, branchId, scaleKey }: { items: Pending
         );
       })}
     </details>
+  );
+}
+
+/**
+ * Crea en Patagonia los productos que la balanza tiene y Patagonia no (mismo número, nombre, precio y forma de venta).
+ * Solo lee la balanza; nunca cambia un producto que ya existe en Patagonia.
+ */
+function ImportFromScale({ session, products, branchId }: { session: ScaleSession | null; products: EngineProduct[]; branchId: string }) {
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const catalog = session?.scaleCatalog?.() ?? null;
+  const plan = catalog ? planScaleImport(catalog, products) : null;
+
+  if (done) {
+    return (
+      <div className="my-scale-review">
+        <p className="my-scale-status ok"><CheckCircle2 size={20} /> {done}</p>
+        <button className="my-scale-primary" onClick={() => window.location.reload()}>ACTUALIZAR LA PANTALLA</button>
+      </div>
+    );
+  }
+  if (!plan) return null;
+  if (plan.rows.length === 0) {
+    return <p className="muted">Todos los productos de la balanza ya están en Patagonia.</p>;
+  }
+
+  async function run() {
+    if (!plan) return;
+    const n = plan.rows.length;
+    if (!window.confirm(`Se van a crear ${n} ${n === 1 ? "producto" : "productos"} en Patagonia con el mismo número, nombre, precio y forma de venta que en la balanza.
+
+No se cambia nada en la balanza ni en los productos que ya tenés. ¿Seguir?`)) return;
+    setBusy(true);
+    setError("");
+    try {
+      const r = await importProducts(branchId, plan.rows, false);
+      const noPrice = plan.rows.filter((x) => x.price_retail === 0).length;
+      setDone(
+        `Listo: se agregaron ${r.created} ${r.created === 1 ? "producto" : "productos"} a Patagonia.` +
+          (r.skipped + plan.existing > 0 ? ` ${r.skipped + plan.existing} ya estaban y no se tocaron.` : "") +
+          (noPrice > 0 ? ` ${noPrice} no tenían precio en la balanza: cargalo en Stock.` : "") +
+          " Revisá el costo de cada uno en Stock."
+      );
+    } catch (err) {
+      setError(`No se pudieron agregar: ${err instanceof Error ? err.message : String(err)}. No se creó ninguno.`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="my-scale-review">
+      <p className="my-scale-status">La balanza tiene {plan.rows.length} {plan.rows.length === 1 ? "producto que no está" : "productos que no están"} en Patagonia</p>
+      <p className="muted">Se crean con el mismo número (código), nombre, precio y forma de venta. A la balanza no se le cambia nada.{plan.existing > 0 ? ` ${plan.existing} ya están en Patagonia y no se tocan.` : ""}</p>
+      {error && <p className="my-scale-warning">{error}</p>}
+      <button className="my-scale-primary" disabled={busy} onClick={() => void run()}>{busy ? "Agregando…" : `TRAER ${plan.rows.length} PRODUCTOS A PATAGONIA`}</button>
+    </div>
   );
 }

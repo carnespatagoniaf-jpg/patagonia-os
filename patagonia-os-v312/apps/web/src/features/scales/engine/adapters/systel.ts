@@ -11,7 +11,7 @@ import type { ScaleSetup } from "../../sale/scale-sale-service";
 import { canWrite, SCALE_CAPABILITIES, systelLimits, type ScaleModelId } from "../capabilities";
 import { preflightProducts, type PreflightResult } from "../preflight";
 import { FRIENDLY_MESSAGES, FriendlyError, SENT_AND_CHECKED } from "../friendly";
-import type { EngineContext, PendingItem, PreparedSync, ProgressFn, ScaleAdapter, ScaleSession, SyncOutcome } from "../types";
+import type { EngineContext, PendingItem, PreparedSync, ProgressFn, ScaleAdapter, ScaleCatalogEntry, ScaleSession, SyncOutcome } from "../types";
 import { planSystelPush, PROOF_NAME, proveSystelWrite, runSystelPush, scaleOnly, type PushItem, type PushProduct, type WriteProofResult } from "./systel-push";
 import type { TypeByteMode } from "../../../inventory/systel/systel-product-barcode";
 
@@ -448,6 +448,14 @@ export class SystelSession implements ScaleSession {
   codeFormats(): { weighed: string | null; unit: string | null; total: string | null } | null {
     const v = (this.state?.backup ?? this.lastBackup)?.config?.values;
     return v ? { weighed: v.E_P ?? null, unit: v.E_U ?? null, total: v.E_S ?? null } : null;
+  }
+
+  /** Lo leído de la balanza: el número de cada producto es su código en Patagonia (igual que al mandarlos, systel-push). */
+  scaleCatalog(): ScaleCatalogEntry[] | null {
+    const b = this.state?.backup ?? this.lastBackup;
+    if (!b) return null;
+    const dec = b.signature?.priceDecimals ?? 0;
+    return b.plus.map((p) => ({ number: p.number, name: p.name.trim(), byWeight: p.saleType === "P" || p.saleType === "C", price: rawToPesos(p.prices[0] ?? 0, dec) }));
   }
 
   supportInfo(): Record<string, unknown> {
