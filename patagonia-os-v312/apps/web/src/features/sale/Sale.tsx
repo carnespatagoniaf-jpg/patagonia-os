@@ -898,6 +898,11 @@ Cancelar = es el mismo papel: no cobrar.`)) {
       // Lo que la cajera declaró por cada posnet/transferencia queda en la tabla del cierre.
       setAccountReconcileInput(declaredAccounts);
       setShowCloseConfirm(false);
+      // Ticket del cierre, solo con "Imprimir automáticamente" prendido (igual que el de cada venta). Antes de la 164
+      // se veía el detalle y se imprimía con un botón; con el cierre a ciegas la cajera se quedaba sin ticket.
+      void autoPrintCloseTicket(
+        buildCloseTicketBytes({ summary: result, branchName: currentBranchName(), accounts, adjustments: adjustmentsSnapshot, vales: valesSnapshot, supplierPayments: supplierPayments ?? [] })
+      );
       await reloadShift();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo cerrar el turno.");
@@ -999,6 +1004,22 @@ Cancelar = es el mismo papel: no cobrar.`)) {
    * navegador como red de seguridad -- ese SÍ requiere un clic en
    * "Imprimir" (ningún navegador permite saltear eso por seguridad), pero
    * nunca deja a alguien sin ticket. */
+  async function autoPrintCloseTicket(bytes: Uint8Array) {
+    if (!autoPrintEnabled) return;
+    if (await isThermalPrinterPaired()) {
+      try {
+        await printBytes(bytes);
+        return;
+      } catch (err) {
+        if (await pingPrintAgent()) {
+          setMessage(err instanceof Error ? err.message : "No se pudo imprimir el ticket de cierre.");
+          return;
+        }
+      }
+    }
+    setTimeout(() => window.print(), 300);
+  }
+
   async function autoPrintReceipt(receiptToPrint: ReceiptState) {
     if (!autoPrintEnabled) return;
     if (await isThermalPrinterPaired()) {
@@ -1286,11 +1307,10 @@ Cancelar = es el mismo papel: no cobrar.`)) {
               {closeSummary.difference < 0 ? `Faltan ${formatMoney(-closeSummary.difference)}` : `Sobran ${formatMoney(closeSummary.difference)}`}
             </p>
           )}
-          <p className="muted" style={{ marginBottom: 0 }}>El dueño ve el detalle en "Control de caja".</p>
         </section>
       )}
 
-      {closeSummary && canSeeShiftTotals && (
+      {closeSummary && (
         <CloseSummaryView
           summary={closeSummary}
           accounts={accounts}
