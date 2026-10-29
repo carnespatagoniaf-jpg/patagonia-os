@@ -142,6 +142,22 @@ describe("[SIMULADO, registros REALES de El Dorado] Cuora Max firmware 7.0: prue
     assert.equal(f.plus.get(2005)!.slice(25, 31), "012500");
   });
 
+  it("REAL 29/10: al conectar, Mostrador deja de leer el importe como kilos (formato viejo guardado en la PC)", async () => {
+    const { saveSystelPluBarcodes, systelConfigForCode, loadSystelLabelTemplates } = await import("../../sale/systel-label-format");
+    // Lo que había quedado guardado en la PC: el 1006 "producto + kilos".
+    saveSystelPluBarcodes({ "1006": { type: 1, config: "20PPPPCCCCCC", p1: 17990, saleType: "P" } });
+    assert.notEqual(systelConfigForCode("2010060999341", loadSystelLabelTemplates()), "no_soportado");
+    const f = eldorado();
+    f.config = "Ton=2;Sinc=0;E_P=20PPPPIIIIII;E_U=21PPPPIIIIII;E_S=22AAIIIIIIII;ETi=S";
+    f.plus.set(1006, "0010060BOLA DE LOMO      017990000000017990000000000000000000000000000000000000000000001006010000P00000000" + TAIL);
+    const { deps } = fakeDb();
+    await new SystelSession(f, 20, ctx(), deps).prepare(noop);
+    const t = loadSystelLabelTemplates()!;
+    assert.deepEqual(t.perPlu?.["1006"], { type: 0, config: "IIIIIIIIIIII", p1: 17990, p2: 17990, name: "BOLA DE LOMO", saleType: "P" });
+    // El ticket real de El Dorado (BOLA DE LOMO $99.934): ya no se lee como kilos.
+    assert.equal(systelConfigForCode("2010060999341", t), "no_soportado");
+  });
+
   it("la segunda vez en la misma computadora no repite la prueba", async () => {
     const f = eldorado();
     const { deps } = fakeDb();

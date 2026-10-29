@@ -3,7 +3,7 @@ import { takeSystelBackup, type SystelBackup } from "../../../inventory/systel/s
 import type { SystelExchangeLog } from "../../../inventory/systel/systel-client";
 import { discoverSystelLink, loadSavedSystelLink, saveSystelLink, type SystelFoundLink } from "../../../inventory/systel/systel-discovery";
 import type { SystelLinkEvent } from "../../../inventory/systel/systel-serial";
-import { LAYOUT_INFO, type SystelLayout } from "../../../inventory/systel/systel-plu";
+import { LAYOUT_INFO, pluEanSetting, rawToPesos, type SystelLayout } from "../../../inventory/systel/systel-plu";
 import { takeProductBackup } from "../../../inventory/systel/systel-product-barcode";
 import { saveSystelLabelTemplates, saveSystelPluBarcodes } from "../../../sale/systel-label-format";
 import type { ScaleCatalogItem, ScaleLink, ScaleSaleProfile } from "../../sale/profile";
@@ -294,6 +294,19 @@ export class SystelSession implements ScaleSession {
       throw new FriendlyError(systelRefused(this.log) ? "balanza_ocupada" : "no_contesta", `${backup.detail} · pedidos: ${this.addressNote}`);
     }
     this.model = systelModelFor(backup);
+    // Mostrador lee las etiquetas con lo que la balanza tiene HOY (formato general y el propio de cada producto), no con
+    // lo que quedó guardado en esta PC de otra vez (real El Dorado 29/10: leyó $99.934 como 99,934 kg).
+    if (backup.complete && backup.config) {
+      saveSystelLabelTemplates(backup.config.values);
+      const dec = backup.signature?.priceDecimals ?? 0;
+      saveSystelPluBarcodes(
+        Object.fromEntries(backup.plus.map((p) => {
+          const ean = pluEanSetting(p.raw);
+          return [String(p.code), { type: ean.type, config: ean.config, p1: rawToPesos(p.prices[0] ?? 0, dec), p2: rawToPesos(p.prices[1] ?? 0, dec), name: p.name.trim(), saleType: p.saleType }];
+        })),
+        true
+      );
+    }
     this.label = SCALE_CAPABILITIES[this.model].label;
 
     onProgress("comparar", "Comparando con los productos de Patagonia…");

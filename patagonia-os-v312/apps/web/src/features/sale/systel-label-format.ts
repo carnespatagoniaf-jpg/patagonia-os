@@ -58,11 +58,15 @@ export function loadSystelLabelTemplates(): SystelLabelTemplates | null {
   }
 }
 
-/** Guarda el código de barras propio de los productos leídos de la balanza (se suma a lo ya guardado). */
-export function saveSystelPluBarcodes(perPlu: Record<string, { type: number | null; config: string | null; p1?: number; p2?: number; name?: string; saleType?: string }>): void {
+/**
+ * Guarda el código de barras propio de los productos leídos de la balanza (se suma a lo ya guardado).
+ * `replace`: reemplaza todo lo guardado (lectura completa de la balanza). REAL El Dorado 29/10: un formato viejo
+ * guardado en la PC ("producto + kilos") leyó una etiqueta de "producto + importe" ($99.934) como 99,934 kg.
+ */
+export function saveSystelPluBarcodes(perPlu: Record<string, { type: number | null; config: string | null; p1?: number; p2?: number; name?: string; saleType?: string }>, replace = false): void {
   try {
     const prev = loadSystelLabelTemplates() ?? { weighed: null, unit: null, at: Date.now() };
-    localStorage.setItem(KEY, JSON.stringify({ ...prev, perPlu: { ...(prev.perPlu ?? {}), ...perPlu } } satisfies SystelLabelTemplates));
+    localStorage.setItem(KEY, JSON.stringify({ ...prev, perPlu: replace ? perPlu : { ...(prev.perPlu ?? {}), ...perPlu } } satisfies SystelLabelTemplates));
   } catch {
     // nada
   }

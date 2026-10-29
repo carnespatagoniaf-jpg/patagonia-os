@@ -395,6 +395,12 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
           done();
           return;
         }
+        // Una Cuora pesa hasta 31 kg: más que eso es un código mal leído (real El Dorado 29/10: $99.934 leído como 99,934 kg).
+        if (resolved.product.unit === "kg" && !(resolved.quantity > 0 && resolved.quantity <= 31)) {
+          setMessage(`No se agregó: la etiqueta se leyó como ${resolved.quantity.toLocaleString("es-AR")} kg, que no puede pesar una balanza. Conectá la balanza en "Balanza" para que Mostrador tome el formato de etiqueta que usa hoy, o cargá el producto a mano.`);
+          done();
+          return;
+        }
         addPendingLabel(resolved.product, resolved.quantity);
         return;
       }
