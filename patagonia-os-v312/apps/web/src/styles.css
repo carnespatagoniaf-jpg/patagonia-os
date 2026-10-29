@@ -1133,3 +1133,20 @@ input[type="file"], main textarea { max-width: 100%; }
 .my-scale-steps li.ok svg { color: var(--success, #15803d); flex: none; margin-top: 2px; }
 .my-scale-steps li.todo strong { color: var(--muted, #6b7280); }
 .my-scale-step-dot { width: 14px; height: 14px; margin: 3px 2px 0; border-radius: 50%; border: 2px solid var(--border, #cbd5e1); flex: none; }
+/* Frigorífico (migración 169): etiquetas de media res (tropa, garrón y kilo). */
+.frigo-labels { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); }
+.frigo-label { background: white; color: #000; border: 1px solid #9aa3af; border-radius: 4px; padding: 10px 12px; break-inside: avoid; page-break-inside: avoid; }
+.frigo-label-head { display: flex; justify-content: space-between; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; border-bottom: 2px solid #000; padding-bottom: 4px; }
+.frigo-label-big { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; margin-top: 6px; }
+.frigo-label-big div { border: 1px solid #000; padding: 4px 6px; }
+.frigo-label-big small { display: block; font-size: 10px; text-transform: uppercase; letter-spacing: .05em; }
+.frigo-label-big b { font-size: 24px; font-variant-numeric: tabular-nums; }
+.frigo-label-kg { margin-top: 6px; border: 2px solid #000; text-align: center; font-size: 26px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.frigo-label-meta { font-size: 11px; line-height: 1.35; margin: 6px 0; }
+.frigo-label-code { font-size: 11px; text-align: center; letter-spacing: .08em; font-variant-numeric: tabular-nums; }
+@media print {
+  .frigo-labels { grid-template-columns: repeat(2, 1fr); }
+}
+/* Panel de plataforma: pantallas a pedido de cada cliente (companies.features). */
+.admin-features { border-top: 1px solid #edf0f4; padding-top: 8px; }
+.admin-features summary { cursor: pointer; font-size: 14px; }
