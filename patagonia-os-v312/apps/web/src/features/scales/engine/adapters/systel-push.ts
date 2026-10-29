@@ -1,7 +1,7 @@
 import type { SystelClient } from "../../../inventory/systel/systel-client";
 import { toCuoraText } from "../../../inventory/systel/systel-frame";
 import { LAYOUT_INFO, pluEanSetting, priceToRaw, type SystelLayout, type SystelPlu } from "../../../inventory/systel/systel-plu";
-import { buildBarcodeRewrite, sameIgnoringLotePadding, targetCodeFor, writeDataFromRead } from "../../../inventory/systel/systel-product-barcode";
+import { buildBarcodeRewrite, sameIgnoringLotePadding, targetCodeFor, writeDataFromRead, type TypeByteMode } from "../../../inventory/systel/systel-product-barcode";
 import { namesEquivalent } from "../matching";
 
 /**
@@ -105,7 +105,7 @@ export function sameRecord(layout: SystelLayout, expected: string, actual: strin
 
 const withGestion = (layout: SystelLayout, data: string, g = "1") => data.slice(0, LAYOUT_INFO[layout].pluDigits) + g + data.slice(LAYOUT_INFO[layout].pluDigits);
 
-export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDecimals: number, products: PushProduct[], opts: { replace?: boolean } = {}): PushItem[] {
+export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDecimals: number, products: PushProduct[], opts: { replace?: boolean; mode?: TypeByteMode } = {}): PushItem[] {
   const info = LAYOUT_INFO[layout];
   const byNumber = new Map(plus.map((p) => [p.number, p]));
   const seen = new Map<number, string>();
@@ -130,7 +130,7 @@ export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDec
     const target = targetCodeFor(product.byWeight ? "P" : "U")!;
     const template = cur ? null : (plus.find((p) => (p.saleType === "P" || p.saleType === "C") === product.byWeight) ?? plus[0])?.raw ?? null;
     const read = desiredRead(layout, number, product, priceRaw, cur?.raw ?? null, template);
-    const data = read ? buildBarcodeRewrite(read, layout, target, "ascii") : null;
+    const data = read ? buildBarcodeRewrite(read, layout, target, opts.mode ?? "ascii") : null;
     if (!data) return { ...base, number, current: cur?.raw ?? null, action: "omitir", reason: "el registro de la balanza no tiene la forma esperada" };
     if (!cur) return { ...base, number, data, action: "crear", reason: "nuevo en la balanza" };
     if (sameRecord(layout, withGestion(layout, data, cur.raw[info.pluDigits]), cur.raw)) return { ...base, number, current: cur.raw, action: "sin_cambios", reason: "ya está igual" };
@@ -154,9 +154,11 @@ export interface PushResult {
   stoppedAt: number | null;
   detail: string;
   restored: boolean | null;
+  /** La balanza contestó con un error a la escritura (no cambió nada): su código (E5, E8…). */
+  rejected?: string;
 }
 
-export async function runSystelPush(client: SystelClient, layout: SystelLayout, plan: PushItem[], onProgress: (done: number, total: number) => void = () => {}): Promise<PushResult> {
+export async function runSystelPush(client: SystelClient, layout: SystelLayout, plan: PushItem[], onProgress: (done: number, total: number) => void = () => {}, mode: TypeByteMode = "ascii"): Promise<PushResult> {
   const todo = plan.filter((x) => x.data && x.number !== null && (x.action === "crear" || x.action === "actualizar" || x.action === "reemplazar"));
   const done: PushResult["done"] = [];
   for (const [i, item] of todo.entries()) {
@@ -170,7 +172,7 @@ export async function runSystelPush(client: SystelClient, layout: SystelLayout, 
     }
     const reply = await client.writeProductRecord(layout, n, item.data!);
     if (reply === "bloqueado") return { done, stoppedAt: n, detail: "escritura bloqueada", restored: null };
-    if (reply && reply.kind === "error") return { done, stoppedAt: n, detail: `la balanza rechazó el producto ${n} (${reply.errorCode}); no cambió nada`, restored: null };
+    if (reply && reply.kind === "error") return { done, stoppedAt: n, detail: `la balanza rechazó el producto ${n} (${reply.errorCode}); no cambió nada`, restored: null, rejected: reply.errorCode ?? "error" };
     const back = await client.readPlu(layout, n);
     const ok = !!back && sameRecord(layout, withGestion(layout, item.data!, back.raw[LAYOUT_INFO[layout].pluDigits]), back.raw);
     if (ok && reply && reply.kind === "ack") {
@@ -180,11 +182,59 @@ export async function runSystelPush(client: SystelClient, layout: SystelLayout, 
     // Diferencia o sin confirmación: si había algo, se vuelve a escribir tal cual estaba y se comprueba.
     let restored: boolean | null = null;
     if (item.current) {
-      await client.writeProductRecord(layout, n, writeDataFromRead(item.current, layout, "ascii"));
+      await client.writeProductRecord(layout, n, writeDataFromRead(item.current, layout, mode));
       const again = await client.readPlu(layout, n);
       restored = !!again && sameRecord(layout, item.current, again.raw);
     }
     return { done, stoppedAt: n, detail: !back ? "no se pudo releer el producto" : ok ? "la balanza no confirmó la escritura" : "lo releído no es lo que se mandó", restored };
   }
   return { done, stoppedAt: null, detail: "", restored: null };
+}
+
+/** Nombre del producto de prueba (queda en la balanza: Patagonia no borra nada; el cliente lo puede borrar en la balanza). */
+export const PROOF_NAME = "PRUEBA PATAGONIA";
+
+export interface WriteProofResult {
+  ok: boolean;
+  /** Número de la balanza donde se hizo la prueba (uno libre, o el producto de prueba de una vez anterior). */
+  number: number | null;
+  /** Cómo aceptó la balanza el tipo de código de barras ("ascii" = el dígito, "binario" = el byte). */
+  mode: TypeByteMode | null;
+  detail: string;
+  tries: { mode: TypeByteMode; detail: string }[];
+}
+
+/**
+ * Prueba de escritura en ESTA balanza antes de tocar un producto del cliente. Para los formatos de Cuora Max que se
+ * leyeron bien en una balanza real pero cuya escritura todavía no se comprobó en una real (firmware 6.2 y 7.0): se
+ * escribe un producto de prueba en un número LIBRE (o sobre el de prueba de una vez anterior), con el mismo armado que
+ * el envío de verdad (sobre el registro de un producto que la balanza ya tiene, función 61), se relee y se compara completo.
+ * - Si la balanza rechaza la escritura (no cambió nada), se prueba la otra forma del tipo de código (dígito o byte).
+ * - Si la acepta pero lo releído no coincide, se frena: ningún producto del cliente se tocó.
+ */
+export async function proveSystelWrite(client: SystelClient, layout: SystelLayout, plus: SystelPlu[], priceDecimals: number, pluCapacity: number): Promise<WriteProofResult> {
+  const info = LAYOUT_INFO[layout];
+  const previous = plus.find((p) => p.name.trim() === PROOF_NAME) ?? null;
+  let number = previous?.number ?? null;
+  if (number === null) {
+    const used = new Set(plus.map((p) => p.number));
+    const top = Math.min(pluCapacity > 0 ? pluCapacity : info.maxPlu, info.maxPlu, info.maxCode);
+    for (let n = top; n >= 1 && number === null; n--) if (!used.has(n)) number = n;
+  }
+  const out: WriteProofResult = { ok: false, number, mode: null, detail: "", tries: [] };
+  if (number === null) return { ...out, detail: "la balanza no tiene un número libre para la prueba" };
+  // Siempre un cambio real (si la prueba anterior quedó en $1, ahora $2), para que haya una escritura que comprobar.
+  const pesos = previous && previous.prices[0] === priceToRaw(1, priceDecimals) ? 2 : 1;
+  const product: PushProduct = { id: "prueba-patagonia", code: String(number), name: PROOF_NAME, byWeight: true, price: pesos };
+  for (const mode of ["ascii", "binario"] as TypeByteMode[]) {
+    const plan = planSystelPush(plus, layout, priceDecimals, [product], { replace: true, mode });
+    const item = plan[0];
+    if (!item?.data) return { ...out, detail: `no se pudo armar el producto de prueba (${item?.reason ?? "sin plan"})` };
+    const r = await runSystelPush(client, layout, plan, () => {}, mode);
+    out.tries.push({ mode, detail: r.stoppedAt === null ? "releído igual" : r.detail });
+    if (r.stoppedAt === null && r.done.length === 1) return { ...out, ok: true, mode, detail: `producto de prueba ${number} escrito y releído igual` };
+    // Solo un rechazo deja la balanza como estaba: ahí sí se prueba la otra forma. Cualquier otra cosa frena.
+    if (!r.rejected) return { ...out, detail: r.detail };
+  }
+  return { ...out, detail: `la balanza rechazó el producto de prueba de las dos formas (${out.tries.map((t) => t.detail).join(" / ")})` };
 }

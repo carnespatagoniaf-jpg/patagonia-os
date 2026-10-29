@@ -12,7 +12,8 @@ import { canWrite, SCALE_CAPABILITIES, systelLimits, type ScaleModelId } from ".
 import { preflightProducts, type PreflightResult } from "../preflight";
 import { FRIENDLY_MESSAGES, FriendlyError, SENT_AND_CHECKED } from "../friendly";
 import type { EngineContext, PendingItem, PreparedSync, ProgressFn, ScaleAdapter, ScaleSession, SyncOutcome } from "../types";
-import { planSystelPush, runSystelPush, scaleOnly, type PushItem, type PushProduct } from "./systel-push";
+import { planSystelPush, PROOF_NAME, proveSystelWrite, runSystelPush, scaleOnly, type PushItem, type PushProduct, type WriteProofResult } from "./systel-push";
+import type { TypeByteMode } from "../../../inventory/systel/systel-product-barcode";
 
 /**
  * Systel (Cuora Max y familia), Patagonia → balanza. Reutiliza, sin cambiarlos:
@@ -28,8 +29,47 @@ export const SYSTEL_VERIFIED = [{ protocolVersion: "0060", layout: "max60" as Sy
 
 export const PRODUCT_BACKUP_KEY = "patagonia-systel-product-backup";
 
+/**
+ * Cuora Max con PLU de 6 cifras (firmware 6.2 y 7.0): mismas funciones que la 6.0 (protocolo oficial V6.2 y V7.0) y el
+ * registro se lee bien en una balanza real (El Dorado, 29/10/2026: firma 0070, formato max7, 254 productos), pero su
+ * ESCRITURA no está comprobada en una real. Se habilitan con una prueba en esa misma balanza antes de tocar un producto
+ * del cliente (proveSystelWrite): si la prueba no queda idéntica, se frena sin tocar nada del cliente.
+ */
+export const SYSTEL_PROOF_LAYOUTS: SystelLayout[] = ["max62", "max7"];
+
+export function systelVerified(b: Pick<SystelBackup, "signature" | "layout">): boolean {
+  return SYSTEL_VERIFIED.some((v) => v.protocolVersion === b.signature?.protocolVersion && v.layout === b.layout);
+}
+
 export function systelModelFor(b: Pick<SystelBackup, "signature" | "layout">): ScaleModelId {
-  return SYSTEL_VERIFIED.some((v) => v.protocolVersion === b.signature?.protocolVersion && v.layout === b.layout) ? "systel-cuora-max" : "systel-otra";
+  if (systelVerified(b)) return "systel-cuora-max";
+  return b.signature && b.layout && SYSTEL_PROOF_LAYOUTS.includes(b.layout) ? "systel-cuora-max" : "systel-otra";
+}
+
+/** Balanzas (firma + formato + número) que ya pasaron la prueba de escritura en esta computadora, y cómo. */
+export const WRITE_PROOF_KEY = "patagonia-systel-write-proof";
+
+function proofKey(b: Pick<SystelBackup, "signature" | "layout">, number: number): string {
+  return `${b.signature?.protocolVersion ?? "?"}/${b.layout ?? "?"}/${number}`;
+}
+
+export function loadWriteProof(b: Pick<SystelBackup, "signature" | "layout">, number: number): TypeByteMode | null {
+  try {
+    const all = JSON.parse(localStorage.getItem(WRITE_PROOF_KEY) ?? "{}") as Record<string, TypeByteMode>;
+    return all[proofKey(b, number)] ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function saveWriteProof(b: Pick<SystelBackup, "signature" | "layout">, number: number, mode: TypeByteMode): void {
+  try {
+    const all = JSON.parse(localStorage.getItem(WRITE_PROOF_KEY) ?? "{}") as Record<string, TypeByteMode>;
+    all[proofKey(b, number)] = mode;
+    localStorage.setItem(WRITE_PROOF_KEY, JSON.stringify(all));
+  } catch {
+    // sin localStorage: la próxima vez se repite la prueba, sobre el mismo producto de prueba
+  }
 }
 
 export interface SystelDeps {
@@ -86,6 +126,8 @@ export class SystelSession implements ScaleSession {
   private syncWaitFixed: boolean | null = null;
   /** La configuración leída dice que espera sincronización al encender (Sinc=1). */
   private startupWaitOn = false;
+  /** Resultado de la prueba de escritura en esta balanza (solo firmware sin comprobar). */
+  private proof: WriteProofResult | null = null;
 
   constructor(
     private readonly link: SystelLink & { close?: () => Promise<void> },
@@ -276,6 +318,9 @@ export class SystelSession implements ScaleSession {
     const extra = scaleOnly(backup.plus, this.pushProducts()).length;
     const notes: string[] = [];
     if (this.startupWaitOn) notes.push("La balanza está configurada para esperar a la PC cada vez que se prende. Al sincronizar, Patagonia además la deja en \"iniciar sin esperar\" (comando oficial de Systel, función 35) y lo comprueba releyendo su configuración.");
+    if (this.model === "systel-cuora-max" && !systelVerified(backup) && !loadWriteProof(backup, this.number)) {
+      notes.push(`Es la primera vez que Patagonia le manda productos a este modelo (${layout ? LAYOUT_INFO[layout].label : "Cuora Max"}). Antes de tocar tus productos, Patagonia crea un producto de prueba, "${PROOF_NAME}" a $1, en un número libre de la balanza, lo relee y lo compara. Si algo no coincide, frena sin tocar tus productos. Ese producto de prueba queda en la balanza: lo podés borrar desde la balanza.`);
+    }
     if (!backup.complete) notes.push("No se pudo leer toda la balanza. Probá de nuevo; si sigue, avisá a soporte.");
     const changing = count("actualizar");
     if (changing) notes.push(`${changing === 1 ? "1 producto que ya está" : `${changing} productos que ya están`} en la balanza cambia de precio o nombre. Los totales de venta que guarda la balanza para ${changing === 1 ? "ese producto" : "esos productos"} podrían volver a cero (no está comprobado). Las ventas de Patagonia no cambian.`);
@@ -325,13 +370,25 @@ export class SystelSession implements ScaleSession {
     if (toWrite.length > 0) {
       onProgress("sincronizar", "Guardando una copia de tu balanza antes de cambiar nada…");
       const writer = this.client(true);
+      // Firmware sin comprobar (6.2 / 7.0): primero la prueba en un número libre; sin ella no se toca nada del cliente.
+      let mode: TypeByteMode = systelVerified(st.backup) ? "ascii" : loadWriteProof(st.backup, this.number) ?? "ascii";
+      if (!systelVerified(st.backup) && !loadWriteProof(st.backup, this.number)) {
+        onProgress("sincronizar", "Probando tu balanza con un producto de prueba…");
+        this.proof = await proveSystelWrite(writer, layout, st.backup.plus, st.backup.signature?.priceDecimals ?? 0, st.backup.signature?.pluCapacity ?? 0);
+        if (!this.proof.ok || !this.proof.mode) {
+          return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, support: { etapa: "prueba", prueba: this.proof } };
+        }
+        mode = this.proof.mode;
+        saveWriteProof(st.backup, this.number, mode);
+      }
+      const modePlan = mode === "ascii" ? plan : planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: !!opts.allowReplace, mode });
       const existing = toWrite.filter((x) => x.current).map((x) => x.number!);
       if (existing.length) {
         const { backup, missing } = await takeProductBackup(writer, layout, existing);
         if (missing.length) return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.no_contesta, pending: prepared.pending, support: { etapa: "copia", missing } };
         this.deps.saveLocalBackup(backup);
       }
-      const r = await runSystelPush(writer, layout, plan, (d, t) => onProgress("sincronizar", "Mandando tus productos a la balanza…", d, t));
+      const r = await runSystelPush(writer, layout, modePlan, (d, t) => onProgress("sincronizar", "Mandando tus productos a la balanza…", d, t), mode);
       written = r.done;
       if (r.stoppedAt !== null) {
         return { ok: false, verified: r.done.length, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, support: { etapa: "envio", stoppedAt: r.stoppedAt, detail: r.detail, restored: r.restored } };
@@ -390,7 +447,9 @@ export class SystelSession implements ScaleSession {
       senales: this.lines ?? "DTR y RTS encendidas",
       liberada_con_25: this.released,
       espera_sincronizacion_apagada: this.syncWaitFixed,
+      prueba_escritura: this.proof,
       sincronizacion_inicial: b?.config?.values.Sinc ?? null,
+      codigo_en_ticket: b?.config?.values.ETi ?? b?.config?.values.Eti ?? null,
       como_se_eligio: this.addressNote,
       firma: b?.signature ?? null,
       formato: b?.layout ?? null,
