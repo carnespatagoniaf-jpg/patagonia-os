@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CarcassBatch, CarcassCut, CarcassCutTemplate, CarcassFillSource, Product } from "@patagonia/domain";
 import { allocateCarcassCost, marginPercent } from "@patagonia/domain";
+import { carcassYield } from "./carcass-yield";
 import { useCarcass } from "./useCarcass";
 import { useCarcassTemplates } from "./useCarcassTemplates";
 import { fillCarcassBatch, listCarcassBatchTotals, markCarcassBatchWeighed, type CarcassBatchTotals } from "./carcass-service";
@@ -215,6 +216,7 @@ export function Carcass() {
   const yieldPct = selectedBatch && selectedBatch.totalWeight > 0 ? Math.round((cutsWeight / selectedBatch.totalWeight) * 1000) / 10 : 0;
   // Cortes que repartió el sistema y nadie corrigió; 0 (con cortes) = pesada de verdad, sirve para aprender.
   const estimatedCuts = cuts.filter((c) => c.fromTemplate).length;
+  const yieldInfo = selectedBatch ? carcassYield(selectedBatch.totalCost, selectedBatch.totalWeight, cuts) : null;
 
   async function updateCut(cut: CarcassCut, changes: Partial<Pick<CarcassCut, "weight" | "unitPrice" | "productId">>) {
     if (!selectedBatch) return;
@@ -763,6 +765,14 @@ export function Carcass() {
                   {value > 0 && <small>{marginPercent(selectedBatch.totalCost, value)}%</small>}
                 </div>
               </div>
+
+              {!cutsLoading && yieldInfo && (
+                <p className="muted" style={{ margin: "8px 0" }}>
+                  Aprovechás {formatKg(yieldInfo.usableKg)} kg de {formatKg(selectedBatch.totalWeight)} ({String(yieldInfo.usablePct).replace(".", ",")}%):
+                  el kilo aprovechable te sale <strong>{formatMoney(yieldInfo.avgCostPerKg)}</strong> en promedio.
+                  Cada corte paga según lo que vale (columna "Te cuesta el kg"), así todos dejan el mismo margen.
+                </p>
+              )}
 
               {unpricedCuts > 0 && (
                 <div className="message warning no-print">
