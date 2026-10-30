@@ -11,7 +11,7 @@ describe("los 5 estados reales de una instalación (etapa 0)", () => {
   it("nunca 'lista para vender' sin una etiqueta leída en Mostrador después del último envío", () => {
     const r = { model: "Kretz Report", detectedAt: "2026-10-28T14:00:00", communicationAt: "2026-10-28T14:00:00", sentAt: "2026-10-28T14:05:00", sentCount: 20, verifiedAt: "2026-10-28T14:05:00", verifiedCount: 20, failedCount: 0 };
     assert.deepEqual(installSteps(r, now).map((s) => s.done), [true, true, true, true, false]);
-    assert.match(installSummary(r, now).text, /4 de 5 pasos · falta: venta probada/);
+    assert.match(installSummary(r, now).text, /4 de 5 pasos · falta: etiqueta probada/);
     // Etiqueta leída ANTES del último envío: no cuenta.
     const old = { ...r, saleTestedAt: "2026-10-28T13:00:00" };
     assert.equal(installSteps(old, now)[4].done, false);

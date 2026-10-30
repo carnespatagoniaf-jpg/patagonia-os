@@ -24,8 +24,8 @@ export const FRIENDLY_MESSAGES: Record<FriendlyKind, string> = {
  * Después de mandar y releer los productos. NO dice "ya podés vender": eso recién se sabe cuando Mostrador lee bien una
  * etiqueta impresa (paso 5, install-status.ts). Antes decía "¡Listo! Tu balanza está conectada y ya podés vender".
  */
-export const SENT_AND_CHECKED = "Productos pasados y comprobados en la balanza. Falta el último paso: pesá algo, imprimí la etiqueta y escaneala en Mostrador.";
-export const ALREADY_SAME = "La balanza ya tiene los mismos productos y precios que Patagonia (comprobado uno por uno). Falta el último paso: pesá algo, imprimí la etiqueta y escaneala en Mostrador.";
+export const SENT_AND_CHECKED = "Productos pasados y comprobados en la balanza. Falta el último paso: pesá algo, imprimí la etiqueta y escaneala en el cuadro de abajo.";
+export const ALREADY_SAME = "La balanza ya tiene los mismos productos y precios que Patagonia (comprobado uno por uno). Falta el último paso: pesá algo, imprimí la etiqueta y escaneala en el cuadro de abajo.";
 
 export class FriendlyError extends Error {
   constructor(readonly kind: FriendlyKind, readonly technical?: string) {
