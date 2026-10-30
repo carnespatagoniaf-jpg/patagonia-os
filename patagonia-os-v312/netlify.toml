@@ -3,7 +3,7 @@
   publish = "apps/web/dist"
 
 [build.environment]
-  NODE_VERSION = "20"
+  NODE_VERSION = "22"
 
 # Producción la publica SOLO GitHub ("Publicar", de noche y con pruebas), subiendo un borrador por API.
 # Netlify no compila producción sola en cada push a main: cada publicación cuesta créditos (91 en tres
