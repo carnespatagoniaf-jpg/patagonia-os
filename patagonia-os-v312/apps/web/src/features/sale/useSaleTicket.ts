@@ -8,7 +8,7 @@ import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
 import { labelWeightProblem, MAX_COUNTER_SCALE_KG, resolveScan } from "./scan-resolve";
 import { noteLabelRead } from "../scales/label-read";
 import { closeSystelTicketSession, readSystelTicketFromScale, refreshSystelLabelFormat, systelTicketReadConfigured } from "../inventory/systel/systel-ticket-from-scale";
-import { loadSystelLabelTemplates, systelConfigForCode } from "./systel-label-format";
+import { loadSystelLabelTemplates, mergedPerPlu, systelConfigForCodeAcross, templatesFromSetups, type SystelLabelTemplates } from "./systel-label-format";
 import { settleTicket, type ScalePrices } from "./systel-ticket-settle";
 import { sameProductName } from "../inventory/systel/systel-sales";
 import { decodeSumCode } from "../inventory/systel/systel-sales";
@@ -67,6 +67,14 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
   // Cualquier sucursal con una balanza "artículos + TOTAL" sincronizada desde Mi balanza (scale_profiles activo).
   // Sin perfil (todas las Kretz y quien no tiene balanza), useScalePapers no hace nada: Mostrador sigue igual.
   const papers = useScalePapers({ enabled: !!scaleBranchId, branchId: scaleBranchId, products, cart, setCart, setMessage });
+  // Formatos de etiqueta de las balanzas Systel ACTIVAS de la sucursal, de la base (por balanza; auditoría 29/10).
+  // Sin datos en la base (sucursal sin balanza registrada), la copia guardada en esta PC, como antes.
+  const dbSystelTemplates = useMemo(() => templatesFromSetups(papers.setups), [papers.setups]);
+  const systelTemplatesList = (): SystelLabelTemplates[] => {
+    if (dbSystelTemplates.length > 0) return dbSystelTemplates;
+    const local = loadSystelLabelTemplates();
+    return local ? [local] : [];
+  };
   /** Clave del TOTAL de balanza que se está detallando (ticket-detail.ts), o null. */
   const [detailing, setDetailing] = useState<string | null>(null);
   /** Etiquetas de balanza escaneadas en ESTA venta (para avisar si se escanea dos veces la misma). */
@@ -297,7 +305,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     // lógica pura y probada con etiquetas reales. Acá solo quedan los avisos y el carrito.
     // Systel piloto: el código de cada producto se lee con el formato que informó la balanza (no con el
     // de la sucursal, que puede haber quedado viejo: real Los gringos 09/10 → 13/10).
-    const systelConfig = systelTicketPilot ? systelConfigForCode(raw, loadSystelLabelTemplates()) : null;
+    const systelConfig = systelTicketPilot ? systelConfigForCodeAcross(raw, systelTemplatesList()) : null;
     if (systelConfig === "no_soportado") {
       setMessage("La balanza imprime el código de los productos con un formato que Patagonia no puede leer sin riesgo de cargar mal los kilos. No se agregó nada: buscá el producto y escribí los kilos del ticket, y avisá a soporte.");
       setSearch("");
@@ -306,7 +314,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     }
     // Con el formato de la balanza, un producto sin precio en Patagonia se carga con el precio de lista 1 de la
     // balanza (provisorio: el importe real sale del TOTAL del ticket).
-    const scanProducts = systelTicketPilot && systelConfig ? withScalePrices(products) : products;
+    const scanProducts = systelTicketPilot && systelConfig ? withScalePrices(products, mergedPerPlu(systelTemplatesList())) : products;
     const resolved = resolveScan(raw, scanProducts, systelConfig ?? scaleConfig);
     const done = () => {
       setSearch("");
@@ -389,7 +397,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       if (systelTicketPilot && systelConfig) {
         // Que el producto de la balanza sea el MISMO de Patagonia (nombre y forma de venta): real Los gringos,
         // los códigos 96-103 son otros productos y 29 se venden por unidad en la balanza y figuran por kg.
-        const problem = scaleProductMismatch(resolved.product, resolved.plu);
+        const problem = scaleProductMismatch(resolved.product, resolved.plu, mergedPerPlu(systelTemplatesList()));
         if (problem) {
           setMessage(`No se agregó: ${problem}`);
           done();
@@ -558,8 +566,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
    * del ticket, y ahí se calcula el importe de cada uno (systel-ticket-settle.ts). Sin conexión con la balanza.
    */
   function addPendingLabel(product: Product, quantity: number) {
-    const templates = loadSystelLabelTemplates();
-    const p1 = templates?.perPlu?.[product.code]?.p1 ?? 0;
+    const p1 = mergedPerPlu(systelTemplatesList())[product.code]?.p1 ?? 0;
     const unitPrice = product.priceRetail > 0 ? product.priceRetail : p1;
     setCart((current) => [
       ...current,
@@ -575,12 +582,13 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
   /** TOTAL escaneado con artículos de etiqueta esperando: se reparte el total entre ellos (precio de la balanza). */
   async function settlePendingWithTotal(code: string, amount: number) {
     const pending = cart.filter((l) => l.scalePending);
-    const templates = loadSystelLabelTemplates();
-    const decoded = decodeSumCode(code, templates?.sums ?? null);
+    const templateList = systelTemplatesList();
+    const perPlu = mergedPerPlu(templateList);
+    const decoded = decodeSumCode(code, templateList.find((t) => t.sums)?.sums ?? null);
     const prices = new Map<number, ScalePrices>();
     const settleLines = pending.map((l) => {
       const product = products.find((p) => p.id === l.productId);
-      const entry = product ? templates?.perPlu?.[product.code] : undefined;
+      const entry = product ? perPlu[product.code] : undefined;
       const plu = Number(product?.code ?? 0);
       if (entry && (entry.p1 ?? 0) > 0) prices.set(plu, { p1: entry.p1 ?? 0, p2: entry.p2 ?? 0 });
       return { plu, quantity: l.quantity };
@@ -869,14 +877,13 @@ function saveChargedSystelTickets(keys: string[]): void {
 }
 
 /** Productos con el precio de lista 1 de la balanza donde Patagonia no tiene precio (solo para leer etiquetas). */
-function withScalePrices(products: Product[]): Product[] {
-  const perPlu = loadSystelLabelTemplates()?.perPlu ?? {};
+function withScalePrices(products: Product[], perPlu: NonNullable<SystelLabelTemplates["perPlu"]>): Product[] {
   return products.map((p) => (p.priceRetail > 0 || !(perPlu[p.code]?.p1 ?? 0) ? p : { ...p, priceRetail: perPlu[p.code]!.p1! }));
 }
 
 /** ¿El producto de la etiqueta (según lo leído de la balanza) es el mismo de Patagonia? null si sí; si no, el motivo. */
-function scaleProductMismatch(product: Product, plu: string): string | null {
-  const e = loadSystelLabelTemplates()?.perPlu?.[String(Number(plu))];
+function scaleProductMismatch(product: Product, plu: string, perPlu: NonNullable<SystelLabelTemplates["perPlu"]>): string | null {
+  const e = perPlu[String(Number(plu))];
   if (!e || !e.name || !e.saleType) return `el producto ${plu} todavía no se leyó de la balanza (hacé el "Diagnóstico completo" en Stock → Balanza).`;
   if (!sameProductName(e.name, product.name)) return `en la balanza el producto ${plu} es "${e.name}" y en Patagonia es "${product.name}": son productos distintos.`;
   const weighed = e.saleType === "P" || e.saleType === "C";
