@@ -90,7 +90,7 @@ export default function App() {
           <div className="message warning">No tenés permiso para ver esta sección. Consultá con el dueño o administrador.</div>
         )}
         <PageFrame key={page}>
-        {allowed && page === "dashboard" && <Dashboard />}
+        {allowed && page === "dashboard" && <Dashboard onNavigate={setPage} />}
         {allowed && page === "sale" && <Sale />}
         {allowed && page === "route" && <RouteSale />}
         {allowed && page === "route_trucks" && <RouteTrucks />}

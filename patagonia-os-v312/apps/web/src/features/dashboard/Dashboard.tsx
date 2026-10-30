@@ -4,7 +4,8 @@ import { isOverdueDebt } from "@patagonia/domain";
 import { AlertTriangle, Boxes, CircleDollarSign, ReceiptText, TrendingUp } from "lucide-react";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
-import { can, canAccessPage } from "../auth/permissions";
+import { can, canAccessPage, type Page } from "../auth/permissions";
+import { OnboardingCard } from "../onboarding/OnboardingCard";
 import { useAuth } from "../auth/AuthProvider";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { listCustomerChargesInRange, listCustomersWithBalance } from "../customers/customers-service";
@@ -25,7 +26,15 @@ interface DaySales {
   total: number;
 }
 
-export function Dashboard() {
+/** Saludo según la hora de Argentina (antes decía "Buenos días" a cualquier hora). */
+function greeting(now = new Date()): string {
+  const hour = Number(new Intl.DateTimeFormat("es-AR", { hour: "numeric", hourCycle: "h23", timeZone: "America/Argentina/Buenos_Aires" }).format(now));
+  if (hour >= 5 && hour < 13) return "Buenos días";
+  if (hour >= 13 && hour < 20) return "Buenas tardes";
+  return "Buenas noches";
+}
+
+export function Dashboard({ onNavigate }: { onNavigate?: (page: Page) => void } = {}) {
   const { profile } = useAuth();
   const { branchId } = useActiveBranch();
   const { balances } = useTreasury();
@@ -205,13 +214,15 @@ export function Dashboard() {
       <header className="page-header">
         <div>
           <p className="eyebrow">RESUMEN DE OPERACIÓN</p>
-          <h1>Buenos días, {firstName}</h1>
+          <h1>{greeting()}, {firstName}</h1>
           <p className="muted">
             {isSupabaseConfigured ? (loading ? "Cargando datos…" : "Datos en vivo de tu empresa.") : "Datos de demostración hasta conectar Supabase."}
           </p>
         </div>
         <span className="status-pill">V3.1 · {isSupabaseConfigured ? "En vivo" : "Desarrollo"}</span>
       </header>
+
+      {isSupabaseConfigured && (profile?.role === "owner" || profile?.role === "admin") && <OnboardingCard onNavigate={onNavigate} />}
 
       <section className="kpi-grid">
         <Kpi title="Ventas hoy" value={formatMoney(salesToday)} detail={`${salesToday === 0 ? "Sin" : ""} tickets de hoy`} icon={<CircleDollarSign />} />
