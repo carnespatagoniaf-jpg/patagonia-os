@@ -39,13 +39,21 @@ export function toCuoraText(text: string, width: number): string {
 /**
  * `allowTypeByteAt`: posición donde se permite un byte 0x00-0x03 (el tipo de código de barras de un producto,
  * que la balanza real guarda así: 0x01). Cualquier otro byte fuera de lo imprimible se rechaza.
+ *
+ * `scaleBytes`: la escritura de un producto devuelve el registro que la balanza misma mandó, y lo que Patagonia
+ * cambia (nombre, precio, código) ya pasó por `toCuoraText`. REAL (El Dorado, 29-30/10): un producto cargado en la
+ * balanza traía un byte fuera de lo imprimible en el texto de la porción (posición 107) y la sincronización se frenaba
+ * siempre ahí. Con esta opción se acepta cualquier byte (0x00-0xFF): se le devuelve a la balanza lo que ella tenía.
  */
-export function buildSystelFrame(address: number, fn: number, data = "", options: { checksum?: boolean; allowTypeByteAt?: number } = {}): Uint8Array {
+export function buildSystelFrame(address: number, fn: number, data = "", options: { checksum?: boolean; allowTypeByteAt?: number; scaleBytes?: boolean } = {}): Uint8Array {
   if (!Number.isInteger(address) || address < 0 || address > 99) throw new Error(`Dirección fuera de rango (0 a 99): ${address}`);
   if (!Number.isInteger(fn) || fn < 1 || fn > 255) throw new Error(`Función inválida: ${fn}`);
   for (let i = 0; i < data.length; i++) {
-    if (i === options.allowTypeByteAt && data.charCodeAt(i) <= 0x03) continue;
-    if (data.charCodeAt(i) > 0x7e || data.charCodeAt(i) < 0x20) throw new Error(`Carácter no permitido en la trama (posición ${i})`);
+    const c = data.charCodeAt(i);
+    if (c > 0xff) throw new Error(`Carácter no permitido en la trama (posición ${i}, U+${c.toString(16)})`);
+    if (options.scaleBytes) continue;
+    if (i === options.allowTypeByteAt && c <= 0x03) continue;
+    if (c > 0x7e || c < 0x20) throw new Error(`Carácter no permitido en la trama (posición ${i}, 0x${c.toString(16).padStart(2, "0")})`);
   }
   const body = [address, fn, ...Array.from(data, (c) => c.charCodeAt(0))];
   const withCheck = options.checksum === false ? body : [...body, xorChecksum(body)];
