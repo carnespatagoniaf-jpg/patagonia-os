@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { parseAmount } from "../../lib/money";
-import { formatMoney } from "../shifts/format";
+import { formatMoney, localDateIso } from "../shifts/format";
 import { savePurchaseVoucher } from "./accounting-service";
 import {
   PURCHASE_VOUCHER_TYPES,
@@ -81,7 +81,8 @@ function draftFrom(existing: PurchaseVoucher | null, hint: VoucherPurchaseHint |
   }
   const supplier = suppliers.find((s) => s.id === (existing?.supplierId ?? hint?.supplierId));
   const parsed = parseVoucherNumber(hint?.invoiceNumber);
-  const date = existing?.voucherDate ?? hint?.date ?? new Date().toISOString().slice(0, 10);
+  // Fecha local: después de las 21 h de Argentina, toISOString() ya da el día siguiente.
+  const date = existing?.voucherDate ?? hint?.date ?? localDateIso();
   return {
     voucherType: existing?.voucherType ?? defaultType(supplier),
     voucherDate: date,

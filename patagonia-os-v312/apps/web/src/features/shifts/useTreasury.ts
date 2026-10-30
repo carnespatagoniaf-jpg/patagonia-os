@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import type { TreasuryAccount } from "@patagonia/domain";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
+import { localDateIso } from "./format";
 import {
   adjustTreasuryAccount,
   createTreasuryAccount,
@@ -107,7 +108,7 @@ export function useTreasury() {
             amount: input.amount,
             movementType: "ajuste",
             category: null,
-            occurredOn: new Date().toISOString().slice(0, 10),
+            occurredOn: localDateIso(),
             notes: input.reason
           },
           ...current

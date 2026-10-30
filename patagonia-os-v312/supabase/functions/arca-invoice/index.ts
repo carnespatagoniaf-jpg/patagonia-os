@@ -375,7 +375,9 @@ async function queueCreditNoteIfSaleVoided(admin: SupabaseClient, inv: Row): Pro
 }
 
 async function authorizeOne(admin: SupabaseClient, settings: Row, invoiceId: string): Promise<Outcome[]> {
-  const cutoff = new Date(Date.now() - 120_000).toISOString();
+  // Una corrida con ARCA lenta puede pasar los 2 minutos (WSAA + consulta + 3 intentos): con 120 s otra caja
+  // podía tomar la misma factura a mitad de camino y pedir otro número (auditoría 29/10/2026). 5 minutos.
+  const cutoff = new Date(Date.now() - 300_000).toISOString();
   const { data: current } = await admin.from("invoices").select("*").eq("id", invoiceId).maybeSingle();
   if (!current) throw new UserError("Factura inexistente.");
   if (current.status !== "pendiente") return [outcome(current)];
