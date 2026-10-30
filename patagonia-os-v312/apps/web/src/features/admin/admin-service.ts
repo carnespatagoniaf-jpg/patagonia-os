@@ -734,3 +734,40 @@ export async function syncMetaAds(): Promise<{ connected: boolean; saved?: numbe
   if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
   return data as { connected: boolean; saved?: number; since?: string };
 }
+
+/** "Para revisar hoy" (migración 180): por cliente activo, lo que la auditoría del 29/10 encontró mirando a mano. */
+export interface DailyCheck {
+  id: string;
+  name: string;
+  plan: Plan;
+  inTrial: boolean;
+  products: number;
+  lastSaleAt: string | null;
+  openShiftsOld: number;
+  oldestOpenShift: string | null;
+  negativeStock: number;
+  belowCost: number;
+  stuckInvoices: number;
+  problems: number;
+}
+
+export async function listDailyChecks(): Promise<DailyCheck[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase.rpc("platform_daily_checks");
+  if (error) throw error;
+  type Row = { id: string; name: string; plan: Plan; in_trial: boolean; products: number; last_sale_at: string | null; open_shifts_old: number; oldest_open_shift: string | null; negative_stock: number; below_cost: number; stuck_invoices: number; problems: number };
+  return ((data ?? []) as Row[]).map((r) => ({
+    id: r.id,
+    name: r.name,
+    plan: r.plan,
+    inTrial: r.in_trial,
+    products: Number(r.products),
+    lastSaleAt: r.last_sale_at,
+    openShiftsOld: Number(r.open_shifts_old),
+    oldestOpenShift: r.oldest_open_shift,
+    negativeStock: Number(r.negative_stock),
+    belowCost: Number(r.below_cost),
+    stuckInvoices: Number(r.stuck_invoices),
+    problems: Number(r.problems)
+  }));
+}
