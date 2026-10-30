@@ -484,4 +484,10 @@ describe("[formatos REALES Los gringos] Tres Systel con el mismo número y el mi
     const r = checkScaleFormats(vieja, { weighed: "25PPPPCCCCCC", unit: null, total: null }, [vieja, nueva]);
     assert.equal(r.verdict === "otra" && r.same, null);
   });
+
+  it("REAL El Dorado 30/10: una sola balanza con ese número a la que le cambiaron el formato en el menú: es la misma, sigue", () => {
+    const unica = scale("systel-e7f52611", "systel", { address: 20 }, { name: "Balanza Systel", formats: { weighed: "20PPPPIIIIII", unit: "21PPPPIIIIII", total: "22AAIIIIIIII" } });
+    const kretz = scale("kretz-1", "kretz", {}, { formats: { weighed: "20PPPPIIIIII", unit: null, total: null } });
+    assert.equal(checkScaleFormats(unica, { weighed: "20PPPPCCCCCC", unit: "21PPPPIIIIII", total: "22AAIIIIIIII" }, [unica, kretz]).verdict, "ok");
+  });
 });
