@@ -4,7 +4,11 @@ export interface OnboardingStatus {
   products: number;
   stockLoaded: boolean;
   sales: number;
+  /** Ventas a cuenta (Clientes, Venta en ruta): también cuentan como que ya vende. */
+  accountSales: number;
   closedShifts: number;
+  /** ¿Usa Mostrador? (La primera vende solo en ruta: sin pasos de caja). */
+  usesPos: boolean;
 }
 
 export interface OnboardingStep {
@@ -24,7 +28,7 @@ export const MIN_PRODUCTS = 5;
  * ventas en una semana). Lógica pura, testeada. Todos hechos = la tarjeta no se muestra.
  */
 export function onboardingSteps(s: OnboardingStatus): OnboardingStep[] {
-  return [
+  const steps: OnboardingStep[] = [
     {
       key: "productos",
       title: "Cargá tus productos",
@@ -45,7 +49,7 @@ export function onboardingSteps(s: OnboardingStatus): OnboardingStep[] {
       key: "venta",
       title: "Hacé tu primera venta",
       help: "En Mostrador abrí la caja, buscá un producto y cobralo.",
-      done: s.sales > 0,
+      done: s.sales > 0 || s.accountSales > 0,
       page: "sale",
       action: "Ir a Mostrador"
     },
@@ -53,9 +57,11 @@ export function onboardingSteps(s: OnboardingStatus): OnboardingStep[] {
       key: "cierre",
       title: "Cerrá la caja al terminar el día",
       help: "En Mostrador, Cerrar caja: contás la plata y el sistema te dice si da bien.",
-      done: s.closedShifts > 0,
+      // Si vende solo a cuenta (sin Mostrador), no hay caja que cerrar.
+      done: s.closedShifts > 0 || (s.sales === 0 && s.accountSales > 0),
       page: "sale",
       action: "Ir a Mostrador"
     }
   ];
+  return s.usesPos ? steps : steps.filter((x) => x.key !== "venta" && x.key !== "cierre");
 }

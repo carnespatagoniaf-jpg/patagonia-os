@@ -22,6 +22,8 @@ begin
       where company_id = v_company_id and quantity > 0 and movement_type in ('adjustment', 'purchase', 'despiece', 'transfer_in')
     ),
     'sales', (select count(*) from public.pos_sales where company_id = v_company_id),
+    -- Ventas a cuenta (Clientes, Venta en ruta, frigorífico): también cuentan como "ya vende".
+    'account_sales', (select count(*) from public.customer_charges where company_id = v_company_id),
     'closed_shifts', (select count(*) from public.pos_shifts where company_id = v_company_id and status = 'closed')
   );
 end;

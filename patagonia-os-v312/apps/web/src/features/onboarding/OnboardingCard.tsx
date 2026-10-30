@@ -8,7 +8,7 @@ import { onboardingSteps, type OnboardingStatus } from "./onboarding";
  * usar el sistema y desaparece sola cuando está todo hecho. Si la consulta falla (por ejemplo, antes de la
  * migración), no muestra nada.
  */
-export function OnboardingCard({ onNavigate }: { onNavigate?: (page: Page) => void }) {
+export function OnboardingCard({ onNavigate, usesPos }: { onNavigate?: (page: Page) => void; usesPos: boolean }) {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
 
   useEffect(() => {
@@ -16,13 +16,13 @@ export function OnboardingCard({ onNavigate }: { onNavigate?: (page: Page) => vo
     let cancelled = false;
     void supabase.rpc("onboarding_status").then(({ data, error }) => {
       if (cancelled || error || !data) return;
-      const d = data as { products: number; stock_loaded: boolean; sales: number; closed_shifts: number };
-      setStatus({ products: Number(d.products), stockLoaded: Boolean(d.stock_loaded), sales: Number(d.sales), closedShifts: Number(d.closed_shifts) });
+      const d = data as { products: number; stock_loaded: boolean; sales: number; account_sales?: number; closed_shifts: number };
+      setStatus({ products: Number(d.products), stockLoaded: Boolean(d.stock_loaded), sales: Number(d.sales), accountSales: Number(d.account_sales ?? 0), closedShifts: Number(d.closed_shifts), usesPos });
     });
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [usesPos]);
 
   if (!status) return null;
   const steps = onboardingSteps(status);
