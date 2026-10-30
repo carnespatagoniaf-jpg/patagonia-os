@@ -1,0 +1,12 @@
+# Cabeceras de seguridad (auditoría 29/10/2026). Sin CSP todavía: hay que listar Supabase, Sentry, SheetJS y el
+# programa de la PC (127.0.0.1:9101) antes de activarla. No se restringen serial/usb/bluetooth: la balanza y la
+# impresora los usan.
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Strict-Transport-Security: max-age=31536000
+  Permissions-Policy: geolocation=(), microphone=(), camera=()
+
+/version.json
+  Cache-Control: no-store
