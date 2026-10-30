@@ -12,6 +12,7 @@ import { useActiveBranch } from "../features/branches/BranchProvider";
 import { TrialBanner } from "./TrialBanner";
 import { NewsBanner } from "./NewsBanner";
 import { UpdateBanner } from "./UpdateBanner";
+import { authErrorText } from "../lib/auth-errors";
 import { useInvoiceRetry } from "../features/invoicing/useInvoiceRetry";
 import { HelpChat } from "../features/help/HelpChat";
 
@@ -192,7 +193,7 @@ function ChangePasswordForm() {
       setPassword("");
       setConfirm("");
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo cambiar.");
+      setMessage(authErrorText(err, "No se pudo cambiar."));
     } finally {
       setBusy(false);
     }
@@ -213,6 +214,12 @@ function ChangePasswordForm() {
       {message && <p className="branch-switcher-error">{message}</p>}
     </div>
   );
+}
+
+/** El rol en castellano (antes se veía "owner" o "cashier"). */
+const ROLE_LABELS: Record<string, string> = { owner: "Dueño", admin: "Administrador", manager: "Encargado", cashier: "Cajero/a", production: "Producción", readonly: "Solo lectura", accountant: "Contador" };
+function roleLabel(role: string | null | undefined): string {
+  return role ? ROLE_LABELS[role] ?? role : "sin rol";
 }
 
 export function Layout({ page, onPageChange, children }: Props) {
@@ -243,7 +250,7 @@ export function Layout({ page, onPageChange, children }: Props) {
         <div>
           <div className="brand">PATAGONIA OS</div>
           <div className="branch">
-            {profile?.full_name ?? "Usuario"} · {profile?.role ?? "sin rol"}
+            {profile?.full_name ?? "Usuario"} · {roleLabel(profile?.role)}
           </div>
           {(profile?.role === "owner" || profile?.role === "admin") && profile?.plan && (
             <div className="branch" style={{ marginTop: 2 }}>Plan {PLAN_LABELS[profilePlan(profile)]}</div>
