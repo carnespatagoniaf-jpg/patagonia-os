@@ -147,7 +147,7 @@ export class SystelClient {
    * de arranque comprobada (`wake`) y se reintenta. Las escrituras no se reintentan acá: el cliente
    * relee antes de volver a mandar.
    */
-  private async call(step: string, fn: number, data: string, opts: { token?: symbol; checksum?: boolean; timeoutMs?: number; allowTypeByteAt?: number } = {}): Promise<SystelReply | null> {
+  private async call(step: string, fn: number, data: string, opts: { token?: symbol; checksum?: boolean; timeoutMs?: number; allowTypeByteAt?: number; scaleBytes?: boolean } = {}): Promise<SystelReply | null> {
     const isRead = (SYSTEL_READ_FUNCTIONS as readonly number[]).includes(fn);
     let reply = await this.callOnce(step, fn, data, opts);
     for (const wait of isRead ? this.busyRetryMs : []) {
@@ -172,17 +172,17 @@ export class SystelClient {
     return r && r.checksumOk && r.fn === 23 && r.address >= 1 && r.address <= 99 ? r.address : null;
   }
 
-  private callOnce(step: string, fn: number, data: string, opts: { token?: symbol; checksum?: boolean; timeoutMs?: number; allowTypeByteAt?: number }): Promise<SystelReply | null> {
+  private callOnce(step: string, fn: number, data: string, opts: { token?: symbol; checksum?: boolean; timeoutMs?: number; allowTypeByteAt?: number; scaleBytes?: boolean }): Promise<SystelReply | null> {
     assertSystelFunctionAllowed(fn, opts.token);
-    return this.rawCall(step, this.address, fn, data, opts.timeoutMs ?? this.timeoutMs, opts.checksum, opts.allowTypeByteAt);
+    return this.rawCall(step, this.address, fn, data, opts.timeoutMs ?? this.timeoutMs, opts.checksum, opts.allowTypeByteAt, opts.scaleBytes);
   }
 
   /**
    * Manda una orden YA AUTORIZADA (la llaman `callOnce`, que controla la lista blanca, y `wake`,
    * que solo manda la 23). Con 0 (general) la balanza contesta con su propio número.
    */
-  private async rawCall(step: string, address: number, fn: number, data: string, timeoutMs: number, checksum?: boolean, allowTypeByteAt?: number): Promise<SystelReply | null> {
-    const frame = buildSystelFrame(address, fn, data, { checksum, allowTypeByteAt });
+  private async rawCall(step: string, address: number, fn: number, data: string, timeoutMs: number, checksum?: boolean, allowTypeByteAt?: number, scaleBytes?: boolean): Promise<SystelReply | null> {
+    const frame = buildSystelFrame(address, fn, data, { checksum, allowTypeByteAt, scaleBytes });
     const t0 = Date.now();
     // Correspondencia con ESTA orden: misma dirección (o una de 1-99 si se preguntó a la general),
     // misma función, control correcto y UNA sola trama posible. El contenido lo verifica después quien
@@ -348,7 +348,7 @@ export class SystelClient {
     if (!this.writes.productBarcode) return "bloqueado";
     // El byte del tipo de código (0x01) está 13 lugares antes del final de los datos fijos (antes de ingredientes).
     const end = data[data.length - 1] === "N" ? data.length - 1 : data.length - 101;
-    return this.call(`código de barras del producto ${number} (función ${LAYOUT_INFO[layout].writeFn})`, LAYOUT_INFO[layout].writeFn, data, { token: WRITE_TOKEN, allowTypeByteAt: end - 13 });
+    return this.call(`código de barras del producto ${number} (función ${LAYOUT_INFO[layout].writeFn})`, LAYOUT_INFO[layout].writeFn, data, { token: WRITE_TOKEN, allowTypeByteAt: end - 13, scaleBytes: true });
   }
 
   /**
@@ -359,7 +359,7 @@ export class SystelClient {
   async writeProductRecord(layout: SystelLayout, number: number, data: string): Promise<SystelReply | null | "bloqueado"> {
     if (!this.writes.products) return "bloqueado";
     const end = data[data.length - 1] === "N" ? data.length - 1 : data.length - 101;
-    return this.call(`producto ${number} desde Patagonia (función ${LAYOUT_INFO[layout].writeFn})`, LAYOUT_INFO[layout].writeFn, data, { token: WRITE_TOKEN, allowTypeByteAt: end - 13 });
+    return this.call(`producto ${number} desde Patagonia (función ${LAYOUT_INFO[layout].writeFn})`, LAYOUT_INFO[layout].writeFn, data, { token: WRITE_TOKEN, allowTypeByteAt: end - 13, scaleBytes: true });
   }
 
   async createPlu(layout: SystelLayout, input: NewPluInput, knownNumbers: Set<number>): Promise<WriteOutcome> {

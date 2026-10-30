@@ -113,7 +113,15 @@ export function checkScaleFormats(target: BranchScale, read: CodeFormats | null,
   if (!read || !target.formats) return { verdict: "ok" };
   if (eq(target.formats, read)) return { verdict: "ok" };
   const same = scales.filter((s) => s.key !== target.key && s.family === target.family && s.formats && eq(s.formats, read));
-  return { verdict: "otra", same: same.length === 1 ? same[0] : null };
+  if (same.length) return { verdict: "otra", same: same.length === 1 ? same[0] : null };
+  // Es la única balanza de esa marca con ese número en la sucursal: no hay otra con la que confundirla, así que le
+  // cambiaron la configuración en el menú. REAL (El Dorado 30/10): pasó de 20PPPPIIIIII a 20PPPPCCCCCC y se frenaba
+  // "no es esa balanza", y la persona terminó agregándola de nuevo. Sigue, y al pasar productos se guarda el formato nuevo.
+  // Una tarjeta sin número guardado (la de antes de la 134) también puede ser cualquiera de las dos.
+  const unknown = (i: Record<string, unknown>) => !Object.values(i ?? {}).some((v) => v !== undefined && v !== null);
+  const twins = scales.filter((s) => s.key !== target.key && s.family === target.family && (unknown(s.identity) || unknown(target.identity) || sameIdentity(s.identity, target.identity)));
+  if (!twins.length) return { verdict: "ok" };
+  return { verdict: "otra", same: null };
 }
 
 /** Con qué configuración buscar una balanza registrada ("¿Qué balanza tenés?" ya contestado). */
