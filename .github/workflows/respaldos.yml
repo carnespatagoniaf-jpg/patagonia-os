@@ -1,0 +1,74 @@
+# Control diario de respaldos y de la vuelta atrás (SOLO LECTURA: no cambia nada).
+#
+# Falla (y GitHub le manda un mail al dueño del repositorio) si:
+#   - la última copia de la base de producción en Supabase tiene más de 30 horas o no terminó bien;
+#   - Netlify no tiene una versión anterior publicada a la que volver con "Volver atrás".
+# También anota si la copia continua (PITR) está apagada: con ella se puede volver a cualquier minuto.
+#
+# Restaurar de verdad (no lo hace este flujo):
+#   - Base: Supabase → Database → Backups → Restore (pisa la base actual: solo con el dueño) o
+#     "Restore to new project" para probar una copia sin tocar producción.
+#   - Página: Actions → "Volver atrás".
+name: Respaldos
+
+on:
+  schedule:
+    - cron: "0 12 * * *" # 09:00 en Argentina, después de la copia diaria de Supabase (~07:00)
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  revisar:
+    name: Copias de la base y versión anterior de la página
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    environment: produccion
+    env:
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
+      SITE_ID: 2cbcab78-0bfb-42c5-bbcf-87791a7d2c89
+    steps:
+      - name: Revisar
+        run: |
+          set -euo pipefail
+          if [ -z "$SUPABASE_ACCESS_TOKEN" ] || [ -z "$NETLIFY_AUTH_TOKEN" ] || [ -z "$PROJECT_REF" ]; then
+            echo "::error::Faltan SUPABASE_ACCESS_TOKEN, NETLIFY_AUTH_TOKEN o SUPABASE_PROJECT_REF en el entorno produccion."; exit 1
+          fi
+          curl -fsS -H "Authorization: Bearer $SUPABASE_ACCESS_TOKEN" \
+            "https://api.supabase.com/v1/projects/$PROJECT_REF/database/backups" > backups.json
+          curl -fsS -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
+            "https://api.netlify.com/api/v1/sites/$SITE_ID" > site.json
+          curl -fsS -H "Authorization: Bearer $NETLIFY_AUTH_TOKEN" \
+            "https://api.netlify.com/api/v1/sites/$SITE_ID/deploys?per_page=50" > deploys.json
+          node <<'JS'
+          const fs = require("fs");
+          const b = JSON.parse(fs.readFileSync("backups.json", "utf8"));
+          const site = JSON.parse(fs.readFileSync("site.json", "utf8"));
+          const deploys = JSON.parse(fs.readFileSync("deploys.json", "utf8"));
+          const out = [];
+          let ok = true;
+          const list = (b.backups ?? []).slice().sort((x, y) => Date.parse(y.inserted_at) - Date.parse(x.inserted_at));
+          const last = list[0];
+          const hours = last ? (Date.now() - Date.parse(last.inserted_at)) / 36e5 : Infinity;
+          if (!last || last.status !== "COMPLETED" || hours > 30) {
+            ok = false;
+            out.push(`❌ Última copia de la base: ${last ? `${last.inserted_at} (${last.status}, hace ${hours.toFixed(1)} h)` : "ninguna"}`);
+          } else {
+            out.push(`✅ Última copia de la base: ${last.inserted_at}, hace ${hours.toFixed(1)} h (${list.length} copias guardadas)`);
+          }
+          out.push(b.pitr_enabled ? "✅ Copia continua (PITR) encendida" : "⚠️ Copia continua (PITR) apagada: solo se puede volver a la copia diaria");
+          const now = site.published_deploy?.id;
+          const previous = deploys.filter((d) => d.id !== now && d.state === "ready" && d.published_at);
+          if (previous.length === 0) {
+            ok = false;
+            out.push("❌ No hay una versión anterior de la página a la que volver");
+          } else {
+            out.push(`✅ Versión anterior para "Volver atrás": ${previous.sort((x, y) => Date.parse(y.published_at) - Date.parse(x.published_at))[0].id}`);
+          }
+          fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, "### Respaldos\n" + out.map((l) => `- ${l}`).join("\n") + "\n");
+          console.log(out.join("\n"));
+          if (!ok) process.exit(1);
+          JS

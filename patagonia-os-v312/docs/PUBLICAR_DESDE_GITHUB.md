@@ -49,3 +49,9 @@ GitHub → repositorio → **Settings**. Las claves se cargan ahí, nunca en el 
 ## Primera vez
 
 La primera corrida de *Publicar* conviene lanzarla a mano (Actions → Publicar → Run workflow) en un horario sin ventas y mirar cada paso. Si el borrador o las pruebas fallan, nada llega a los clientes.
+
+## Protecciones y controles (desde el 30/10/2026)
+
+- **`main` protegida**: solo entra por pull request y con las dos pruebas obligatorias en verde (*Pruebas, tipos y compilación* y *Migraciones desde cero + pruebas SQL*). Sin force push y sin borrar la rama; vale también para administradores.
+- **Respaldos** (`.github/workflows/respaldos.yml`, todos los días a las 09:00, solo lectura): falla y avisa por mail si la última copia de la base tiene más de 30 horas o si no hay una versión anterior de la página para "Volver atrás". Anota si la copia continua (PITR) está apagada.
+- **Seguridad de GitHub**: escaneo de claves subidas por error (con bloqueo al subir), alertas de Dependabot y pull requests automáticos de arreglos de seguridad.
