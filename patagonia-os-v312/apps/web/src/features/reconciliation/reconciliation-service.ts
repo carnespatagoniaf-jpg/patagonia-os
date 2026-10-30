@@ -49,6 +49,8 @@ export interface ReconMovement {
   amount: number;
   type: string;
   notes: string | null;
+  /** 'card_fees' = comisiones de tarjetas anotadas desde Tesorería → Plata por entrar (167). */
+  referenceType: string | null;
   reconciled: boolean;
 }
 
@@ -163,11 +165,12 @@ export async function getReconciliationItems(reconAccountId: string, from: strin
   const { data, error } = await client().rpc("get_reconciliation_items", { p_recon_account_id: reconAccountId, p_from: from, p_to: to });
   if (error) throw new Error(error.message);
   type P = { id: string; date: string; account_id: string; amount: number; reference: string | null; reconciled: boolean };
-  type M = { id: string; date: string; account_id: string; direction: "in" | "out"; amount: number; type: string; notes: string | null; reconciled: boolean };
+  type M = { id: string; date: string; account_id: string; direction: "in" | "out"; amount: number; type: string; notes: string | null; reference_type?: string | null; reconciled: boolean };
   return {
     payments: ((data?.payments ?? []) as P[]).map((p) => ({ id: p.id, date: p.date, accountId: p.account_id, amount: Number(p.amount), reference: p.reference, reconciled: p.reconciled })),
     movements: ((data?.movements ?? []) as M[]).map((m) => ({
-      id: m.id, date: m.date, accountId: m.account_id, direction: m.direction, amount: Number(m.amount), type: m.type, notes: m.notes, reconciled: m.reconciled
+      id: m.id, date: m.date, accountId: m.account_id, direction: m.direction, amount: Number(m.amount), type: m.type, notes: m.notes,
+      referenceType: m.reference_type ?? null, reconciled: m.reconciled
     }))
   };
 }

@@ -11,6 +11,8 @@ import { listCustomerChargesInRange, listCustomersWithBalance } from "../custome
 import { listProductsForBranch } from "../inventory/inventory-service";
 import { getReconReminders, getTransferAlerts, type ReconReminder } from "../reconciliation/reconciliation-service";
 import { chequeAlerts, type ChequeAlerts } from "../cheques/cheque-logic";
+import { loadSettlementData } from "../settlements/settlement-service";
+import { settle } from "../settlements/settlement";
 import { getTaxCalendarInputs } from "../accounting/accounting-service";
 import { daysLeftLabel, dueDateLabel, upcomingDues, type DueItem } from "../accounting/tax-calendar";
 import { listOpenCheques } from "../cheques/cheques-service";
@@ -39,6 +41,7 @@ export function Dashboard() {
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [overdueCustomers, setOverdueCustomers] = useState<{ name: string; balance: number }[]>([]);
   const [transferAlerts, setTransferAlerts] = useState<{ count: number; total: number; oldest: string } | null>(null);
+  const [lateCards, setLateCards] = useState<{ names: string[]; total: number } | null>(null);
   const [statementReminders, setStatementReminders] = useState<ReconReminder[]>([]);
   const [chequeWarnings, setChequeWarnings] = useState<ChequeAlerts | null>(null);
 
@@ -121,6 +124,19 @@ export function Dashboard() {
         if (!cancelled) setStatementReminders(list);
       })
       .catch(() => undefined);
+    // Plata por entrar (167): tarjetas que tenían que estar en el banco y no están.
+    // Las transferencias ya avisan arriba, por eso acá van solo los posnet.
+    if (profile?.role === "owner" || profile?.role === "admin") {
+      const today = todayIso();
+      loadSettlementData(addDaysIso(today, -90))
+        .then((d) => {
+          if (cancelled) return;
+          const late = settle({ accounts: d.accounts, sales: d.sales, cardCredits: d.cardCredits, coverage: d.coverage, today })
+            .filter((r) => r.account.isCard && r.lateGross > 0);
+          if (late.length > 0) setLateCards({ names: late.map((r) => r.account.name), total: late.reduce((s, r) => s + r.lateGross, 0) });
+        })
+        .catch(() => undefined);
+    }
     return () => {
       cancelled = true;
     };
@@ -253,7 +269,7 @@ export function Dashboard() {
             <h2>Alertas</h2>
             <AlertTriangle size={20} />
           </div>
-          {alerts.length === 0 && overdueCustomers.length === 0 && !transferAlerts && statementReminders.length === 0 && chequeRows.length === 0 && taxDues.length === 0 ? (
+          {alerts.length === 0 && overdueCustomers.length === 0 && !transferAlerts && !lateCards && statementReminders.length === 0 && chequeRows.length === 0 && taxDues.length === 0 ? (
             <p className="muted">Sin alertas.</p>
           ) : (
             <>
@@ -286,6 +302,15 @@ export function Dashboard() {
                     <span>
                       Suman {formatMoney(transferAlerts.total)} · desde el {transferAlerts.oldest.split("-").reverse().join("/")} · revisalos en Finanzas → Conciliación
                     </span>
+                  </div>
+                </div>
+              )}
+              {lateCards && (
+                <div className="alert-row">
+                  <AlertTriangle size={18} />
+                  <div>
+                    <strong>Tarjetas atrasadas: {formatMoney(lateCards.total)} no llegó al banco</strong>
+                    <span>{lateCards.names.join(", ")} · revisalo en Finanzas → Tesorería → Plata por entrar</span>
                   </div>
                 </div>
               )}

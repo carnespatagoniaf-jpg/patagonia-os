@@ -9,6 +9,7 @@ import { addDaysIso, formatMoney, todayIso } from "./format";
 import { parseAmount } from "../../lib/money";
 import type { ShiftRangeRow } from "./shifts-service";
 import { listTreasuryMovements, type TreasuryExpenseCategory, type TreasuryMovementRow } from "./treasury-service";
+import { SettlementPanel } from "../settlements/SettlementPanel";
 
 // Al sistema solo le importa si la cuenta es efectivo o no (cierre de caja,
 // vuelto, cupón obligatorio) -- un posnet recibe débito, crédito y QR juntos,
@@ -47,7 +48,7 @@ const EXPENSE_CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
 );
 
 export function Treasury() {
-  const { accounts, allAccounts, balances, movements, loading, error, create, adjust, transfer, registerExpense, removeExpense, setActive, setAccountBranch } = useTreasury();
+  const { accounts, allAccounts, balances, movements, loading, error, create, adjust, transfer, registerExpense, removeExpense, setActive, setAccountBranch, reload } = useTreasury();
   const { loadRange } = useShifts();
   const { branches: allBranches } = useActiveBranch();
   const { profile } = useAuth();
@@ -338,6 +339,19 @@ export function Treasury() {
           </button>
         )}
       </section>
+
+      {/* Plata por entrar (167): plan Full, solo dueño/admin (las funciones lo exigen). */}
+      {planAllows(profile, "full") && (profile?.role === "owner" || profile?.role === "admin") && (
+        <SettlementPanel
+          totalBalance={balances
+            .filter((b) => {
+              const a = allAccounts.find((x) => x.id === b.accountId);
+              return a ? a.active && !a.chequeRole : true;
+            })
+            .reduce((s, b) => s + b.balance, 0)}
+          onLedgerChanged={() => void reload()}
+        />
+      )}
 
       <section className="panel" style={{ marginTop: 18 }}>
         <div className="panel-title">

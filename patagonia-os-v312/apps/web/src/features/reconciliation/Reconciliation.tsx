@@ -219,7 +219,9 @@ export function Reconciliation() {
           source: "movement" as const,
           date: m.date,
           amount: m.direction === "in" ? m.amount : -m.amount,
-          isCard: false,
+          // Las comisiones de tarjetas del mes (Plata por entrar, 167) son parte de las tarjetas:
+          // no se buscan en el banco, se descuentan de la diferencia de tarjetas.
+          isCard: m.referenceType === "card_fees",
           label: `${MOVEMENT_LABELS[m.type] ?? m.type} · ${accountName(m.accountId)}${m.notes ? ` · ${m.notes}` : ""}`
         }))
     ],
@@ -244,6 +246,10 @@ export function Reconciliation() {
     [payments, cardIds, from, to]
   );
   const cardSummary = summarizeCards(cardSales, cardDepositsAll);
+  // Comisiones ya anotadas como gasto en el período: ya bajaron el saldo del sistema.
+  const bookedCardFees = movements
+    .filter((m) => m.referenceType === "card_fees" && m.date >= from && m.date <= to)
+    .reduce((s, m) => s + m.amount, 0);
 
   const cardMonths = cardCostByMonth(cardSales, cardDepositsAll);
   const cardBrands = depositsByBrand(cardDepositsAll);
@@ -953,7 +959,7 @@ export function Reconciliation() {
               suggestedBankBalance={closingBalanceFromLines(lines)}
               pendingBank={{ total: Math.round(closingPendingBank.reduce((s, l) => s + l.amount, 0) * 100) / 100, count: closingPendingBank.length }}
               pendingSystem={{ total: Math.round(closingPendingSystem.reduce((s, i) => s + i.amount, 0) * 100) / 100, count: closingPendingSystem.length }}
-              cardsGap={hasCards ? cardSummary.difference : 0}
+              cardsGap={hasCards ? Math.round((cardSummary.difference - bookedCardFees) * 100) / 100 : 0}
               onMessage={setMessage}
               onChanged={reload}
             />

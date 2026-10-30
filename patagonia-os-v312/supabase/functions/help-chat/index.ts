@@ -188,6 +188,17 @@ CHEQUES (menú "Finanzas" → Cheques; dueño y administrador; plan Full)
 - Cada cheque tiene un botón para deshacer el último paso ("Deshacer depósito", "Deshacer endoso", "Deshacer rechazo", "Deshacer débito"); en el primero dice "Borrar cheque" y borra también el cobro o el pago. Un cobro o pago que es un cheque no se puede cambiar de monto desde Clientes o Compras: se maneja desde Cheques. Los cheques ya cerrados quedan en "Ver historial".
 - Los depósitos y débitos de cheques son movimientos del banco, así que la Conciliación bancaria los cruza con el resumen como cualquier otro.
 
+PLATA POR ENTRAR (menú "Finanzas" → Tesorería, debajo de los saldos; dueño y administrador; plan Full)
+- Sirve para lo que se cobra con posnet, QR o Mercado Pago y no llega al banco en el momento: tarda unos días hábiles y llega con la comisión descontada.
+- La primera vez: "Cargar condiciones" (después se llama "Condiciones de cada cuenta"). Por cada cuenta que no es efectivo se pone si "Llega en el momento", o cuántos días hábiles tarda, y qué % te descuentan (comisión, IVA y retenciones juntos), y "Guardar". "Quitar" deja de seguir esa cuenta. Si no se sabe el %, se pone uno aproximado: cuando hay resumen del banco el sistema avisa cuánto te descuentan de verdad.
+- Arriba muestra "Disponible hoy" (los saldos de Tesorería menos lo que todavía no llegó), "Por entrar" (lo que va a llegar, ya con la comisión descontada) y, si hay, "Atrasado" (tenía que estar en el banco y no está en el resumen).
+- "Lo que va a entrar": cuánto llega cada día (hoy, mañana, los próximos días).
+- "Atrasado": qué cuenta, qué día se vendió, qué día tenía que entrar y cuánto falta. Se espera 2 días hábiles después de la fecha antes de marcarlo. Las tarjetas atrasadas también salen en Inicio → Alertas.
+- Se confirma solo con el resumen que se sube en Conciliación: la cuenta de Tesorería tiene que estar en una cuenta del banco de Conciliación (y el posnet marcado como posnet). Las transferencias y QR que caen uno a uno se confirman cobro por cobro; el posnet, por lo que acredita el banco, del más viejo al más nuevo. Si una cuenta no tiene resumen, se supone que llegó el día previsto (lo dice abajo del recuadro).
+- Si según el banco te descuentan otro % del que cargaste (más de medio punto), aparece un aviso con el botón "Usar X%" para corregirlo.
+- "Comisiones de tarjetas del mes": cuando el resumen cubre un mes entero que ya terminó, muestra lo vendido con posnet que tenía que entrar ese mes, lo que entró y la diferencia. "Anotar como gasto" la carga en Tesorería como un gasto "Comisiones de tarjetas" (una vez por mes), en la cuenta donde van las comisiones de esa cuenta del banco; "Deshacer" la borra. En el cierre de Conciliación ese gasto ya se descuenta de la diferencia de tarjetas, no se cuenta dos veces.
+- Lo que cobra Mostrador no cambia: cada venta sigue entrando a su cuenta como siempre.
+
 CONCILIACIÓN BANCARIA (menú "Finanzas" → Conciliación; dueño y administrador; plan Full)
 - Sirve para comparar el resumen del banco (cualquier banco o Mercado Pago) con lo que el sistema cobró y pagó.
 - La primera vez se configura la "cuenta del banco": un nombre (ej. Banco Provincia cuenta corriente) y qué cuentas de Tesorería caen ahí (ej. "Transferencia" y el posnet caen en la misma cuenta del banco). Se marca cuál es posnet/tarjetas y en cuál se cargan las comisiones y gastos. Se puede cambiar con "Editar" y agregar otras con "+ Otra cuenta del banco".
