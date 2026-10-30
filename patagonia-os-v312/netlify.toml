@@ -3,7 +3,23 @@
   publish = "apps/web/dist"
 
 [build.environment]
-  NODE_VERSION = "20"
+  NODE_VERSION = "22"
+
+# Producción la publica SOLO GitHub ("Publicar", de noche y con pruebas), subiendo un borrador por API.
+# Netlify no compila producción sola en cada push a main: cada publicación cuesta créditos (91 en tres
+# semanas de octubre 2026, hasta 17 en un día) y salía sin pasar por las pruebas. Las vistas previas de
+# los pull requests siguen compilando. Para volver a lo de antes, borrar este bloque.
+[context.production]
+  ignore = "exit 0"
+
+# Archivos con huella en el nombre (index-XXXX.js): nunca cambian, se guardan un año en el navegador.
+# Antes iban con max-age=0 y cada apertura del sistema volvía a pedir todos (Netlify cobra los pedidos).
+# index.html y version.json siguen sin caché: así cada publicación llega igual que antes.
+# Si se cambia algo acá, cambiar también HEADERS en scripts/deploy-netlify.mjs.
+[[headers]]
+  for = "/assets/*"
+  [headers.values]
+    Cache-Control = "public, max-age=31536000, immutable"
 
 [[redirects]]
   from = "/api/*"

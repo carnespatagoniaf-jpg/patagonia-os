@@ -1,11 +1,15 @@
 # Publicación AUTOMÁTICA de Patagonia System.
 #
-# Arranca sola cuando el CI de un cambio en main termina EN VERDE (pruebas, tipos, compilación y
-# migraciones desde cero). Si el CI falla, no corre. También se puede correr a mano (Run workflow).
+# Corre UNA VEZ POR NOCHE, a las 00:00 de Argentina (regla del dueño: se publica con los locales
+# cerrados), y publica lo último de main solo si su CI terminó EN VERDE (pruebas, tipos, compilación
+# y migraciones desde cero) y si no es lo mismo que ya está publicado (lo lee de /version.json).
+# Antes corría en cada push a main: con Netlify cobrando cada publicación, eran hasta 17 por día.
+# También se puede correr a mano (Run workflow), con las mismas condiciones.
 # Queda apagada mientras la variable del repositorio AUTOPUBLICAR no sea "true".
 #
 # Orden (cualquier falla frena lo que sigue; nada de lo anterior se pierde):
-#   1. Base de PRUEBAS (staging): aplica las migraciones pendientes.
+#   1. Base de PRUEBAS (staging): aplica las migraciones pendientes. Si el entorno staging no
+#      tiene SUPABASE_DB_URL, se saltea con un aviso (todavía no hay acceso a ese proyecto).
 #   2. Página: compila con los valores de producción, sube un BORRADOR a Netlify (los clientes
 #      no lo ven) y le corre las pruebas de humo (solo lectura).
 #   3. Base de PRODUCCIÓN: guarda la estructura actual (sin datos de clientes) como respaldo y
@@ -18,14 +22,13 @@
 name: Publicar
 
 on:
-  workflow_run:
-    workflows: [CI]
-    types: [completed]
-    branches: [main]
+  schedule:
+    - cron: "0 3 * * *" # 03:00 UTC = 00:00 en Argentina (no hay horario de verano)
   workflow_dispatch:
 
 permissions:
   contents: read
+  actions: read # para leer el resultado del CI del commit a publicar
 
 concurrency:
   group: publicar
@@ -42,27 +45,30 @@ jobs:
       - id: d
         env:
           HABILITADO: ${{ vars.AUTOPUBLICAR }}
-          EVENTO: ${{ github.event_name }}
-          CI_RESULTADO: ${{ github.event.workflow_run.conclusion }}
-          CI_SHA: ${{ github.event.workflow_run.head_sha }}
-          CI_RAMA: ${{ github.event.workflow_run.head_branch }}
-          CI_EVENTO: ${{ github.event.workflow_run.event }}
           RAMA: ${{ github.ref_name }}
           SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           seguir=true
+          sha="$SHA"
           if [ "$HABILITADO" != "true" ]; then
             echo "Publicación automática apagada (variable AUTOPUBLICAR). No se publica nada." | tee -a "$GITHUB_STEP_SUMMARY"
             seguir=false
-          elif [ "$EVENTO" = "workflow_run" ]; then
-            sha="$CI_SHA"
-            if [ "$CI_RESULTADO" != "success" ] || [ "$CI_RAMA" != "main" ] || [ "$CI_EVENTO" != "push" ]; then
-              echo "El CI no terminó en verde en main ($CI_RESULTADO): no se publica." | tee -a "$GITHUB_STEP_SUMMARY"
+          elif [ "$RAMA" != "main" ]; then
+            echo "::error::Solo se publica desde main."; exit 1
+          else
+            # El CI del push de este commit a main tiene que haber terminado en verde.
+            ci="$(gh api "repos/$REPO/actions/workflows/ci.yml/runs?head_sha=$sha&event=push&per_page=1" -q '.workflow_runs[0].conclusion // "sin CI"')"
+            # Lo publicado ahora (version.json trae el commit; si no lo trae, se publica igual).
+            publicado="$(curl -fsS "https://app.patagoniasystem.com.ar/version.json?t=$(date +%s)" | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>{try{console.log(JSON.parse(s).commit??"")}catch{console.log("")}})' || true)"
+            if [ "$ci" != "success" ]; then
+              echo "El CI de main ($sha) no está en verde ($ci): no se publica." | tee -a "$GITHUB_STEP_SUMMARY"
+              seguir=false
+            elif [ "$publicado" = "$sha" ]; then
+              echo "Ya está publicado $sha: no hay nada nuevo." | tee -a "$GITHUB_STEP_SUMMARY"
               seguir=false
             fi
-          else
-            sha="$SHA"
-            if [ "$RAMA" != "main" ]; then echo "::error::Solo se publica desde main."; exit 1; fi
           fi
           echo "seguir=$seguir" >> "$GITHUB_OUTPUT"
           echo "sha=${sha:-}" >> "$GITHUB_OUTPUT"
@@ -86,7 +92,10 @@ jobs:
         env:
           DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
         run: |
-          if [ -z "$DATABASE_URL" ]; then echo "::error::Falta SUPABASE_DB_URL en el entorno staging."; exit 1; fi
+          if [ -z "$DATABASE_URL" ]; then
+            echo "::warning::El entorno staging no tiene SUPABASE_DB_URL: se saltea la base de pruebas. Las migraciones igual se probaron desde cero en el CI."
+            exit 0
+          fi
           bash scripts/ci/apply-migrations.sh aplicar
 
   borrador:
@@ -239,6 +248,9 @@ jobs:
         working-directory: patagonia-os-v312
     env:
       NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      # deploy-netlify.mjs publish controla que producción tenga todas las migraciones del repo: sin esto, frenaba siempre.
+      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+      SUPABASE_PROJECT_REF: ${{ vars.SUPABASE_PROJECT_REF }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -261,7 +273,8 @@ jobs:
       - name: Pruebas de humo contra la página real
         id: humo
         env:
-          E2E_BASE_URL: https://patagoniasystem.com.ar
+          # El sistema está en app.; patagoniasystem.com.ar es la página de presentación (otro sitio de Netlify).
+          E2E_BASE_URL: https://app.patagoniasystem.com.ar
           E2E_OWNER_EMAIL: ${{ secrets.E2E_OWNER_EMAIL }}
           E2E_OWNER_PASSWORD: ${{ secrets.E2E_OWNER_PASSWORD }}
           E2E_ADMIN_EMAIL: ${{ secrets.E2E_ADMIN_EMAIL }}
@@ -274,7 +287,7 @@ jobs:
         env:
           ANTERIOR: ${{ steps.antes.outputs.id }}
         run: |
-          node scripts/deploy-netlify.mjs publish "$ANTERIOR"
+          node scripts/deploy-netlify.mjs rollback "$ANTERIOR"
           echo "::error::La página nueva falló las pruebas y se volvió sola a la versión anterior ($ANTERIOR)."
       - name: Resumen
         if: success()
