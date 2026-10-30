@@ -5,7 +5,7 @@ import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { useAuth } from "../auth/AuthProvider";
-import { can, planAllows } from "../auth/permissions";
+import { planAllows } from "../auth/permissions";
 import { adjustProductStock, clearProductPackages, createProduct, deleteProduct, listProductPackages, listProductsForBranch, listProductVatRates, registerProductPackages, setProductActive, setProductsVatRate, setProductStockSource, updateProduct } from "./inventory-service";
 import { getFiscalSettings } from "../invoicing/invoicing-service";
 import { PRODUCT_VAT_OPTIONS, productVatLabel, vatFromSelect, vatPercentLabel, vatSelectValue } from "./product-vat";
@@ -165,8 +165,9 @@ export function Inventory() {
   const [showPriceLists, setShowPriceLists] = useState(false);
   const activeLists = priceLists.filter((l) => l.active);
   const canManageLists = (profile?.role === "owner" || profile?.role === "admin") && planAllows(profile, "full");
-  // "Solo lectura" ve Stock pero no lo cambia (la base lo rechaza desde la 178): sin botones de editar.
-  const canEdit = can(profile, "inventory.adjust");
+  // "Solo lectura" ve Stock pero no lo cambia (la base lo rechaza desde la 178): sin botones de editar. Por rol, no por
+  // el tilde "Ajustar stock" (a un encargado sin ese tilde no se le esconde Editar; revisión 30/10).
+  const canEdit = profile?.role !== "readonly";
   const productCols = PRODUCT_COLS + activeLists.length;
 
 

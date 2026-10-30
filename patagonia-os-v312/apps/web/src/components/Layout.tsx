@@ -225,7 +225,8 @@ function roleLabel(role: string | null | undefined): string {
 export function Layout({ page, onPageChange, children }: Props) {
   const { profile, signOut } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
-  useInvoiceRetry(Boolean(profile?.company_id));
+  // Solo desde la PC del dueño o de un administrador: no hace falta que cada caja y cada pestaña le pregunten a ARCA.
+  useInvoiceRetry(Boolean(profile?.company_id) && (profile?.role === "owner" || profile?.role === "admin"));
   const visibleGroups = navGroups
     .map((group) => ({ ...group, items: group.items.filter((item) => canAccessPage(profile, item.page) && (item.page !== "invoicing" || SHOW_INVOICING)) }))
     .filter((group) => group.items.length > 0);

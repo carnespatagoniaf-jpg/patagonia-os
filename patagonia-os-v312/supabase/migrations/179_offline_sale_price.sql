@@ -26,6 +26,7 @@ alter table public.product_price_history enable row level security;
 do $mig$
 begin
   if exists (select 1 from pg_proc where proname = 'accountant_readonly_guard') then
+    execute 'drop trigger if exists zz_accountant_readonly on public.product_price_history';
     execute 'create trigger zz_accountant_readonly before insert or update or delete on public.product_price_history for each statement execute function public.accountant_readonly_guard()';
   end if;
 end
@@ -87,11 +88,15 @@ revoke all on function public.pos_charged_unit_price(public.products, jsonb) fro
 
 do $mig$
 declare
-  v_proc regprocedure := 'public.create_pos_sale(uuid,jsonb,jsonb,uuid,numeric,numeric,uuid)'::regprocedure;
+  v_proc regprocedure := to_regprocedure('public.create_pos_sale(uuid,jsonb,jsonb,uuid,numeric,numeric,uuid)');
   v_def text;
   v_a constant text := 'public.pos_list_unit_price(v_product, v_item)';
   v_b constant text := 'public.pos_charged_unit_price(v_product, v_item)';
 begin
+  if v_proc is null then
+    raise notice '179: no está create_pos_sale de 7 argumentos: queda como antes';
+    return;
+  end if;
   v_def := replace(pg_get_functiondef(v_proc), E'\r\n', E'\n');
   if position(v_b in v_def) > 0 then
     raise notice '179: create_pos_sale ya acepta el precio cobrado';

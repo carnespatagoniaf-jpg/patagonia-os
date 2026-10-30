@@ -29,6 +29,10 @@ begin
   select * into v_inv from public.invoices where id = p_invoice_id and company_id = v_company_id for update;
   if v_inv.id is null then raise exception 'Factura inválida'; end if;
   if v_inv.status <> 'pendiente' then raise exception 'Solo se puede descartar una factura pendiente'; end if;
+  -- Una nota de crédito no se descarta: la factura que anula seguiría válida con la venta anulada (revisión 30/10).
+  if v_inv.kind = 'nota_credito' then
+    raise exception 'Una nota de crédito no se puede descartar: tocá Reintentar para que salga.';
+  end if;
   if v_inv.pending_number is not null then
     raise exception 'Esta factura ya se le pidió a ARCA: no se puede descartar. Tocá Reintentar para que el sistema consulte a ARCA y la cierre.';
   end if;
