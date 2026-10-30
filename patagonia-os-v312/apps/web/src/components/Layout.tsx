@@ -12,6 +12,7 @@ import { useActiveBranch } from "../features/branches/BranchProvider";
 import { TrialBanner } from "./TrialBanner";
 import { NewsBanner } from "./NewsBanner";
 import { UpdateBanner } from "./UpdateBanner";
+import { useInvoiceRetry } from "../features/invoicing/useInvoiceRetry";
 import { HelpChat } from "../features/help/HelpChat";
 
 export type { Page };
@@ -217,6 +218,7 @@ function ChangePasswordForm() {
 export function Layout({ page, onPageChange, children }: Props) {
   const { profile, signOut } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
+  useInvoiceRetry(Boolean(profile?.company_id));
   const visibleGroups = navGroups
     .map((group) => ({ ...group, items: group.items.filter((item) => canAccessPage(profile, item.page) && (item.page !== "invoicing" || SHOW_INVOICING)) }))
     .filter((group) => group.items.length > 0);

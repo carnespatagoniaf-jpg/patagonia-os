@@ -140,6 +140,14 @@ export async function listInvoices(limit = 200): Promise<Invoice[]> {
   return (data ?? []).map(mapInvoice);
 }
 
+/** ¿Hay alguna factura o nota de crédito esperando a ARCA? (consulta liviana, para el reintento automático) */
+export async function hasPendingInvoices(): Promise<boolean> {
+  if (!supabase) return false;
+  const { data, error } = await supabase.from("invoices").select("id").eq("status", "pendiente").limit(1);
+  if (error) return false;
+  return (data ?? []).length > 0;
+}
+
 export interface UninvoicedSale {
   id: string;
   total: number;
