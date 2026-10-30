@@ -50,6 +50,16 @@ function fmtMoney(n: number): string {
   return `$${n.toLocaleString("es-AR", { maximumFractionDigits: 2 })}`;
 }
 
+/**
+ * ¿Ese código, en una etiqueta de `digits` cifras, se lee como el TOTAL de un ticket (código suma 99998 de las Kretz)?
+ * Mostrador lo prueba antes que el producto (parseAuraSumTicket): 3 cifras → 998 y 999, 4 → 9998 y 9999, 5 → 99998.
+ * Auditoría 29/10/2026: un producto con ese número se cobraba sin bajar stock.
+ */
+export function isTicketTotalCode(n: number, digits: number): boolean {
+  const field = String(n).padStart(digits, "0");
+  return field.length >= 3 && ("999998".endsWith(field) || "99998".startsWith(field));
+}
+
 /** Por qué un producto no se puede mandar exacto, o null si se puede. */
 export function productProblem(p: EngineProduct, limits: ModelLimits): string | null {
   const code = p.code.trim();
@@ -64,6 +74,9 @@ export function productProblem(p: EngineProduct, limits: ModelLimits): string | 
   if (limits.labelMaxCode !== null && n > limits.labelMaxCode) {
     const digits = String(limits.labelMaxCode).length;
     return `el código ${n} tiene más de ${digits} cifras y la etiqueta lleva ${digits}: Mostrador leería otro producto. Poné un código de 1 a ${limits.labelMaxCode} en Stock`;
+  }
+  if (limits.labelMaxCode !== null && isTicketTotalCode(n, String(limits.labelMaxCode).length)) {
+    return `el código ${n} es el que la balanza usa para el TOTAL del ticket: Mostrador cobraría el importe sin el producto ni el stock. Cambialo por otro código en Stock`;
   }
   if (!scaleName(p.name, limits.nameLength)) return "no tiene nombre: ponele uno en Stock";
   if (!UNITS.has(p.unit)) return "no dice si se vende por kilo o por unidad";
