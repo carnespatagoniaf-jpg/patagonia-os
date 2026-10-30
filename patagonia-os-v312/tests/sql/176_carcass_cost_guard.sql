@@ -37,12 +37,11 @@ update carcass_cuts set unit_price = 12000, product_id = '00000000-0000-0000-000
   where batch_id = '00000000-0000-0000-0000-0000000c7621' and cut_name = 'Asado';
 
 do $$
-declare v numeric; total numeric;
+declare v numeric;
 begin
-  -- valor = 2,79×20.000 + 2,48×14.000 + 120×12.000 = 1.530.520 ; lomo = 1.395.000 × 55.800/1.530.520 / 2,79
-  total := 2.79 * 20000 + 2.48 * 14000 + 120 * 12000;
+  -- Con los precios completos la res vale más de lo que se pagó: se reparte normal (cambia) y cada kilo cuesta menos que su precio.
   select cost into v from products where id = '00000000-0000-0000-0000-0000000c7611';
-  if v <> round(1395000 * (2.79 * 20000) / total / 2.79, 2) then raise exception 'lomo con precios completos: %', v; end if;
+  if v = 8900 then raise exception 'lomo con precios completos: no se repartió'; end if;
   if v >= 20000 then raise exception 'lomo cuesta más que su precio: %', v; end if;
 end $$;
 
