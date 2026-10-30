@@ -22,6 +22,8 @@ export interface PendingSale {
   total?: number;
   /** Aviso no-error (p. ej. "esperando que se abra un turno"). */
   note?: string;
+  /** Turno donde se cobró, si se subió a otro porque ese ya estaba cerrado (migración 184). */
+  originalShiftId?: string;
 }
 
 const QUEUE_KEY = "patagonia-pos-offline-queue";

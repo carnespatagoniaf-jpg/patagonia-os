@@ -87,6 +87,20 @@ export async function createPosSale(input: CreatePosSaleInput): Promise<CreatePo
 }
 
 /**
+ * Una venta guardada sin internet se subió a otro turno porque el suyo ya estaba cerrado: se anota de qué turno era
+ * y a qué hora se cobró (migración 184), para explicar en Control de caja la diferencia de las dos cajas. Nunca frena
+ * nada: si falla (sin conexión, base sin la 184), la venta ya está subida igual.
+ */
+export async function noteOfflineSaleMoved(saleId: string, originalShiftId: string, soldAt: string): Promise<void> {
+  if (!supabase) return;
+  try {
+    await supabase.rpc("note_offline_sale_moved", { p_sale_id: saleId, p_original_shift_id: originalShiftId, p_sold_at: soldAt });
+  } catch {
+    // solo informativo
+  }
+}
+
+/**
  * Cuáles de estos tickets de la balanza ya están en una venta NO anulada (cualquier computadora).
  * Devuelve null si no se pudo consultar (sin conexión): entonces vale el control local de esa computadora.
  */

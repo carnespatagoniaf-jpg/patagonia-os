@@ -16,7 +16,7 @@ import { useTreasury } from "../shifts/useTreasury";
 import { useSuppliers } from "../purchases/useSuppliers";
 import { useEmployees } from "../employees/useEmployees";
 import { deletePosShiftOutflow, listPosShiftVales, type PosShiftVale } from "../employees/employees-service";
-import { createPosSale, type CreatePosSaleInput } from "./sale-service";
+import { createPosSale, noteOfflineSaleMoved, type CreatePosSaleInput } from "./sale-service";
 import { repeatedPaperTime } from "../scales/sale/scale-sale-service";
 import { authorizeInvoices, getFiscalSettings, getInvoice, invoicePrintFrom, requestInvoice, type FiscalSettings } from "../invoicing/invoicing-service";
 import { emptyInvoiceDraft, invoiceDraftError, type InvoiceDraft } from "../invoicing/invoicing-view";
@@ -334,8 +334,10 @@ export function Sale() {
    * la venta sí había llegado la primera vez, no se duplica. Si no hay
    * ningún turno abierto, queda pendiente hasta que se abra uno. */
   async function uploadPendingSale(sale: PendingSale) {
+    let originalShiftId = sale.originalShiftId;
+    let saleId: string;
     try {
-      await createPosSale(sale.input);
+      saleId = (await createPosSale(sale.input)).saleId;
     } catch (err) {
       if (!isShiftClosedError(err)) throw err;
       const open = await getOpenPosShift(sale.input.branchId);
@@ -343,10 +345,14 @@ export function Sale() {
         updatePendingSale(sale.localId, { note: "su turno ya se cerró; se sube sola apenas abras un turno nuevo" });
         return;
       }
+      originalShiftId = originalShiftId ?? sale.input.posShiftId;
       const input = { ...sale.input, posShiftId: open.id };
-      updatePendingSale(sale.localId, { input });
-      await createPosSale(input);
+      updatePendingSale(sale.localId, { input, originalShiftId });
+      saleId = (await createPosSale(input)).saleId;
     }
+    // Quedó en otro turno: se anota para que Control de caja explique la diferencia de las dos cajas (184).
+    // El servidor no anota nada si la venta quedó en su propio turno.
+    if (originalShiftId) void noteOfflineSaleMoved(saleId, originalShiftId, sale.createdAt);
     removePendingSale(sale.localId);
   }
 
