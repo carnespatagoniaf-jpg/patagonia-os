@@ -338,7 +338,8 @@ export function Carcass() {
     setBusy(true);
     try {
       const r = await applyCarcassCosts(selectedBatch.id);
-      setMessage(r.updated > 0 ? `Listo: se actualizó el costo de ${r.updated} ${r.updated === 1 ? "producto" : "productos"} en Stock.` : "Los costos en Stock ya estaban al día.");
+      if (r.blocked) setMessage(r.blocked);
+      else setMessage(r.updated > 0 ? `Listo: se actualizó el costo de ${r.updated} ${r.updated === 1 ? "producto" : "productos"} en Stock.` : "Los costos en Stock ya estaban al día.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudieron actualizar los costos.");
     } finally {

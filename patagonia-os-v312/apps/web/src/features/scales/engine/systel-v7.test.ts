@@ -173,3 +173,21 @@ describe("[SIMULADO, registros REALES de El Dorado] Cuora Max firmware 7.0: prue
     assert.deepEqual(writes, [2005]);
   });
 });
+
+describe("[SIMULADO] REAL El Dorado 29-30/10: un producto de la balanza con un byte raro en la porción", () => {
+  it("se le devuelve a la balanza tal cual y la sincronización no se frena (antes: Carácter no permitido, posición 107)", async () => {
+    const f = eldorado();
+    // Porción con un byte nulo y una º (0xBA) desde la posición 108 de la lectura = 107 de la escritura (sin gestión).
+    const raw = ELDORADO[2][1];
+    const odd = raw.slice(0, 107) + "1 ºPORCION" + raw.slice(107 + 10);
+    assert.equal(odd.length, 223);
+    f.plus.set(2005, odd);
+    const { deps } = fakeDb();
+    const s = new SystelSession(f, 20, ctx(), deps);
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, true, out.message);
+    const lengua = f.plus.get(2005)!;
+    assert.equal(lengua.slice(25, 31), "012500");
+    assert.equal(lengua.slice(107, 117), "1 ºPORCION", "la porción de la balanza queda igual");
+  });
+});
