@@ -17,7 +17,8 @@ export function useInvoiceRetry(enabled: boolean) {
       if (running || !navigator.onLine) return;
       running = true;
       try {
-        if (await hasPendingInvoices()) await authorizeInvoices();
+        // Solo las de hace más de 2 minutos: la caja que recién cobró la está pidiendo ella (revisión 30/10).
+        if (await hasPendingInvoices()) await authorizeInvoices(undefined, 120);
       } catch {
         // Queda pendiente: se vuelve a probar en el próximo intento.
       } finally {

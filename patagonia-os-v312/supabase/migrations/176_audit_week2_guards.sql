@@ -28,6 +28,24 @@ as $$
   where p.id = auth.uid() and p.active = true and c.active = true
 $$;
 
+-- La ficha de SU empresa la sigue viendo aunque esté dada de baja: así el ingreso lee active = false y muestra "Esta
+-- empresa está desactivada" (con la política vieja, id = current_company_id(), la ficha llegaba vacía y una web
+-- vieja la tomaba como activa y entraba a un sistema vacío; revisión 30/10/2026). Solo la ficha, nada más.
+create or replace function public.caller_company_id_any()
+returns uuid
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select company_id from public.profiles where id = auth.uid() and active = true
+$$;
+revoke all on function public.caller_company_id_any() from public, anon;
+grant execute on function public.caller_company_id_any() to authenticated;
+
+alter policy companies_members_select on public.companies
+  using (id = (select public.caller_company_id_any()));
+
 -- 3 ---------------------------------------------------------------------------------------------------------
 create or replace function public.audit_customer_money_change()
 returns trigger

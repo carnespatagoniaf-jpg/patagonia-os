@@ -143,7 +143,7 @@ export async function listInvoices(limit = 200): Promise<Invoice[]> {
 /** ¿Hay alguna factura o nota de crédito esperando a ARCA? (consulta liviana, para el reintento automático) */
 export async function hasPendingInvoices(): Promise<boolean> {
   if (!supabase) return false;
-  const { data, error } = await supabase.from("invoices").select("id").eq("status", "pendiente").limit(1);
+  const { data, error } = await supabase.from("invoices").select("id").eq("status", "pendiente").lt("created_at", new Date(Date.now() - 120_000).toISOString()).limit(1);
   if (error) return false;
   return (data ?? []).length > 0;
 }
@@ -230,8 +230,8 @@ export interface AuthorizeOutcome {
 }
 
 /** Pide el CAE de esa factura (o de todas las pendientes de la empresa, hasta 10). */
-export async function authorizeInvoices(invoiceId?: string): Promise<AuthorizeOutcome[]> {
-  const data = await invokeArca<{ results: AuthorizeOutcome[] }>({ action: "authorize", invoiceId });
+export async function authorizeInvoices(invoiceId?: string, olderThanSeconds?: number): Promise<AuthorizeOutcome[]> {
+  const data = await invokeArca<{ results: AuthorizeOutcome[] }>({ action: "authorize", invoiceId, ...(olderThanSeconds ? { olderThanSeconds } : {}) });
   return data.results ?? [];
 }
 

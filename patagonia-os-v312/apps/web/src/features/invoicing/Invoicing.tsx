@@ -582,7 +582,7 @@ export function Invoicing() {
                         <button className="danger" disabled={busy} onClick={() => void handleCreditNote(inv)}>Anular</button>
                       )}
                       {inv.status === "pendiente" && <button className="secondary" disabled={busy} onClick={() => void handleRetry(inv.id)}>Reintentar</button>}
-                      {inv.status === "pendiente" && <button className="secondary" disabled={busy} onClick={() => void handleDiscard(inv)}>Descartar</button>}
+                      {inv.status === "pendiente" && inv.kind === "factura" && <button className="secondary" disabled={busy} onClick={() => void handleDiscard(inv)}>Descartar</button>}
                     </div>
                   </td>
                 </tr>
