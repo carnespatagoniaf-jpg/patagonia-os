@@ -1160,3 +1160,14 @@ input[type="file"], main textarea { max-width: 100%; }
 /* Panel de plataforma: pantallas a pedido de cada cliente (companies.features). */
 .admin-features { border-top: 1px solid #edf0f4; padding-top: 8px; }
 .admin-features summary { cursor: pointer; font-size: 14px; }
+
+/* Hoy en tus locales (Inicio, dueño/administrador) */
+.owner-today ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); }
+.owner-today li { border: 1px solid #e5e7eb; border-radius: 12px; padding: 10px 12px; min-width: 0; }
+.owner-today .panel-title h2 { display: flex; align-items: center; gap: 6px; }
+.owner-today-head { display: flex; justify-content: space-between; gap: 8px; align-items: baseline; margin-bottom: 4px; }
+.owner-today-line { margin: 2px 0 0; font-size: 14px; }
+.owner-today-line.ok { color: #176329; }
+.owner-today-line.warn { color: #8a4b00; }
+.owner-today-line.bad { color: #b42318; font-weight: 600; }
+.owner-today-line.muted { color: #697386; }

@@ -6,6 +6,7 @@ import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { can, canAccessPage, type Page } from "../auth/permissions";
 import { OnboardingCard } from "../onboarding/OnboardingCard";
+import { OwnerToday } from "./OwnerToday";
 import { useAuth } from "../auth/AuthProvider";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { listCustomerChargesInRange, listCustomersWithBalance } from "../customers/customers-service";
@@ -223,6 +224,8 @@ export function Dashboard({ onNavigate }: { onNavigate?: (page: Page) => void } 
       </header>
 
       {isSupabaseConfigured && profile?.company_id && (profile.role === "owner" || profile.role === "admin") && <OnboardingCard onNavigate={onNavigate} usesPos={can(profile, "pos.sell")} companyId={profile.company_id} />}
+
+      {isSupabaseConfigured && (profile?.role === "owner" || profile?.role === "admin") && <OwnerToday />}
 
       <section className="kpi-grid">
         <Kpi title="Ventas hoy" value={formatMoney(salesToday)} detail={`${salesToday === 0 ? "Sin" : ""} tickets de hoy`} icon={<CircleDollarSign />} />
