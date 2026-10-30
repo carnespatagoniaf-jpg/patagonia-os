@@ -222,7 +222,7 @@ export function Dashboard({ onNavigate }: { onNavigate?: (page: Page) => void } 
         <span className="status-pill">V3.1 · {isSupabaseConfigured ? "En vivo" : "Desarrollo"}</span>
       </header>
 
-      {isSupabaseConfigured && (profile?.role === "owner" || profile?.role === "admin") && <OnboardingCard onNavigate={onNavigate} usesPos={can(profile, "pos.sell")} />}
+      {isSupabaseConfigured && profile?.company_id && (profile.role === "owner" || profile.role === "admin") && <OnboardingCard onNavigate={onNavigate} usesPos={can(profile, "pos.sell")} companyId={profile.company_id} />}
 
       <section className="kpi-grid">
         <Kpi title="Ventas hoy" value={formatMoney(salesToday)} detail={`${salesToday === 0 ? "Sin" : ""} tickets de hoy`} icon={<CircleDollarSign />} />

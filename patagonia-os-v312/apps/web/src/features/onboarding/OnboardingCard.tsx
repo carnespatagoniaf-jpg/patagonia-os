@@ -8,8 +8,28 @@ import { onboardingSteps, type OnboardingStatus } from "./onboarding";
  * usar el sistema y desaparece sola cuando está todo hecho. Si la consulta falla (por ejemplo, antes de la
  * migración), no muestra nada.
  */
-export function OnboardingCard({ onNavigate, usesPos }: { onNavigate?: (page: Page) => void; usesPos: boolean }) {
+const HIDDEN_KEY = "patagonia-onboarding-hidden";
+
+function isHidden(companyId: string): boolean {
+  try {
+    return localStorage.getItem(`${HIDDEN_KEY}-${companyId}`) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function OnboardingCard({ onNavigate, usesPos, companyId }: { onNavigate?: (page: Page) => void; usesPos: boolean; companyId: string }) {
   const [status, setStatus] = useState<OnboardingStatus | null>(null);
+  const [hidden, setHidden] = useState(() => isHidden(companyId));
+
+  function hide() {
+    try {
+      localStorage.setItem(`${HIDDEN_KEY}-${companyId}`, "1");
+    } catch {
+      // sin localStorage se oculta solo por ahora
+    }
+    setHidden(true);
+  }
 
   useEffect(() => {
     if (!supabase) return;
@@ -24,7 +44,7 @@ export function OnboardingCard({ onNavigate, usesPos }: { onNavigate?: (page: Pa
     };
   }, [usesPos]);
 
-  if (!status) return null;
+  if (!status || hidden) return null;
   const steps = onboardingSteps(status);
   if (steps.every((s) => s.done)) return null;
   const next = steps.find((s) => !s.done);
@@ -34,7 +54,10 @@ export function OnboardingCard({ onNavigate, usesPos }: { onNavigate?: (page: Pa
     <section className="panel" style={{ marginBottom: 16 }}>
       <div className="panel-title">
         <h2>Primeros pasos</h2>
-        <span className="muted" style={{ fontSize: 13 }}>{doneCount} de {steps.length} hechos</span>
+        <span className="muted" style={{ fontSize: 13 }}>
+          {doneCount} de {steps.length} hechos ·{" "}
+          <button className="link-button" onClick={hide}>No mostrar más</button>
+        </span>
       </div>
       <ol style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 10 }}>
         {steps.map((s) => (
