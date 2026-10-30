@@ -210,10 +210,11 @@ export async function markCarcassBatchWeighed(batchId: string): Promise<void> {
 }
 
 /** "Actualizar costos en Stock": escribe el costo por kilo de esta res en sus productos (migración 170). */
-export async function applyCarcassCosts(batchId: string): Promise<{ updated: number }> {
+export async function applyCarcassCosts(batchId: string): Promise<{ updated: number; blocked: string | null }> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { data, error } = await supabase.rpc("apply_carcass_costs", { p_batch_id: batchId });
   if (error) throw error;
-  return { updated: Array.isArray(data?.updated) ? data.updated.length : 0 };
+  // 176: si la res vale vendida mucho menos de lo que se pagó (faltan precios), no se escribe ningún costo.
+  return { updated: Array.isArray(data?.updated) ? data.updated.length : 0, blocked: typeof data?.blocked === "string" ? data.blocked : null };
 }
