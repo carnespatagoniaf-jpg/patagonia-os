@@ -46,8 +46,9 @@ export function NetworkScaleSetup({ onConnect, onBack }: { onConnect: (a: NetAdd
       setMessage("Escribí la dirección (IP) de la balanza, por ejemplo 192.168.1.50. Está en el menú de la balanza: Configuración de Red → IP.");
       return;
     }
-    if (!Number.isInteger(p) || p < 1 || p > 65535) {
-      setMessage("El puerto tiene que ser un número (el de fábrica es 1001).");
+    // El programa de la PC solo abre puertos de balanza (1000-1099), para no servir de puente a otros equipos de la red.
+    if (!Number.isInteger(p) || p < 1000 || p > 1099) {
+      setMessage("El puerto de la balanza va de 1000 a 1099 (el de fábrica es 1001). Fijate en el menú Configuración de Red.");
       return;
     }
     setBusy(true);

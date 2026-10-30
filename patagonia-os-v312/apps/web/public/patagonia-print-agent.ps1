@@ -335,7 +335,8 @@ function Handle-ScaleRequest($ctx, [string]$path, [string]$origin) {
   }
   if ($path -eq "/scale/find") {
     $p = 0
-    if (-not [int]::TryParse([string]$req.QueryString["port"], [ref]$p) -or $p -lt 1 -or $p -gt 65535) { $p = 1001 }
+    # Solo puertos de balanza (Kretz Report: 1001 de fabrica). Auditoria 29/10/2026: antes cualquier puerto de la red.
+    if (-not [int]::TryParse([string]$req.QueryString["port"], [ref]$p) -or $p -lt 1000 -or $p -gt 1099) { $p = 1001 }
     Send-Json $ctx 200 @{ ok = $true; port = $p; found = (Find-ScaleHosts $p); local = (Get-LocalIPv4) } $origin
     return
   }
@@ -350,8 +351,8 @@ function Handle-ScaleRequest($ctx, [string]$path, [string]$origin) {
       Send-Json $ctx 400 @{ ok = $false; error = "La direccion '$h' no es de la red local."; local = (Get-LocalIPv4) } $origin
       return
     }
-    if (-not [int]::TryParse([string]$req.QueryString["port"], [ref]$p) -or $p -lt 1 -or $p -gt 65535) {
-      Send-Json $ctx 400 @{ ok = $false; error = "Puerto invalido." } $origin
+    if (-not [int]::TryParse([string]$req.QueryString["port"], [ref]$p) -or $p -lt 1000 -or $p -gt 1099) {
+      Send-Json $ctx 400 @{ ok = $false; error = "Puerto invalido: el de la balanza va de 1000 a 1099 (de fabrica 1001)." } $origin
       return
     }
     $r = Open-ScaleLink $h $p
