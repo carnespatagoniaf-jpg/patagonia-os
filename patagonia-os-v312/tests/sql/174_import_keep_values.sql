@@ -1,4 +1,6 @@
 -- Pruebas de la migración 174 (importar no pisa costo/precio/mínimo con 0). Se deshace al final.
+-- Cada importación corre como el dueño (authenticated); los controles leen la tabla como postgres
+-- (reset role), porque authenticated no puede leer products directo desde la 051 (oculta el costo).
 \set ON_ERROR_STOP 1
 begin;
 
@@ -15,37 +17,68 @@ insert into products (id, company_id, code, name, unit, cost, price_retail, min_
 update products set stock_source_id = '00000000-0000-0000-0000-0000000c7404', stock_factor = 1
   where id = '00000000-0000-0000-0000-0000000c7405';
 
-set local role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000c7403', true);
 
+-- Archivo con solo código, nombre y precio (sin columna de costo ni mínimo): el costo NO se pierde.
+set local role authenticated;
 do $$
-declare r jsonb; p record;
 begin
-  -- Archivo con solo código, nombre y precio (sin columna de costo ni mínimo): el costo NO se pierde.
-  r := public.import_products('00000000-0000-0000-0000-0000000c7402',
+  perform public.import_products('00000000-0000-0000-0000-0000000c7402',
     '[{"row":1,"code":"10","name":"Vacío novillo","price_retail":16000,"cost":null,"min_stock":null}]'::jsonb, true);
+end $$;
+reset role;
+do $$
+declare p record;
+begin
   select cost, price_retail, min_stock, name into p from products where id = '00000000-0000-0000-0000-0000000c7404';
   if p.cost <> 9000 then raise exception 'se perdió el costo: %', p.cost; end if;
   if p.price_retail <> 16000 then raise exception 'no actualizó el precio: %', p.price_retail; end if;
   if p.min_stock <> 5 then raise exception 'se perdió el mínimo: %', p.min_stock; end if;
   if p.name <> 'Vacío novillo' then raise exception 'no actualizó el nombre: %', p.name; end if;
+end $$;
 
-  -- Un valor que sí viene se actualiza.
-  r := public.import_products('00000000-0000-0000-0000-0000000c7402',
+-- Un valor que sí viene se actualiza.
+set local role authenticated;
+do $$
+begin
+  perform public.import_products('00000000-0000-0000-0000-0000000c7402',
     '[{"row":1,"code":"10","name":"Vacío novillo","cost":9500}]'::jsonb, true);
+end $$;
+reset role;
+do $$
+declare p record;
+begin
   select cost, price_retail into p from products where id = '00000000-0000-0000-0000-0000000c7404';
   if p.cost <> 9500 or p.price_retail <> 16000 then raise exception 'costo %, precio %', p.cost, p.price_retail; end if;
+end $$;
 
-  -- Producto nuevo sin precio ni costo: arranca en 0 (como antes).
-  r := public.import_products('00000000-0000-0000-0000-0000000c7402',
+-- Producto nuevo sin precio ni costo: arranca en 0 (como antes).
+set local role authenticated;
+do $$
+begin
+  perform public.import_products('00000000-0000-0000-0000-0000000c7402',
     '[{"row":1,"code":"12","name":"Chorizo"}]'::jsonb, false);
+end $$;
+reset role;
+do $$
+declare p record;
+begin
   select cost, price_retail, min_stock into p from products where company_id = '00000000-0000-0000-0000-0000000c7401' and code = '12';
   if p.cost <> 0 or p.price_retail <> 0 or p.min_stock <> 0 then raise exception 'nuevo: %', p; end if;
+end $$;
 
-  -- Stock de una presentación: se saltea en vez de abortar todo el archivo; el principal sí se carga.
+-- Stock de una presentación: se saltea en vez de abortar todo el archivo; el principal sí se carga.
+set local role authenticated;
+do $$
+declare r jsonb;
+begin
   r := public.import_products('00000000-0000-0000-0000-0000000c7402',
     '[{"row":1,"code":"10","name":"Vacío novillo","stock":20},{"row":2,"code":"11","name":"Vacío oferta","stock":7}]'::jsonb, true);
   if (r ->> 'stock_adjusted')::int <> 1 then raise exception 'stock ajustado: %', r; end if;
+end $$;
+reset role;
+do $$
+begin
   if (select coalesce(sum(quantity), 0) from inventory_movements where product_id = '00000000-0000-0000-0000-0000000c7404') <> 20 then
     raise exception 'stock del principal mal';
   end if;
