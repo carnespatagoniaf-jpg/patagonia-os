@@ -676,7 +676,9 @@ export function Sale() {
         scaleAmount: l.scaleAmount,
         scaleTicket: l.scaleTicket,
         ...(l.scalePaper ? { scaleCode: l.scaleCode ?? null } : {}),
-        ...(l.kind === "product" && l.priceListId ? { priceListId: l.priceListId } : {})
+        ...(l.kind === "product" && l.priceListId ? { priceListId: l.priceListId } : {}),
+        // Precio cobrado en pantalla: si cambió mientras no había internet, la venta no se pierde (179).
+        ...(l.kind === "product" && !l.priceListId && l.scaleAmount === undefined ? { chargedUnitPrice: l.unitPrice } : {})
       }));
       const paymentsPayload = isSplit
         ? payments.map((p) => ({ accountId: p.accountId, amount: parseAmount(p.amount || "0") || 0, reference: p.reference.trim() || undefined }))

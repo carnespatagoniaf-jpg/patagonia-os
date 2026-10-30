@@ -15,6 +15,11 @@ export interface CreatePosSaleItemInput {
   scaleCode?: number | null;
   /** Lista de precios (Mayorista, migración 167): el servidor cobra el precio de esa lista. */
   priceListId?: string;
+  /**
+   * Precio que se cobró en pantalla (producto sin lista ni importe de balanza). Si el precio cambió mientras la caja
+   * estaba sin internet, el servidor lo acepta cuando ese producto lo tuvo en las últimas 72 h (migración 179).
+   */
+  chargedUnitPrice?: number;
 }
 
 export interface CreatePosSalePaymentInput {
@@ -62,7 +67,8 @@ export async function createPosSale(input: CreatePosSaleInput): Promise<CreatePo
       ...(item.source ? { source: item.source, scale_tickets: item.scaleTickets ?? 1 } : {}),
       ...(item.scaleAmount !== undefined && item.scaleTicket ? { scale_amount: item.scaleAmount, scale_ticket: item.scaleTicket } : {}),
       ...(item.scaleCode !== undefined ? { scale_code: item.scaleCode } : {}),
-      ...(item.productId && item.priceListId ? { price_list_id: item.priceListId } : {})
+      ...(item.productId && item.priceListId ? { price_list_id: item.priceListId } : {}),
+      ...(item.productId && item.chargedUnitPrice !== undefined ? { charged_unit_price: item.chargedUnitPrice } : {})
     })),
     p_payments: input.payments.map((p) => ({ account_id: p.accountId, amount: p.amount, reference: p.reference ?? null })),
     p_pos_shift_id: input.posShiftId,
