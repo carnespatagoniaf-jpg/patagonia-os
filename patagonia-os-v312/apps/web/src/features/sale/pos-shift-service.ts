@@ -566,6 +566,24 @@ export async function listPosSalesInRange(branchId: string, fromDate: string, to
   }));
 }
 
+/**
+ * Lo mismo que listPosSalesInRange pero ya sumado por día y cuenta en el servidor (migración 185): un pedido y pocas
+ * filas en vez de cada pago. Inicio y Reportes solo suman, así que dan igual. Base sin la 185: la forma de antes.
+ */
+export async function listPosSalesByDay(branchId: string, fromDate: string, toDate: string): Promise<MostradorSaleEntry[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase.rpc("pos_sales_by_day_account", { p_branch_id: branchId, p_from: fromDate, p_to: toDate });
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") return listPosSalesInRange(branchId, fromDate, toDate);
+    throw error;
+  }
+  return ((data ?? []) as { sale_date: string; account_id: string; amount: number | string }[]).map((r) => ({
+    date: r.sale_date,
+    accountId: r.account_id,
+    amount: Number(r.amount)
+  }));
+}
+
 export async function listPosShiftSales(shiftId: string): Promise<PosShiftSale[]> {
   if (!supabase) return [];
 

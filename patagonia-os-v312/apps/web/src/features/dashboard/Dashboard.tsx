@@ -15,7 +15,7 @@ import { chequeAlerts, type ChequeAlerts } from "../cheques/cheque-logic";
 import { getTaxCalendarInputs } from "../accounting/accounting-service";
 import { daysLeftLabel, dueDateLabel, upcomingDues, type DueItem } from "../accounting/tax-calendar";
 import { listOpenCheques } from "../cheques/cheques-service";
-import { listPosSalesInRange, listSalesByProduct } from "../sale/pos-shift-service";
+import { listPosSalesByDay, listSalesByProduct } from "../sale/pos-shift-service";
 import { addDaysIso, formatMoney, todayIso } from "../shifts/format";
 import { stockValueReport } from "../shifts/stock-value";
 import { useShifts } from "../shifts/useShifts";
@@ -63,7 +63,7 @@ export function Dashboard({ onNavigate }: { onNavigate?: (page: Page) => void } 
       listProductsForBranch(branchId),
       loadRange(weekAgo, today),
       can(profile, "treasury.manage") ? listSalesByProduct(branchId, `${today.slice(0, 7)}-01`, today).catch(() => null) : Promise.resolve(null),
-      listPosSalesInRange(branchId, weekAgo, today),
+      listPosSalesByDay(branchId, weekAgo, today),
       can(profile, "customers.manage") ? listCustomerChargesInRange(branchId, weekAgo, today) : Promise.resolve([]),
       can(profile, "customers.manage") ? listCustomersWithBalance() : Promise.resolve([])
     ])
