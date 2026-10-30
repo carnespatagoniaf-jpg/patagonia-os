@@ -40,6 +40,7 @@ import {
   arDate,
   caeRequestInner,
   certificateProblem,
+  consultIsUncertain,
   consultInner,
   friendlyArcaMessage,
   isNumberRaceError,
@@ -68,6 +69,15 @@ const ARCA_VAULT_KEY = Deno.env.get("ARCA_VAULT_KEY") ?? "";
 const ENDPOINTS = ARCA_ENDPOINTS[ARCA_ENV];
 /** Alias con el que el negocio da de alta el certificado en su ARCA. */
 const COMPANY_CERT_ALIAS = "patagonia";
+/**
+ * Únicas empresas que pueden facturar con el certificado compartido (el CUIT es de Carnes Patagonia).
+ * Antes bastaba con cargar ese CUIT en Facturas: cualquier cliente podía sacar CAE a nombre de Carnes Patagonia
+ * (auditoría 29/10/2026, crítico C2). Producción: Carnes Patagonia. Homologación (staging): Carnicería Don Julio.
+ */
+const SHARED_CERT_COMPANIES: Record<ArcaEnv, string[]> = {
+  prod: ["11111111-1111-1111-1111-111111111111"],
+  homo: ["0295a76b-acc0-4d62-8e6b-9065bd1647ca"]
+};
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -143,7 +153,7 @@ async function credentialsFor(admin: SupabaseClient, companyId: string, cuit: st
     return { keyPem: await decryptKey(own.key_cipher, own.key_iv), certPem: own.cert_pem, fingerprint: own.cert_fingerprint, shared: false };
   }
   const shared = sharedCertificate();
-  if (shared && shared.cuit === cuit && ARCA_KEY) {
+  if (shared && shared.cuit === cuit && ARCA_KEY && SHARED_CERT_COMPANIES[ARCA_ENV].includes(companyId)) {
     return { keyPem: ARCA_KEY, certPem: ARCA_CERT, fingerprint: shared.fingerprint, shared: true };
   }
   throw new UserError("Falta el certificado de ARCA de este negocio: hacé los pasos de Facturas → Conectar con ARCA.");
@@ -406,6 +416,11 @@ async function authorizeOne(admin: SupabaseClient, settings: Row, invoiceId: str
       const nc = await queueCreditNoteIfSaleVoided(admin, inv);
       return nc ? [outcome(inv), ...(await authorizeOne(admin, settings, nc.id))] : [outcome(inv)];
     }
+    // ARCA no dijo que ese número no existe: no se pide otro (podría quedar duplicada). Queda pendiente.
+    if (consultIsUncertain(c)) {
+      inv = await update(admin, inv.id, { error_message: "ARCA no pudo confirmar el intento anterior. Se vuelve a intentar sola.", claimed_at: null });
+      return [outcome(inv)];
+    }
   }
 
   // 2) Factura de una venta que se anuló o borró antes de llegar a ARCA: no se emite.
@@ -540,7 +555,7 @@ async function certStatus(admin: SupabaseClient, companyId: string) {
     env: ARCA_ENV,
     alias: COMPANY_CERT_ALIAS,
     /** Carnes Patagonia: factura con el certificado compartido, que es de su CUIT; no tiene que hacer nada. */
-    usesShared: Boolean(cuit && shared && shared.cuit === cuit && !own?.cert_pem),
+    usesShared: Boolean(cuit && shared && shared.cuit === cuit && !own?.cert_pem && SHARED_CERT_COMPANIES[ARCA_ENV].includes(companyId)),
     hasRequest: Boolean(own && own.cuit === cuit),
     csrPem: own && own.cuit === cuit ? own.csr_pem : null,
     hasCertificate: Boolean(own?.cert_pem && own.cuit === cuit),

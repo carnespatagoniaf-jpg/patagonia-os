@@ -21,7 +21,6 @@ export interface BlindCloseFormProps {
   shiftSales: PosShiftSale[];
   busy: boolean;
   onSalesChanged: () => Promise<void>;
-  onRequestSafeDeposit: () => void;
   /** Cerrar de verdad, con el efectivo contado y los totales declarados. */
   onConfirmClose: (countedCash: number, declaredAccounts: Record<string, string>) => void;
   onCancel: () => void;
@@ -175,7 +174,8 @@ export function BlindCloseForm(p: BlindCloseFormProps) {
   }
 
   const ok = countIsOk(result);
-  const cashShort = result.cashDifference < -CLOSE_OK_TOLERANCE;
+  // Ya no se ofrece "Sí, anotar el retiro" después de ver la diferencia: convertía un faltante en un papelito sin
+  // que nadie lo viera (auditoría 29/10/2026, crítico C7). Un retiro se anota cuando se saca la plata.
 
   return (
     <div style={{ display: "grid", gap: 10 }}>
@@ -233,23 +233,6 @@ export function BlindCloseForm(p: BlindCloseFormProps) {
           )}
         </div>
       ))}
-
-      {cashShort && swaps.length === 0 && (
-        <div className="panel" style={{ padding: 12 }}>
-          <p style={{ margin: "0 0 6px" }}>
-            Falta {formatMoney(-result.cashDifference)} de efectivo. ¿Retiraste plata y no la anotaste?
-          </p>
-          <button
-            className="secondary"
-            onClick={() => {
-              setResult(null);
-              p.onRequestSafeDeposit();
-            }}
-          >
-            Sí, anotar el retiro
-          </button>
-        </div>
-      )}
 
       {error && <p className="num-negative" style={{ margin: 0 }}>{error}</p>}
       <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>

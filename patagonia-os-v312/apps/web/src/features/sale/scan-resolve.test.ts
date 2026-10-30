@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import type { Product } from "@patagonia/domain";
 import { DEFAULT_SCALE_CONFIG } from "./scale-barcode";
 import { CARNES_PATAGONIA_CONFIG, CARNES_PATAGONIA_LABELS, LOS_GRINGOS_LABEL_CONFIG, LOS_GRINGOS_TOTAL_TICKET, LOS_GRINGOS_TWO_ITEM_TICKET, SYSTEL_LABEL_CONFIG, TRIPLES_LABELS, TRIPLES_TOTAL_WITHOUT_AMOUNT } from "./scale-real-labels";
-import { resolveScan, validEan13 } from "./scan-resolve";
+import { labelWeightProblem, resolveScan, validEan13 } from "./scan-resolve";
 
 const product = (code: string, name: string, unit: "kg" | "unit", priceRetail: number, active = true) =>
   ({ id: `id-${code}`, code, name, unit, priceRetail, active }) as unknown as Product;
@@ -197,5 +197,28 @@ describe("[REAL] Kretz Aura en Pre-Empaque (Pollo y mar 15/10/2026, un ticket po
     const r = resolveScan("2099806737003", products, AURA_ITEM);
     assert.equal(r.type, "ticket_total");
     assert.equal(r.type === "ticket_total" && r.amount, 6737);
+  });
+});
+
+describe("Peso de la etiqueta fuera del piloto Systel (auditoría 29/10: El Dorado leyó $99.934 como 99,934 kg)", () => {
+  it("más de 31 kg de un producto por kilo se pregunta, no se agrega solo", () => {
+    assert.equal(labelWeightProblem("kg", 99.934), "excesivo");
+    assert.equal(labelWeightProblem("kg", 31.001), "excesivo");
+  });
+  it("un peso normal pasa, y las unidades no tienen tope", () => {
+    assert.equal(labelWeightProblem("kg", 0.215), null);
+    assert.equal(labelWeightProblem("kg", 31), null);
+    assert.equal(labelWeightProblem("unit", 40), null);
+  });
+  it("cero, negativo o no numérico no se agrega", () => {
+    assert.equal(labelWeightProblem("kg", 0), "invalido");
+    assert.equal(labelWeightProblem("kg", -1), "invalido");
+    assert.equal(labelWeightProblem("kg", Number.NaN), "invalido");
+  });
+  it("la etiqueta real de El Dorado con el formato de fábrica cae como excesiva", () => {
+    const nalga = product("1", "NALGA", "kg", 14000);
+    const r = resolveScan("2000019993407", [nalga], DEFAULT_SCALE_CONFIG);
+    assert.equal(r.type, "label");
+    if (r.type === "label") assert.equal(labelWeightProblem(r.product.unit, r.quantity), "excesivo");
   });
 });

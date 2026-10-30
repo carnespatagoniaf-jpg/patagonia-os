@@ -1028,7 +1028,6 @@ export function ShiftPanel(p: ShiftPanelProps) {
             shiftSales={p.shiftSales}
             busy={p.busy}
             onSalesChanged={p.onSalesChanged}
-            onRequestSafeDeposit={() => setCashOut("retiro")}
             onConfirmClose={confirmCloseWithScaleCheck}
             onCancel={p.onCancelClose}
           />

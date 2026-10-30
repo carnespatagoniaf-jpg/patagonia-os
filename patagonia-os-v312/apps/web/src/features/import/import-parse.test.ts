@@ -106,7 +106,8 @@ describe("buildProductRows", () => {
     ];
     const rows = buildProductRows(table, map, new Set(["102"]), false);
     assert.deepEqual(rows.map((r) => [r.row, r.status]), [[2, "new"], [3, "skip"], [4, "new"], [5, "error"], [6, "error"], [7, "error"], [8, "error"]]);
-    assert.deepEqual(rows[0].payload, { row: 2, code: "101", name: "Asado", unit: "kg", cost: 9500, price_retail: 13800, min_stock: 0, category: "", stock: 25.5, vat_rate: null });
+    assert.deepEqual(rows[0].payload, { row: 2, code: "101", name: "Asado", unit: "kg", cost: 9500, price_retail: 13800, min_stock: null, category: "", stock: 25.5, vat_rate: null });
+    // Sin mínimo en el archivo: va null y la base deja el que había (174); un producto nuevo arranca en 0.
     assert.match(rows[3].errors[0], /repetido/);
     assert.deepEqual(summarize(rows), { total: 7, created: 2, updated: 0, skipped: 1, errors: 4 });
   });
