@@ -1,4 +1,4 @@
--- 176: Auditoría 29/10/2026, semana 2 (controles de plata y de acceso). No cambia ningún dato existente.
+-- 176b (escrita como 176; renumerada porque producción ya tiene 176_carcass_cost_guard): Auditoría 29/10/2026, semana 2 (controles de plata y de acceso). No cambia ningún dato existente.
 --
 -- 1. Empresa dada de baja = sin acceso a la base. current_company_id() miraba solo profiles.active: una empresa
 --    desactivada por falta de pago quedaba bloqueada en la pantalla (AuthProvider) pero seguía leyendo y
@@ -208,4 +208,4 @@ $$;
 revoke all on function public.delete_supplier_payment(uuid) from public, anon;
 grant execute on function public.delete_supplier_payment(uuid) to authenticated;
 
-insert into public.schema_migrations (version) values ('176_audit_week2_guards') on conflict do nothing;
+insert into public.schema_migrations (version) values ('176b_audit_week2_guards') on conflict do nothing;

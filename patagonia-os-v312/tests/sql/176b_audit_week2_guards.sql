@@ -1,4 +1,4 @@
--- Pruebas de la migración 176 (empresa dada de baja, auditoría de cobros, borrar gastos). Se deshace al final.
+-- Pruebas de la migración 176b (empresa dada de baja, auditoría de cobros, borrar gastos). Se deshace al final.
 \set ON_ERROR_STOP 1
 begin;
 
