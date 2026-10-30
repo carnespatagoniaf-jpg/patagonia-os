@@ -23,6 +23,8 @@ export interface Recipe {
   marginPct: number | null;
   notes: string;
   items: RecipeItem[];
+  /** Al venderlo, baja del stock los insumos de la receta. Ver migración 168. */
+  deductOnSale: boolean;
   updatedAt: string;
 }
 
@@ -34,6 +36,7 @@ interface RecipeRow {
   extra_cost: number | string;
   margin_pct: number | string | null;
   notes: string | null;
+  deduct_on_sale?: boolean | null;
   updated_at: string;
 }
 
@@ -50,10 +53,14 @@ const PAGE = 1000;
 export async function listRecipes(): Promise<Recipe[]> {
   if (!supabase) return [];
 
-  const { data: rows, error } = await supabase
+  const columns = "id,kind,product_id,yield_qty,extra_cost,margin_pct,notes,updated_at";
+  const first = await supabase
     .from("recipes")
-    .select("id,kind,product_id,yield_qty,extra_cost,margin_pct,notes,updated_at")
+    .select(`${columns},deduct_on_sale`)
     .order("updated_at", { ascending: false });
+  // Base sin la migración 168 todavía: se lee como antes (nadie descuenta al vender).
+  const { data: rows, error } =
+    first.error?.code === "42703" ? await supabase.from("recipes").select(columns).order("updated_at", { ascending: false }) : first;
   if (error) throw error;
 
   // Los insumos se traen paginados: PostgREST corta en 1000 filas.
@@ -86,6 +93,7 @@ export async function listRecipes(): Promise<Recipe[]> {
     marginPct: row.margin_pct === null ? null : Number(row.margin_pct),
     notes: row.notes ?? "",
     items: itemsByRecipe.get(row.id) ?? [],
+    deductOnSale: row.deduct_on_sale === true,
     updatedAt: row.updated_at
   }));
 }
@@ -122,6 +130,13 @@ export async function saveRecipe(input: SaveRecipeInput): Promise<string> {
 export async function setRecipeKind(recipeId: string, kind: RecipeKind): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("set_recipe_kind", { p_recipe_id: recipeId, p_kind: kind });
+  if (error) throw error;
+}
+
+/** Prende o apaga "al venderlo, descontar los insumos del stock". Se llama después de saveRecipe. */
+export async function setRecipeDeductOnSale(recipeId: string, enabled: boolean): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("set_recipe_deduct_on_sale", { p_recipe_id: recipeId, p_enabled: enabled });
   if (error) throw error;
 }
 

@@ -1,5 +1,5 @@
 /**
- * "Plata por entrar" (migración 167, plan Full): lo cobrado con posnet, QR o
+ * "Plata por entrar" (migración 176, plan Full): lo cobrado con posnet, QR o
  * transferencia que todavía no llegó al banco. Como las empresas grandes:
  *
  * - Cada cuenta tiene sus condiciones: en cuántos días hábiles acredita y qué

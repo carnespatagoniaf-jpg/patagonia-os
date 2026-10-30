@@ -365,3 +365,29 @@ describe("peso", () => {
     assert.deepEqual(parseCuoraWeight("-00250i000010"), { grams: -250, stable: false, tareGrams: 10 });
   });
 });
+
+describe("respaldo con productos que no se leyeron a la primera (real Giuseppe 27-28/10)", () => {
+  it("los vuelve a pedir al final y el respaldo queda completo", async () => {
+    const fake = loadedFake("max60");
+    // La conexión se corta durante un rato: la segunda lectura de producto y las siguientes no contestan, una vez cada una.
+    let reads = 0;
+    const failed = new Set<string>();
+    const flaky = {
+      exchange: async (frame: Uint8Array) => {
+        if (frame[1] === LAYOUT_INFO.max60.readFn) {
+          reads += 1;
+          const key = String.fromCharCode(...frame.subarray(2, frame.length - 1));
+          if (reads > 2 && !failed.has(key)) {
+            failed.add(key);
+            return null;
+          }
+        }
+        return fake.exchange(frame);
+      }
+    };
+    const backup = await takeSystelBackup(new SystelClient(flaky, { address: 1, busyRetryMs: [] }));
+    assert.ok(failed.size > 0, "hubo productos que no contestaron a la primera");
+    assert.equal(backup.complete, true, backup.detail);
+    assert.deepEqual(backup.plus.map((p) => p.number), [...fake.plus.keys()].sort((a, b) => a - b));
+  });
+});

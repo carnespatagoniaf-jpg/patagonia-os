@@ -1,3 +1,4 @@
+import { isNetPort, netKey } from "../../inventory/kretz/net-port";
 import type { ScaleModelId } from "./capabilities";
 
 /**
@@ -19,6 +20,8 @@ export interface RememberedScale {
 }
 
 export function usbKeyOf(port: SerialPort): string | null {
+  // Balanza por cable de red: se reconoce por su dirección ("red:192.168.1.50:1001").
+  if (isNetPort(port)) return netKey(port.net);
   try {
     const i = port.getInfo?.() ?? {};
     if (i.usbVendorId === undefined) return null;

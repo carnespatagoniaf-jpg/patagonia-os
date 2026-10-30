@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Product, TreasuryAccount } from "@patagonia/domain";
 import { parseAmount } from "../../lib/money";
 import { formatMoney, localDateIso } from "../shifts/format";
 import type { ProductCategory } from "../inventory/product-categories-service";
 import { parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, type ScaleConfig } from "./scale-config-service";
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
-import { resolveScan } from "./scan-resolve";
+import { labelWeightProblem, MAX_COUNTER_SCALE_KG, resolveScan } from "./scan-resolve";
 import { noteLabelRead } from "../scales/label-read";
 import { closeSystelTicketSession, readSystelTicketFromScale, refreshSystelLabelFormat, systelTicketReadConfigured } from "../inventory/systel/systel-ticket-from-scale";
 import { loadSystelLabelTemplates, systelConfigForCode } from "./systel-label-format";
@@ -18,7 +18,7 @@ import { chargedScaleTickets } from "./sale-service";
 import { useScalePapers } from "./useScalePapers";
 import { submitScaleSupportReport } from "../scales/support-service";
 import type { PosShift } from "./pos-shift-service";
-import { lineGross, type PaymentRow, type TicketLine } from "./sale-model";
+import { lineGross, withPriceList, type PaymentRow, type TicketLine } from "./sale-model";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { findScaleTicketSale, findScaleTicketVoid, undoScaleTicketVoid } from "./scale-control-service";
 import { chargedTicketQuestion, detailedTotalKey, SAME_SALE_LABEL_QUESTION, type ChargedHit } from "./scale-repeat";
@@ -51,7 +51,16 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [showProductTable, setShowProductTable] = useState(false);
-  const [cart, setCart] = useState<TicketLine[]>([]);
+  const [baseCart, setCart] = useState<TicketLine[]>([]);
+  /** Lista de precios de esta venta (botón Minorista / Mayorista, migración 167); null = minorista. */
+  const [priceListId, setPriceListId] = useState<string | null>(null);
+  const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
+  // El ticket que se ve y se cobra: cada línea con el precio de la lista elegida (withPriceList no
+  // pierde el precio minorista, así volver a Minorista deja todo como estaba).
+  const cart = useMemo(
+    () => baseCart.map((l) => withPriceList(l, l.productId ? productById.get(l.productId) : undefined, priceListId)),
+    [baseCart, productById, priceListId]
+  );
   /** Varios tickets de la balanza con el mismo total: la persona elige cuál (nunca a ciegas). */
   const [scaleTicketChoices, setScaleTicketChoices] = useState<{ amount: number; candidates: TicketCandidate[]; charged: SystelTicket[] } | null>(null);
   const [readingScaleTicket, setReadingScaleTicket] = useState(false);
@@ -386,8 +395,30 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
           done();
           return;
         }
+        // Una Cuora pesa hasta 31 kg: más que eso es un código mal leído (real El Dorado 29/10: $99.934 leído como 99,934 kg).
+        if (resolved.product.unit === "kg" && !(resolved.quantity > 0 && resolved.quantity <= 31)) {
+          setMessage(`No se agregó: la etiqueta se leyó como ${resolved.quantity.toLocaleString("es-AR")} kg, que no puede pesar una balanza. Conectá la balanza en "Balanza" para que Mostrador tome el formato de etiqueta que usa hoy, o cargá el producto a mano.`);
+          done();
+          return;
+        }
         addPendingLabel(resolved.product, resolved.quantity);
         return;
+      }
+      // Fuera del piloto Systel (Kretz, formato de fábrica, El Dorado): una etiqueta de más de 31 kg casi seguro es un
+      // formato mal leído (real El Dorado 29/10: $99.934 leído como 99,934 kg). Se pregunta mostrando el importe.
+      const weightProblem = labelWeightProblem(resolved.product.unit, resolved.quantity);
+      if (weightProblem === "invalido") {
+        setMessage("No se agregó: la etiqueta no trae un peso válido. Cargá el producto a mano.");
+        done();
+        return;
+      }
+      if (weightProblem === "excesivo") {
+        const charged = resolved.amount ?? resolved.quantity * resolved.product.priceRetail;
+        if (!window.confirm(`La etiqueta se leyó como ${resolved.quantity.toLocaleString("es-AR")} kg de ${resolved.product.name} (${formatMoney(charged)}). Una balanza de mostrador pesa hasta ${MAX_COUNTER_SCALE_KG} kg: casi seguro el formato de la etiqueta está mal configurado. ¿Agregarlo igual?`)) {
+          setMessage(`No se agregó: revisá que el peso del papel sea ${resolved.quantity.toLocaleString("es-AR")} kg, o cargá el producto a mano.`);
+          done();
+          return;
+        }
       }
       if (resolved.amount !== undefined) {
         // La etiqueta trae el importe (Kretz Aura en Pre-Empaque): se cobra el importe del papel, exacto, en su propia
@@ -727,6 +758,7 @@ ${l.name} ${qty}`);
     setScaleTicketChoices(null);
     papers.reset();
     setCart([]);
+    setPriceListId(null);
     setItemDiscounts({});
     setSaleDiscount("");
     setSaleDiscountMode("amount");
@@ -812,7 +844,7 @@ ${l.name} ${qty}`);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSplit, busy, cart.length, shift, accounts, confirmCharge]);
 
-  return { search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, detailing, startTicketDetail, stopTicketDetail, commitScaleTickets, papers, readingScaleTicket, scaleTicketChoices, setScaleTicketChoices, addScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
+  return { priceListId, setPriceListId, search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, detailing, startTicketDetail, stopTicketDetail, commitScaleTickets, papers, readingScaleTicket, scaleTicketChoices, setScaleTicketChoices, addScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
 }
 
 export type SaleTicket = ReturnType<typeof useSaleTicket>;

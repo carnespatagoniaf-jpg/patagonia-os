@@ -446,7 +446,7 @@ returns integer
 language plpgsql
 security definer
 set search_path = public
-as $
+as $$
 declare
   v_match jsonb;
   v_count integer := 0;
@@ -466,7 +466,7 @@ begin
   end loop;
   return v_count;
 end;
-$;
+$$;
 
 revoke all on function public.confirm_bank_matches(jsonb) from public, anon;
 grant execute on function public.confirm_bank_matches(jsonb) to authenticated;

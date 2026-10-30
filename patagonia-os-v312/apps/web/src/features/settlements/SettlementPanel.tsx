@@ -13,7 +13,7 @@ import {
 } from "./settlement-service";
 
 /**
- * Tesorería → "Plata por entrar" (migración 167, plan Full, dueño/admin).
+ * Tesorería → "Plata por entrar" (migración 176, plan Full, dueño/admin).
  * Lo cobrado con posnet, QR o transferencia que todavía no llegó al banco,
  * cuándo llega, qué está atrasado y las comisiones de tarjetas del mes.
  */

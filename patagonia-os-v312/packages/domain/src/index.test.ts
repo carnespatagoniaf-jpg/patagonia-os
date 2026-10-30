@@ -69,7 +69,25 @@ test("calcula el subtotal de un corte por peso x precio", () => {
   assert.equal(carcassCutLineTotal({ weight: 8.61, unitPrice: 16000 }), 137760);
 });
 
-test("allocateCarcassCost: la compra se reparte por lo que vale cada corte", () => {
+test("allocateCarcassCost (costo parejo, 'costo_parejo'): todos los cortes cuestan lo mismo por kilo", () => {
+  // Media res de 100 kg a $5.000/kg = $500.000. Se venden 55 kg (lomo 5 + asado 20 + picada 30); el hueso es merma.
+  // 500.000 / 55 = 9.090,91 el kilo para todos.
+  const lines = allocateCarcassCost(500000, [
+    { productId: "lomo", weight: 5, unitPrice: 20000 },
+    { productId: "asado", weight: 20, unitPrice: 10000 },
+    { productId: "picada", weight: 30, unitPrice: 6000 },
+    { productId: "hueso", weight: 10, unitPrice: 0 }
+  ], "average");
+  assert.deepEqual(lines.map((l) => [l.productId, l.costPerKg]), [
+    ["lomo", 9090.91],
+    ["asado", 9090.91],
+    ["picada", 9090.91],
+    ["hueso", 0]
+  ]);
+  assert.equal(Math.round(lines.reduce((s, l) => s + l.cost, 0)), 500000);
+});
+
+test("allocateCarcassCost (por valor, la de siempre): la compra se reparte por lo que vale cada corte", () => {
   // Media res de 100 kg a $5.000/kg = $500.000. Lomo 5 kg a $20.000, asado 20 kg a $10.000, carne picada 30 kg a
   // $6.000, hueso 10 kg sin precio. Valor total = 100.000 + 200.000 + 180.000 = 480.000.
   const lines = allocateCarcassCost(500000, [

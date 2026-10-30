@@ -271,6 +271,17 @@ export function parsePointsOfSale(xml: string): { points: PointOfSaleInfo[]; err
   return { points, errors: parseErrors(xml) };
 }
 
+/**
+ * ¿La consulta de un número ya pedido NO sirve para saber si quedó autorizado? Solo el error 602 ("no existen
+ * datos") dice que ese número no existe en ARCA y se puede pedir otro. Cualquier otro error (500/501/502 de ARCA
+ * lento, justo cuando se cortó la respuesta) o una respuesta sin datos ni errores es "no sé": pedir un número
+ * nuevo podía dejar DOS comprobantes en ARCA por la misma venta (auditoría 29/10/2026, crítico C8).
+ */
+export function consultIsUncertain(c: { found: boolean; errors: ArcaMessage[] }): boolean {
+  if (c.found) return false;
+  return !c.errors.some((e) => e.code === 602);
+}
+
 /** Error 10016: el número no es el siguiente (otra caja facturó justo antes). Se reintenta. */
 export function isNumberRaceError(errors: ArcaMessage[]): boolean {
   return errors.some((e) => e.code === 10016);

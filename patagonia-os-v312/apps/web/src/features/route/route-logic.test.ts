@@ -4,6 +4,7 @@ import {
   addLine,
   customerBalanceWithQueue,
   paidTotal,
+  routePrice,
   saleError,
   stockAfterQueue,
   ticketTotal,
@@ -79,4 +80,12 @@ describe("venta en ruta", () => {
     assert.equal(whatsappNumber("2944 15 123456"), "5492944123456");
     assert.equal(whatsappNumber("123"), null);
   });
+});
+
+describe("precio mayorista en la ruta", () => {
+  const chorizo = { price: 8100, listPrices: { may: 7290 } };
+  it("cliente con lista: su precio", () => assert.equal(routePrice(chorizo, { priceListId: "may" }), 7290));
+  it("cliente sin lista: minorista", () => assert.equal(routePrice(chorizo, {}), 8100));
+  it("sin cliente elegido: minorista", () => assert.equal(routePrice(chorizo, null), 8100));
+  it("producto sin precio en esa lista: minorista", () => assert.equal(routePrice({ price: 4200 }, { priceListId: "may" }), 4200));
 });

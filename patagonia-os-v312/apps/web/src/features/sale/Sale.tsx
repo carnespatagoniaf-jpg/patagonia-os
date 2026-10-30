@@ -36,6 +36,9 @@ import { SaleTicketPanel } from "./SaleTicketPanel";
 import { useSaleTicket } from "./useSaleTicket";
 import { applySoldToStock } from "./sale-stock";
 import { getMostradorPin } from "./company-settings-service";
+import { PriceListToggle } from "../pricing/PriceListToggle";
+import { listPriceLists } from "../pricing/price-lists-service";
+import type { PriceList } from "../pricing/price-lists";
 import { buildCloseTicket as buildCloseTicketBytes, buildMovementTicket as buildMovementTicketBytes, buildReceiptTicket as buildReceiptTicketBytes } from "./sale-tickets";
 import { type ReceiptLine, type ReceiptState, type MovementReceiptState, STALE_SHIFT_HOURS, formatShiftStart, getAutoPrintEnabled, saveAutoPrintEnabled, loadStoredReceipt, saveStoredReceipt } from "./sale-model";
 
@@ -49,6 +52,8 @@ export function Sale() {
   const [cashiers, setCashiers] = useState<PosCashier[]>([]);
   const [openCashierId, setOpenCashierId] = useState("");
   const [openCashierPin, setOpenCashierPin] = useState("");
+  // "Inicio de caja" sin cajeras con PIN: nombre de quien atiende, escrito a mano (migración 172).
+  const [openCashierName, setOpenCashierName] = useState("");
   const { suppliers, create: createSupplier } = useSuppliers();
   const { employees } = useEmployees();
   // "treasury.manage" (dueño/admin) da acceso a la pantalla completa de
@@ -161,6 +166,12 @@ export function Sale() {
   const [scaleConfigCalibrated, setScaleConfigCalibrated] = useState(false);
 
 
+  // Listas de precios (Mayorista, migración 167): sin listas, Mostrador queda como siempre.
+  const [priceLists, setPriceLists] = useState<PriceList[]>([]);
+  useEffect(() => {
+    if (!isSupabaseConfigured) return;
+    listPriceLists().then((l) => setPriceLists(l.filter((x) => x.active))).catch(() => setPriceLists([]));
+  }, []);
   const ticket = useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot: SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? ""), scaleBranchId: branchId ?? null });
   const {
     cart,
@@ -528,7 +539,7 @@ export function Sale() {
     setMessage("");
     const openingCash = parseAmount(openingCashInput || "0") || 0;
     if (!isSupabaseConfigured) {
-      setShift({ id: "demo-shift", openedAt: new Date().toISOString(), openingCash });
+      setShift({ id: "demo-shift", openedAt: new Date().toISOString(), openingCash, cashierName: openCashierName.trim() || null });
       setShiftSales([]);
       setOpeningCashInput("");
       return;
@@ -541,10 +552,16 @@ export function Sale() {
     }
     setBusy(true);
     try {
-      setShift(await openPosShift(branchId, openingCash, cashier ? { employeeId: cashier.employeeId, pin: openCashierPin.trim(), fullName: cashier.fullName } : null));
+      setShift(await openPosShift(
+        branchId,
+        openingCash,
+        cashier ? { employeeId: cashier.employeeId, pin: openCashierPin.trim(), fullName: cashier.fullName } : null,
+        cashier ? null : openCashierName
+      ));
       setShiftSales([]);
       setOpeningCashInput("");
       setOpenCashierPin("");
+      setOpenCashierName("");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo abrir el turno.");
     } finally {
@@ -658,7 +675,8 @@ export function Sale() {
         scaleTickets: l.scaleTickets,
         scaleAmount: l.scaleAmount,
         scaleTicket: l.scaleTicket,
-        ...(l.scalePaper ? { scaleCode: l.scaleCode ?? null } : {})
+        ...(l.scalePaper ? { scaleCode: l.scaleCode ?? null } : {}),
+        ...(l.kind === "product" && l.priceListId ? { priceListId: l.priceListId } : {})
       }));
       const paymentsPayload = isSplit
         ? payments.map((p) => ({ accountId: p.accountId, amount: parseAmount(p.amount || "0") || 0, reference: p.reference.trim() || undefined }))
@@ -888,6 +906,11 @@ Cancelar = es el mismo papel: no cobrar.`)) {
       // Lo que la cajera declaró por cada posnet/transferencia queda en la tabla del cierre.
       setAccountReconcileInput(declaredAccounts);
       setShowCloseConfirm(false);
+      // Ticket del cierre, solo con "Imprimir automáticamente" prendido (igual que el de cada venta). Antes de la 164
+      // se veía el detalle y se imprimía con un botón; con el cierre a ciegas la cajera se quedaba sin ticket.
+      void autoPrintCloseTicket(
+        buildCloseTicketBytes({ summary: result, branchName: currentBranchName(), accounts, adjustments: adjustmentsSnapshot, vales: valesSnapshot, supplierPayments: supplierPayments ?? [] })
+      );
       await reloadShift();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo cerrar el turno.");
@@ -989,6 +1012,22 @@ Cancelar = es el mismo papel: no cobrar.`)) {
    * navegador como red de seguridad -- ese SÍ requiere un clic en
    * "Imprimir" (ningún navegador permite saltear eso por seguridad), pero
    * nunca deja a alguien sin ticket. */
+  async function autoPrintCloseTicket(bytes: Uint8Array) {
+    if (!autoPrintEnabled) return;
+    if (await isThermalPrinterPaired()) {
+      try {
+        await printBytes(bytes);
+        return;
+      } catch (err) {
+        if (await pingPrintAgent()) {
+          setMessage(err instanceof Error ? err.message : "No se pudo imprimir el ticket de cierre.");
+          return;
+        }
+      }
+    }
+    setTimeout(() => window.print(), 300);
+  }
+
   async function autoPrintReceipt(receiptToPrint: ReceiptState) {
     if (!autoPrintEnabled) return;
     if (await isThermalPrinterPaired()) {
@@ -1140,6 +1179,16 @@ Cancelar = es el mismo papel: no cobrar.`)) {
                 />
               </>
             )}
+            {cashiers.length === 0 && (
+              <input
+                type="text"
+                placeholder="¿Quién atiende? (nombre)"
+                maxLength={60}
+                value={openCashierName}
+                onChange={(e) => setOpenCashierName(e.target.value)}
+                style={{ width: 200 }}
+              />
+            )}
             <label className="muted">Fondo inicial de caja $</label>
             <input
               type="text"
@@ -1159,6 +1208,11 @@ Cancelar = es el mismo papel: no cobrar.`)) {
             accounts={accounts}
             busy={busy}
             onCheckout={checkout}
+            priceSlot={
+              priceLists.length > 0 ? (
+                <PriceListToggle lists={priceLists} value={ticket.priceListId} onChange={ticket.setPriceListId} disabled={busy} />
+              ) : null
+            }
             invoiceSlot={
               fiscal?.enabled && cart.length > 0 ? (
                 <InvoiceRequestFields issuer={fiscal.taxCondition} draft={invoiceDraft} total={total} onChange={setInvoiceDraft} />
@@ -1167,6 +1221,7 @@ Cancelar = es el mismo papel: no cobrar.`)) {
           />
 
           <ShiftPanel
+            branchId={branchId ?? null}
             shift={shift}
             canSeeShiftTotals={canSeeShiftTotals}
             canManageTreasury={canManageTreasury}
@@ -1271,11 +1326,10 @@ Cancelar = es el mismo papel: no cobrar.`)) {
               {closeSummary.difference < 0 ? `Faltan ${formatMoney(-closeSummary.difference)}` : `Sobran ${formatMoney(closeSummary.difference)}`}
             </p>
           )}
-          <p className="muted" style={{ marginBottom: 0 }}>El dueño ve el detalle en "Control de caja".</p>
         </section>
       )}
 
-      {closeSummary && canSeeShiftTotals && (
+      {closeSummary && (
         <CloseSummaryView
           summary={closeSummary}
           accounts={accounts}

@@ -1,3 +1,4 @@
+import { knownNetAddresses, netPortFor, type NetAddress } from "../../inventory/kretz/net-port";
 import { FriendlyError, friendlyKind, isPortOpenError } from "./friendly";
 import { familyOrder, loadRememberedScale, rememberScale, usbKeyOf } from "./memory";
 import type { EngineContext, ProgressFn, ScaleAdapter, ScaleSession } from "./types";
@@ -12,8 +13,33 @@ export interface SerialApi {
   requestPort(): Promise<SerialPort>;
 }
 
+let pendingNetPick: NetAddress | null = null;
+
+/** "Por cable de red": la próxima elección de cable es esa balanza por red (sin la lista de Chrome). */
+export function pickNetworkScaleNext(a: NetAddress | null): void {
+  pendingNetPick = a;
+}
+
+/**
+ * Los puertos de Chrome más las balanzas por cable de red que esta computadora ya conectó (inventory/kretz/net-port.ts):
+ * para "Mis balanzas" una Report por red es un cable más, reconocido por su dirección ("red:IP:puerto").
+ */
 export function serialApi(): SerialApi | null {
-  return typeof navigator !== "undefined" && "serial" in navigator ? navigator.serial : null;
+  const native = typeof navigator !== "undefined" && "serial" in navigator ? navigator.serial : null;
+  if (!native && !pendingNetPick && knownNetAddresses().length === 0) return null;
+  const netPorts = () => knownNetAddresses().map((a) => netPortFor(a) as unknown as SerialPort);
+  return {
+    getPorts: async () => [...(native ? await native.getPorts() : []), ...netPorts()],
+    requestPort: async () => {
+      const a = pendingNetPick;
+      if (a) {
+        pendingNetPick = null;
+        return netPortFor(a) as unknown as SerialPort;
+      }
+      if (!native) throw new Error("Este navegador no puede usar balanzas por cable.");
+      return native.requestPort();
+    }
+  };
 }
 
 /**

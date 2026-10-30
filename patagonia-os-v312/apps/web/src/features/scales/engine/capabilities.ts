@@ -81,7 +81,8 @@ export const SCALE_CAPABILITIES: Record<ScaleModelId, ScaleCapabilities> = {
       "Los gringos 14/10/2026: 103 productos con su código propio (función 61), cada uno releído; ventas y demás datos iguales",
       "Los gringos 14/10/2026: productos de prueba creados con nombre, precio y forma de venta, releídos iguales",
       "Habilitado 19/10/2026 para pasar productos a la segunda balanza de Los gringos; falta comprobar los totales de la balanza al cambiar un producto existente",
-      "Ticket real: 2179950000014 (7995 × 1 u), 2000130002101 (13, 0,210 kg), TOTAL 2202000019336"
+      "Ticket real: 2179950000014 (7995 × 1 u), 2000130002101 (13, 0,210 kg), TOTAL 2202000019336",
+      "Firmware 6.2 / 7.0 (El Dorado 29/10/2026: firma 0070, formato max7, 254 productos leídos): misma escritura, habilitada solo después de una prueba en un número libre de esa balanza (proveSystelWrite)"
     ]
   },
   "systel-otra": {

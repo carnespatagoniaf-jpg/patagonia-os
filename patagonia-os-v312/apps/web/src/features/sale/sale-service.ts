@@ -13,6 +13,8 @@ export interface CreatePosSaleItemInput {
   scaleTicket?: string;
   /** Código de la balanza escaneado (venta "artículos + TOTAL", migración 119); null = venta libre sin código. */
   scaleCode?: number | null;
+  /** Lista de precios (Mayorista, migración 167): el servidor cobra el precio de esa lista. */
+  priceListId?: string;
 }
 
 export interface CreatePosSalePaymentInput {
@@ -59,7 +61,8 @@ export async function createPosSale(input: CreatePosSaleInput): Promise<CreatePo
         : { description: item.description, unit_price: item.unitPrice, quantity: item.quantity, discount_amount: item.discountAmount }),
       ...(item.source ? { source: item.source, scale_tickets: item.scaleTickets ?? 1 } : {}),
       ...(item.scaleAmount !== undefined && item.scaleTicket ? { scale_amount: item.scaleAmount, scale_ticket: item.scaleTicket } : {}),
-      ...(item.scaleCode !== undefined ? { scale_code: item.scaleCode } : {})
+      ...(item.scaleCode !== undefined ? { scale_code: item.scaleCode } : {}),
+      ...(item.productId && item.priceListId ? { price_list_id: item.priceListId } : {})
     })),
     p_payments: input.payments.map((p) => ({ account_id: p.accountId, amount: p.amount, reference: p.reference ?? null })),
     p_pos_shift_id: input.posShiftId,

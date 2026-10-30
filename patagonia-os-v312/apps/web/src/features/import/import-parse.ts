@@ -294,9 +294,10 @@ export interface ProductPayload {
   code: string;
   name: string;
   unit: "kg" | "unit" | "box";
-  cost: number;
-  price_retail: number;
-  min_stock: number;
+  /** null = celda vacía o columna que no vino: al actualizar queda lo que había (174); uno nuevo arranca en 0. */
+  cost: number | null;
+  price_retail: number | null;
+  min_stock: number | null;
   category: string;
   stock: number | null;
   /** IVA del producto (migración 154); null = el IVA general de Facturas. */
@@ -385,9 +386,9 @@ export function buildProductRows(
               code,
               name,
               unit,
-              cost: cost.value ?? 0,
-              price_retail: price.value ?? 0,
-              min_stock: min.value ?? 0,
+              cost: cost.value ?? null,
+              price_retail: price.value ?? null,
+              min_stock: min.value ?? null,
               category: cellText(get("category")),
               stock: stock.value,
               vat_rate: vat

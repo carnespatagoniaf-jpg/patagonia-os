@@ -7,6 +7,7 @@ import { runAuraModelProbe, saveModelProbe, type ModelProbeResult } from "./kret
 import { AURA_BARCODE_CONFIG, readAuraList, runAuraSync, setAuraItemBarcodes, type AuraItemBarcodeResult, type AuraSyncItem, type AuraSyncResult } from "./kretz/aura-sync";
 import { getKretzModel, getSavedModelId } from "./kretz/models";
 import { buildKretzFrame, describeKretzCode } from "./kretz/kretz-frame";
+import { isNetPort } from "./kretz/net-port";
 
 /** Lo mínimo que hace falta de un producto para mandarlo a la balanza --
  * no el `Product` completo de @patagonia/domain. Así esta función sirve
@@ -212,6 +213,7 @@ const USB_SERIAL_CHIPS: Record<number, string> = {
 /** Qué puerto está elegido, en palabras (para la pantalla y para soporte). */
 export function describeScalePort(port: SerialPort | null): string {
   if (!port) return "ninguno";
+  if (isNetPort(port)) return `balanza por cable de red (${port.net.host}, puerto ${port.net.port})`;
   let info: SerialPortInfo = {};
   try {
     info = port.getInfo?.() ?? {};
@@ -495,7 +497,7 @@ export async function diagnoseScaleLink(
   const port = await pickPort();
   const portLabel = describeScalePort(port);
   cachedPortOpenKey = null;
-  const portsSeen = (await navigator.serial.getPorts()).map((p) => describeScalePort(p));
+  const portsSeen = (isScaleSerialSupported() ? await navigator.serial.getPorts() : []).map((p) => describeScalePort(p));
   const record = await runKretzDiscovery(port, portLabel, model, {
     portsSeen,
     releaseOtherTabs: options.releaseOtherTabs,
@@ -771,6 +773,9 @@ async function readExistingPluFields(port: SerialPort, settings: ScaleSerialSett
   const argument = fixedDigits(pluDigits - 1, 6);
   const frame = buildFrame(settings.deviceType, settings.equipmentId, "5005", argument);
   const response = await writeFrameResilient(port, frame, settings.baudRate);
+  // Sin respuesta (o basura) NO es "libre": tomarlo así pisaba el producto que tenía ese número sin preguntar
+  // (auditoría 29/10/2026, crítico C4). Se frena todo; un número libre es una respuesta de Kretz sin ese PLU.
+  if (!isKretzResponse(response)) throw new Error(`La balanza no contestó al leer el producto ${pluDigits}. No se mandó nada: revisá la conexión y probá de nuevo.`);
   if (extractResponseCode(response) !== "01") return null;
   const dataBytes = response.length > 10 ? response.slice(8, -3) : new Uint8Array();
   const dataStr = Array.from(dataBytes).map((b) => String.fromCharCode(b)).join("");

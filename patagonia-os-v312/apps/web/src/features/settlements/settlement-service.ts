@@ -2,7 +2,7 @@ import { supabase } from "../../lib/supabase";
 import { isCardDeposit } from "../reconciliation/reconcile-match";
 import type { CardCredit, ReconCoverage, SaleDay, SettleAccount } from "./settlement";
 
-/** Plata por entrar (migración 167). Dueño/administrador, plan Full. */
+/** Plata por entrar (migración 176). Dueño/administrador, plan Full. */
 
 export interface SettlementAccountRow {
   id: string;

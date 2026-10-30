@@ -1,9 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import type { CarcassBatch, CarcassCut, CarcassCutTemplate, CarcassFillSource, Product } from "@patagonia/domain";
 import { allocateCarcassCost, marginPercent } from "@patagonia/domain";
+import { carcassYield } from "./carcass-yield";
 import { useCarcass } from "./useCarcass";
 import { useCarcassTemplates } from "./useCarcassTemplates";
-import { fillCarcassBatch, listCarcassBatchTotals, markCarcassBatchWeighed, type CarcassBatchTotals } from "./carcass-service";
+import { applyCarcassCosts, fillCarcassBatch, listCarcassBatchTotals, markCarcassBatchWeighed, type CarcassBatchTotals } from "./carcass-service";
+import { useAuth } from "../auth/AuthProvider";
 import { applyDefaultCarcassCuts, listDefaultCarcassCuts, type DefaultCarcassCut } from "./carcass-templates-service";
 import { animalTypeLabel, buildTypeChips, carcassNorm, carcassTypeKey, findSameType, initialType } from "./carcass-types";
 import { useSuppliers } from "../purchases/useSuppliers";
@@ -53,6 +55,10 @@ export function Carcass() {
   const [totals, setTotals] = useState<Map<string, CarcassBatchTotals>>(new Map());
 
   const [message, setMessage] = useState("");
+  const { profile } = useAuth();
+  // 'costo_parejo' (migración 170, se prende desde el panel de plataforma): todos los cortes cuestan lo mismo por kilo.
+  const evenCost = Boolean(profile?.features?.includes("costo_parejo"));
+  const canApplyCosts = profile?.role === "owner" || profile?.role === "admin";
   const [busy, setBusy] = useState(false);
 
   // Qué se desposta: los botones de arriba.
@@ -208,13 +214,14 @@ export function Carcass() {
   const selectedTotals = selectedBatch ? totalsFor(selectedBatch) : undefined;
   const value = selectedTotals?.value ?? 0;
   const ganancia = selectedBatch ? value - selectedBatch.totalCost : 0;
-  const realCosts = useMemo(() => (selectedBatch ? allocateCarcassCost(selectedBatch.totalCost, cuts) : []), [selectedBatch, cuts]);
+  const realCosts = useMemo(() => (selectedBatch ? allocateCarcassCost(selectedBatch.totalCost, cuts, evenCost ? "average" : "value") : []), [selectedBatch, cuts, evenCost]);
   const costPerKgByProduct = useMemo(() => new Map(realCosts.map((l) => [l.productId, l.costPerKg])), [realCosts]);
   const unpricedCuts = cuts.filter((c) => c.unitPrice <= 0 && c.weight > 0).length;
   const cutsWeight = cuts.reduce((s, c) => s + c.weight, 0);
   const yieldPct = selectedBatch && selectedBatch.totalWeight > 0 ? Math.round((cutsWeight / selectedBatch.totalWeight) * 1000) / 10 : 0;
   // Cortes que repartió el sistema y nadie corrigió; 0 (con cortes) = pesada de verdad, sirve para aprender.
   const estimatedCuts = cuts.filter((c) => c.fromTemplate).length;
+  const yieldInfo = selectedBatch ? carcassYield(selectedBatch.totalCost, selectedBatch.totalWeight, cuts) : null;
 
   async function updateCut(cut: CarcassCut, changes: Partial<Pick<CarcassCut, "weight" | "unitPrice" | "productId">>) {
     if (!selectedBatch) return;
@@ -313,6 +320,20 @@ export function Carcass() {
     return `Repartida en ${result.cuts} cortes con tus cortes de siempre. Si la pesaste, corregí los kilos.`;
   }
 
+  /** Escribe en Stock el costo por kilo de esta res (lo mismo que pasa solo al tocar un corte). */
+  async function handleApplyCosts() {
+    if (!selectedBatch) return;
+    setBusy(true);
+    try {
+      const r = await applyCarcassCosts(selectedBatch.id);
+      setMessage(r.updated > 0 ? `Listo: se actualizó el costo de ${r.updated} ${r.updated === 1 ? "producto" : "productos"} en Stock.` : "Los costos en Stock ya estaban al día.");
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudieron actualizar los costos.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function handleMarkWeighed() {
     if (!selectedBatch) return;
     setBusy(true);
@@ -370,11 +391,14 @@ export function Carcass() {
   }
 
   async function handleDeleteBatch(batch: CarcassBatch) {
-    if (!window.confirm("¿Quitar esta res y sus cortes? No se puede deshacer.")) return;
+    const question = batch.purchaseItemId
+      ? "Esta res vino de una compra. Si la quitás, también se anula esa compra (deja de contar en lo que le debés al proveedor) y se borran sus cortes y su stock. No se puede deshacer. ¿Quitarla?"
+      : "¿Quitar esta res y sus cortes? No se puede deshacer.";
+    if (!window.confirm(question)) return;
     try {
       await removeBatch(batch.id);
       setSelectedId(null);
-      setMessage("Res quitada.");
+      setMessage(batch.purchaseItemId ? "Res quitada y su compra anulada." : "Res quitada.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo quitar.");
     }
@@ -745,11 +769,10 @@ export function Carcass() {
                 </h2>
                 <div className="row-actions no-print">
                   {!selectedBatch.purchaseItemId && (
-                    <>
-                      <button type="button" className="secondary" onClick={() => { setShowMoreOptions(true); openBatchForm(selectedBatch); }}>Corregir</button>
-                      <button type="button" className="danger" onClick={() => void handleDeleteBatch(selectedBatch)}>Quitar</button>
-                    </>
+                    <button type="button" className="secondary" onClick={() => { setShowMoreOptions(true); openBatchForm(selectedBatch); }}>Corregir</button>
                   )}
+                  {/* También la que vino de una compra (171): se anula esa compra y se borra de todos lados. */}
+                  <button type="button" className="danger" onClick={() => void handleDeleteBatch(selectedBatch)}>Quitar</button>
                   <button type="button" className="secondary" onClick={() => window.print()}>Imprimir</button>
                 </div>
               </div>
@@ -763,6 +786,16 @@ export function Carcass() {
                   {value > 0 && <small>{marginPercent(selectedBatch.totalCost, value)}%</small>}
                 </div>
               </div>
+
+              {!cutsLoading && yieldInfo && (
+                <p className="muted" style={{ margin: "8px 0" }}>
+                  Aprovechás {formatKg(yieldInfo.usableKg)} kg de {formatKg(selectedBatch.totalWeight)} ({String(yieldInfo.usablePct).replace(".", ",")}%):
+                  el kilo aprovechable te sale <strong>{formatMoney(yieldInfo.avgCostPerKg)}</strong>{evenCost ? "" : " en promedio"}.
+                  {evenCost
+                    ? " Todos los cortes te cuestan eso por kilo (el hueso y la grasa sin precio son merma); cada uno deja su margen."
+                    : " Cada corte paga según lo que vale (columna \"Te cuesta el kg\"), así todos dejan el mismo margen."}
+                </p>
+              )}
 
               {unpricedCuts > 0 && (
                 <div className="message warning no-print">
@@ -800,7 +833,7 @@ export function Carcass() {
                 <div className="table-scroll">
                   <table className="data-table">
                     <thead>
-                      <tr><th>Corte</th><th className="num">Kilos</th><th className="num">Precio venta</th><th className="num">Te cuesta el kg</th><th className="no-print"></th></tr>
+                      <tr><th>Corte</th><th className="num">Kilos</th><th className="num">Precio venta</th><th className="num">Te cuesta el kg</th><th className="num">Margen</th><th className="no-print"></th></tr>
                     </thead>
                     <tbody>
                       {cuts.map((cut) => {
@@ -838,6 +871,13 @@ export function Carcass() {
                               />
                             </td>
                             <td className="num">{costKg !== undefined && cut.unitPrice > 0 ? formatMoney(costKg) : <span className="muted">—</span>}</td>
+                            <td className="num">
+                              {costKg !== undefined && costKg > 0 && cut.unitPrice > 0 ? (
+                                <span className={cut.unitPrice < costKg ? "num-negative" : undefined}>{marginPercent(costKg, cut.unitPrice)}%</span>
+                              ) : (
+                                <span className="muted">—</span>
+                              )}
+                            </td>
                             <td className="no-print">
                               <div className="row-actions">
                                 <button type="button" className="danger" aria-label={`Quitar ${cut.cutName}`} onClick={() => void handleDeleteCut(cut)}>✕</button>
@@ -847,8 +887,13 @@ export function Carcass() {
                         );
                       })}
                       <tr>
-                        <td colSpan={5} className="muted" style={{ fontSize: 13 }}>
+                        <td colSpan={6} className="muted" style={{ fontSize: 13 }}>
                           Rindió {formatKg(cutsWeight)} de {formatKg(selectedBatch.totalWeight)} kg ({yieldPct}%)
+                          {canApplyCosts && (
+                            <button type="button" className="secondary no-print" style={{ marginLeft: 10 }} disabled={busy} onClick={() => void handleApplyCosts()}>
+                              Actualizar costos en Stock
+                            </button>
+                          )}
                         </td>
                       </tr>
                     </tbody>

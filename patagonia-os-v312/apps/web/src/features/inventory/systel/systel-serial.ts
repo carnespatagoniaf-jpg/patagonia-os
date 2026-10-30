@@ -66,7 +66,18 @@ export class SerialSystelLink implements SystelLink {
     try {
       await this.port.open({ baudRate: s.baudRate, dataBits: 8, stopBits: s.stopBits, parity: s.parity });
     } catch (err) {
-      this.note("error al abrir", `${label}: ${err instanceof Error ? err.message : String(err)}`);
+      const message = err instanceof Error ? err.message : String(err);
+      // El MISMO puerto quedó abierto en esta pestaña y nadie lo está usando (real Giuseppe 27 y 28/10: algo cortó
+      // la lectura a mitad, el cierre no terminó y los 80 productos siguientes dieron "The port is already open").
+      // Se vuelve a usar en vez de fallar. Si otro lo está leyendo o escribiendo, no se toca.
+      if (/already open/i.test(message) && this.port.readable && this.port.writable && !this.port.readable.locked && !this.port.writable.locked) {
+        this.note("abrir", `${label} · ya estaba abierto en esta pestaña: se vuelve a usar`);
+        this.open = true;
+        this.lost = false;
+        this.startReading();
+        return;
+      }
+      this.note("error al abrir", `${label}: ${message}`);
       throw err;
     }
     let info = "";
@@ -135,6 +146,8 @@ export class SerialSystelLink implements SystelLink {
   }
 
   async close(): Promise<void> {
+    // Quién cerró (las 2 funciones que llamaron): sin esto no se pudo saber qué cortó la lectura de Giuseppe.
+    const by = (new Error().stack ?? "").split("\n").slice(2, 4).map((l) => l.trim().replace(/^at /, "").replace(/\(.*\/([^/]+)\)$/, "($1)")).join(" ← ");
     try {
       await this.reader?.cancel();
     } catch {
@@ -149,7 +162,7 @@ export class SerialSystelLink implements SystelLink {
     } catch {
       // nada
     }
-    if (this.open) this.note("cerrar", "");
+    if (this.open) this.note("cerrar", by.slice(0, 200));
     this.open = false;
   }
 
@@ -172,7 +185,13 @@ export class SerialSystelLink implements SystelLink {
       try {
         await this.reopen();
       } catch {
-        return null;
+        // Un segundo intento después de una pausa: el puerto puede estar terminando de cerrarse.
+        await new Promise((r) => setTimeout(r, 300));
+        try {
+          await this.reopen();
+        } catch {
+          return null;
+        }
       }
     }
     try {

@@ -1,5 +1,5 @@
 import { useState, type ReactNode } from "react";
-import { BarChart3, Banknote, Beef, BookOpenCheck, Boxes, ChefHat, ClipboardList, ScrollText, Download, FileText, HandCoins, Handshake, History, Truck, KeyRound, Landmark, MapPin, Menu, Upload, LogOut, PackagePlus, Receipt, Tag, TrendingUp, Users, Wallet } from "lucide-react";
+import { BarChart3, Banknote, Beef, BookOpenCheck, Boxes, ChefHat, ClipboardList, ScrollText, Download, FileText, HandCoins, Handshake, History, Truck, KeyRound, Landmark, MapPin, Menu, Upload, LogOut, PackagePlus, Receipt, Snowflake, Tag, TrendingUp, Users, Wallet } from "lucide-react";
 import { useAuth } from "../features/auth/AuthProvider";
 import { PLAN_LABELS, canAccessPage, planAllows, profilePlan, type Page } from "../features/auth/permissions";
 
@@ -11,6 +11,7 @@ const SHOW_INVOICING = true;
 import { useActiveBranch } from "../features/branches/BranchProvider";
 import { TrialBanner } from "./TrialBanner";
 import { NewsBanner } from "./NewsBanner";
+import { UpdateBanner } from "./UpdateBanner";
 import { HelpChat } from "../features/help/HelpChat";
 
 export type { Page };
@@ -46,7 +47,9 @@ const navGroups: Array<{ heading: string | null; items: NavItem[] }> = [
       { page: "inventory", label: "Stock", icon: Boxes },
       { page: "purchases", label: "Compras", icon: PackagePlus },
       { page: "carcass", label: "Despiece", icon: Beef },
-      { page: "recipes", label: "Recetas", icon: ChefHat }
+      { page: "recipes", label: "Recetas", icon: ChefHat },
+      // Solo para la empresa con 'frigorifico' en companies.features (migración 169).
+      { page: "frigorifico", label: "Frigorífico", icon: Snowflake }
       // "Balanzas" (features/scales, el Scale Manager) está escondida desde el
       // 2026-09-30: duplicaba lo que ya
       // anda (Productos/Stock → "Balanza por cable" y el engranaje de
@@ -274,6 +277,7 @@ export function Layout({ page, onPageChange, children }: Props) {
       </aside>
 
       <main className="main-content">
+        <UpdateBanner />
         <TrialBanner />
         <NewsBanner onPageChange={onPageChange} />
         {children}

@@ -2,8 +2,8 @@ import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 import { Building2, LockKeyhole, MapPin, MessageCircle, Plus, Search } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import {
-  PROVINCES, createClient, deleteClient, deleteCompanyPayment, listCompanies, listCompanyPayments, listCompanyPlans, registerCompanyPayment,
-  setCompanyActive, setCompanyLocation, setCompanyPaidUntil, setCompanyPlan, setCompanyTrial,
+  COMPANY_FEATURES, PROVINCES, createClient, deleteClient, deleteCompanyPayment, listCompanies, listCompanyFeatures, listCompanyPayments, listCompanyPlans, registerCompanyPayment,
+  setCompanyActive, setCompanyFeature, setCompanyLocation, setCompanyPaidUntil, setCompanyPlan, setCompanyTrial,
   listScaleSupportReports, resetUserPassword, saveLead, type CompanyPayment, type CompanyPlanInfo, type CompanySummary, type CreateClientResult
 } from "./admin-service";
 import { PLAN_LABELS, PLAN_LIMITS, type Plan } from "../auth/permissions";
@@ -138,6 +138,9 @@ export function AdminCreateClient() {
   const [trialBusyId, setTrialBusyId] = useState<string | null>(null);
   const [plans, setPlans] = useState<Record<string, CompanyPlanInfo>>({});
   const [planBusyId, setPlanBusyId] = useState<string | null>(null);
+  /** Pantallas a pedido de cada empresa (companies.features, migración 169). */
+  const [features, setFeatures] = useState<Record<string, string[]>>({});
+  const [featureBusyId, setFeatureBusyId] = useState<string | null>(null);
   /** Acceso de soporte a las herramientas técnicas de balanza (migración 120): empresa → vence. */
   const [supportAccess, setSupportAccess] = useState<Record<string, string>>({});
   const [supportBusyId, setSupportBusyId] = useState<string | null>(null);
@@ -246,10 +249,29 @@ export function AdminCreateClient() {
         // Base sin la migración 101 todavía: la lista de clientes igual se ve.
         setPlans({});
       }
+      try {
+        setFeatures(await listCompanyFeatures());
+      } catch {
+        // Base sin la migración 169 todavía: no se muestran los tildes.
+        setFeatures({});
+      }
     } finally {
       setCompaniesLoading(false);
     }
   }, []);
+
+  async function toggleFeature(company: CompanySummary, feature: string, enabled: boolean) {
+    setFeatureBusyId(company.id);
+    setMessage("");
+    try {
+      const next = await setCompanyFeature(company.id, feature, enabled);
+      setFeatures((prev) => ({ ...prev, [company.id]: next }));
+    } catch (error) {
+      setMessage((error as { message?: string } | null)?.message ?? "No se pudo cambiar la pantalla.");
+    } finally {
+      setFeatureBusyId(null);
+    }
+  }
 
   useEffect(() => {
     void reloadCompanies();
@@ -756,6 +778,30 @@ export function AdminCreateClient() {
               </div>
             );
           })()}
+
+          {features[company.id] && (
+            <details className="admin-features">
+              <summary>
+                <strong>Pantallas a pedido</strong>
+                <span className="muted" style={{ fontSize: 13 }}>
+                  {" "}· {COMPANY_FEATURES.filter((f) => features[company.id].includes(f.key)).map((f) => f.short).join(", ") || "ninguna"}
+                </span>
+              </summary>
+              <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+                {COMPANY_FEATURES.map((f) => (
+                  <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
+                    <input
+                      type="checkbox"
+                      checked={features[company.id].includes(f.key)}
+                      disabled={featureBusyId === company.id}
+                      onChange={(e) => void toggleFeature(company, f.key, e.target.checked)}
+                    />
+                    {f.label}
+                  </label>
+                ))}
+              </div>
+            </details>
+          )}
 
           <div className="admin-chips">
             <span>{company.branchCount} {company.branchCount === 1 ? "sucursal" : "sucursales"}</span>

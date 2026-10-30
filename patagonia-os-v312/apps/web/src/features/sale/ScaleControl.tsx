@@ -176,6 +176,11 @@ export function ScaleControlResult({ state, comparison }: { state: ScaleControlS
       {totals.shiftCount > 1 && <p style={{ margin: 0, color: "#8a4b00" }}>Este control abarca {totals.shiftCount} turnos (la balanza no se borró en el cierre anterior).</p>}
       <p style={{ margin: 0 }}>Balanza {formatMoney(saved.amount)} − anulados {formatMoney(totals.voidedAmount)} ({totals.voidedTickets}) = <strong>{formatMoney(comparison.expectedAmount)}</strong></p>
       <p style={{ margin: 0 }}>Cobrado en Mostrador con tickets de balanza: <strong>{formatMoney(totals.systemAmount)}</strong></p>
+      {(totals.listDiscount ?? 0) > 0 && (
+        <p style={{ margin: 0 }} className="muted">
+          Incluye {formatMoney(totals.listDiscount ?? 0)} de descuento mayorista ({totals.listDiscountTickets} {totals.listDiscountTickets === 1 ? "ticket" : "tickets"}): la balanza imprimió a minorista.
+        </p>
+      )}
       <p style={{ margin: 0 }}>
         Importe: <strong className={comparison.amountDiff < -0.99 ? "num-negative" : undefined}>{Math.abs(comparison.amountDiff) < 1 ? "coincide ✓" : diffText(Math.round(comparison.amountDiff), formatMoney)}</strong>
       </p>

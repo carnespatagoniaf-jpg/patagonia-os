@@ -5,6 +5,7 @@ import {
   arDate,
   caeRequestInner,
   certificateProblem,
+  consultIsUncertain,
   creditNoteTypeFor,
   friendlyArcaMessage,
   isNumberRaceError,
@@ -284,5 +285,18 @@ describe("nombre de fantasía en la factura (migración 138)", () => {
     const smallAt = bytes.findIndex((b, i) => b === 0x1b && bytes[i + 1] === 0x4d && bytes[i + 2] === 1);
     assert.ok(smallAt > 0);
     assert.match(text, /Nro 00003-00000001/);
+  });
+});
+
+describe("Reintento de una factura cuyo pedido se cortó (auditoría 29/10: no duplicar en ARCA)", () => {
+  it("si ARCA dice 602 (no existe ese número) se puede pedir otro", () => {
+    assert.equal(consultIsUncertain(parseConsultResponse("<Errors><Err><Code>602</Code><Msg>Sin Resultados</Msg></Err></Errors>")), false);
+  });
+  it("si ARCA contesta con otro error (lenta, caída) NO se pide otro número", () => {
+    assert.equal(consultIsUncertain(parseConsultResponse("<Errors><Err><Code>501</Code><Msg>Error interno de aplicación</Msg></Err></Errors>")), true);
+    assert.equal(consultIsUncertain(parseConsultResponse("<FECompConsultarResult></FECompConsultarResult>")), true);
+  });
+  it("si lo encontró, no hay duda", () => {
+    assert.equal(consultIsUncertain(parseConsultResponse("<ResultGet><DocNro>0</DocNro><ImpTotal>100</ImpTotal><CodAutorizacion>1</CodAutorizacion></ResultGet>")), false);
   });
 });

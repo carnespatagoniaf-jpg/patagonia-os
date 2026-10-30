@@ -629,6 +629,8 @@ const CASH_OUT_OPTIONS: Array<{ kind: CashOutKind; title: string; hint: string }
 /* ------------------------------ panel ------------------------------ */
 
 export interface ShiftPanelProps {
+  /** Sucursal del turno: la lista de retiros trae también los sin contar de turnos anteriores. */
+  branchId: string | null;
   shift: PosShift;
   canSeeShiftTotals: boolean;
   canManageTreasury: boolean;
@@ -715,9 +717,9 @@ export function ShiftPanel(p: ShiftPanelProps) {
 
   // Retiros de este turno, para la lista "Ver movimientos de caja" (anular uno mal cargado).
   useEffect(() => {
-    if (!canManageTreasury || !p.showMovementsList || !isSupabaseConfigured) return;
-    listPosShiftWithdrawals(shift.id).then(setWithdrawals).catch(() => setWithdrawals([]));
-  }, [canManageTreasury, p.showMovementsList, shift.id, withdrawalsKey]);
+    if (!canManageTreasury || !p.showMovementsList || !isSupabaseConfigured || !p.branchId) return;
+    listPosShiftWithdrawals(shift.id, p.branchId).then(setWithdrawals).catch(() => setWithdrawals([]));
+  }, [canManageTreasury, p.showMovementsList, shift.id, p.branchId, withdrawalsKey]);
 
   async function movementsChanged() {
     setWithdrawalsKey((k) => k + 1);
@@ -916,7 +918,7 @@ export function ShiftPanel(p: ShiftPanelProps) {
             <p className="muted" style={{ fontSize: 13 }}>Sin movimientos de caja en este turno.</p>
           )}
 
-          <p className="muted" style={{ margin: "14px 0 6px", fontWeight: 700, fontSize: 12, textTransform: "uppercase" }}>Retiros de dinero</p>
+          <p className="muted" style={{ margin: "14px 0 6px", fontWeight: 700, fontSize: 12, textTransform: "uppercase" }}>Retiros de dinero (los de este turno y los que el dueño todavía no contó)</p>
           {withdrawals.length > 0 ? (
             <table className="data-table">
               <thead>
@@ -925,10 +927,17 @@ export function ShiftPanel(p: ShiftPanelProps) {
               <tbody>
                 {withdrawals.map((w) => (
                   <tr key={w.id}>
-                    <td>{new Date(w.createdAt).toLocaleTimeString("es-AR")}</td>
+                    <td>
+                      {w.previousShift
+                        ? new Date(w.createdAt).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+                        : new Date(w.createdAt).toLocaleTimeString("es-AR")}
+                    </td>
                     <td>N.º {w.number}</td>
                     <td className="num">{formatMoney(w.amount)}</td>
                     <td>
+                      {w.previousShift ? (
+                        <span className="muted" style={{ fontSize: 12 }}>Turno anterior · sin contar</span>
+                      ) : (
                       <ConfirmDelete
                         label="Anular retiro"
                         pinRequired={p.voidPinRequired}
@@ -945,13 +954,14 @@ export function ShiftPanel(p: ShiftPanelProps) {
                           }
                         }}
                       />
+                      )}
                     </td>
                   </tr>
                 ))}
               </tbody>
             </table>
           ) : (
-            <p className="muted" style={{ fontSize: 13 }}>Sin retiros en este turno.</p>
+            <p className="muted" style={{ fontSize: 13 }}>Sin retiros sin contar.</p>
           )}
 
           <p className="muted" style={{ margin: "14px 0 6px", fontWeight: 700, fontSize: 12, textTransform: "uppercase" }}>Vales a empleados</p>
@@ -1018,7 +1028,6 @@ export function ShiftPanel(p: ShiftPanelProps) {
             shiftSales={p.shiftSales}
             busy={p.busy}
             onSalesChanged={p.onSalesChanged}
-            onRequestSafeDeposit={() => setCashOut("retiro")}
             onConfirmClose={confirmCloseWithScaleCheck}
             onCancel={p.onCancelClose}
           />

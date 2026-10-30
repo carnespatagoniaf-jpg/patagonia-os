@@ -69,6 +69,7 @@ export async function listScaleVoids(posShiftId: string): Promise<ScaleVoid[]> {
 }
 
 type ControlJson = {
+  list_discount?: number; list_discount_tickets?: number;
   system_amount: number; system_kg: number; system_tickets: number; voided_amount: number; voided_kg: number; voided_tickets: number;
   shifts: unknown[];
   saved: null | { scale_amount: number; scale_kg: number | null; scale_tickets: number | null; scale_cleared: boolean; created_at: string;
@@ -87,7 +88,9 @@ function mapControl(data: ControlJson): ScaleControlState {
       voidedAmount: Number(src.voided_amount),
       voidedKg: Number(src.voided_kg ?? 0),
       voidedTickets: Number(src.voided_tickets),
-      shiftCount: Array.isArray(data.shifts) ? data.shifts.length : 1
+      shiftCount: Array.isArray(data.shifts) ? data.shifts.length : 1,
+      listDiscount: Number(data.list_discount ?? 0),
+      listDiscountTickets: Number(data.list_discount_tickets ?? 0)
     },
     saved: data.saved
       ? {

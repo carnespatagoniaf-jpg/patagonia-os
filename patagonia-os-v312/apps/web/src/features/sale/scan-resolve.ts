@@ -39,6 +39,20 @@ export function validEan13(code: string): boolean {
   return (10 - (sum % 10)) % 10 === d[12];
 }
 
+/** Lo más que pesa una balanza de mostrador (Kretz Report/Aura, Systel Cuora: 30-31 kg). */
+export const MAX_COUNTER_SCALE_KG = 31;
+
+/**
+ * ¿Tiene sentido el peso de una etiqueta? Un producto por kg con más de MAX_COUNTER_SCALE_KG casi seguro es un
+ * formato de etiqueta mal leído (real El Dorado 29/10: $99.934 leído como 99,934 kg): "excesivo" se pregunta.
+ * Cero, negativo o no numérico: "invalido", no se agrega.
+ */
+export function labelWeightProblem(unit: string, quantity: number): "invalido" | "excesivo" | null {
+  if (!Number.isFinite(quantity) || quantity <= 0) return "invalido";
+  if (unit === "kg" && quantity > MAX_COUNTER_SCALE_KG) return "excesivo";
+  return null;
+}
+
 /** ¿Tiene forma de etiqueta de balanza para este formato? (no dice todavía de qué producto). */
 export function looksLikeScaleLabel(code: string, config: ScaleConfig): boolean {
   if (!/^[0-9]+$/.test(code) || code.length !== config.totalLength) return false;
