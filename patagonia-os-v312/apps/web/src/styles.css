@@ -1171,3 +1171,9 @@ input[type="file"], main textarea { max-width: 100%; }
 .owner-today-line.warn { color: #8a4b00; }
 .owner-today-line.bad { color: #b42318; font-weight: 600; }
 .owner-today-line.muted { color: #697386; }
+
+/* Pestañas de un botón del menú que junta varias pantallas (Stock/Recetas, Bancos, Contable/Facturas, Reportes, Importar/Exportar) */
+.page-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 14px; border-bottom: 1px solid #e5e7eb; }
+.page-tab { background: transparent; border: none; border-bottom: 3px solid transparent; border-radius: 0; padding: 8px 14px; font-weight: 600; color: #5b6475; cursor: pointer; }
+.page-tab:hover { color: #1d2330; }
+.page-tab.active { color: #8e1f1f; border-bottom-color: #8e1f1f; }

@@ -182,12 +182,12 @@ export function Dashboard({ onNavigate }: { onNavigate?: (page: Page) => void } 
         chequeWarnings.expiring.count > 0 && {
           key: "expiring",
           title: `${chequeWarnings.expiring.count} ${chequeWarnings.expiring.count === 1 ? "cheque está" : "cheques están"} por vencer`,
-          detail: `Suman ${formatMoney(chequeWarnings.expiring.total)} · un cheque se deposita hasta 30 días después de su fecha · Finanzas → Cheques`
+          detail: `Suman ${formatMoney(chequeWarnings.expiring.total)} · un cheque se deposita hasta 30 días después de su fecha · Finanzas → Bancos → Cheques`
         },
         chequeWarnings.toDeposit.count > chequeWarnings.expiring.count && {
           key: "deposit",
           title: `${chequeWarnings.toDeposit.count} ${chequeWarnings.toDeposit.count === 1 ? "cheque para depositar" : "cheques para depositar"} esta semana`,
-          detail: `Suman ${formatMoney(chequeWarnings.toDeposit.total)} · Finanzas → Cheques`
+          detail: `Suman ${formatMoney(chequeWarnings.toDeposit.total)} · Finanzas → Bancos → Cheques`
         },
         chequeWarnings.toDebit.count > 0 && {
           key: "debit",
@@ -298,7 +298,7 @@ export function Dashboard({ onNavigate }: { onNavigate?: (page: Page) => void } 
                   <div>
                     <strong>{transferAlerts.count} {transferAlerts.count === 1 ? "cobro por transferencia no llegó" : "cobros por transferencia no llegaron"} al banco</strong>
                     <span>
-                      Suman {formatMoney(transferAlerts.total)} · desde el {transferAlerts.oldest.split("-").reverse().join("/")} · revisalos en Finanzas → Conciliación
+                      Suman {formatMoney(transferAlerts.total)} · desde el {transferAlerts.oldest.split("-").reverse().join("/")} · revisalos en Finanzas → Bancos → Conciliación
                     </span>
                   </div>
                 </div>

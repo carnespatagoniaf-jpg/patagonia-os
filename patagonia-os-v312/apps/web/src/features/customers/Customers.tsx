@@ -659,7 +659,7 @@ export function Customers() {
         setPaymentAccountId("");
         setPaymentNotes("");
         setPaymentCheque(EMPTY_CHEQUE);
-        setMessage(`Cheque cargado (queda en Finanzas → Cheques).${result.balance !== null ? ` Saldo restante: ${formatMoney(result.balance)}.` : ""}`);
+        setMessage(`Cheque cargado (queda en Finanzas → Bancos → Cheques).${result.balance !== null ? ` Saldo restante: ${formatMoney(result.balance)}.` : ""}`);
         return;
       }
       const result = await registerPayment({
