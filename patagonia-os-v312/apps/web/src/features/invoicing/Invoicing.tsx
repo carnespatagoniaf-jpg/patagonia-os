@@ -5,6 +5,7 @@ import { useActiveBranch } from "../branches/BranchProvider";
 import { SettingSection } from "../../components/SettingSection";
 import {
   authorizeInvoices,
+  discardPendingInvoice,
   checkArcaConnection,
   getArcaCertificateStatus,
   getFiscalSettings,
@@ -210,6 +211,21 @@ export function Invoicing() {
       await reload();
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo probar la conexión.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleDiscard(inv: Invoice) {
+    if (!window.confirm("¿Descartar esta factura? No se emite: la venta queda sin factura. Solo se puede si nunca se le pidió a ARCA.")) return;
+    setBusy(true);
+    setMessage("");
+    try {
+      await discardPendingInvoice(inv.id);
+      setMessage("Factura descartada.");
+      await reload();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo descartar.");
     } finally {
       setBusy(false);
     }
@@ -566,6 +582,7 @@ export function Invoicing() {
                         <button className="danger" disabled={busy} onClick={() => void handleCreditNote(inv)}>Anular</button>
                       )}
                       {inv.status === "pendiente" && <button className="secondary" disabled={busy} onClick={() => void handleRetry(inv.id)}>Reintentar</button>}
+                      {inv.status === "pendiente" && <button className="secondary" disabled={busy} onClick={() => void handleDiscard(inv)}>Descartar</button>}
                     </div>
                   </td>
                 </tr>

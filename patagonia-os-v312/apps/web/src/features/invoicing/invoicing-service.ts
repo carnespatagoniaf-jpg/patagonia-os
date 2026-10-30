@@ -235,6 +235,13 @@ export async function authorizeInvoices(invoiceId?: string): Promise<AuthorizeOu
   return data.results ?? [];
 }
 
+/** Descarta una factura pendiente que nunca se pidió a ARCA (migración 183; dueño o administrador). */
+export async function discardPendingInvoice(invoiceId: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("discard_pending_invoice", { p_invoice_id: invoiceId });
+  if (error) throw new Error(error.message);
+}
+
 /** Factura de una venta en cuenta corriente (Clientes). Sin factura, sigue saliendo el remito. */
 export async function requestChargeInvoice(chargeId: string, draft: InvoiceDraft): Promise<{ invoiceId: string; letter: InvoiceLetter }> {
   if (!supabase) throw new Error("Supabase no está configurado.");
