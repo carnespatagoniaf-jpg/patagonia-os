@@ -704,7 +704,7 @@ function diagnosisVerdictMessage(r: DiagnosticRecord, modelId: string, portLabel
         : "") +
       `1) Report LT por Bluetooth (como en las que ya andan): en Windows, Configuración → Bluetooth → Agregar dispositivo → elegí la balanza. Después, en "Elegir el cable", elegí "Puerto serie estándar a través de vínculo Bluetooth" (si hay dos, el primero).\n` +
       `2) Report LT por USB: el cable USB va directo de la balanza a la PC, sin adaptador. En la lista de "Elegir el cable" tiene que aparecer un puerto nuevo al enchufarlo.\n` +
-      `3) Report NX: se conecta por red (Ethernet/Wi-Fi, menú Configuración de Red). Escribinos: esa conexión no se puede hacer desde el navegador.\n` +
+      `3) Si la Report está conectada con el cable de red (Ethernet): en Mis balanzas → Agregar balanza, tocá \"Mi Kretz Report está conectada por cable de red\".\n` +
       `4) Que no esté abierto iTegra u otro programa de la balanza, y que la balanza esté prendida.`
     );
   }

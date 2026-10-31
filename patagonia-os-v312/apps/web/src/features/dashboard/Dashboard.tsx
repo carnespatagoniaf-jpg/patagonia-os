@@ -4,7 +4,9 @@ import { isOverdueDebt } from "@patagonia/domain";
 import { AlertTriangle, Boxes, CircleDollarSign, ReceiptText, TrendingUp } from "lucide-react";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
-import { can, canAccessPage } from "../auth/permissions";
+import { can, canAccessPage, type Page } from "../auth/permissions";
+import { OnboardingCard } from "../onboarding/OnboardingCard";
+import { OwnerToday } from "./OwnerToday";
 import { useAuth } from "../auth/AuthProvider";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { listCustomerChargesInRange, listCustomersWithBalance } from "../customers/customers-service";
@@ -14,7 +16,7 @@ import { chequeAlerts, type ChequeAlerts } from "../cheques/cheque-logic";
 import { getTaxCalendarInputs } from "../accounting/accounting-service";
 import { daysLeftLabel, dueDateLabel, upcomingDues, type DueItem } from "../accounting/tax-calendar";
 import { listOpenCheques } from "../cheques/cheques-service";
-import { listPosSalesInRange, listSalesByProduct } from "../sale/pos-shift-service";
+import { listPosSalesByDay, listSalesByProduct } from "../sale/pos-shift-service";
 import { addDaysIso, formatMoney, todayIso } from "../shifts/format";
 import { stockValueReport } from "../shifts/stock-value";
 import { useShifts } from "../shifts/useShifts";
@@ -25,7 +27,15 @@ interface DaySales {
   total: number;
 }
 
-export function Dashboard() {
+/** Saludo según la hora de Argentina (antes decía "Buenos días" a cualquier hora). */
+function greeting(now = new Date()): string {
+  const hour = Number(new Intl.DateTimeFormat("es-AR", { hour: "numeric", hourCycle: "h23", timeZone: "America/Argentina/Buenos_Aires" }).format(now));
+  if (hour >= 5 && hour < 13) return "Buenos días";
+  if (hour >= 13 && hour < 20) return "Buenas tardes";
+  return "Buenas noches";
+}
+
+export function Dashboard({ onNavigate }: { onNavigate?: (page: Page) => void } = {}) {
   const { profile } = useAuth();
   const { branchId } = useActiveBranch();
   const { balances } = useTreasury();
@@ -54,7 +64,7 @@ export function Dashboard() {
       listProductsForBranch(branchId),
       loadRange(weekAgo, today),
       can(profile, "treasury.manage") ? listSalesByProduct(branchId, `${today.slice(0, 7)}-01`, today).catch(() => null) : Promise.resolve(null),
-      listPosSalesInRange(branchId, weekAgo, today),
+      listPosSalesByDay(branchId, weekAgo, today),
       can(profile, "customers.manage") ? listCustomerChargesInRange(branchId, weekAgo, today) : Promise.resolve([]),
       can(profile, "customers.manage") ? listCustomersWithBalance() : Promise.resolve([])
     ])
@@ -172,12 +182,12 @@ export function Dashboard() {
         chequeWarnings.expiring.count > 0 && {
           key: "expiring",
           title: `${chequeWarnings.expiring.count} ${chequeWarnings.expiring.count === 1 ? "cheque está" : "cheques están"} por vencer`,
-          detail: `Suman ${formatMoney(chequeWarnings.expiring.total)} · un cheque se deposita hasta 30 días después de su fecha · Finanzas → Cheques`
+          detail: `Suman ${formatMoney(chequeWarnings.expiring.total)} · un cheque se deposita hasta 30 días después de su fecha · Finanzas → Bancos → Cheques`
         },
         chequeWarnings.toDeposit.count > chequeWarnings.expiring.count && {
           key: "deposit",
           title: `${chequeWarnings.toDeposit.count} ${chequeWarnings.toDeposit.count === 1 ? "cheque para depositar" : "cheques para depositar"} esta semana`,
-          detail: `Suman ${formatMoney(chequeWarnings.toDeposit.total)} · Finanzas → Cheques`
+          detail: `Suman ${formatMoney(chequeWarnings.toDeposit.total)} · Finanzas → Bancos → Cheques`
         },
         chequeWarnings.toDebit.count > 0 && {
           key: "debit",
@@ -205,13 +215,17 @@ export function Dashboard() {
       <header className="page-header">
         <div>
           <p className="eyebrow">RESUMEN DE OPERACIÓN</p>
-          <h1>Buenos días, {firstName}</h1>
+          <h1>{greeting()}, {firstName}</h1>
           <p className="muted">
             {isSupabaseConfigured ? (loading ? "Cargando datos…" : "Datos en vivo de tu empresa.") : "Datos de demostración hasta conectar Supabase."}
           </p>
         </div>
         <span className="status-pill">V3.1 · {isSupabaseConfigured ? "En vivo" : "Desarrollo"}</span>
       </header>
+
+      {isSupabaseConfigured && profile?.company_id && (profile.role === "owner" || profile.role === "admin") && <OnboardingCard onNavigate={onNavigate} usesPos={can(profile, "pos.sell")} companyId={profile.company_id} />}
+
+      {isSupabaseConfigured && (profile?.role === "owner" || profile?.role === "admin") && <OwnerToday />}
 
       <section className="kpi-grid">
         <Kpi title="Ventas hoy" value={formatMoney(salesToday)} detail={`${salesToday === 0 ? "Sin" : ""} tickets de hoy`} icon={<CircleDollarSign />} />
@@ -284,7 +298,7 @@ export function Dashboard() {
                   <div>
                     <strong>{transferAlerts.count} {transferAlerts.count === 1 ? "cobro por transferencia no llegó" : "cobros por transferencia no llegaron"} al banco</strong>
                     <span>
-                      Suman {formatMoney(transferAlerts.total)} · desde el {transferAlerts.oldest.split("-").reverse().join("/")} · revisalos en Finanzas → Conciliación
+                      Suman {formatMoney(transferAlerts.total)} · desde el {transferAlerts.oldest.split("-").reverse().join("/")} · revisalos en Finanzas → Bancos → Conciliación
                     </span>
                   </div>
                 </div>

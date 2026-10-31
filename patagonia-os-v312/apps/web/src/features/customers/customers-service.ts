@@ -1,5 +1,6 @@
 import type { Customer, CustomerBalance, CustomerCharge, CustomerPayment } from "@patagonia/domain";
 import { supabase } from "../../lib/supabase";
+import { fetchAllPages } from "../../lib/paginate";
 
 interface CustomerRow {
   id: string;
@@ -35,11 +36,13 @@ export async function listCustomers(includeInactive = false): Promise<Customer[]
   if (!supabase) return [];
 
   const BASE = "id,branch_id,number,name,phone,notes,locality,province,payment_term_days,active";
-  const run = (columns: string) => {
-    let query = supabase!.from("customers").select(columns).order("name");
-    if (!includeInactive) query = query.eq("active", true);
-    return query;
-  };
+  // Por páginas: con más de 1000 clientes la lista se cortaba sin avisar (auditoría 29/10/2026).
+  const run = (columns: string) =>
+    fetchAllPages<unknown>((from, to) => {
+      let query = supabase!.from("customers").select(columns).order("name").order("id");
+      if (!includeInactive) query = query.eq("active", true);
+      return query.range(from, to);
+    });
   let { data, error } = await run(`${BASE},price_list_id`);
   // Antes de la migración 167 la columna no existe: se lee como siempre.
   if (error && (error.code === "42703" || error.code === "PGRST204")) ({ data, error } = await run(BASE));
@@ -424,7 +427,9 @@ export async function listCustomersWithBalance(includeInactive = false): Promise
 
   const [customers, { data: balanceRows, error }] = await Promise.all([
     listCustomers(includeInactive),
-    supabase.from("customer_balance").select("customer_id,balance,last_activity_date")
+    fetchAllPages<{ customer_id: string; balance: number; last_activity_date: string | null }>((from, to) =>
+      supabase!.from("customer_balance").select("customer_id,balance,last_activity_date").order("customer_id").range(from, to)
+    )
   ]);
   if (error) throw error;
 

@@ -60,3 +60,17 @@ describe("revisión antes de mandar productos (etapa 1)", () => {
     assert.equal(labelMaxCodeFromFormat("22BBIIIIIIII"), null);
   });
 });
+
+describe("códigos que Mostrador lee como TOTAL del ticket (auditoría 29/10)", () => {
+  it("3 cifras: 998 y 999; 4: 9998 y 9999; 5: 99998; el resto no", async () => {
+    const { isTicketTotalCode } = await import("./preflight");
+    assert.equal(isTicketTotalCode(998, 3), true);
+    assert.equal(isTicketTotalCode(999, 3), true);
+    assert.equal(isTicketTotalCode(997, 3), false);
+    assert.equal(isTicketTotalCode(9998, 4), true);
+    assert.equal(isTicketTotalCode(9999, 4), true);
+    assert.equal(isTicketTotalCode(999, 4), false);
+    assert.equal(isTicketTotalCode(99998, 5), true);
+    assert.equal(isTicketTotalCode(1, 3), false);
+  });
+});

@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
-import { BarChart3, Banknote, Beef, BookOpenCheck, Boxes, ChefHat, ClipboardList, ScrollText, Download, FileText, HandCoins, Handshake, History, Truck, KeyRound, Landmark, MapPin, Menu, Upload, LogOut, PackagePlus, Receipt, Snowflake, Tag, TrendingUp, Users, Wallet } from "lucide-react";
+import { LogOut, Menu } from "lucide-react";
+import { navGroups, visibleItem, type VisibleItem } from "./nav";
 import { useAuth } from "../features/auth/AuthProvider";
 import { PLAN_LABELS, canAccessPage, planAllows, profilePlan, type Page } from "../features/auth/permissions";
 
@@ -12,6 +13,8 @@ import { useActiveBranch } from "../features/branches/BranchProvider";
 import { TrialBanner } from "./TrialBanner";
 import { NewsBanner } from "./NewsBanner";
 import { UpdateBanner } from "./UpdateBanner";
+import { authErrorText } from "../lib/auth-errors";
+import { useInvoiceRetry } from "../features/invoicing/useInvoiceRetry";
 import { HelpChat } from "../features/help/HelpChat";
 
 export type { Page };
@@ -21,76 +24,6 @@ interface Props {
   onPageChange: (page: Page) => void;
   children: ReactNode;
 }
-
-type NavItem = { page: Page; label: string; icon: typeof BarChart3 };
-
-/** Agrupado por tarea (no por tabla/permiso) para que el menú no sea una
- * lista plana de 15 ítems -- las tres pantallas de venta (Mostrador, Turnos,
- * Clientes) quedan juntas en vez de dispersas, etc. "Inicio" va suelto,
- * sin encabezado de grupo. */
-const navGroups: Array<{ heading: string | null; items: NavItem[] }> = [
-  { heading: null, items: [{ page: "dashboard", label: "Inicio", icon: BarChart3 }] },
-  {
-    heading: "Ventas",
-    items: [
-      { page: "sale", label: "Mostrador", icon: Receipt },
-      { page: "route", label: "Venta en ruta", icon: Truck },
-      { page: "route_trucks", label: "Camiones", icon: Truck },
-      { page: "customers", label: "Clientes", icon: Handshake },
-      { page: "sales_report", label: "Reporte de ventas", icon: ClipboardList }
-    ]
-  },
-  {
-    heading: "Producto y stock",
-    items: [
-      { page: "products", label: "Productos", icon: Tag },
-      { page: "inventory", label: "Stock", icon: Boxes },
-      { page: "purchases", label: "Compras", icon: PackagePlus },
-      { page: "carcass", label: "Despiece", icon: Beef },
-      { page: "recipes", label: "Recetas", icon: ChefHat },
-      // Solo para la empresa con 'frigorifico' en companies.features (migración 169).
-      { page: "frigorifico", label: "Frigorífico", icon: Snowflake }
-      // "Balanzas" (features/scales, el Scale Manager) está escondida desde el
-      // 2026-09-30: duplicaba lo que ya
-      // anda (Productos/Stock → "Balanza por cable" y el engranaje de
-      // Mostrador). Se vuelve a mostrar agregando acá
-      // la entrada de la página "scales" con el ícono Scale (importándolo)
-      // si se decide que sea el único lugar (el envío de precios se probó una vez
-      // con una Kretz Report LT real; el peso de la Aura, nunca).
-    ]
-  },
-  {
-    heading: "Finanzas",
-    items: [
-      { page: "treasury", label: "Tesorería", icon: Wallet },
-      { page: "accounts", label: "Reporte de cuentas", icon: ClipboardList },
-      { page: "expenses", label: "Gastos", icon: Banknote },
-      { page: "reconciliation", label: "Conciliación", icon: Landmark },
-      { page: "cheques", label: "Cheques", icon: ScrollText },
-      { page: "invoicing", label: "Facturas", icon: FileText },
-      { page: "accounting", label: "Contable", icon: BookOpenCheck },
-      { page: "creditors", label: "Deudas", icon: HandCoins },
-      { page: "profitability", label: "Rentabilidad", icon: TrendingUp }
-    ]
-  },
-  {
-    heading: "Equipo",
-    items: [
-      { page: "branches", label: "Sucursales", icon: MapPin },
-      { page: "employees", label: "Empleados", icon: Users },
-      { page: "users", label: "Usuarios", icon: KeyRound }
-    ]
-  },
-  {
-    heading: "Reportes",
-    items: [
-      { page: "reports", label: "Reportes", icon: FileText },
-      { page: "export", label: "Exportar", icon: Download },
-      { page: "import", label: "Importar", icon: Upload },
-      { page: "audit", label: "Auditoría", icon: History }
-    ]
-  }
-];
 
 function BranchSwitcher() {
   const { branchId, branches, canSwitch, setBranchId, addBranch, renameBranch } = useActiveBranch();
@@ -191,7 +124,7 @@ function ChangePasswordForm() {
       setPassword("");
       setConfirm("");
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : "No se pudo cambiar.");
+      setMessage(authErrorText(err, "No se pudo cambiar."));
     } finally {
       setBusy(false);
     }
@@ -214,14 +147,24 @@ function ChangePasswordForm() {
   );
 }
 
+/** El rol en castellano (antes se veía "owner" o "cashier"). */
+const ROLE_LABELS: Record<string, string> = { owner: "Dueño", admin: "Administrador", manager: "Encargado", cashier: "Cajero/a", production: "Producción", readonly: "Solo lectura", accountant: "Contador" };
+function roleLabel(role: string | null | undefined): string {
+  return role ? ROLE_LABELS[role] ?? role : "sin rol";
+}
+
 export function Layout({ page, onPageChange, children }: Props) {
   const { profile, signOut } = useAuth();
   const [menuOpen, setMenuOpen] = useState(false);
+  // Solo desde la PC del dueño o de un administrador: no hace falta que cada caja y cada pestaña le pregunten a ARCA.
+  useInvoiceRetry(Boolean(profile?.company_id) && (profile?.role === "owner" || profile?.role === "admin"));
+  const allowed = (target: Page) => canAccessPage(profile, target) && (target !== "invoicing" || SHOW_INVOICING);
   const visibleGroups = navGroups
-    .map((group) => ({ ...group, items: group.items.filter((item) => canAccessPage(profile, item.page) && (item.page !== "invoicing" || SHOW_INVOICING)) }))
+    .map((group) => ({ ...group, items: group.items.map((item) => visibleItem(item, allowed)).filter((item): item is VisibleItem => item !== null) }))
     .filter((group) => group.items.length > 0);
-
-  const currentLabel = navGroups.flatMap((g) => g.items).find((i) => i.page === page)?.label ?? "Patagonia OS";
+  const currentItem = visibleGroups.flatMap((g) => g.items).find((i) => i.pages.includes(page));
+  const currentTabs = currentItem && currentItem.tabs.length > 1 ? currentItem.tabs : null;
+  const currentLabel = currentTabs?.find((t) => t.page === page)?.label ?? currentItem?.label ?? "Patagonia OS";
   function goTo(target: Page) {
     onPageChange(target);
     setMenuOpen(false);
@@ -241,7 +184,7 @@ export function Layout({ page, onPageChange, children }: Props) {
         <div>
           <div className="brand">PATAGONIA OS</div>
           <div className="branch">
-            {profile?.full_name ?? "Usuario"} · {profile?.role ?? "sin rol"}
+            {profile?.full_name ?? "Usuario"} · {roleLabel(profile?.role)}
           </div>
           {(profile?.role === "owner" || profile?.role === "admin") && profile?.plan && (
             <div className="branch" style={{ marginTop: 2 }}>Plan {PLAN_LABELS[profilePlan(profile)]}</div>
@@ -253,10 +196,10 @@ export function Layout({ page, onPageChange, children }: Props) {
           {visibleGroups.map((group) => (
             <div key={group.heading ?? "root"} className="nav-group">
               {group.heading && <p className="nav-heading">{group.heading}</p>}
-              {group.items.map(({ page: target, label, icon: Icon }) => (
+              {group.items.map(({ page: target, label, icon: Icon, pages }) => (
                 <button
                   key={target}
-                  className={page === target ? "nav-item active" : "nav-item"}
+                  className={pages.includes(page) ? "nav-item active" : "nav-item"}
                   onClick={() => goTo(target)}
                 >
                   <Icon size={19} />
@@ -280,6 +223,15 @@ export function Layout({ page, onPageChange, children }: Props) {
         <UpdateBanner />
         <TrialBanner />
         <NewsBanner onPageChange={onPageChange} />
+        {currentTabs && (
+          <div className="page-tabs no-print" role="tablist">
+            {currentTabs.map((t) => (
+              <button key={t.page} role="tab" aria-selected={t.page === page} className={t.page === page ? "page-tab active" : "page-tab"} onClick={() => onPageChange(t.page)}>
+                {t.label}
+              </button>
+            ))}
+          </div>
+        )}
         {children}
       </main>
       {import.meta.env.VITE_HELP_CHAT === "1" && planAllows(profile, "estandar") && <HelpChat />}

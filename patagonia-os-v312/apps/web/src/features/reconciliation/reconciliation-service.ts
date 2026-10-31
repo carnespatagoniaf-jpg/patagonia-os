@@ -130,15 +130,24 @@ export async function importBankStatement(reconAccountId: string, fileName: stri
 }
 
 export async function listBankLines(reconAccountId: string, from: string, to: string): Promise<StoredBankLine[]> {
-  const { data, error } = await client()
-    .from("bank_statement_lines")
-    .select("id,line_date,description,amount,reference,balance,status,match_kind,created_movement_id,bank_line_matches(movement_id,payment_id)")
-    .eq("recon_account_id", reconAccountId)
-    .gte("line_date", from)
-    .lte("line_date", to)
-    .order("line_date")
-    .limit(10000);
-  if (error) throw error;
+  // Supabase devuelve como máximo 1000 filas por consulta: se pide por páginas. Antes un .limit(10000) cortaba en
+  // 1000 sin avisar, y un mes real de Banco Provincia tiene 1.227 líneas (auditoría 29/10/2026).
+  const PAGE_SIZE = 1000;
+  const data: unknown[] = [];
+  for (let start = 0; ; start += PAGE_SIZE) {
+    const { data: page, error } = await client()
+      .from("bank_statement_lines")
+      .select("id,line_date,description,amount,reference,balance,status,match_kind,created_movement_id,bank_line_matches(movement_id,payment_id)")
+      .eq("recon_account_id", reconAccountId)
+      .gte("line_date", from)
+      .lte("line_date", to)
+      .order("line_date")
+      .order("id")
+      .range(start, start + PAGE_SIZE - 1);
+    if (error) throw error;
+    data.push(...(page ?? []));
+    if (!page || page.length < PAGE_SIZE) break;
+  }
   type Row = {
     id: string; line_date: string; description: string; amount: number; reference: string | null; balance: number | null;
     status: StoredBankLine["status"]; match_kind: StoredBankLine["matchKind"]; created_movement_id: string | null;

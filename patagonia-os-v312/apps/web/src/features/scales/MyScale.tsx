@@ -8,6 +8,8 @@ import { isPhoneOrTablet, PHONE_OR_TABLET_MESSAGE } from "./engine/device";
 import { markSynced, pickNetworkScaleNext } from "./engine/engine";
 import { netAgentVersion, parseNetKey, rememberNetAddress, type NetAddress } from "../inventory/kretz/net-port";
 import { NetworkScaleSetup } from "./NetworkScaleSetup";
+import { LabelTestBox } from "./LabelTestBox";
+import type { Product } from "@patagonia/domain";
 import { adaptersForChoice } from "./engine/live";
 import { ALREADY_SAME, friendlyKind, friendlyMessage } from "./engine/friendly";
 import { choiceLabel, SCALE_CHOICES, type ScaleChoice } from "./engine/choice";
@@ -166,6 +168,12 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
   function installOf(s: BranchScale | null): InstallRecord {
     if (!s || !branchId) return {};
     return newestInstall(localInstall(branchId, s.key), s.install ?? null);
+  }
+
+  /** Productos ya pasados (paso 4) y la etiqueta todavía sin probar (paso 5). */
+  function needsLabelTestFor(s: BranchScale): boolean {
+    const steps = installSteps(installOf(s));
+    return steps[3].done && !steps[4].done;
   }
 
   async function closeSession() {
@@ -368,6 +376,8 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
               {list.map((s) => {
                 const local = s.key === LOCAL_KEY ? (loadRememberedScale()?.connectedAt ?? null) : branchId ? (bindingFor(s.key, branchId)?.lastOkAt ?? null) : null;
                 const inst = installOf(s);
+                const instSteps = installSteps(inst);
+                const needsLabelTest = !!branchId && instSteps[3].done && !instSteps[4].done;
                 const st = inst.detectedAt && !(s.sellsWithCodes && !s.active) ? installSummary(inst) : scaleStatus({ active: s.active, sellsWithCodes: s.sellsWithCodes, localOkAt: local });
                 return (
                   <li key={s.key} className="my-scale-item">
@@ -381,6 +391,8 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
                       {canManage && s.key !== LOCAL_KEY && <button className="secondary" onClick={() => void handleRename(s)}>Cambiar nombre</button>}
                       {canManage && s.key !== LOCAL_KEY && <button className="secondary" onClick={() => void handleRemove(s)}>Quitar</button>}
                     </div>
+                    {/* Pedido del dueño 31/10: la prueba de la etiqueta va justo debajo de la balanza, sin botón, para que se vea. */}
+                    {needsLabelTest && <LabelTestBox products={products as unknown as Product[]} branchId={branchId!} onDone={() => void reload()} />}
                   </li>
                 );
               })}
@@ -500,7 +512,9 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       {phase.kind === "listo" && (
         <div className="my-scale-body">
           <p className="my-scale-status ok"><CheckCircle2 size={22} /> {phase.message}</p>
-          <InstallChecklist record={installOf(active)} onRefresh={() => void reload()} />
+          {/* La etiqueta se prueba apenas termina de enlazarse, arriba de los pasos (antes quedaba al final y no se veía). */}
+          {active && branchId && needsLabelTestFor(active) && <LabelTestBox products={products as unknown as Product[]} branchId={branchId} onDone={() => void reload()} />}
+          <InstallChecklist record={installOf(active)} onRefresh={() => void reload()} products={products} branchId={branchId} />
           {canImport && <ImportFromScale session={session.current} products={products} branchId={branchId!} />}
           {phase.pending.length > 0 && active && <PendingReview items={phase.pending} products={products} branchId={branchId} scaleKey={active.key} />}
           <ProblemList title="no van a la balanza" items={phase.skipped} />
@@ -557,7 +571,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
 }
 
 /** Los 5 pasos de la instalación, cada uno con lo que lo prueba (install-status.ts). */
-function InstallChecklist({ record, onRefresh }: { record: InstallRecord; onRefresh: () => void }) {
+function InstallChecklist({ record, onRefresh, products, branchId }: { record: InstallRecord; onRefresh: () => void; products: EngineProduct[]; branchId: string | null }) {
   const steps = installSteps(record);
   return (
     <div className="my-scale-steps">
@@ -572,7 +586,7 @@ function InstallChecklist({ record, onRefresh }: { record: InstallRecord; onRefr
           </li>
         ))}
       </ol>
-      {!steps[4].done && (
+      {!steps[4].done && !(steps[3].done && branchId) && (
         <div className="my-scale-actions">
           <button className="secondary" onClick={onRefresh}>Ya escaneé una etiqueta: comprobar</button>
         </div>

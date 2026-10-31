@@ -140,6 +140,14 @@ export async function listInvoices(limit = 200): Promise<Invoice[]> {
   return (data ?? []).map(mapInvoice);
 }
 
+/** ¿Hay alguna factura o nota de crédito esperando a ARCA? (consulta liviana, para el reintento automático) */
+export async function hasPendingInvoices(): Promise<boolean> {
+  if (!supabase) return false;
+  const { data, error } = await supabase.from("invoices").select("id").eq("status", "pendiente").lt("created_at", new Date(Date.now() - 120_000).toISOString()).limit(1);
+  if (error) return false;
+  return (data ?? []).length > 0;
+}
+
 export interface UninvoicedSale {
   id: string;
   total: number;
@@ -222,9 +230,16 @@ export interface AuthorizeOutcome {
 }
 
 /** Pide el CAE de esa factura (o de todas las pendientes de la empresa, hasta 10). */
-export async function authorizeInvoices(invoiceId?: string): Promise<AuthorizeOutcome[]> {
-  const data = await invokeArca<{ results: AuthorizeOutcome[] }>({ action: "authorize", invoiceId });
+export async function authorizeInvoices(invoiceId?: string, olderThanSeconds?: number): Promise<AuthorizeOutcome[]> {
+  const data = await invokeArca<{ results: AuthorizeOutcome[] }>({ action: "authorize", invoiceId, ...(olderThanSeconds ? { olderThanSeconds } : {}) });
   return data.results ?? [];
+}
+
+/** Descarta una factura pendiente que nunca se pidió a ARCA (migración 183; dueño o administrador). */
+export async function discardPendingInvoice(invoiceId: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("discard_pending_invoice", { p_invoice_id: invoiceId });
+  if (error) throw new Error(error.message);
 }
 
 /** Factura de una venta en cuenta corriente (Clientes). Sin factura, sigue saliendo el remito. */

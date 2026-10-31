@@ -2,6 +2,7 @@ import { useState } from "react";
 import { LockKeyhole } from "lucide-react";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useAuth } from "./AuthProvider";
+import { authErrorText } from "../../lib/auth-errors";
 
 export function Login() {
   const { signIn, sendPasswordReset } = useAuth();
@@ -18,7 +19,7 @@ export function Login() {
     try {
       await signIn(email, password);
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo iniciar sesión.");
+      setMessage(authErrorText(error, "No se pudo iniciar sesión."));
     } finally {
       setBusy(false);
     }
@@ -32,7 +33,7 @@ export function Login() {
       await sendPasswordReset(email);
       setMessage("Si el mail existe en el sistema, te enviamos un link para restablecer la contraseña.");
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "No se pudo enviar el mail.");
+      setMessage(authErrorText(error, "No se pudo enviar el mail."));
     } finally {
       setBusy(false);
     }

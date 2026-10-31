@@ -15,6 +15,11 @@ export interface CreatePosSaleItemInput {
   scaleCode?: number | null;
   /** Lista de precios (Mayorista, migración 167): el servidor cobra el precio de esa lista. */
   priceListId?: string;
+  /**
+   * Precio que se cobró en pantalla (producto sin lista ni importe de balanza). Si el precio cambió mientras la caja
+   * estaba sin internet, el servidor lo acepta cuando ese producto lo tuvo en las últimas 72 h (migración 179).
+   */
+  chargedUnitPrice?: number;
 }
 
 export interface CreatePosSalePaymentInput {
@@ -62,7 +67,8 @@ export async function createPosSale(input: CreatePosSaleInput): Promise<CreatePo
       ...(item.source ? { source: item.source, scale_tickets: item.scaleTickets ?? 1 } : {}),
       ...(item.scaleAmount !== undefined && item.scaleTicket ? { scale_amount: item.scaleAmount, scale_ticket: item.scaleTicket } : {}),
       ...(item.scaleCode !== undefined ? { scale_code: item.scaleCode } : {}),
-      ...(item.productId && item.priceListId ? { price_list_id: item.priceListId } : {})
+      ...(item.productId && item.priceListId ? { price_list_id: item.priceListId } : {}),
+      ...(item.productId && item.chargedUnitPrice !== undefined ? { charged_unit_price: item.chargedUnitPrice } : {})
     })),
     p_payments: input.payments.map((p) => ({ account_id: p.accountId, amount: p.amount, reference: p.reference ?? null })),
     p_pos_shift_id: input.posShiftId,
@@ -78,6 +84,20 @@ export async function createPosSale(input: CreatePosSaleInput): Promise<CreatePo
   });
   if (error) throw error;
   return { saleId: data.sale_id, total: Number(data.total) };
+}
+
+/**
+ * Una venta guardada sin internet se subió a otro turno porque el suyo ya estaba cerrado: se anota de qué turno era
+ * y a qué hora se cobró (migración 184), para explicar en Control de caja la diferencia de las dos cajas. Nunca frena
+ * nada: si falla (sin conexión, base sin la 184), la venta ya está subida igual.
+ */
+export async function noteOfflineSaleMoved(saleId: string, originalShiftId: string, soldAt: string): Promise<void> {
+  if (!supabase) return;
+  try {
+    await supabase.rpc("note_offline_sale_moved", { p_sale_id: saleId, p_original_shift_id: originalShiftId, p_sold_at: soldAt });
+  } catch {
+    // solo informativo
+  }
 }
 
 /**

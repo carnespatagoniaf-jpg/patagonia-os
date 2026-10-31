@@ -248,6 +248,18 @@ export function Carcass() {
       return;
     }
     if (Math.abs(weight - cut.weight) < 0.0005) return;
+    // Borrar los kilos de un corte que no salió mandaba 0 y la base lo rechazaba sin explicar nada (59 errores en
+    // un día, auditoría 29/10/2026). Un corte no queda en 0 kg: se ofrece quitarlo.
+    if (weight === 0) {
+      if (selectedBatch && window.confirm(`"${cut.cutName}" quedó en 0 kg. ¿Lo quitamos de esta res?`)) {
+        void removeCut(cut.id, selectedBatch.id)
+          .then(() => refreshTotals())
+          .catch((err) => setMessage(err instanceof Error ? err.message : "No se pudo quitar."));
+      } else {
+        setMessage(`Un corte no puede quedar en 0 kg: escribí los kilos de "${cut.cutName}" o quitalo con la ✕.`);
+      }
+      return;
+    }
     void updateCut(cut, { weight });
   }
 

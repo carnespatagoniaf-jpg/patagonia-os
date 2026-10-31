@@ -904,7 +904,7 @@ export function Reconciliation() {
                       <span>
                         Cuando {r.direction === "in" ? "entra" : "sale"} plata con "<strong>{r.matchText}</strong>" → {ruleLabel(r)}
                       </span>
-                      <button className="secondary" disabled={busy} onClick={() => run(async () => { await deleteReconRule(r.id); await reload(); })}>Borrar</button>
+                      <button className="secondary" disabled={busy} onClick={() => { if (window.confirm(`¿Borrar la regla "${r.matchText}"? Las líneas ya conciliadas no cambian.`)) run(async () => { await deleteReconRule(r.id); await reload(); }); }}>Borrar</button>
                     </div>
                   ))}
                 </div>
@@ -970,7 +970,7 @@ export function Reconciliation() {
                     <span className="muted">
                       ({line.matchKind === "card_deposit" ? "acreditación de tarjetas" : `${line.paymentIds.length + line.movementIds.length} del sistema`}{line.createdMovementId ? ", cargado desde el banco" : ""})
                     </span>
-                    <button className="secondary" disabled={busy} onClick={() => run(async () => { await undoBankMatch(line.id); await reload(); })}>Deshacer</button>
+                    <button className="secondary" disabled={busy} onClick={() => { if (window.confirm("¿Deshacer esta conciliación? La línea del banco vuelve a quedar pendiente" + (line.createdMovementId ? " y se borra el movimiento que se cargó desde el banco." : "."))) run(async () => { await undoBankMatch(line.id); await reload(); }); }}>Deshacer</button>
                   </div>
                 ))}
               </div>

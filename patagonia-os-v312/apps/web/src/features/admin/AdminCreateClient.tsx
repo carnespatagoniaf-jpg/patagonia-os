@@ -16,6 +16,7 @@ import { whatsappLink, type Lead } from "./sales-pipeline";
 import { AdminScaleReports } from "./AdminScaleReports";
 import { AdminMercadoPago } from "./AdminMercadoPago";
 import { AdminSummary } from "./AdminSummary";
+import { AdminDailyChecks } from "./AdminDailyChecks";
 import { AdminContacts } from "./AdminContacts";
 import { AdminFinance } from "./AdminFinance";
 import { mpFailedChargeMessage, mpProblem, toArDate, type MpSubscription } from "./mercadopago";
@@ -940,6 +941,7 @@ export function AdminCreateClient() {
 
       {tab === "soporte" && <AdminScaleReports onChange={reloadPendingReports} />}
 
+      {tab === "resumen" && <AdminDailyChecks />}
       {tab === "resumen" && (
         <AdminSummary
           companies={companies}

@@ -375,7 +375,9 @@ async function queueCreditNoteIfSaleVoided(admin: SupabaseClient, inv: Row): Pro
 }
 
 async function authorizeOne(admin: SupabaseClient, settings: Row, invoiceId: string): Promise<Outcome[]> {
-  const cutoff = new Date(Date.now() - 120_000).toISOString();
+  // Una corrida con ARCA lenta puede pasar los 2 minutos (WSAA + consulta + 3 intentos): con 120 s otra caja
+  // podía tomar la misma factura a mitad de camino y pedir otro número (auditoría 29/10/2026). 5 minutos.
+  const cutoff = new Date(Date.now() - 300_000).toISOString();
   const { data: current } = await admin.from("invoices").select("*").eq("id", invoiceId).maybeSingle();
   if (!current) throw new UserError("Factura inexistente.");
   if (current.status !== "pendiente") return [outcome(current)];
@@ -513,7 +515,7 @@ async function authorizeOne(admin: SupabaseClient, settings: Row, invoiceId: str
   return [outcome(inv)];
 }
 
-async function authorize(admin: SupabaseClient, companyId: string, invoiceId: string | undefined) {
+async function authorize(admin: SupabaseClient, companyId: string, invoiceId: string | undefined, olderThanSeconds = 0) {
   const settings = await fiscalSettings(admin, companyId);
   if (!settings?.enabled) throw new UserError("La factura electrónica no está activada en este negocio.");
   let ids: string[];
@@ -522,7 +524,10 @@ async function authorize(admin: SupabaseClient, companyId: string, invoiceId: st
     if (!data) throw new UserError("Factura inexistente.");
     ids = [data.id];
   } else {
-    const { data } = await admin.from("invoices").select("id").eq("company_id", companyId).eq("status", "pendiente").order("created_at").limit(10);
+    // El reintento automático (useInvoiceRetry) pide solo las viejas: no le gana la factura a la caja que recién cobró.
+    let q = admin.from("invoices").select("id").eq("company_id", companyId).eq("status", "pendiente");
+    if (olderThanSeconds > 0) q = q.lt("created_at", new Date(Date.now() - olderThanSeconds * 1000).toISOString());
+    const { data } = await q.order("created_at").limit(10);
     ids = (data ?? []).map((r: Row) => r.id);
   }
   const results: Outcome[] = [];
@@ -640,7 +645,8 @@ Deno.serve(async (req) => {
       return jsonResponse(await checkConnection(admin, who.companyId, who.userId));
     }
     if (body.action === "authorize") {
-      return jsonResponse(await authorize(admin, who.companyId, typeof body.invoiceId === "string" ? body.invoiceId : undefined));
+      const olderThan = typeof body.olderThanSeconds === "number" && body.olderThanSeconds > 0 ? Math.min(body.olderThanSeconds, 86_400) : 0;
+      return jsonResponse(await authorize(admin, who.companyId, typeof body.invoiceId === "string" ? body.invoiceId : undefined, olderThan));
     }
     if (body.action === "cert_status" || body.action === "cert_request" || body.action === "cert_upload") {
       if (who.role !== "owner" && who.role !== "admin") throw new UserError("Solo el dueño o un administrador maneja el certificado de ARCA.");

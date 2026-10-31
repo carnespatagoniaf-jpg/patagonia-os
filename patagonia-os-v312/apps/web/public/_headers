@@ -1,0 +1,15 @@
+# Cabeceras de seguridad (auditoría 29/10/2026). No se restringen serial/usb/bluetooth: la balanza y la impresora los usan.
+# CSP en modo "solo avisar" (Report-Only, 30/10): NO bloquea nada, cada cosa que bloquearía llega a Sentry como
+# "CSP violation". Después de una semana sin avisos raros se cambia el nombre a Content-Security-Policy para que
+# bloquee. Lista: Supabase (API y tiempo real), Sentry, el programa de la PC (127.0.0.1:9101, impresora y Kretz por
+# red) y Google Ads (index.html). SheetJS va dentro del paquete, no se carga de afuera.
+/*
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Strict-Transport-Security: max-age=31536000
+  Permissions-Policy: geolocation=(), microphone=(), camera=()
+  Content-Security-Policy-Report-Only: default-src 'self'; script-src 'self' 'unsafe-inline' https://www.googletagmanager.com https://*.googletagmanager.com https://www.googleadservices.com https://*.doubleclick.net https://www.google.com; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://*.ingest.us.sentry.io https://*.ingest.sentry.io http://127.0.0.1:9101 https://*.google-analytics.com https://*.googletagmanager.com https://www.google.com https://*.doubleclick.net https://www.googleadservices.com; frame-src 'self' blob: https://*.supabase.co https://*.doubleclick.net https://www.googletagmanager.com; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; report-uri https://o4512023213637632.ingest.us.sentry.io/api/4512023385079809/security/?sentry_key=d7f3d3c3754b964d363c4662db81f1dd
+
+/version.json
+  Cache-Control: no-store

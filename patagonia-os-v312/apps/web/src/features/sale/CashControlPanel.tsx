@@ -22,7 +22,7 @@ import {
   type SafeWithdrawal,
   type ShiftCloseRow
 } from "./cash-control-service";
-import { hasPosVoidPin, listPosVoidedSales, setPosVoidPin, type VoidedSale } from "./pos-shift-service";
+import { hasPosVoidPin, listOfflineSaleMoves, listPosVoidedSales, setPosVoidPin, type OfflineSaleMove, type VoidedSale } from "./pos-shift-service";
 import { delayLabel, isValidAuthPin, minutesBetween } from "./void-sale";
 
 // "Control de caja" para el dueño/admin, abajo de Mostrador (migraciones 117 y 164):
@@ -397,6 +397,48 @@ function VoidedSalesBlock({ sales }: { sales: VoidedSale[] }) {
   );
 }
 
+/**
+ * Ventas hechas sin internet que se subieron a otro turno porque el suyo ya estaba cerrado (184). La plata en
+ * Tesorería está bien, pero explican una diferencia en las DOS cajas: sobra en la del turno donde se cobró y falta en
+ * la del turno donde se subió.
+ */
+function OfflineMovesBlock({ moves }: { moves: OfflineSaleMove[] }) {
+  if (moves.length === 0) return null;
+  return (
+    <div style={{ margin: "14px 0" }}>
+      <p style={{ margin: "6px 0", fontWeight: 700 }}>Ventas sin internet que se subieron a otro turno (30 días)</p>
+      <p className="muted" style={{ margin: "0 0 8px", fontSize: 13 }}>
+        Se cobraron sin internet y, cuando volvió la conexión, su turno ya estaba cerrado: se sumaron al turno siguiente.
+        La plata en Tesorería está bien, pero la parte en efectivo hace que sobre en la caja del primer turno y falte lo mismo en la del segundo.
+      </p>
+      <div style={{ overflowX: "auto" }}>
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>Se cobró</th>
+              <th>Turno donde se cobró</th>
+              <th>Se subió al turno de</th>
+              <th className="num">Total</th>
+              <th className="num">En efectivo</th>
+            </tr>
+          </thead>
+          <tbody>
+            {moves.map((m) => (
+              <tr key={m.saleId}>
+                <td>{m.soldAt ? fmtDate(m.soldAt) : <span className="muted">sin hora</span>}{m.voided ? <span className="muted"> · anulada</span> : ""}</td>
+                <td>{m.originalCashier ?? "-"} <span className="muted">· {fmtDate(m.originalOpenedAt)}</span></td>
+                <td>{m.newCashier ?? "-"} <span className="muted">· {fmtDate(m.newOpenedAt)}</span></td>
+                <td className="num">{formatMoney(m.total)}</td>
+                <td className="num">{m.cashAmount > 0 ? formatMoney(m.cashAmount) : "-"}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 export function CashControlPanel({ branchId, onMessage, adjust, onVoidPinChange, refreshKey, scaleCloseControl, onScaleCloseControlChange }: {
   branchId: string;
   onMessage: (m: string) => void;
@@ -413,17 +455,19 @@ export function CashControlPanel({ branchId, onMessage, adjust, onVoidPinChange,
   const [counts, setCounts] = useState<WithdrawalCount[]>([]);
   const [closes, setCloses] = useState<ShiftCloseRow[]>([]);
   const [voided, setVoided] = useState<VoidedSale[]>([]);
+  const [moves, setMoves] = useState<OfflineSaleMove[]>([]);
   const [loading, setLoading] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, c, v, w, wc] = await Promise.all([
+      const [s, c, v, w, wc, om] = await Promise.all([
         listSafeAccounts(),
         listPosShiftCloses(branchId, 14),
         listPosVoidedSales(branchId, 14).catch(() => []),
         listPendingWithdrawals(branchId).catch(() => []),
-        listWithdrawalCounts(branchId)
+        listWithdrawalCounts(branchId),
+        listOfflineSaleMoves(branchId).catch(() => [])
       ]);
       // Las cuentas "Caja fuerte" del sistema anterior: solo si les queda saldo (se pasa a Efectivo con una transferencia).
       setSafes(s.filter((safe) => Math.abs(safe.balance) >= 1));
@@ -431,6 +475,7 @@ export function CashControlPanel({ branchId, onMessage, adjust, onVoidPinChange,
       setCounts(wc);
       setCloses(c);
       setVoided(v);
+      setMoves(om);
     } catch (err) {
       onMessage(err instanceof Error ? err.message : "No se pudo cargar el control de caja.");
     } finally {
@@ -467,6 +512,7 @@ export function CashControlPanel({ branchId, onMessage, adjust, onVoidPinChange,
 
           <VoidPinBlock onMessage={onMessage} onChange={onVoidPinChange} />
           <VoidedSalesBlock sales={voided} />
+          <OfflineMovesBlock moves={moves} />
 
           <p style={{ margin: "6px 0", fontWeight: 700 }}>Últimos cierres (14 días)</p>
           <p className="muted" style={{ margin: "0 0 8px", fontSize: 13 }}>

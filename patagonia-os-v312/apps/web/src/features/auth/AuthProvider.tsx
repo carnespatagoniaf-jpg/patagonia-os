@@ -123,7 +123,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     type CompanyRow = { active: boolean; plan?: UserProfile["plan"]; features?: string[] | null };
     const companyRaw = data.companies as unknown as CompanyRow | CompanyRow[] | null;
     const company = Array.isArray(companyRaw) ? companyRaw[0] : companyRaw;
-    const companyActive = company?.active ?? true;
+    // Desde la 176b la base no le muestra nada a una empresa dada de baja: si la ficha de la empresa no llega, se toma
+    // como desactivada (antes "?? true" la dejaba entrar a un sistema vacío; revisión 30/10/2026).
+    const companyActive = data.company_id ? company?.active === true : true;
     if (!companyActive) throw new DefinitiveProfileError("Esta empresa está desactivada.");
     setIsPlatformAdmin(false);
     setProfile({ ...(data as unknown as UserProfile), plan: company?.plan, features: company?.features ?? [] });

@@ -265,6 +265,48 @@ export async function listPosVoidedSales(branchId: string | null, days = 14): Pr
   }));
 }
 
+/** Venta hecha sin internet que se subió a otro turno (migración 184). */
+export interface OfflineSaleMove {
+  saleId: string;
+  branchId: string;
+  total: number;
+  cashAmount: number;
+  voided: boolean;
+  soldAt: string | null;
+  uploadedAt: string;
+  originalOpenedAt: string;
+  originalClosedAt: string | null;
+  originalCashier: string | null;
+  newOpenedAt: string;
+  newCashier: string | null;
+}
+
+/** Dueño o administrador. Base sin la 184: lista vacía. */
+export async function listOfflineSaleMoves(branchId: string, days = 30): Promise<OfflineSaleMove[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase.rpc("list_offline_sale_moves", { p_days: days });
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") return [];
+    throw error;
+  }
+  return ((data ?? []) as Record<string, unknown>[])
+    .filter((r) => r.branch_id === branchId)
+    .map((r) => ({
+      saleId: String(r.sale_id),
+      branchId: String(r.branch_id),
+      total: Number(r.total ?? 0),
+      cashAmount: Number(r.cash_amount ?? 0),
+      voided: r.voided === true,
+      soldAt: (r.sold_at as string | null) ?? null,
+      uploadedAt: String(r.uploaded_at),
+      originalOpenedAt: String(r.original_opened_at),
+      originalClosedAt: (r.original_closed_at as string | null) ?? null,
+      originalCashier: (r.original_cashier as string | null) ?? null,
+      newOpenedAt: String(r.new_opened_at),
+      newCashier: (r.new_cashier as string | null) ?? null
+    }));
+}
+
 export interface PosShiftAdjustment {
   id: string;
   direction: "in" | "out";
@@ -521,6 +563,24 @@ export async function listPosSalesInRange(branchId: string, fromDate: string, to
     date: localDateIso(new Date(row.pos_sales.created_at)),
     accountId: row.account_id,
     amount: Number(row.amount)
+  }));
+}
+
+/**
+ * Lo mismo que listPosSalesInRange pero ya sumado por día y cuenta en el servidor (migración 185): un pedido y pocas
+ * filas en vez de cada pago. Inicio y Reportes solo suman, así que dan igual. Base sin la 185: la forma de antes.
+ */
+export async function listPosSalesByDay(branchId: string, fromDate: string, toDate: string): Promise<MostradorSaleEntry[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase.rpc("pos_sales_by_day_account", { p_branch_id: branchId, p_from: fromDate, p_to: toDate });
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") return listPosSalesInRange(branchId, fromDate, toDate);
+    throw error;
+  }
+  return ((data ?? []) as { sale_date: string; account_id: string; amount: number | string }[]).map((r) => ({
+    date: r.sale_date,
+    accountId: r.account_id,
+    amount: Number(r.amount)
   }));
 }
 

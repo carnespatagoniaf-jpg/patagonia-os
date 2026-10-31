@@ -3,7 +3,7 @@ import { useShifts } from "./useShifts";
 import { useTreasury } from "./useTreasury";
 import { addDaysIso, formatMoney, todayIso } from "./format";
 import type { ShiftRangeRow } from "./shifts-service";
-import { listPosSalesInRange, listSalesByProduct, type MostradorSaleEntry } from "../sale/pos-shift-service";
+import { listPosSalesByDay, listSalesByProduct, type MostradorSaleEntry } from "../sale/pos-shift-service";
 import { ReportsActivity } from "./ReportsActivity";
 import { useAuth } from "../auth/AuthProvider";
 import { can } from "../auth/permissions";
@@ -53,7 +53,7 @@ export function Reports() {
       const prev = previousPeriod(nextFrom, nextTo);
       const [shiftRows, mostrador, byProduct, byProductBefore] = await Promise.all([
         loadRange(nextFrom, nextTo),
-        branchId ? listPosSalesInRange(branchId, nextFrom, nextTo) : Promise.resolve([]),
+        branchId ? listPosSalesByDay(branchId, nextFrom, nextTo) : Promise.resolve([]),
         // Si la base todavía no tiene la migración 114, el resto del reporte sale igual.
         branchId ? listSalesByProduct(branchId, nextFrom, nextTo).catch(() => [] as ProductSalesRow[]) : Promise.resolve([] as ProductSalesRow[]),
         branchId ? listSalesByProduct(branchId, prev.from, prev.to).catch(() => [] as ProductSalesRow[]) : Promise.resolve([] as ProductSalesRow[])

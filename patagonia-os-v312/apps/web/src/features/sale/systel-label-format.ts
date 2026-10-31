@@ -113,3 +113,52 @@ export function systelConfigForCode(code: string, templates: SystelLabelTemplate
   const first = JSON.stringify(configs[0]);
   return configs.every((c) => JSON.stringify(c) === first) ? configs[0] : "no_soportado";
 }
+
+/** Lo mínimo de una balanza registrada en la sucursal (scale_profiles + scale_catalog_items, ver loadScaleSetups). */
+export interface RegisteredScaleFormats {
+  profile: {
+    brand: string;
+    weighedFormat: string | null;
+    unitFormat: string | null;
+    totalFormat: string | null;
+    catalog: Array<{ code: number; name: string; saleType: string; prices: number[]; eanType: number | null; eanConfig: string | null }>;
+  };
+}
+
+/**
+ * Formatos de etiqueta de cada balanza Systel ACTIVA de la sucursal, leídos de la base (auditoría 29/10/2026). Antes
+ * Mostrador usaba una sola copia guardada en la PC, sin empresa ni sucursal ni balanza: real Los gringos, la misma
+ * sucursal tiene una ficha vieja "20PPPPCCCCII" y la actual "20PPPPCCCCCC"; leer con la equivocada da otros kilos.
+ */
+export function templatesFromSetups(setups: RegisteredScaleFormats[]): SystelLabelTemplates[] {
+  return setups
+    .filter((s) => s.profile.brand.toLowerCase().includes("systel") && (s.profile.weighedFormat || s.profile.unitFormat))
+    .map((s) => ({
+      weighed: s.profile.weighedFormat,
+      unit: s.profile.unitFormat,
+      sums: s.profile.totalFormat,
+      at: 0,
+      perPlu: Object.fromEntries(
+        s.profile.catalog.map((c) => [String(c.code), { type: c.eanType, config: c.eanConfig, p1: c.prices[0] ?? 0, p2: c.prices[1] ?? 0, name: c.name, saleType: c.saleType }])
+      )
+    }));
+}
+
+/**
+ * Formato para leer una etiqueta con TODAS las balanzas Systel de la sucursal: si solo una la reconoce, esa; si
+ * varias la reconocen y leen igual, esa; si leen distinto, "no_soportado" (nunca se adivina con plata y kilos).
+ */
+export function systelConfigForCodeAcross(code: string, list: SystelLabelTemplates[]): ScaleConfig | "no_soportado" | null {
+  const results = list.map((t) => systelConfigForCode(code, t)).filter((r) => r !== null);
+  if (results.length === 0) return null;
+  if (results.some((r) => r === "no_soportado")) return "no_soportado";
+  const first = JSON.stringify(results[0]);
+  return results.every((r) => JSON.stringify(r) === first) ? (results[0] as ScaleConfig) : "no_soportado";
+}
+
+/** Datos de cada producto (nombre, forma de venta, precio) juntando las balanzas; el primero que lo tenga. */
+export function mergedPerPlu(list: SystelLabelTemplates[]): NonNullable<SystelLabelTemplates["perPlu"]> {
+  const out: NonNullable<SystelLabelTemplates["perPlu"]> = {};
+  for (const t of list) for (const [plu, e] of Object.entries(t.perPlu ?? {})) if (!(plu in out)) out[plu] = e;
+  return out;
+}

@@ -165,6 +165,9 @@ export function Inventory() {
   const [showPriceLists, setShowPriceLists] = useState(false);
   const activeLists = priceLists.filter((l) => l.active);
   const canManageLists = (profile?.role === "owner" || profile?.role === "admin") && planAllows(profile, "full");
+  // "Solo lectura" ve Stock pero no lo cambia (la base lo rechaza desde la 178): sin botones de editar. Por rol, no por
+  // el tilde "Ajustar stock" (a un encargado sin ese tilde no se le esconde Editar; revisión 30/10).
+  const canEdit = profile?.role !== "readonly";
   const productCols = PRODUCT_COLS + activeLists.length;
 
 
@@ -889,7 +892,7 @@ export function Inventory() {
       <section className="panel">
         <div className="panel-title">
           <h2>Productos <span className="muted" style={{ fontSize: 14, fontWeight: 500 }}>{loading ? "Cargando…" : `${visibleProducts.length} productos`}</span></h2>
-          {!showNewForm && <button onClick={() => setShowNewForm(true)}>+ Agregar producto</button>}
+          {!showNewForm && canEdit && <button onClick={() => setShowNewForm(true)}>+ Agregar producto</button>}
         </div>
 
         <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 14 }}>
@@ -920,9 +923,11 @@ export function Inventory() {
               <option key={c.id} value={c.id}>{c.name}</option>
             ))}
           </select>
-          <button className="secondary" onClick={() => setShowCategoryManager((v) => !v)}>
-            {showCategoryManager ? "Ocultar categorías" : "Gestionar categorías"}
-          </button>
+          {canEdit && (
+            <button className="secondary" onClick={() => setShowCategoryManager((v) => !v)}>
+              {showCategoryManager ? "Ocultar categorías" : "Gestionar categorías"}
+            </button>
+          )}
           {canManageLists && (
             <button className="secondary" onClick={() => setShowPriceLists((v) => !v)}>
               {showPriceLists ? "Ocultar listas de precios" : activeLists.length > 0 ? "Listas de precios" : "Precio mayorista"}
@@ -936,7 +941,7 @@ export function Inventory() {
           )}
         </div>
 
-        <PriceTools products={products} categories={categories} onApplied={reload} />
+        {canEdit && <PriceTools products={products} categories={categories} onApplied={reload} />}
 
         {showPriceLists && canManageLists && <PriceListsPanel lists={priceLists} onChanged={reload} onMessage={setMessage} />}
 
@@ -1121,7 +1126,11 @@ export function Inventory() {
                 <td className="hide-sm">{product.code}</td>
                 <td>
                   {/* El nombre abre Editar: en pantallas chicas la columna de botones puede quedar fuera de vista. */}
-                  <button className="link-button" title="Editar este producto" onClick={() => startEdit(product)}>{product.name}</button>
+                  {canEdit ? (
+                    <button className="link-button" title="Editar este producto" onClick={() => startEdit(product)}>{product.name}</button>
+                  ) : (
+                    product.name
+                  )}
                   {inactive && <span className="badge" style={{ marginLeft: 6 }}>Inactivo</span>}
                   {presentationsOf(product.id).length > 0 && (
                     <span className="cell-sub">
@@ -1177,9 +1186,9 @@ export function Inventory() {
                 <td className="num hide-md">{product.minStock}</td>
                 <td>
                   <div className="row-actions">
-                    <button className="secondary" onClick={() => (editing ? setEditingId(null) : startEdit(product))}>{editing ? "Cerrar" : "Editar"}</button>
-                    {inactive && <button className="secondary" onClick={() => void handleToggleActive(product)}>Reactivar</button>}
-                    {!product.stockSourceId && (
+                    {canEdit && <button className="secondary" onClick={() => (editing ? setEditingId(null) : startEdit(product))}>{editing ? "Cerrar" : "Editar"}</button>}
+                    {canEdit && inactive && <button className="secondary" onClick={() => void handleToggleActive(product)}>Reactivar</button>}
+                    {canEdit && !product.stockSourceId && (
                       <button className="secondary" title="Ajustar el stock con lo que contaste" onClick={() => (adjusting ? setAdjustingId(null) : startAdjustStock(product))}>Ajustar</button>
                     )}
                   </div>

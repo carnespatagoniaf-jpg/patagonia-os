@@ -747,6 +747,12 @@ export function ShiftPanel(p: ShiftPanelProps) {
       {shift.cashierName && (
         <p style={{ margin: "-6px 0 12px", fontSize: 13 }}>Atiende: <strong>{shift.cashierName}</strong></p>
       )}
+      {/* Auditoría 29/10/2026: 15 cajas de clientes activos llevaban días abiertas y mezclaban la plata de varios días. */}
+      {Date.now() - new Date(shift.openedAt).getTime() > 20 * 3_600_000 && (
+        <p className="message warning" style={{ margin: "0 0 12px" }}>
+          Esta caja está abierta desde {formatShiftStart(shift.openedAt)}. Cerrala al terminar el día, así la plata de cada día queda separada.
+        </p>
+      )}
 
       {canSeeShiftTotals && p.showShiftTotals && (
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 16 }}>

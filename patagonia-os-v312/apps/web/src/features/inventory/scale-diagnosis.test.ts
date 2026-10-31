@@ -119,7 +119,7 @@ describe("Probar todo (diagnóstico de la balanza por cable)", () => {
     const d = await diagnoseScaleLink(() => {}, { ...fast, modelId: "report-lt" });
     assert.equal(d.verdict, "nada");
     assert.match(d.message, /adaptador USB a serie \(DB9\)/);
-    assert.match(d.message, /Report NX: se conecta por red/);
+    assert.match(d.message, /conectada por cable de red/);
     assert.match(d.message, /RPX/);
     assert.match(d.message, /null modem/);
   });

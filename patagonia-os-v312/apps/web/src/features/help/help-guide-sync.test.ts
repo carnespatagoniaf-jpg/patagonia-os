@@ -14,7 +14,8 @@ import { fileURLToPath } from "node:url";
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
-const layout = readFileSync(resolve(here, "../../components/Layout.tsx"), "utf8");
+// El menú vive en components/nav.ts desde el menú más simple (30/10/2026).
+const layout = readFileSync(resolve(here, "../../components/nav.ts"), "utf8");
 const helpChat = readFileSync(resolve(here, "../../../../../supabase/functions/help-chat/index.ts"), "utf8");
 const guide = helpChat.slice(helpChat.indexOf("const GUIDE = `"), helpChat.indexOf("`;", helpChat.indexOf("const GUIDE = `")));
 

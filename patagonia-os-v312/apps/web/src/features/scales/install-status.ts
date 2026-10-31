@@ -71,13 +71,13 @@ export function installSteps(r: InstallRecord, now = new Date()): InstallStep[] 
     },
     {
       id: "venta",
-      label: "Venta probada en Mostrador",
+      label: "Etiqueta probada",
       done: saleOk,
       detail: saleOk
         ? `${r.saleTestDetail ?? "Etiqueta leída bien"} · ${fmt(r.saleTestedAt!, now)}`
         : r.saleTestedAt && verifiedOk
           ? "Falta probar con una etiqueta impresa después del último envío"
-          : "Pesá algo, imprimí la etiqueta y escaneala en Mostrador"
+          : "Tocá «Probar una etiqueta» y escaneá una etiqueta impresa (o vendé una en Mostrador)"
     }
   ];
 }
