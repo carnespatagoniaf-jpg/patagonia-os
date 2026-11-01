@@ -16,6 +16,10 @@ import { UpdateBanner } from "./UpdateBanner";
 import { authErrorText } from "../lib/auth-errors";
 import { useInvoiceRetry } from "../features/invoicing/useInvoiceRetry";
 import { HelpChat } from "../features/help/HelpChat";
+import { OrdersAlert } from "../features/orders/OrdersAlert";
+import { daySummary } from "../features/orders/orders-logic";
+import { useOrdersToday } from "../features/orders/useOrdersToday";
+import { localDateIso } from "../features/shifts/format";
 
 export type { Page };
 
@@ -155,7 +159,12 @@ function roleLabel(role: string | null | undefined): string {
 
 export function Layout({ page, onPageChange, children }: Props) {
   const { profile, signOut } = useAuth();
+  const { branchId } = useActiveBranch();
   const [menuOpen, setMenuOpen] = useState(false);
+  // Pedidos (migración 187): contador en el menú y aviso arriba, solo si la empresa tiene la pantalla.
+  const ordersEnabled = canAccessPage(profile, "orders");
+  const ordersToday = useOrdersToday(branchId, ordersEnabled);
+  const ordersOpenToday = ordersEnabled ? daySummary(ordersToday.today, localDateIso(ordersToday.now), ordersToday.now).open : 0;
   // Solo desde la PC del dueño o de un administrador: no hace falta que cada caja y cada pestaña le pregunten a ARCA.
   useInvoiceRetry(Boolean(profile?.company_id) && (profile?.role === "owner" || profile?.role === "admin"));
   const allowed = (target: Page) => canAccessPage(profile, target) && (target !== "invoicing" || SHOW_INVOICING);
@@ -204,6 +213,9 @@ export function Layout({ page, onPageChange, children }: Props) {
                 >
                   <Icon size={19} />
                   {label}
+                  {target === "orders" && ordersOpenToday > 0 && (
+                    <span className="nav-count" aria-label={`${ordersOpenToday} pedidos para hoy`}>{ordersOpenToday}</span>
+                  )}
                 </button>
               ))}
             </div>
@@ -223,6 +235,9 @@ export function Layout({ page, onPageChange, children }: Props) {
         <UpdateBanner />
         <TrialBanner />
         <NewsBanner onPageChange={onPageChange} />
+        {ordersEnabled && page !== "orders" && (
+          <OrdersAlert today={ordersToday.today} tomorrow={ordersToday.tomorrow} now={ordersToday.now} onOpen={() => onPageChange("orders")} />
+        )}
         {currentTabs && (
           <div className="page-tabs no-print" role="tablist">
             {currentTabs.map((t) => (

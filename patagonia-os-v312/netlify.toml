@@ -14,3 +14,13 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# Vista previa de un PR (deploy-preview-N--sistemapatagonia.netlify.app): en modo demostración, SIN base de datos,
+# entrando como cajera con Pedidos y pedidos de ejemplo. Así el dueño ve un cambio con un link, sin usuario y sin
+# tocar los datos de los clientes. No afecta la página real ni el borrador de publicar.yml (se sube por la API).
+[context.deploy-preview.environment]
+  VITE_SUPABASE_URL = ""
+  VITE_SUPABASE_ANON_KEY = ""
+  VITE_SENTRY_DSN = ""
+  VITE_DEMO_ROLE = "cashier"
+  VITE_DEMO_FEATURES = "pedidos"

@@ -26,7 +26,9 @@ export type Permission =
   | "import.data"
   | "scales.manage"
   | "route.sell"
-  | "frigo.manage";
+  | "frigo.manage"
+  | "orders.view"
+  | "orders.manage";
 
 // "owner" es interno nuestro (el equipo de Patagonia OS): ve todo, incluidas
 // herramientas todavía en prueba (Auditoría) antes de decidir si pasan a
@@ -89,9 +91,10 @@ export const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> 
     "frigo.manage"
   ],
   // frigo.manage: el encargado carga DT, faena y salidas (la pantalla solo existe si la empresa tiene 'frigorifico').
-  manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view", "frigo.manage"],
+  manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view", "frigo.manage", "orders.view", "orders.manage"],
   // "route.sell": vendedor de un camión (venta en ruta, migración 161); la pantalla además pide companies.features "venta_ruta".
-  cashier: ["pos.sell", "products.view", "sales.create", "pos.treasury", "route.sell"],
+  // Pedidos (migración 187): el cajero los carga y los entrega, solo en su sucursal (la base lo exige).
+  cashier: ["pos.sell", "products.view", "sales.create", "pos.treasury", "route.sell", "orders.view", "orders.manage"],
   production: ["dashboard.view", "inventory.view", "inventory.adjust"],
   readonly: ["dashboard.view", "inventory.view", "reports.view"],
   // El contador (migración 155): solo la pantalla Contable. La base le corta toda escritura.
@@ -126,7 +129,9 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   "import.data": "Importar desde Excel",
   "scales.manage": "Balanzas",
   "route.sell": "Venta en ruta (camión)",
-  "frigo.manage": "Frigorífico (tropa, garrón y kilo)"
+  "frigo.manage": "Frigorífico (tropa, garrón y kilo)",
+  "orders.view": "Pedidos (ver)",
+  "orders.manage": "Pedidos (cargar, entregar y cancelar)"
 };
 
 /** Planes que se venden (migración 101). El plan de la empresa se chequea
@@ -195,6 +200,8 @@ export const PAGE_PERMISSIONS = {
   // Venta en ruta (migración 161), a pedido: va antes de Mostrador para que el vendedor del camión entre directo acá.
   route: "route.sell",
   sale: "pos.sell",
+  // Pedidos de clientes (migración 187, a pedido): el cuaderno de cada local, solo cajero y encargado (PAGE_ONLY_ROLES).
+  orders: "orders.view",
   branches: "branches.manage",
   products: "products.view",
   shifts: "sales.create",
@@ -232,9 +239,15 @@ export const PAGE_PERMISSIONS = {
 export type Page = keyof typeof PAGE_PERMISSIONS;
 
 /** Pantallas que solo ve una empresa que las pidió (companies.features, migración 143). Hoy: Martínez, La primera (venta en ruta) y los frigoríficos (migración 169). */
-const PAGE_REQUIRED_FEATURE: Partial<Record<string, string>> = { accounts: "cuentas", expenses: "gastos", sales_report: "reporte_ventas", route: "venta_ruta", route_trucks: "venta_ruta", frigorifico: "frigorifico" };
+const PAGE_REQUIRED_FEATURE: Partial<Record<string, string>> = { accounts: "cuentas", expenses: "gastos", sales_report: "reporte_ventas", route: "venta_ruta", route_trucks: "venta_ruta", frigorifico: "frigorifico", orders: "pedidos" };
+
+/** Pantallas que son solo del local, no de la administración: ni el dueño ("*") ni el administrador las ven.
+ * Pedidos (migración 187) es el cuaderno de cada sucursal: solo cajero y encargado (la base exige lo mismo). */
+const PAGE_ONLY_ROLES: Partial<Record<string, UserProfile["role"][]>> = { orders: ["cashier", "manager"] };
 
 export function canAccessPage(profile: UserProfile | null, page: Page) {
+  const onlyRoles = PAGE_ONLY_ROLES[page];
+  if (onlyRoles && (!profile || !onlyRoles.includes(profile.role))) return false;
   const feature = PAGE_REQUIRED_FEATURE[page];
   if (feature && !profile?.features?.includes(feature)) return false;
   const minPlan = PAGE_MIN_PLAN[page];

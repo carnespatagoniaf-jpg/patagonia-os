@@ -1177,3 +1177,71 @@ input[type="file"], main textarea { max-width: 100%; }
 .page-tab { background: transparent; border: none; border-bottom: 3px solid transparent; border-radius: 0; padding: 8px 14px; font-weight: 600; color: #5b6475; cursor: pointer; }
 .page-tab:hover { color: #1d2330; }
 .page-tab.active { color: #8e1f1f; border-bottom-color: #8e1f1f; }
+
+/* Pedidos de clientes (migración 187) */
+.nav-count { margin-left: auto; min-width: 22px; padding: 1px 7px; border-radius: 999px; background: var(--brand); color: #fff; font-size: 12px; font-weight: 800; text-align: center; }
+.nav-item.active .nav-count, .nav-item:hover .nav-count { background: #fff; color: var(--brand); }
+.orders-alert { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; background: var(--warn-soft); color: var(--warn); border: 1px solid #f5d9a8; border-radius: var(--r); padding: 8px 12px; margin-bottom: 12px; font-size: 14px; }
+.orders-alert.soon { background: var(--danger-soft); color: var(--danger); border-color: #f4c7c2; }
+.orders-alert-actions { display: flex; gap: 6px; }
+.orders-alert-actions button { padding: 4px 10px; font-size: 13px; }
+.order-banner { background: var(--warn-soft); color: var(--warn); border-radius: var(--r); padding: 10px 12px; font-weight: 700; margin-bottom: 14px; }
+.order-banner.empty { background: var(--ok-soft); color: var(--ok); }
+.order-banner.late { background: var(--danger-soft); color: var(--danger); }
+.order-day-nav { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.order-day-nav input[type="date"] { width: auto; }
+.order-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.order-card { display: grid; grid-template-columns: 110px 1fr auto; gap: 12px; align-items: start; border: 1px solid var(--line); border-left: 4px solid var(--warn); border-radius: var(--r-lg); padding: 12px; background: var(--surface); min-width: 0; }
+.order-card.overdue { border-left-color: var(--danger); background: #fffafa; }
+.order-card.cancelled { opacity: .6; border-left-color: var(--line); }
+.order-card-time { display: grid; gap: 4px; justify-items: start; }
+.order-card-time strong { font-size: 24px; font-variant-numeric: tabular-nums; line-height: 1.1; }
+.order-card-time small { font-size: 12px; color: var(--muted); text-transform: capitalize; }
+.order-card-body { min-width: 0; display: grid; gap: 6px; }
+.order-card-customer { font-size: 16px; }
+.order-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.order-chip { background: var(--surface-2); border: 1px solid var(--line-soft); border-radius: 999px; padding: 3px 10px; font-size: 14px; font-weight: 600; }
+.order-chip em { font-weight: 400; color: var(--muted); }
+.order-card-note { margin: 0; font-size: 13px; color: var(--ink-2); }
+.order-card-money { margin: 0; font-size: 14px; }
+.order-card-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; max-width: 340px; }
+.order-card-actions button { padding: 6px 10px; font-size: 13px; white-space: nowrap; }
+.order-form-label { margin: 14px 0 6px; font-size: 12px; font-weight: 700; color: var(--ink-2); }
+.order-product-picks { display: flex; flex-wrap: wrap; gap: 6px; }
+.order-product-picks button { padding: 6px 10px; font-size: 13px; }
+.order-lines { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 6px; }
+.order-lines li { display: grid; grid-template-columns: minmax(120px, 1fr) auto minmax(120px, 1fr) auto; gap: 8px; align-items: center; background: var(--surface); border: 1px solid var(--line-soft); border-radius: var(--r); padding: 6px 8px; min-width: 0; }
+.order-line-name { font-weight: 700; min-width: 0; overflow-wrap: anywhere; }
+.order-stepper { display: inline-flex; gap: 4px; align-items: center; }
+.order-stepper button { width: 36px; padding: 6px 0; font-size: 18px; line-height: 1; }
+.order-stepper input { width: 64px; text-align: center; }
+.order-due { font-size: 18px; padding: 6px 0; }
+.order-day-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); gap: 6px; margin-bottom: 14px; }
+.order-day-pick { display: grid; gap: 2px; justify-items: center; padding: 6px 4px; background: var(--surface); color: var(--ink); border: 1px solid var(--line); border-radius: var(--r); font-weight: 400; }
+.order-day-pick small { text-transform: capitalize; color: var(--muted); font-size: 11px; }
+.order-day-pick span { font-size: 11.5px; color: var(--muted); }
+.order-day-pick.heavy span { color: var(--danger); font-weight: 700; }
+.order-day-pick.selected { background: var(--brand); color: #fff; border-color: var(--brand); }
+.order-day-pick.selected small, .order-day-pick.selected span { color: #fff; }
+.order-plan-head { margin: 0 0 10px; }
+.order-plan-block h3 { margin: 12px 0 6px; font-size: 15px; }
+.order-paper { width: 72mm; max-width: 100%; font-family: "Courier New", monospace; font-size: 13px; color: #000; }
+.order-paper p { margin: 0; }
+.order-paper-branch, .order-paper-title { text-align: center; }
+.order-paper-title { font-weight: 800; letter-spacing: .05em; border-bottom: 1px dashed #000; padding-bottom: 4px; margin-bottom: 6px !important; }
+.order-paper-day { text-align: center; font-size: 20px; font-weight: 800; text-transform: uppercase; }
+.order-paper-time { text-align: center; font-size: 26px; font-weight: 800; }
+.order-paper-block { border-top: 1px dashed #000; padding-top: 4px; margin-top: 6px !important; }
+.order-paper-items { list-style: none; margin: 6px 0 0; padding: 4px 0 0; border-top: 1px dashed #000; }
+.order-paper-items li { padding: 2px 0; font-size: 14px; font-weight: 700; }
+.order-paper-items small { font-weight: 400; }
+.order-paper-due { font-size: 18px; font-weight: 800; margin-top: 4px; }
+.order-paper-foot { text-align: center; border-top: 1px dashed #000; margin-top: 8px !important; padding-top: 4px; font-size: 11px; }
+.order-print-area { padding: 0; background: #fff; }
+@media (max-width: 760px) {
+  .order-card { grid-template-columns: 1fr; }
+  .order-card-time { grid-auto-flow: column; justify-content: start; align-items: center; gap: 8px; }
+  .order-card-actions { justify-content: flex-start; max-width: none; }
+  .order-lines li { grid-template-columns: 1fr auto; }
+  .order-lines li > input { grid-column: 1 / -1; }
+}

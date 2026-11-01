@@ -32,13 +32,18 @@ interface AuthContextValue {
 
 const AuthContext = createContext<AuthContextValue | null>(null);
 
+// Modo demostración (sin base). Una compilación de prueba puede entrar con otro rol y pantallas a pedido
+// (VITE_DEMO_ROLE / VITE_DEMO_FEATURES, ej. la vista previa de un cambio para mostrarlo como lo ve la cajera).
+const DEMO_ROLE = (import.meta.env.VITE_DEMO_ROLE as UserProfile["role"] | undefined) || "owner";
+const DEMO_FEATURES = ((import.meta.env.VITE_DEMO_FEATURES as string | undefined) ?? "").split(",").map((f) => f.trim()).filter(Boolean);
 const DEMO_PROFILE: UserProfile = {
   id: "demo-user",
   company_id: "demo-company",
   branch_id: "demo-branch",
-  full_name: "Demo",
-  role: "owner",
-  active: true
+  full_name: DEMO_ROLE === "owner" ? "Demo" : "Demo cajera",
+  role: DEMO_ROLE,
+  active: true,
+  features: DEMO_FEATURES
 };
 
 /** El perfil se cargó bien y dice que este usuario NO puede entrar
