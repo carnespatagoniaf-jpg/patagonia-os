@@ -4,7 +4,7 @@ import { addDaysIso, localDateIso } from "../shifts/format";
 import { dayLabel, openCountByDate, planTotals, type CustomerOrder, type PlanLine } from "./orders-logic";
 import { listOrders } from "./orders-service";
 
-const WINDOW_DAYS = 21;
+const MAX_DAYS = 62;
 
 function quantityText(line: PlanLine): string {
   const n = new Intl.NumberFormat("es-AR", { maximumFractionDigits: 3 }).format(line.quantity);
@@ -38,17 +38,23 @@ function PlanTable({ title, lines }: { title: string; lines: PlanLine[] }) {
   );
 }
 
-/** Planificación: qué hay que preparar (y comprar) en ESTE local para los días elegidos. Solo cantidades, nunca plata. */
+/** Planificación: qué hay que preparar (y comprar) en ESTE local entre dos fechas. Solo cantidades, nunca plata. */
 export function OrdersPlanning({ branchId, branchName }: { branchId: string | null; branchName?: string }) {
-  const [start, setStart] = useState(() => localDateIso());
-  const [selected, setSelected] = useState<string[]>(() => [localDateIso()]);
+  const [from, setFrom] = useState(() => localDateIso());
+  const [to, setTo] = useState(() => localDateIso());
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [printing, setPrinting] = useState(false);
   const doneRef = useRef(() => setPrinting(false));
 
-  const days = useMemo(() => Array.from({ length: WINDOW_DAYS }, (_, i) => addDaysIso(start, i)), [start]);
+  // "Hasta" antes de "Desde" se toma como un solo día; como mucho 62 días.
+  const days = useMemo(() => {
+    const end = to < from ? from : to;
+    const list: string[] = [];
+    for (let d = from; d <= end && list.length < MAX_DAYS; d = addDaysIso(d, 1)) list.push(d);
+    return list;
+  }, [from, to]);
 
   useEffect(() => {
     if (!branchId) return;
@@ -77,20 +83,15 @@ export function OrdersPlanning({ branchId, branchName }: { branchId: string | nu
   }, [printing]);
 
   const counts = openCountByDate(orders);
-  // Solo los días que se ven en la tira (al cambiar "Desde" los elegidos de antes quedan fuera).
-  const chosen = selected.filter((d) => days.includes(d)).sort();
-  const plan = planTotals(orders, chosen);
-  const daysText = chosen.map(dayLabel).join(", ");
-
-  function toggle(date: string) {
-    setSelected((current) => (current.includes(date) ? current.filter((d) => d !== date) : [...current, date]));
-  }
+  const plan = planTotals(orders, days);
+  const busyDays = days.filter((d) => (counts[d] ?? 0) > 0);
+  const daysText = days.length === 1 ? dayLabel(days[0]) : `del ${dayLabel(days[0])} al ${dayLabel(days[days.length - 1])}`;
 
   const result = (
     <>
       <p className="order-plan-head">
         <strong>{plan.orders} {plan.orders === 1 ? "pedido" : "pedidos"}</strong>{branchName && <> · {branchName}</>}
-        {daysText && <> · <span style={{ textTransform: "capitalize" }}>{daysText}</span></>}
+        {daysText && <> · {daysText}</>}
       </p>
       <PlanTable title="Por kilo" lines={plan.byKg} />
       <PlanTable title="Por unidad" lines={plan.byUnit} />
@@ -105,38 +106,26 @@ export function OrdersPlanning({ branchId, branchName }: { branchId: string | nu
         <div className="order-day-nav no-print">
           <label className="muted" style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 13 }}>
             Desde
-            <input type="date" value={start} onChange={(e) => e.target.value && setStart(e.target.value)} />
+            <input type="date" value={from} onChange={(e) => e.target.value && setFrom(e.target.value)} />
+          </label>
+          <label className="muted" style={{ display: "inline-flex", gap: 6, alignItems: "center", fontSize: 13 }}>
+            Hasta
+            <input type="date" value={to} onChange={(e) => e.target.value && setTo(e.target.value)} />
           </label>
         </div>
       </div>
 
-      <p className="muted" style={{ margin: "0 0 8px", fontSize: 13 }}>Tocá uno o varios días. Debajo de cada día, cuántos pedidos tiene.</p>
-      <div className="order-day-strip no-print">
-        {days.map((d) => {
-          const n = counts[d] ?? 0;
-          const date = new Date(`${d}T12:00:00`);
-          return (
-            <button
-              key={d}
-              type="button"
-              className={`order-day-pick${selected.includes(d) ? " selected" : ""}${n >= 10 ? " heavy" : ""}`}
-              onClick={() => toggle(d)}
-            >
-              <small>{date.toLocaleDateString("es-AR", { weekday: "short" })}</small>
-              <strong>{d.slice(8, 10)}/{d.slice(5, 7)}</strong>
-              <span>{n === 0 ? "—" : `${n} ${n === 1 ? "pedido" : "pedidos"}`}</span>
-            </button>
-          );
-        })}
-      </div>
+      {!loading && busyDays.length > 0 && (
+        <p className="muted no-print" style={{ margin: "0 0 12px", fontSize: 13 }}>
+          Pedidos por día: {busyDays.map((d) => `${dayLabel(d)} (${counts[d]})`).join(" · ")}
+        </p>
+      )}
 
       {error && <div className="message warning">{error}</div>}
       {loading ? (
         <p className="muted">Cargando…</p>
-      ) : chosen.length === 0 ? (
-        <p className="muted">Elegí al menos un día.</p>
       ) : plan.orders === 0 ? (
-        <p className="muted">No hay pedidos pendientes para los días elegidos.</p>
+        <p className="muted">No hay pedidos pendientes para esas fechas.</p>
       ) : (
         <>
           {result}
