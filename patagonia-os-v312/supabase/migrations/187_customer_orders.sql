@@ -8,10 +8,9 @@
 -- del pedido; ninguna función de acá lee ni escribe inventory_movements, pos_*, treasury_*.
 --
 -- - Pantalla a pedido: companies.features 'pedidos' (panel de plataforma → Pantallas a pedido).
--- - Es el cuaderno de CADA local (pedido del dueño): el cajero y el encargado ven y cargan solo los de su sucursal.
---   Dueño y administrador pueden abrir el de la sucursal que tengan elegida (muchos locales atienden la caja con
---   ese usuario), pero la pantalla nunca suma ni compara sucursales.
--- - Escriben solo por RPC (migración 175): dueño, administrador, encargado y cajero.
+-- - Es el cuaderno de CADA local (pedido del dueño, 01/11): solo el cajero y el encargado, y solo los de su
+--   sucursal. Dueño, administrador y solo lectura (la administración) no los ven ni los cargan.
+-- - Escriben solo por RPC (migración 175).
 -- - Estados: pendiente → listo → entregado; cancelado. Entregado o cancelado ya no se edita.
 
 create table if not exists public.customer_orders (
@@ -65,7 +64,7 @@ $$;
 revoke all on function public.orders_enabled() from public, anon;
 grant execute on function public.orders_enabled() to authenticated;
 
--- ¿Puede ver los pedidos de esta sucursal? (dueño/admin: la que elijan; encargado y cajero: solo la suya)
+-- ¿Puede ver los pedidos de esta sucursal? Solo el encargado y el cajero de esa sucursal.
 create or replace function public.orders_branch_visible(p_branch_id uuid)
 returns boolean
 language sql
@@ -76,7 +75,7 @@ as $$
   select exists (
     select 1 from public.profiles p
     where p.id = auth.uid() and p.active = true
-      and (p.role in ('owner', 'admin') or (p.role in ('manager', 'cashier') and p.branch_id = p_branch_id))
+      and p.role in ('manager', 'cashier') and p.branch_id = p_branch_id
   );
 $$;
 revoke all on function public.orders_branch_visible(uuid) from public, anon;
@@ -133,13 +132,13 @@ begin
   if not exists (select 1 from public.companies c where c.id = company_id and 'pedidos' = any(c.features)) then
     raise exception 'Esta empresa no tiene la pantalla Pedidos';
   end if;
-  if v_role not in ('owner', 'admin', 'manager', 'cashier') then
-    raise exception 'Tu usuario no puede cargar pedidos';
+  if v_role not in ('manager', 'cashier') then
+    raise exception 'Los pedidos se cargan con el usuario de cajero o encargado del local';
   end if;
   if not exists (select 1 from public.branches b where b.id = p_branch_id and b.company_id = orders_caller.company_id) then
     raise exception 'Sucursal inválida';
   end if;
-  if v_role in ('manager', 'cashier') and v_branch is distinct from p_branch_id then
+  if v_branch is distinct from p_branch_id then
     raise exception 'Solo podés cargar pedidos de tu sucursal';
   end if;
 end;

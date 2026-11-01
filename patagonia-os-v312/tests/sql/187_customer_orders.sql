@@ -13,11 +13,12 @@ insert into branches (id, company_id, name) values
   ('00000000-0000-0000-0000-0000000c8712', '00000000-0000-0000-0000-0000000c8711', 'Única'),
   ('00000000-0000-0000-0000-0000000c8722', '00000000-0000-0000-0000-0000000c8721', 'Única');
 insert into auth.users (id, email) values
-  ('00000000-0000-0000-0000-0000000c8704', 'duenio@a'), ('00000000-0000-0000-0000-0000000c8705', 'cajera-centro@a'),
+  ('00000000-0000-0000-0000-0000000c8704', 'encargado@a'), ('00000000-0000-0000-0000-0000000c870b', 'duenio@a'), ('00000000-0000-0000-0000-0000000c8705', 'cajera-centro@a'),
   ('00000000-0000-0000-0000-0000000c8706', 'cajera-norte@a'), ('00000000-0000-0000-0000-0000000c8707', 'lectura@a'),
   ('00000000-0000-0000-0000-0000000c8714', 'duenio@b'), ('00000000-0000-0000-0000-0000000c8724', 'duenio@c');
 insert into profiles (id, company_id, branch_id, full_name, role) values
-  ('00000000-0000-0000-0000-0000000c8704', '00000000-0000-0000-0000-0000000c8701', '00000000-0000-0000-0000-0000000c8702', 'Dueño', 'owner'),
+  ('00000000-0000-0000-0000-0000000c8704', '00000000-0000-0000-0000-0000000c8701', '00000000-0000-0000-0000-0000000c8702', 'Encargado Centro', 'manager'),
+  ('00000000-0000-0000-0000-0000000c870b', '00000000-0000-0000-0000-0000000c8701', '00000000-0000-0000-0000-0000000c8702', 'Dueño', 'owner'),
   ('00000000-0000-0000-0000-0000000c8705', '00000000-0000-0000-0000-0000000c8701', '00000000-0000-0000-0000-0000000c8702', 'Cajera Centro', 'cashier'),
   ('00000000-0000-0000-0000-0000000c8706', '00000000-0000-0000-0000-0000000c8701', '00000000-0000-0000-0000-0000000c8703', 'Cajera Norte', 'cashier'),
   ('00000000-0000-0000-0000-0000000c8707', '00000000-0000-0000-0000-0000000c8701', '00000000-0000-0000-0000-0000000c8702', 'Lectura', 'readonly'),
@@ -108,6 +109,22 @@ begin
   if (select unit from customer_order_items where order_id = o.id and position = 1) <> 'unit' then raise exception 'unidad mal copiada'; end if;
 end $$;
 
+-- Es el cuaderno del local: el dueño (administración) no lo ve ni carga.
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000c870b', true);
+do $$
+begin
+  if exists (select 1 from customer_orders) or exists (select 1 from customer_order_items) then
+    raise exception 'el dueño ve los pedidos del local';
+  end if;
+  begin
+    perform public.save_customer_order(null, '00000000-0000-0000-0000-0000000c8702', null, 'X', null, current_date, null, null, null, 0,
+      '[{"product_id":"00000000-0000-0000-0000-0000000c8708","quantity":1}]'::jsonb);
+    raise exception 'el dueño cargó un pedido';
+  exception when raise_exception then
+    if sqlerrm = 'el dueño cargó un pedido' then raise; end if;
+  end;
+end $$;
+
 -- La cajera del Norte no lo ve; solo lectura tampoco; otra empresa no.
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000c8706', true);
 do $$
@@ -158,12 +175,12 @@ begin
   end;
 end $$;
 
--- El dueño ve todo, edita, marca listo y entrega; después no se puede editar.
+-- El encargado del Centro lo ve, edita, marca listo y entrega; después no se puede editar.
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000c8704', true);
 do $$
 declare v uuid := current_setting('test.order')::uuid;
 begin
-  if (select count(*) from customer_orders) <> 1 then raise exception 'el dueño no ve el pedido'; end if;
+  if (select count(*) from customer_orders) <> 1 then raise exception 'el encargado no ve el pedido'; end if;
   perform public.save_customer_order(v, null, null, 'Juan Pérez', null, date '2026-12-24', time '12:30', null, null, 0,
     '[{"product_id":"00000000-0000-0000-0000-0000000c8708","quantity":4}]'::jsonb);
   if (select count(*) from customer_order_items where order_id = v) <> 1 then raise exception 'no reemplazó los ítems'; end if;
@@ -200,7 +217,7 @@ begin
   if (select count(*) from pos_sales) <> a.ventas then raise exception 'cambió una venta'; end if;
 end $$;
 
--- Con la pantalla apagada, el dueño deja de verlos.
+-- Con la pantalla apagada, el encargado deja de verlos.
 update companies set features = '{}' where id = '00000000-0000-0000-0000-0000000c8701';
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000c8704', true);
