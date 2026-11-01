@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import type { CustomerOrder, OrderDraftItem, OrderStatus, OrderUnit } from "./orders-logic";
+import { demoSeedOrders } from "./orders-demo";
 
 // Pedidos de clientes (migración 187). Se lee directo de las tablas (RLS: empresa + sucursal + pantalla 'pedidos')
 // y se escribe solo por RPC (migración 175). Sin Supabase (modo demostración) se guarda en este navegador.
@@ -134,7 +135,11 @@ const DEMO_KEY = "patagonia-demo-orders";
 function demoList(): CustomerOrder[] {
   try {
     const raw = localStorage.getItem(DEMO_KEY);
-    return raw ? (JSON.parse(raw) as CustomerOrder[]) : [];
+    if (raw) return JSON.parse(raw) as CustomerOrder[];
+    // Primera vez en este navegador: pedidos de ejemplo para ver la pantalla andando.
+    const seed = demoSeedOrders();
+    localStorage.setItem(DEMO_KEY, JSON.stringify(seed));
+    return seed;
   } catch {
     return [];
   }
