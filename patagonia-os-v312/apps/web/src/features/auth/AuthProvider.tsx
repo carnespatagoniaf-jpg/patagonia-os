@@ -38,7 +38,9 @@ const DEMO_PROFILE: UserProfile = {
   branch_id: "demo-branch",
   full_name: "Demo",
   role: "owner",
-  active: true
+  active: true,
+  // Modo demostración (sin base): se ven las pantallas a pedido que guardan en el navegador.
+  features: ["pedidos"]
 };
 
 /** El perfil se cargó bien y dice que este usuario NO puede entrar

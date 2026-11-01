@@ -1,4 +1,4 @@
-import { BarChart3, Banknote, Beef, BookOpenCheck, Boxes, ClipboardList, FileText, HandCoins, Handshake, History, Truck, KeyRound, Landmark, MapPin, Upload, PackagePlus, Receipt, Snowflake, Tag, Users, Wallet } from "lucide-react";
+import { BarChart3, Banknote, Beef, BookOpenCheck, Boxes, ClipboardList, FileText, HandCoins, Handshake, History, Truck, KeyRound, Landmark, MapPin, NotebookPen, Upload, PackagePlus, Receipt, Snowflake, Tag, Users, Wallet } from "lucide-react";
 import type { Page } from "../features/auth/permissions";
 
 export type NavItem = {
@@ -24,6 +24,8 @@ export const navGroups: Array<{ heading: string | null; items: NavItem[] }> = [
     heading: "Ventas",
     items: [
       { page: "sale", label: "Mostrador", icon: Receipt },
+      // Solo para la empresa con 'pedidos' en companies.features (migración 187). El menú muestra cuántos hay hoy.
+      { page: "orders", label: "Pedidos", icon: NotebookPen },
       { page: "route", label: "Venta en ruta", icon: Truck },
       { page: "route_trucks", label: "Camiones", icon: Truck },
       { page: "customers", label: "Clientes", icon: Handshake },

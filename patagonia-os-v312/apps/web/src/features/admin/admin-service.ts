@@ -210,7 +210,8 @@ export const COMPANY_FEATURES: { key: string; label: string; short: string }[] =
   { key: "paquetes", label: "Paquetes (cortes envasados) en Stock", short: "Paquetes" },
   { key: "venta_ruta", label: "Venta en ruta y Camiones", short: "Venta en ruta" },
   { key: "costo_parejo", label: "Despiece: costo parejo por kilo (todos los cortes cuestan lo mismo)", short: "Costo parejo" },
-  { key: "traer_balanza", label: "Mis balanzas: traer a Patagonia los productos de la balanza", short: "Traer de balanza" }
+  { key: "traer_balanza", label: "Mis balanzas: traer a Patagonia los productos de la balanza", short: "Traer de balanza" },
+  { key: "pedidos", label: "Pedidos de clientes (anotar, avisar el día del retiro y planificar)", short: "Pedidos" }
 ];
 
 export async function listCompanyFeatures(): Promise<Record<string, string[]>> {
