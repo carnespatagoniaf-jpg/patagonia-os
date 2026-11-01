@@ -53,9 +53,10 @@ export function OrderForm({
   const due = total !== null ? Math.max(0, total - deposit) : null;
 
   const shown = useMemo(() => {
+    // Sin escribir nada no se muestra ningún producto: aparecen recién al buscar.
     const q = normalize(search);
-    const list = q ? products.filter((p) => normalize(p.name).includes(q) || p.code.trim() === search.trim()) : products;
-    return list.slice(0, q ? 30 : 18);
+    if (!q) return [];
+    return products.filter((p) => normalize(p.name).includes(q) || p.code.trim() === search.trim()).slice(0, 12);
   }, [products, search]);
 
   function pickCustomer(name: string) {
@@ -155,7 +156,7 @@ export function OrderForm({
       <p className="order-form-label">Productos</p>
       <input
         style={{ width: "100%", marginBottom: 8 }}
-        placeholder="Buscar producto (nombre o código)"
+        placeholder="Escribí el producto (nombre o código) y Enter"
         value={search}
         onChange={(e) => setSearch(e.target.value)}
         onKeyDown={(e) => {
@@ -165,14 +166,16 @@ export function OrderForm({
           }
         }}
       />
-      <div className="order-product-picks">
-        {shown.map((p) => (
-          <button key={p.id} type="button" className="secondary" onClick={() => addProduct(p)}>
-            {p.name}
-          </button>
-        ))}
-        {shown.length === 0 && <span className="muted">No hay productos con ese nombre.</span>}
-      </div>
+      {search.trim() && (
+        <div className="order-product-picks">
+          {shown.map((p) => (
+            <button key={p.id} type="button" className="secondary" onClick={() => addProduct(p)}>
+              {p.name}
+            </button>
+          ))}
+          {shown.length === 0 && <span className="muted">No hay productos con ese nombre.</span>}
+        </div>
+      )}
 
       {items.length > 0 && (
         <ul className="order-lines">
