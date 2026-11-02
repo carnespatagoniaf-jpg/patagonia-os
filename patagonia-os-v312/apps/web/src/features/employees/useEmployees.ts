@@ -4,6 +4,7 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { useAuth } from "../auth/AuthProvider";
 import { planAllows } from "../auth/permissions";
+import { addDaysIso, todayIso } from "../shifts/format";
 import {
   createEmployee,
   createPayrollAdjustment,
@@ -29,8 +30,8 @@ const DEMO_EMPLOYEES: Employee[] = [
     id: "demo-emp-1",
     branchId: DEMO_BRANCH_ID,
     fullName: "Carlos Fernández",
-    baseSalary: 400000,
-    salaryPeriod: "monthly",
+    baseSalary: 390000,
+    salaryPeriod: "weekly",
     recurringBonusAmount: 0,
     active: true
   }
@@ -127,8 +128,17 @@ export function useEmployees() {
 
   const loadDetail = useCallback(async (employeeId: string) => {
     if (!isSupabaseConfigured) {
-      setAdjustments([]);
-      setVouchers([]);
+      // Modo demo: vales de las últimas dos semanas (unos pendientes de la semana anterior) para que se vea la pantalla con datos.
+      const day = (n: number) => addDaysIso(todayIso(), -n);
+      const vale = (n: number, amount: number, detail: string, type: EmployeeVoucher["type"] = "vale_adelanto", liquidated = false): EmployeeVoucher =>
+        ({ id: `demo-vale-${n}-${amount}`, amount, type, detail, shiftDate: day(n), shift: "mostrador", liquidated });
+      setVouchers(employeeId === "demo-emp-1" ? [
+        vale(1, 120000, "vale"), vale(2, 140000, "semana"), vale(2, 21769, "mercadería", "vale_mercaderia"), vale(4, 7685, "mercadería", "vale_mercaderia"),
+        vale(5, 100000, "vale"), vale(5, 27977, "mercadería", "vale_mercaderia"), vale(6, 11832, "mercadería", "vale_mercaderia"), vale(6, 20000, "efectivo"),
+        vale(8, 60000, "vale"), vale(10, 28453, "mercadería", "vale_mercaderia"), vale(10, 160000, "vale"),
+        vale(40, 95000, "sueldo", "vale_adelanto", true), vale(44, 50051, "mercadería", "vale_mercaderia", true)
+      ] : []);
+      setAdjustments(employeeId === "demo-emp-1" ? [{ id: "demo-adj-1", employeeId, adjustmentDate: day(4), type: "bonus", amount: 28000, reason: "feriado", liquidated: false }] : []);
       setLiquidations([]);
       return;
     }

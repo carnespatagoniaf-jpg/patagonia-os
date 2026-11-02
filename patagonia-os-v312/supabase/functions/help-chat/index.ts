@@ -250,7 +250,9 @@ DEUDAS
 EMPLEADOS
 - Se cargan los empleados con sueldo base y su período (mensual, quincenal, semanal o diario), y un premio fijo opcional.
 - Se registran premios y descuentos, y los vales (adelantos). Los vales también pueden cargarse desde Mostrador con "Sacar plata del cajón" → "Vale a un empleado".
-- "Liquidación" calcula el sueldo neto restando vales y descuentos y sumando premios; el pago se puede repartir entre varias cuentas. Después se puede imprimir el recibo.
+- A la izquierda está la lista de empleados; se toca uno y a la derecha aparece su liquidación. Arriba de todo: "Liquidar" con las fechas (botones Semana, Quincena, Mes) y una franja con Sueldo, Premios − descuentos, Vales y "Neto a pagar" (si da negativo, dice "Le debe al negocio"). Debajo, "Vales del período" (solo los de esas fechas, con su barra para bajar) y "Premios y descuentos" (con "+ Premio" y "+ Descuento"). Abajo, "Pagar desde" (la cuenta de donde sale la plata; "+ Dividir en otra cuenta" para repartirlo) y "Registrar liquidación". Después se puede imprimir el recibo. "Editar" y "PIN de caja" están arriba, al lado del nombre.
+- Si quedaron vales o premios pendientes de antes de la fecha "desde" (por ejemplo, de la semana anterior que no se liquidó), aparece un aviso amarillo con el botón "Liquidar desde el …", que corre la fecha para incluirlos (también suma el sueldo de esos días). Si el vale tiene fecha de días que ya se liquidaron, hay que borrar esa liquidación y volver a liquidar.
+- Abajo de todo, en pestañas: "Liquidaciones anteriores" (las últimas 5, con "Ver / Imprimir" y "Borrar"; "Ver las …" muestra todas) y "Vales y premios ya liquidados".
 
 RENTABILIDAD, REPORTES Y EXPORTAR
 - Rentabilidad: costos fijos, conteo de stock y cierre del período con ganancia estimada.

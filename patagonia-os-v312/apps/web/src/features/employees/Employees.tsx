@@ -8,6 +8,7 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { listPayrollLiquidationDetail, type PayrollLiquidationLineItem } from "./employees-service";
 import { listPosCashiers } from "../sale/pos-shift-service";
 import { setEmployeePosPin } from "../sale/cash-control-service";
+import { earlierPending, shortDate } from "./payroll-period";
 
 const ADJUSTMENT_TYPE_LABELS: Record<PayrollAdjustmentType, string> = {
   bonus: "Premio",
@@ -87,6 +88,10 @@ export function Employees() {
   const [adjType, setAdjType] = useState<PayrollAdjustmentType>("bonus");
   const [adjAmount, setAdjAmount] = useState("");
   const [adjReason, setAdjReason] = useState("");
+  const [showAdjForm, setShowAdjForm] = useState(false);
+  const [showPin, setShowPin] = useState(false);
+  const [historyTab, setHistoryTab] = useState<"liquidations" | "liquidated">("liquidations");
+  const [showAllLiquidations, setShowAllLiquidations] = useState(false);
 
   const [periodStart, setPeriodStart] = useState(addDaysIso(todayIso(), -6));
   const [periodEnd, setPeriodEnd] = useState(todayIso());
@@ -139,6 +144,11 @@ export function Employees() {
 
   const selectedEmployee = employees.find((e) => e.id === selectedId) ?? null;
 
+  // Arranca con el primero elegido: la derecha nunca queda vacía.
+  useEffect(() => {
+    if (!selectedId && employees.length > 0) setSelectedId(employees[0].id);
+  }, [selectedId, employees]);
+
   useEffect(() => {
     if (selectedEmployee) {
       setEditName(selectedEmployee.fullName);
@@ -148,6 +158,9 @@ export function Employees() {
       setEditBonusReason(selectedEmployee.recurringBonusReason ?? "");
       setEditActive(selectedEmployee.active);
       setEditingEmployee(false);
+      setShowPin(false);
+      setShowAdjForm(false);
+      setShowAllLiquidations(false);
     }
   }, [selectedEmployee]);
 
@@ -269,7 +282,8 @@ export function Employees() {
       await addAdjustment({ employeeId: selectedEmployee.id, adjustmentDate: adjDate, type: adjType, amount, reason: adjReason.trim() });
       setAdjAmount("");
       setAdjReason("");
-      setMessage("Ajuste cargado.");
+      setShowAdjForm(false);
+      setMessage(adjType === "bonus" ? "Premio cargado." : "Descuento cargado.");
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo cargar el ajuste.");
     }
@@ -354,383 +368,437 @@ export function Employees() {
     }
   }
 
+
   function handlePrint() {
     window.print();
   }
 
+  // Lo que quedó pendiente de antes del "desde" (2026-11-02: vales de la semana anterior quedaban colgados sin que nadie los viera).
+  const earlier = useMemo(
+    () =>
+      earlierPending(
+        [
+          ...vouchers.filter((v) => !v.liquidated && v.shiftDate !== "-").map((v) => ({ date: v.shiftDate, kind: "voucher" as const, amount: -v.amount })),
+          ...adjustments.filter((a) => !a.liquidated).map((a) => ({ date: a.adjustmentDate, kind: "adjustment" as const, amount: a.type === "bonus" ? a.amount : -a.amount }))
+        ],
+        periodStart,
+        liquidations
+      ),
+    [vouchers, adjustments, liquidations, periodStart]
+  );
+  const earlierVouchers = earlier.includable.filter((i) => i.kind === "voucher");
+  const earlierAdjustments = earlier.includable.filter((i) => i.kind === "adjustment");
+  const stuckVouchers = earlier.stuck.filter((i) => i.kind === "voucher");
+
+  const liquidatedRows = useMemo(
+    () =>
+      [
+        ...vouchers.filter((v) => v.liquidated).map((v) => ({ id: v.id, date: v.shiftDate, label: `${OUTFLOW_TYPE_LABELS[v.type] ?? v.type} · ${v.detail}`, amount: -v.amount })),
+        ...adjustments.filter((a) => a.liquidated).map((a) => ({ id: a.id, date: a.adjustmentDate, label: `${ADJUSTMENT_TYPE_LABELS[a.type]} · ${a.reason}`, amount: a.type === "bonus" ? a.amount : -a.amount }))
+      ].sort((a, b) => b.date.localeCompare(a.date)),
+    [vouchers, adjustments]
+  );
+  const visibleLiquidations = showAllLiquidations ? liquidations : liquidations.slice(0, 5);
+
+  function setPeriod(days: number) {
+    setPeriodStart(addDaysIso(todayIso(), -(days - 1)));
+    setPeriodEnd(todayIso());
+  }
+  const periodDays = daysBetweenInclusive(periodStart, periodEnd);
+  const activePreset = periodEnd === todayIso() && [7, 15, 30].includes(periodDays) ? periodDays : null;
+
   return (
     <>
-      <header className="page-header">
+      <header className="page-header no-print">
         <div>
           <p className="eyebrow">EMPLEADOS</p>
-          <h1>Empleados y liquidación</h1>
+          <h1>Sueldos y vales</h1>
           <p className="muted">Sueldo, premios, descuentos y vales — enlazado con las salidas de caja.</p>
         </div>
       </header>
 
-      {message && <div className="message">{message}</div>}
-      {error && <div className="message warning">{error}</div>}
+      {message && <div className="message no-print">{message}</div>}
+      {error && <div className="message warning no-print">{error}</div>}
 
-      <div className="content-grid">
-        <section className="panel">
+      <div className="emp-layout">
+        <section className="panel emp-list no-print">
           <div className="panel-title">
             <h2>Empleados</h2>
-            <span>{loading ? "Cargando…" : `${employees.length} activos`}</span>
+            {!showNewForm && <button className="secondary" onClick={() => setShowNewForm(true)}>+ Nuevo</button>}
           </div>
-          {showNewForm ? (
-            <div className="cash-banner-form" style={{ marginBottom: 16, flexWrap: "wrap" }}>
-              <input placeholder="Nombre" value={newName} onChange={(e) => setNewName(e.target.value)} />
-              <input type="text" inputMode="decimal" placeholder="Sueldo base" value={newSalary} onChange={(e) => setNewSalary(e.target.value)} />
-              <select value={newSalaryPeriod} onChange={(e) => setNewSalaryPeriod(e.target.value as SalaryPeriod)}>
-                <option value="monthly">Por mes</option>
-                <option value="biweekly">Por quincena</option>
-                <option value="weekly">Por semana</option>
-                <option value="daily">Por día</option>
-              </select>
-              <input type="text" inputMode="decimal" placeholder="Premio fijo (opcional)" value={newBonusAmount} onChange={(e) => setNewBonusAmount(e.target.value)} />
-              <input placeholder="Motivo del premio fijo" value={newBonusReason} onChange={(e) => setNewBonusReason(e.target.value)} />
-              <button onClick={handleCreate}>Guardar empleado</button>
-              <button className="secondary" onClick={() => setShowNewForm(false)}>Cancelar</button>
-            </div>
-          ) : (
-            <button className="secondary" style={{ marginBottom: 16 }} onClick={() => setShowNewForm(true)}>
-              + Agregar empleado
-            </button>
-          )}
-
-          <table className="data-table">
-            <thead>
-              <tr><th>Nombre</th><th className="num">Sueldo</th><th></th></tr>
-            </thead>
-            <tbody>
-              {employees.map((employee) => (
-                <tr key={employee.id} className={employee.id === selectedId ? "row-selected" : "row-clickable"} onClick={() => setSelectedId(employee.id)}>
-                  <td>{employee.fullName}</td>
-                  <td className="num">{formatMoney(employee.baseSalary)} <span className="muted">{SALARY_PERIOD_LABELS[employee.salaryPeriod]}</span></td>
-                  <td>
-                    {employee.id === selectedId ? (
-                          <span className="badge brand">Viendo</span>
-                        ) : (
-                          <button className="secondary" onClick={() => setSelectedId(employee.id)}>Ver</button>
-                        )}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-        </section>
-
-        <section className="panel">
-          <div className="panel-title">
-            <h2>Datos del empleado</h2>
-          </div>
-          {!selectedEmployee && <p className="muted">Elegí un empleado para ver el detalle.</p>}
-          {selectedEmployee && !editingEmployee && (
-            <div className="totals">
-              <span>Nombre <b>{selectedEmployee.fullName}</b></span>
-              <span>Sueldo base <b>{formatMoney(selectedEmployee.baseSalary)} {SALARY_PERIOD_LABELS[selectedEmployee.salaryPeriod]}</b></span>
-              {selectedEmployee.recurringBonusAmount > 0 && (
-                <span>Premio fijo <b>{formatMoney(selectedEmployee.recurringBonusAmount)} {SALARY_PERIOD_LABELS[selectedEmployee.salaryPeriod]} · {selectedEmployee.recurringBonusReason}</b></span>
-              )}
-              <span>Estado <b>{selectedEmployee.active ? "Activo" : "Inactivo"}</b></span>
-              <button className="secondary" style={{ marginTop: 10 }} onClick={() => setEditingEmployee(true)}>Editar</button>
-            </div>
-          )}
-          {selectedEmployee && !editingEmployee && isSupabaseConfigured && (
-            <div style={{ marginTop: 16, paddingTop: 12, borderTop: "1px solid #e6e8ee" }}>
-              <p style={{ margin: "0 0 6px", fontWeight: 700 }}>
-                PIN de caja {pinHolders.has(selectedEmployee.id) ? <span className="num-positive">· tiene PIN</span> : <span className="muted">· sin PIN</span>}
-              </p>
-              <p className="muted" style={{ margin: "0 0 8px", fontSize: 13 }}>
-                Si atiende la caja, ponele un PIN de 4 a 6 números. Al abrir y cerrar la caja en Mostrador elige su nombre y pone el PIN, así cada cierre y cada retiro queda con su nombre.
-              </p>
-              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <input
-                  type="password"
-                  inputMode="numeric"
-                  maxLength={6}
-                  placeholder={pinHolders.has(selectedEmployee.id) ? "PIN nuevo" : "PIN"}
-                  value={pinInput}
-                  onChange={(e) => setPinInput(e.target.value.replace(/D/g, ""))}
-                  style={{ width: 120 }}
-                />
-                <button disabled={pinBusy || !pinInput} onClick={() => handleSavePin(selectedEmployee.id, pinInput)}>
-                  {pinHolders.has(selectedEmployee.id) ? "Cambiar PIN" : "Guardar PIN"}
-                </button>
-                {pinHolders.has(selectedEmployee.id) && (
-                  <button className="secondary" disabled={pinBusy} onClick={() => handleSavePin(selectedEmployee.id, null)}>Quitar PIN</button>
-                )}
+          {showNewForm && (
+            <div className="form-box" style={{ marginBottom: 12 }}>
+              <div className="form-grid">
+                <label>Nombre<input value={newName} onChange={(e) => setNewName(e.target.value)} /></label>
+                <label>Sueldo base<input type="text" inputMode="decimal" value={newSalary} onChange={(e) => setNewSalary(e.target.value)} /></label>
+                <label>Se paga
+                  <select value={newSalaryPeriod} onChange={(e) => setNewSalaryPeriod(e.target.value as SalaryPeriod)}>
+                    <option value="monthly">Por mes</option>
+                    <option value="biweekly">Por quincena</option>
+                    <option value="weekly">Por semana</option>
+                    <option value="daily">Por día</option>
+                  </select>
+                </label>
+                <label>Premio fijo (opcional)<input type="text" inputMode="decimal" value={newBonusAmount} onChange={(e) => setNewBonusAmount(e.target.value)} /></label>
+                <label>Motivo del premio fijo<input value={newBonusReason} onChange={(e) => setNewBonusReason(e.target.value)} /></label>
+              </div>
+              <div className="form-actions">
+                <button onClick={handleCreate}>Guardar empleado</button>
+                <button className="secondary" onClick={() => setShowNewForm(false)}>Cancelar</button>
               </div>
             </div>
           )}
-          {selectedEmployee && editingEmployee && (
-            <div className="cash-banner-form" style={{ flexWrap: "wrap" }}>
-              <input value={editName} onChange={(e) => setEditName(e.target.value)} />
-              <input type="text" inputMode="decimal" value={editSalary} onChange={(e) => setEditSalary(e.target.value)} />
-              <select value={editSalaryPeriod} onChange={(e) => setEditSalaryPeriod(e.target.value as SalaryPeriod)}>
-                <option value="monthly">Por mes</option>
-                <option value="biweekly">Por quincena</option>
-                <option value="weekly">Por semana</option>
-                <option value="daily">Por día</option>
-              </select>
-              <input type="text" inputMode="decimal" placeholder="Premio fijo (opcional)" value={editBonusAmount} onChange={(e) => setEditBonusAmount(e.target.value)} />
-              <input placeholder="Motivo del premio fijo" value={editBonusReason} onChange={(e) => setEditBonusReason(e.target.value)} />
-              <select value={editActive ? "1" : "0"} onChange={(e) => setEditActive(e.target.value === "1")}>
-                <option value="1">Activo</option>
-                <option value="0">Inactivo (eliminado)</option>
-              </select>
-              <button onClick={handleUpdate}>Guardar</button>
-              <button className="secondary" onClick={() => setEditingEmployee(false)}>Cancelar</button>
-            </div>
+          {loading && <p className="muted">Cargando…</p>}
+          <div className="emp-list-items">
+            {employees.map((employee) => (
+              <button
+                key={employee.id}
+                className={employee.id === selectedId ? "emp-item active" : "emp-item"}
+                onClick={() => setSelectedId(employee.id)}
+              >
+                <b>{employee.fullName}</b>
+                <small>{formatMoney(employee.baseSalary)} {SALARY_PERIOD_LABELS[employee.salaryPeriod]}</small>
+              </button>
+            ))}
+          </div>
+          {!loading && employees.length === 0 && <p className="muted">Todavía no cargaste empleados.</p>}
+        </section>
+
+        <section className="panel emp-main print-area">
+          {!selectedEmployee && <p className="muted">Elegí un empleado de la lista para liquidarle el sueldo.</p>}
+          {selectedEmployee && (
+            <>
+              <div className="emp-head">
+                <div>
+                  <h2>{selectedEmployee.fullName}</h2>
+                  <p className="muted">
+                    Sueldo {formatMoney(selectedEmployee.baseSalary)} {SALARY_PERIOD_LABELS[selectedEmployee.salaryPeriod]}
+                    {selectedEmployee.recurringBonusAmount > 0 && ` · Premio fijo ${formatMoney(selectedEmployee.recurringBonusAmount)} (${selectedEmployee.recurringBonusReason})`}
+                    {!selectedEmployee.active && " · Inactivo"}
+                    {isSupabaseConfigured && <span className="no-print"> · PIN de caja: {pinHolders.has(selectedEmployee.id) ? "sí" : "no"}</span>}
+                  </p>
+                </div>
+                <div className="row-actions no-print">
+                  <button className="secondary" onClick={() => { setEditingEmployee((v) => !v); setShowPin(false); }}>Editar</button>
+                  {isSupabaseConfigured && <button className="secondary" onClick={() => { setShowPin((v) => !v); setEditingEmployee(false); }}>PIN de caja</button>}
+                  <button className="secondary" onClick={handlePrint}>Imprimir</button>
+                </div>
+              </div>
+
+              {editingEmployee && (
+                <div className="form-box no-print">
+                  <div className="form-grid">
+                    <label>Nombre<input value={editName} onChange={(e) => setEditName(e.target.value)} /></label>
+                    <label>Sueldo base<input type="text" inputMode="decimal" value={editSalary} onChange={(e) => setEditSalary(e.target.value)} /></label>
+                    <label>Se paga
+                      <select value={editSalaryPeriod} onChange={(e) => setEditSalaryPeriod(e.target.value as SalaryPeriod)}>
+                        <option value="monthly">Por mes</option>
+                        <option value="biweekly">Por quincena</option>
+                        <option value="weekly">Por semana</option>
+                        <option value="daily">Por día</option>
+                      </select>
+                    </label>
+                    <label>Premio fijo (opcional)<input type="text" inputMode="decimal" value={editBonusAmount} onChange={(e) => setEditBonusAmount(e.target.value)} /></label>
+                    <label>Motivo del premio fijo<input value={editBonusReason} onChange={(e) => setEditBonusReason(e.target.value)} /></label>
+                    <label>Estado
+                      <select value={editActive ? "1" : "0"} onChange={(e) => setEditActive(e.target.value === "1")}>
+                        <option value="1">Activo</option>
+                        <option value="0">Inactivo (eliminado)</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div className="form-actions">
+                    <button onClick={handleUpdate}>Guardar</button>
+                    <button className="secondary" onClick={() => setEditingEmployee(false)}>Cancelar</button>
+                  </div>
+                </div>
+              )}
+
+              {showPin && isSupabaseConfigured && (
+                <div className="form-box no-print">
+                  <p className="muted" style={{ margin: "0 0 8px", fontSize: 13 }}>
+                    Si atiende la caja, ponele un PIN de 4 a 6 números. Al abrir y cerrar la caja en Mostrador elige su nombre y pone el PIN, así cada cierre y cada retiro queda con su nombre.
+                  </p>
+                  <div className="row-actions">
+                    <input
+                      type="password"
+                      inputMode="numeric"
+                      maxLength={6}
+                      placeholder={pinHolders.has(selectedEmployee.id) ? "PIN nuevo" : "PIN"}
+                      value={pinInput}
+                      onChange={(e) => setPinInput(e.target.value.replace(/\D/g, ""))}
+                      style={{ width: 120 }}
+                    />
+                    <button disabled={pinBusy || !pinInput} onClick={() => handleSavePin(selectedEmployee.id, pinInput)}>
+                      {pinHolders.has(selectedEmployee.id) ? "Cambiar PIN" : "Guardar PIN"}
+                    </button>
+                    {pinHolders.has(selectedEmployee.id) && (
+                      <button className="secondary" disabled={pinBusy} onClick={() => handleSavePin(selectedEmployee.id, null)}>Quitar PIN</button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              {receipt ? (
+                <>
+                  <div className="emp-period">
+                    <b>Recibo de liquidación</b>
+                    <span className="muted">del {receipt.liquidation.periodStart} al {receipt.liquidation.periodEnd}{receiptLoading && " · Cargando detalle…"}</span>
+                    <button className="secondary no-print" onClick={() => setReceipt(null)}>Liquidar otro período</button>
+                  </div>
+                  <div className="emp-summary">
+                    <div><span>Sueldo del período</span><strong>{formatMoney(receipt.liquidation.baseSalary)}</strong></div>
+                    <div><span>Premios − descuentos</span><strong>{formatMoney(receipt.liquidation.adjustmentsTotal)}</strong></div>
+                    <div><span>Vales</span><strong>{formatMoney(receipt.liquidation.vouchersTotal)}</strong></div>
+                    <div className="total"><span>Neto pagado</span><strong>{formatMoney(receipt.liquidation.netAmount)}</strong></div>
+                  </div>
+                  {receipt.items.length > 0 && (
+                    <div className="emp-box" style={{ marginTop: 14 }}>
+                      <h3>Detalle</h3>
+                      <table className="data-table no-stack">
+                        <tbody>
+                          {receipt.items.map((item, i) => (
+                            <tr key={i}>
+                              <td className="emp-date">{shortDate(item.date)}</td>
+                              <td>{item.kind === "voucher" ? `Vale · ${item.label}` : `${ADJUSTMENT_TYPE_LABELS[item.kind]} · ${item.label}`}</td>
+                              <td className={`num ${item.kind === "bonus" ? "num-positive" : "num-negative"}`}>
+                                {item.kind === "bonus" ? "+" : "−"} {formatMoney(item.amount)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                  <p style={{ marginTop: 14 }}>
+                    <b>Forma de pago: </b>
+                    {receipt.liquidation.payments.length === 0
+                      ? "Sin cuenta (ya se pagó por afuera del sistema)"
+                      : receipt.liquidation.payments.map((p) => `${p.accountName ?? "Cuenta"}: ${formatMoney(p.amount)}`).join(" + ")}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <div className="emp-period">
+                    <b>Liquidar</b>
+                    <input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
+                    <span className="muted">a</span>
+                    <input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
+                    <div className="emp-seg no-print">
+                      <button className={activePreset === 7 ? "active" : ""} onClick={() => setPeriod(7)}>Semana</button>
+                      <button className={activePreset === 15 ? "active" : ""} onClick={() => setPeriod(15)}>Quincena</button>
+                      <button className={activePreset === 30 ? "active" : ""} onClick={() => setPeriod(30)}>Mes</button>
+                    </div>
+                    {detailLoading && <span className="muted">Cargando…</span>}
+                  </div>
+
+                  <div className="emp-summary">
+                    <div><span>Sueldo ({periodDays} {periodDays === 1 ? "día" : "días"})</span><strong>{formatMoney(previewBaseSalary)}</strong></div>
+                    <div>
+                      <span>Premios − descuentos</span>
+                      <strong className={periodAdjustmentsTotal > 0 ? "num-positive" : periodAdjustmentsTotal < 0 ? "num-negative" : ""}>
+                        {periodAdjustmentsTotal > 0 ? "+ " : periodAdjustmentsTotal < 0 ? "− " : ""}{formatMoney(Math.abs(periodAdjustmentsTotal))}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Vales ({periodPendingVouchers.length})</span>
+                      <strong className={periodVouchersTotal > 0 ? "num-negative" : ""}>{periodVouchersTotal > 0 ? "− " : ""}{formatMoney(periodVouchersTotal)}</strong>
+                    </div>
+                    <div className={previewNet < 0 ? "total negative" : "total"}>
+                      <span>Neto a pagar</span>
+                      <strong>{previewNet < 0 ? "− " : ""}{formatMoney(Math.abs(previewNet))}</strong>
+                      {previewNet < 0 && <small>Le debe al negocio</small>}
+                    </div>
+                  </div>
+
+                  {earlier.includeFrom && (
+                    <div className="emp-note no-print">
+                      <span>
+                        Tiene{" "}
+                        {earlierVouchers.length > 0 && <b>{earlierVouchers.length} {earlierVouchers.length === 1 ? "vale pendiente" : "vales pendientes"} ({formatMoney(-earlierVouchers.reduce((s, i) => s + i.amount, 0))})</b>}
+                        {earlierVouchers.length > 0 && earlierAdjustments.length > 0 && " y "}
+                        {earlierAdjustments.length > 0 && <b>{earlierAdjustments.length} {earlierAdjustments.length === 1 ? "premio/descuento" : "premios/descuentos"}</b>}
+                        {" "}de antes del {shortDate(periodStart)} que no entran en esta liquidación.
+                      </span>
+                      <button className="secondary" onClick={() => setPeriodStart(earlier.includeFrom!)}>Liquidar desde el {shortDate(earlier.includeFrom)}</button>
+                    </div>
+                  )}
+                  {stuckVouchers.length > 0 && (
+                    <div className="emp-note no-print">
+                      <span>
+                        {stuckVouchers.length === 1 ? "Hay 1 vale pendiente" : `Hay ${stuckVouchers.length} vales pendientes`} ({formatMoney(-stuckVouchers.reduce((s, i) => s + i.amount, 0))}) con fecha de días que ya se liquidaron. Para descontarlos, borrá la liquidación de esos días (abajo) y volvé a liquidar.
+                      </span>
+                    </div>
+                  )}
+
+                  <div className="emp-cols">
+                    <div className="emp-box">
+                      <h3>Vales del período <span>{periodPendingVouchers.length} · {formatMoney(periodVouchersTotal)}</span></h3>
+                      {periodPendingVouchers.length === 0 ? (
+                        <p className="muted emp-empty">No hay vales en estas fechas.</p>
+                      ) : (
+                        <div className="emp-scroll">
+                          <table className="data-table no-stack">
+                            <tbody>
+                              {periodPendingVouchers.map((v) => (
+                                <tr key={v.id}>
+                                  <td className="emp-date">{shortDate(v.shiftDate)}</td>
+                                  <td>{v.detail}</td>
+                                  <td><span className={v.type === "vale_mercaderia" ? "badge info" : "badge"}>{v.type === "vale_mercaderia" ? "Mercadería" : "Adelanto"}</span></td>
+                                  <td className="num">{formatMoney(v.amount)}</td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="emp-box">
+                      <h3>Premios y descuentos <span>{periodAdjustmentsTotal >= 0 ? "+" : "−"} {formatMoney(Math.abs(periodAdjustmentsTotal))}</span></h3>
+                      {periodAdjustments.length === 0 && !showAdjForm && <p className="muted emp-empty">No hay premios ni descuentos en estas fechas.</p>}
+                      {periodAdjustments.length > 0 && (
+                        <div className="emp-scroll">
+                          <table className="data-table no-stack">
+                            <tbody>
+                              {periodAdjustments.map((a) => (
+                                <tr key={a.id}>
+                                  <td className="emp-date">{shortDate(a.adjustmentDate)}</td>
+                                  <td>{ADJUSTMENT_TYPE_LABELS[a.type]} · {a.reason}</td>
+                                  <td className={`num ${a.type === "deduction" ? "num-negative" : "num-positive"}`}>{a.type === "deduction" ? "−" : "+"} {formatMoney(a.amount)}</td>
+                                  <td className="no-print" style={{ width: 1 }}><button className="danger" onClick={() => handleRemoveAdjustment(a.id)}>Quitar</button></td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      )}
+                      {showAdjForm ? (
+                        <div className="emp-adj-form no-print">
+                          <input type="date" value={adjDate} onChange={(e) => setAdjDate(e.target.value)} />
+                          <input type="text" inputMode="decimal" placeholder="Monto" value={adjAmount} onChange={(e) => setAdjAmount(e.target.value)} />
+                          <input placeholder="Motivo" value={adjReason} onChange={(e) => setAdjReason(e.target.value)} />
+                          <div className="row-actions">
+                            <button onClick={handleAddAdjustment}>Agregar {adjType === "bonus" ? "premio" : "descuento"}</button>
+                            <button className="secondary" onClick={() => setShowAdjForm(false)}>Cancelar</button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="row-actions emp-adj-buttons no-print">
+                          <button className="secondary" onClick={() => { setAdjType("bonus"); setShowAdjForm(true); }}>+ Premio</button>
+                          <button className="secondary" onClick={() => { setAdjType("deduction"); setShowAdjForm(true); }}>+ Descuento</button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="emp-pay no-print">
+                    <div className="emp-pay-rows">
+                      {paymentRows.map((p, i) => (
+                        <div key={i} className="emp-pay-row">
+                          <b className={i === 0 ? "" : "emp-pay-spacer"}>Pagar desde</b>
+                          <select value={p.accountId} onChange={(e) => updatePaymentRow(i, "accountId", e.target.value)}>
+                            <option value="">Sin cuenta (ya se pagó por afuera)</option>
+                            {accounts.map((a) => (
+                              <option key={a.id} value={a.id}>{a.name}</option>
+                            ))}
+                          </select>
+                          {isSplit && (
+                            <input type="text" inputMode="decimal" placeholder="Monto" value={p.amount} onChange={(e) => updatePaymentRow(i, "amount", e.target.value)} style={{ width: 130 }} />
+                          )}
+                          {isSplit && <button className="secondary" onClick={() => removePaymentRow(i)}>Quitar</button>}
+                        </div>
+                      ))}
+                      {paymentRows[0]?.accountId && (
+                        <div className="emp-pay-row">
+                          <span className="emp-pay-spacer" />
+                          <button className="secondary" onClick={addPaymentRow}>+ Dividir en otra cuenta</button>
+                          {isSplit && Math.abs(paymentsRemaining) > 0.01 && <span className="num-negative">Faltan {formatMoney(paymentsRemaining)} para cubrir el neto.</span>}
+                        </div>
+                      )}
+                    </div>
+                    <button className="charge-button emp-pay-go" onClick={handleLiquidate}>Registrar liquidación</button>
+                  </div>
+                  <p className="muted no-print" style={{ margin: "8px 0 0", fontSize: 13 }}>
+                    Si elegís una cuenta, el neto sale de ahí al liquidar. Sin cuenta, la liquidación queda registrada pero no mueve Tesorería.
+                  </p>
+                </>
+              )}
+            </>
           )}
         </section>
       </div>
 
       {selectedEmployee && (
-        <>
-          <div className="content-grid" style={{ marginTop: 18 }}>
-            <section className="panel no-print">
-              <div className="panel-title">
-                <h2>Premios y descuentos</h2>
-                <span>{detailLoading ? "Cargando…" : null}</span>
-              </div>
-              <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 10 }}>
-                <input type="date" value={adjDate} onChange={(e) => setAdjDate(e.target.value)} />
-                <select value={adjType} onChange={(e) => setAdjType(e.target.value as PayrollAdjustmentType)}>
-                  <option value="bonus">Premio</option>
-                  <option value="deduction">Descuento</option>
-                </select>
-                <input type="text" inputMode="decimal" placeholder="Monto" value={adjAmount} onChange={(e) => setAdjAmount(e.target.value)} />
-                <input placeholder="Motivo" value={adjReason} onChange={(e) => setAdjReason(e.target.value)} />
-                <button onClick={handleAddAdjustment}>Agregar</button>
-              </div>
-              <table className="data-table">
-                <thead>
-                  <tr><th>Fecha</th><th>Tipo</th><th>Motivo</th><th className="num">Monto</th><th></th></tr>
-                </thead>
-                <tbody>
-                  {adjustments.map((a) => (
-                    <tr key={a.id}>
-                      <td>{a.adjustmentDate}</td>
-                      <td>{ADJUSTMENT_TYPE_LABELS[a.type]}</td>
-                      <td>{a.reason}</td>
-                      <td className={`num ${a.type === "deduction" ? "num-negative" : "num-positive"}`}>{a.type === "deduction" ? "-" : "+"}{formatMoney(a.amount)}</td>
-                      <td><button className="danger" onClick={() => handleRemoveAdjustment(a.id)}>Quitar</button></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {adjustments.length === 0 && <p className="muted">Todavía no hay premios ni descuentos cargados.</p>}
-            </section>
-
-            <section className="panel">
-              <div className="panel-title">
-                <h2>Vales retirados</h2>
-              </div>
-              <table className="data-table">
-                <thead>
-                  <tr><th>Fecha</th><th>Turno</th><th>Tipo</th><th>Detalle</th><th className="num">Monto</th><th>Estado</th></tr>
-                </thead>
-                <tbody>
-                  {vouchers.map((v) => (
-                    <tr key={v.id}>
-                      <td>{v.shiftDate}</td>
-                      <td>{v.shift === "mostrador" ? "Mostrador" : v.shift === "morning" ? "Mañana" : "Tarde"}</td>
-                      <td>{OUTFLOW_TYPE_LABELS[v.type] ?? v.type}</td>
-                      <td>{v.detail}</td>
-                      <td className="num">{formatMoney(v.amount)}</td>
-                      <td>{v.liquidated ? "Liquidado" : "Pendiente"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              {vouchers.length === 0 && <p className="muted">Todavía no retiró vales.</p>}
-            </section>
+        <section className="panel no-print" style={{ marginTop: 16 }}>
+          <div className="page-tabs">
+            <button className={historyTab === "liquidations" ? "page-tab active" : "page-tab"} onClick={() => setHistoryTab("liquidations")}>
+              Liquidaciones anteriores <span className="badge">{liquidations.length}</span>
+            </button>
+            <button className={historyTab === "liquidated" ? "page-tab active" : "page-tab"} onClick={() => setHistoryTab("liquidated")}>
+              Vales y premios ya liquidados <span className="badge">{liquidatedRows.length}</span>
+            </button>
           </div>
 
-          <section className="panel print-area" style={{ marginTop: 18 }}>
-            <div className="panel-title">
-              <h2>{receipt ? "Recibo de liquidación" : "Liquidación"}</h2>
-              <div className="no-print" style={{ display: "flex", gap: 8 }}>
-                {receipt && <button className="secondary" onClick={() => setReceipt(null)}>Liquidar otro período</button>}
-                <button className="secondary" onClick={handlePrint}>Imprimir</button>
-              </div>
-            </div>
-            <p className="muted print-only-header">
-              {selectedEmployee.fullName} · Sueldo {formatMoney(selectedEmployee.baseSalary)} {SALARY_PERIOD_LABELS[selectedEmployee.salaryPeriod]}
-            </p>
-
-            {receipt ? (
-              <>
-                <p className="muted">
-                  Período {receipt.liquidation.periodStart} — {receipt.liquidation.periodEnd}
-                  {receiptLoading && " · Cargando detalle…"}
-                </p>
-                <div className="kpi-grid">
-                  <div className="kpi-card">
-                    <span>Sueldo del período</span>
-                    <strong>{formatMoney(receipt.liquidation.baseSalary)}</strong>
-                  </div>
-                  <div className="kpi-card">
-                    <span>Premios / descuentos</span>
-                    <strong>{formatMoney(receipt.liquidation.adjustmentsTotal)}</strong>
-                  </div>
-                  <div className="kpi-card">
-                    <span>Vales</span>
-                    <strong>{formatMoney(receipt.liquidation.vouchersTotal)}</strong>
-                  </div>
-                  <div className="kpi-card">
-                    <span>Neto pagado</span>
-                    <strong>{formatMoney(receipt.liquidation.netAmount)}</strong>
-                  </div>
-                </div>
-
-                {receipt.items.length > 0 && (
-                  <table className="data-table" style={{ marginTop: 14 }}>
+          {historyTab === "liquidations" && (
+            <>
+              {liquidations.length === 0 ? (
+                <p className="muted">Todavía no hay liquidaciones registradas.</p>
+              ) : (
+                <div className="table-scroll">
+                  <table className="data-table">
                     <thead>
-                      <tr><th>Fecha</th><th>Concepto</th><th className="num">Monto</th></tr>
+                      <tr><th>Período</th><th className="num hide-sm">Sueldo</th><th className="num hide-sm">Premios/desc.</th><th className="num hide-sm">Vales</th><th className="num">Neto</th><th className="hide-md">Pagado desde</th><th></th></tr>
                     </thead>
                     <tbody>
-                      {receipt.items.map((item, i) => (
-                        <tr key={i}>
-                          <td>{item.date}</td>
-                          <td>{item.kind === "voucher" ? `Vale · ${item.label}` : `${ADJUSTMENT_TYPE_LABELS[item.kind]} · ${item.label}`}</td>
-                          <td className={`num ${item.kind === "bonus" ? "num-positive" : "num-negative"}`}>
-                            {item.kind === "bonus" ? "+" : "-"}{formatMoney(item.amount)}
+                      {visibleLiquidations.map((l) => (
+                        <tr key={l.id}>
+                          <td>{shortDate(l.periodStart)} al {shortDate(l.periodEnd)}/{l.periodEnd.slice(2, 4)}</td>
+                          <td className="num hide-sm">{formatMoney(l.baseSalary)}</td>
+                          <td className="num hide-sm">{formatMoney(l.adjustmentsTotal)}</td>
+                          <td className="num hide-sm">{formatMoney(l.vouchersTotal)}</td>
+                          <td className={l.netAmount < 0 ? "num num-negative" : "num"}>{formatMoney(l.netAmount)}</td>
+                          <td className="hide-md">{l.payments.length > 0 ? l.payments.map((p) => p.accountName ?? "Cuenta").join(" + ") : "—"}</td>
+                          <td>
+                            <div className="row-actions">
+                              <button className="secondary" onClick={() => handleViewReceipt(l)}>Ver / Imprimir</button>
+                              <button className="danger" onClick={() => handleRemoveLiquidation(l.id)}>Borrar</button>
+                            </div>
                           </td>
                         </tr>
                       ))}
                     </tbody>
                   </table>
-                )}
+                </div>
+              )}
+              {liquidations.length > 5 && (
+                <button className="secondary" style={{ marginTop: 10 }} onClick={() => setShowAllLiquidations((v) => !v)}>
+                  {showAllLiquidations ? "Ver solo las últimas 5" : `Ver las ${liquidations.length}`}
+                </button>
+              )}
+            </>
+          )}
 
-                <p style={{ marginTop: 14 }}>
-                  <b>Forma de pago: </b>
-                  {receipt.liquidation.payments.length === 0
-                    ? "Sin cuenta (ya se pagó por afuera del sistema)"
-                    : receipt.liquidation.payments.map((p) => `${p.accountName ?? "Cuenta"}: ${formatMoney(p.amount)}`).join(" + ")}
-                </p>
-              </>
+          {historyTab === "liquidated" && (
+            liquidatedRows.length === 0 ? (
+              <p className="muted">Todavía no hay vales ni premios liquidados.</p>
             ) : (
-              <>
-                <div className="cash-banner-form no-print" style={{ flexWrap: "wrap", marginBottom: 14 }}>
-                  <input type="date" value={periodStart} onChange={(e) => setPeriodStart(e.target.value)} />
-                  <input type="date" value={periodEnd} onChange={(e) => setPeriodEnd(e.target.value)} />
-                  <button className="secondary" onClick={() => { setPeriodStart(addDaysIso(todayIso(), -6)); setPeriodEnd(todayIso()); }}>Semana</button>
-                  <button className="secondary" onClick={() => { setPeriodStart(addDaysIso(todayIso(), -14)); setPeriodEnd(todayIso()); }}>Quincena</button>
-                  <button className="secondary" onClick={() => { setPeriodStart(addDaysIso(todayIso(), -29)); setPeriodEnd(todayIso()); }}>Mes</button>
-                </div>
-
-                <div className="kpi-grid">
-                  <div className="kpi-card">
-                    <span>Sueldo del período ({daysBetweenInclusive(periodStart, periodEnd)} días, {SALARY_PERIOD_LABELS[selectedEmployee.salaryPeriod]})</span>
-                    <strong>{formatMoney(previewBaseSalary)}</strong>
-                  </div>
-                  <div className="kpi-card">
-                    <span>Premios / descuentos</span>
-                    <strong>{formatMoney(periodAdjustmentsTotal)}</strong>
-                  </div>
-                  <div className="kpi-card">
-                    <span>Vales del período</span>
-                    <strong>{formatMoney(periodVouchersTotal)}</strong>
-                  </div>
-                  <div className="kpi-card">
-                    <span>Neto a pagar</span>
-                    <strong>{formatMoney(previewNet)}</strong>
-                  </div>
-                </div>
-
-                {(periodAdjustments.length > 0 || periodPendingVouchers.length > 0) && (
-                  <table className="data-table" style={{ marginTop: 14 }}>
-                    <thead>
-                      <tr><th>Fecha</th><th>Concepto</th><th className="num">Monto</th></tr>
-                    </thead>
-                    <tbody>
-                      {periodAdjustments.map((a) => (
-                        <tr key={a.id}>
-                          <td>{a.adjustmentDate}</td>
-                          <td>{ADJUSTMENT_TYPE_LABELS[a.type]} · {a.reason}</td>
-                          <td className={`num ${a.type === "bonus" ? "num-positive" : "num-negative"}`}>{a.type === "bonus" ? "+" : "-"}{formatMoney(a.amount)}</td>
-                        </tr>
-                      ))}
-                      {periodPendingVouchers.map((v) => (
-                        <tr key={v.id}>
-                          <td>{v.shiftDate}</td>
-                          <td>Vale · {v.detail}</td>
-                          <td className="num num-negative">-{formatMoney(v.amount)}</td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                )}
-
-                <div className="no-print" style={{ marginTop: 14 }}>
-                  {paymentRows.map((p, i) => (
-                    <div key={i} className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 8 }}>
-                      <select value={p.accountId} onChange={(e) => updatePaymentRow(i, "accountId", e.target.value)}>
-                        <option value="">Sin cuenta (ya se pagó por afuera del sistema)</option>
-                        {accounts.map((a) => (
-                          <option key={a.id} value={a.id}>{a.name}</option>
-                        ))}
-                      </select>
-                      {isSplit && (
-                        <input
-                          type="text"
-                          inputMode="decimal"
-                          placeholder="Monto"
-                          value={p.amount}
-                          onChange={(e) => updatePaymentRow(i, "amount", e.target.value)}
-                          style={{ width: 130 }}
-                        />
-                      )}
-                      {isSplit && (
-                        <button className="secondary" onClick={() => removePaymentRow(i)}>Quitar cuenta</button>
-                      )}
-                    </div>
-                  ))}
-                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                    {paymentRows[0]?.accountId && (
-                      <button className="secondary" onClick={addPaymentRow}>+ Dividir el pago en más de una cuenta</button>
-                    )}
-                    <button className="charge-button" onClick={handleLiquidate}>
-                      Liquidar período
-                    </button>
-                  </div>
-                </div>
-                {isSplit && Math.abs(paymentsRemaining) > 0.01 && (
-                  <p className="message warning" style={{ marginTop: 6 }}>Faltan {formatMoney(paymentsRemaining)} para cubrir el neto entre las cuentas.</p>
-                )}
-                <p className="muted" style={{ marginTop: 6 }}>
-                  Si elegís cuenta(s), el neto se descuenta de ahí al liquidar (podés dividirlo en más de una). Si dejás la cuenta sin elegir, la liquidación queda registrada pero no mueve nada de Tesorería.
-                </p>
-              </>
-            )}
-
-            <table className="data-table no-print" style={{ marginTop: 18 }}>
-              <thead>
-                <tr><th>Período</th><th className="num">Sueldo</th><th className="num">Ajustes</th><th className="num">Vales</th><th className="num">Neto</th><th>Pagado desde</th><th></th></tr>
-              </thead>
-              <tbody>
-                {liquidations.map((l) => (
-                  <tr key={l.id}>
-                    <td>{l.periodStart} — {l.periodEnd}</td>
-                    <td className="num">{formatMoney(l.baseSalary)}</td>
-                    <td className="num">{formatMoney(l.adjustmentsTotal)}</td>
-                    <td className="num">{formatMoney(l.vouchersTotal)}</td>
-                    <td className="num">{formatMoney(l.netAmount)}</td>
-                    <td>{l.payments.length > 0 ? l.payments.map((p) => p.accountName ?? "Cuenta").join(" + ") : "—"}</td>
-                    <td style={{ display: "flex", gap: 6 }}>
-                      <button className="secondary" onClick={() => handleViewReceipt(l)}>Ver / Imprimir</button>
-                      <button className="danger" onClick={() => handleRemoveLiquidation(l.id)}>Borrar</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            {liquidations.length === 0 && <p className="muted">Todavía no hay liquidaciones registradas.</p>}
-          </section>
-        </>
+              <div className="emp-scroll tall">
+                <table className="data-table no-stack">
+                  <tbody>
+                    {liquidatedRows.map((row) => (
+                      <tr key={row.id}>
+                        <td className="emp-date">{shortDate(row.date)}/{row.date.slice(2, 4)}</td>
+                        <td>{row.label}</td>
+                        <td className={row.amount < 0 ? "num num-negative" : "num num-positive"}>{row.amount < 0 ? "−" : "+"} {formatMoney(Math.abs(row.amount))}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )
+          )}
+        </section>
       )}
     </>
   );

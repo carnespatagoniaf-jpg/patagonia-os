@@ -1231,3 +1231,77 @@ input[type="file"], main textarea { max-width: 100%; }
   .order-lines li { grid-template-columns: 1fr auto; }
   .order-lines li > input { grid-column: 1 / -1; }
 }
+
+/* Empleados (2026-11-02, el dueño: "tenés que ir abajo todo, los vales se ven feos"): lista angosta a la izquierda,
+   la liquidación arriba a la derecha y los vales en una caja con su propia barra, para que la página no crezca con cada vale. */
+.badge.info { background: #eef4ff; color: #2849a8; }
+.emp-layout { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 16px; align-items: start; }
+.emp-list.panel { padding: 16px; }
+.emp-list .panel-title { margin-bottom: 10px; }
+.emp-list .panel-title h2 { font-size: 16px; }
+.emp-list-items { display: grid; gap: 2px; max-height: 520px; overflow-y: auto; }
+.emp-item { display: grid; gap: 1px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: var(--r); padding: 9px 11px; color: var(--ink); }
+.emp-item:hover { background: var(--surface-2); }
+.emp-item.active { background: var(--brand-soft); border-color: var(--brand-line); }
+.emp-item small { color: var(--muted); font-size: 12.5px; }
+.emp-main.panel { padding: 18px 20px; min-width: 0; }
+.emp-main > .muted:only-child { margin: 0; }
+.emp-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.emp-head h2 { margin: 0; font-size: 20px; }
+.emp-head p { margin: 2px 0 0; font-size: 13px; }
+.emp-main .form-box { margin-top: 12px; }
+.emp-period { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin: 14px 0 12px; }
+.emp-period input[type="date"] { width: auto; }
+.emp-seg { display: inline-flex; border: 1px solid var(--field-line); border-radius: var(--r); overflow: hidden; }
+.emp-seg button { background: #fff; border: 0; border-right: 1px solid var(--field-line); padding: 7px 13px; font-weight: 700; font-size: 13px; color: var(--ink); }
+.emp-seg button:last-child { border-right: 0; }
+.emp-seg button.active { background: var(--ink); color: #fff; }
+.emp-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; }
+.emp-summary > div { padding: 12px 14px; border-right: 1px solid var(--line); display: grid; gap: 2px; align-content: start; min-width: 0; }
+.emp-summary > div:last-child { border-right: 0; }
+.emp-summary span { color: var(--muted); font-size: 12px; }
+.emp-summary strong { font-size: 21px; white-space: nowrap; }
+.emp-summary .total { background: var(--ok-soft); }
+.emp-summary .total.negative { background: var(--danger-soft); }
+.emp-summary .total.negative strong, .emp-summary .total.negative small { color: var(--danger); }
+.emp-summary small { font-size: 12px; font-weight: 600; }
+.emp-note { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; margin-top: 10px; background: var(--warn-soft); color: var(--warn); border-radius: var(--r); padding: 8px 12px; font-size: 13px; }
+.emp-cols { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; margin-top: 14px; align-items: start; }
+.emp-box { border: 1px solid var(--line); border-radius: var(--r-lg); min-width: 0; }
+.emp-box h3 { margin: 0; font-size: 14px; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); display: flex; justify-content: space-between; gap: 8px; }
+.emp-box h3 span { color: var(--muted); font-weight: 600; white-space: nowrap; }
+.emp-box .data-table td { padding: 7px 14px; font-size: 13px; }
+.emp-box .data-table tr:last-child td { border-bottom: 0; }
+.emp-box .emp-empty { margin: 0; padding: 12px 14px; font-size: 13px; }
+.emp-scroll { max-height: 262px; overflow-y: auto; }
+.emp-scroll.tall { max-height: 420px; }
+td.emp-date { color: var(--muted); width: 1%; white-space: nowrap; }
+.emp-adj-buttons { padding: 10px 14px; border-top: 1px solid var(--line-soft); }
+.emp-adj-form { display: grid; grid-template-columns: auto minmax(90px, 1fr); gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line-soft); }
+.emp-adj-form input[placeholder="Motivo"], .emp-adj-form .row-actions { grid-column: 1 / -1; }
+.emp-pay { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--line-soft); }
+.emp-pay-rows { display: grid; gap: 8px; min-width: 0; }
+.emp-pay-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.emp-pay-row > b, .emp-pay-spacer { width: 96px; flex: none; }
+.emp-pay-row b.emp-pay-spacer { visibility: hidden; }
+.emp-pay-row select { width: auto; min-width: 220px; max-width: 100%; }
+.charge-button.emp-pay-go { padding: 11px 20px; font-size: 15px; }
+@media (max-width: 1100px) {
+  .emp-layout { grid-template-columns: 220px minmax(0, 1fr); }
+  .emp-cols { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .emp-layout { grid-template-columns: minmax(0, 1fr); }
+  .emp-list-items { max-height: 220px; }
+  .emp-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .emp-summary > div:nth-child(2) { border-right: 0; }
+  .emp-summary > div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .emp-pay-row > b, .emp-pay-spacer { width: auto; }
+  .emp-pay-row b.emp-pay-spacer, span.emp-pay-spacer { display: none; }
+  .emp-pay-row select { min-width: 0; flex: 1; }
+  .charge-button.emp-pay-go { width: 100%; }
+}
+@media print {
+  .emp-scroll, .emp-scroll.tall { max-height: none; overflow: visible; }
+  .emp-main.panel { padding: 0; }
+}
