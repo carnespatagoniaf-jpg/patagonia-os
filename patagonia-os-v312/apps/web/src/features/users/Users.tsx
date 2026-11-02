@@ -190,7 +190,11 @@ export function Users() {
                     <>
                       <td><input value={editDraft.fullName} onChange={(e) => setEditDraft({ ...editDraft, fullName: e.target.value })} /></td>
                       <td>
-                        <select value={editDraft.role} onChange={(e) => setEditDraft({ ...editDraft, role: e.target.value as StaffRole })}>
+                        <select
+                          value={editDraft.role}
+                          disabled={user.id === profile?.id}
+                          title={user.id === profile?.id ? "Tu propio rol lo cambia otro administrador o el dueño" : undefined}
+                          onChange={(e) => setEditDraft({ ...editDraft, role: e.target.value as StaffRole })}>
                           {ASSIGNABLE_ROLES.map((r) => (
                             <option key={r} value={r}>{ROLE_LABELS[r]}</option>
                           ))}
@@ -204,7 +208,7 @@ export function Users() {
                         </select>
                       </td>
                       <td>
-                        <select value={editDraft.active ? "1" : "0"} onChange={(e) => setEditDraft({ ...editDraft, active: e.target.value === "1" })}>
+                        <select value={editDraft.active ? "1" : "0"} disabled={user.id === profile?.id} onChange={(e) => setEditDraft({ ...editDraft, active: e.target.value === "1" })}>
                           <option value="1">Activo</option>
                           <option value="0">Inactivo</option>
                         </select>
@@ -245,7 +249,9 @@ export function Users() {
                   <tr>
                     <td colSpan={5} style={{ background: "#f8f5f2" }}>
                       <p className="muted" style={{ margin: "4px 0 8px" }}>
-                        Qué puede ver {editDraft.fullName || "esta persona"} (destildá para ocultarle algo puntual, sin cambiarle el rol):
+                        {user.id === profile?.id
+                          ? "Lo que ves vos no se cambia desde tu propio usuario (así nadie se deja afuera sin querer): lo cambia otro administrador o el dueño."
+                          : `Qué puede ver ${editDraft.fullName || "esta persona"} (destildá para ocultarle algo puntual, sin cambiarle el rol):`}
                       </p>
                       <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 18px" }}>
                         {rolePermissions[editDraft.role]
@@ -255,6 +261,7 @@ export function Users() {
                               <input
                                 type="checkbox"
                                 checked={!editDraft.deniedPermissions.includes(permission)}
+                                disabled={user.id === profile?.id}
                                 onChange={(e) => toggleDeniedPermission(permission, e.target.checked)}
                               />
                               {PERMISSION_LABELS[permission]}

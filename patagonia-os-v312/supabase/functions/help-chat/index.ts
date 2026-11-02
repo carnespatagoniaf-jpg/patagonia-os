@@ -261,7 +261,7 @@ RENTABILIDAD, REPORTES Y EXPORTAR
 USUARIOS (dueño o administrador)
 - Permite crear el acceso de otras personas: email, nombre, rol y sucursal. Al crear, el sistema muestra una contraseña temporal para pasarle a esa persona. También se puede cambiar el rol, la sucursal o desactivar a alguien.
 - Roles: Administrador, Encargado, Cajero/a, Producción, Solo lectura y Contador (solo ve la pantalla Contable y no puede cambiar nada; plan Full).
-- En "Editar" de cada persona aparece "Qué puede ver": destildando una opción se le oculta esa sección solo a esa persona, sin cambiarle el rol.
+- En "Editar" de cada persona aparece "Qué puede ver": destildando una opción se le oculta esa sección solo a esa persona, sin cambiarle el rol. Nadie puede cambiar su propio rol ni lo que ve él mismo (para no dejarse afuera sin querer): eso lo cambia otro administrador o el dueño.
 
 IMPORTAR (menú Reportes → Importar; solo dueño y administrador)
 - Sirve para cargar muchos productos de una vez desde Excel. 1) Bajar la plantilla y completarla (o usar un archivo propio: se reconocen columnas como Código, Nombre, Precio, Costo, Stock, Categoría). 2) Subir el archivo (.xlsx o .csv) o pegar las filas copiadas de Excel; también se puede sumar una columna IVA con 10,5 o 21. 3) Revisar la vista previa y tocar Importar. No se guarda nada hasta ese momento.
