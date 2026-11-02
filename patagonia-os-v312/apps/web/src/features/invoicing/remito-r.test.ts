@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { caiStatus, canIssueRemito, lastNumberByPointOfSale, parseRemito, remitoQuantityLabel, validateCaiForm, type RemitoCai } from "./remito-r";
+import { caiStatus, canIssueRemito, lastNumberByPointOfSale, listInWords, missingRemitoIssuerFields, parseRemito, remitoQuantityLabel, validateCaiForm, type RemitoCai } from "./remito-r";
+
+test("datos del negocio que faltan para el Remito R", () => {
+  const ok = { cuit: "30712345678", businessName: "Carnes SA", address: "Haedo 1", grossIncomeNumber: "123", activityStart: "2020-01-01" };
+  assert.deepEqual(missingRemitoIssuerFields(ok), []);
+  assert.deepEqual(missingRemitoIssuerFields({ ...ok, grossIncomeNumber: " ", activityStart: "" }), ["N.º de Ingresos Brutos", "inicio de actividades"]);
+  assert.equal(missingRemitoIssuerFields(null).length, 5);
+  assert.equal(listInWords(["a", "b", "c"]), "a, b y c");
+  assert.equal(listInWords(["a"]), "a");
+});
 
 const cai = (over: Partial<RemitoCai> = {}): RemitoCai => ({
   id: "c1", pointOfSale: 3, cai: "76123456789012", caiDue: "2026-12-31", numberFrom: 1, numberTo: 100, active: true, ...over

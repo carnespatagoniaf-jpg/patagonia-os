@@ -1,8 +1,25 @@
 import { useEffect, useState } from "react";
 import { CUSTOMER_CONDITION_LABEL, voucherNumberLabel } from "./invoicing-view";
-import { CONSUMER_ID_THRESHOLD, validateRemitoIssue, type Remito, type RemitoIssueForm } from "./remito-r";
+import { CONSUMER_ID_THRESHOLD, listInWords, missingRemitoIssuerFields, validateRemitoIssue, type Remito, type RemitoIssueForm } from "./remito-r";
 import { getChargeRemito, getLastCustomerRemito, issueRemito, listRemitoCais } from "./remito-service";
-import { getCustomerTaxData } from "./invoicing-service";
+import { getCustomerTaxData, getFiscalSettings } from "./invoicing-service";
+import { goToFiscalSettings } from "../../lib/navigate";
+
+/** Aviso grande (antes era una línea roja de 12 px que nadie veía) con el botón para ir a cargar lo que falta. */
+function MissingFiscalData({ missing }: { missing: string[] }) {
+  return (
+    <div className="message warning" style={{ display: "grid", gap: 8, margin: 0 }}>
+      <span>
+        <b>No se puede emitir el Remito R todavía.</b> Faltan datos del negocio que van impresos en el remito: <b>{listInWords(missing)}</b>.
+      </span>
+      <div>
+        <button onClick={goToFiscalSettings}>Cargar los datos en Facturas</button>
+      </div>
+    </div>
+  );
+}
+
+const FISCAL_ERROR = "Faltan datos fiscales del negocio";
 import { RemitoRPrint } from "./RemitoRPaper";
 
 const CONDITIONS: RemitoIssueForm["condition"][] = ["responsable_inscripto", "monotributo", "exento", "consumidor_final"];
@@ -33,6 +50,7 @@ export function RemitoRButton({ chargeId, customerId, amount }: { chargeId: stri
   const [showValues, setShowValues] = useState(false);
   const [printing, setPrinting] = useState<Remito | null>(null);
   const [issued, setIssued] = useState<Remito | null>(null);
+  const [missingFiscal, setMissingFiscal] = useState<string[]>([]);
 
   async function handleClick() {
     setBusy(true);
@@ -45,7 +63,12 @@ export function RemitoRButton({ chargeId, customerId, amount }: { chargeId: stri
         return;
       }
       // Se proponen los datos que ya tiene el cliente (factura o remito anterior).
-      const [tax, last] = await Promise.all([getCustomerTaxData(customerId), getLastCustomerRemito(customerId).catch(() => null)]);
+      const [tax, last, fiscal] = await Promise.all([
+        getCustomerTaxData(customerId),
+        getLastCustomerRemito(customerId).catch(() => null),
+        getFiscalSettings().catch(() => null)
+      ]);
+      setMissingFiscal(missingRemitoIssuerFields(fiscal));
       setForm({
         ...emptyForm(),
         condition: (tax.taxCondition ?? (last?.receiver.taxCondition as RemitoIssueForm["condition"] | null) ?? "consumidor_final"),
@@ -100,6 +123,7 @@ export function RemitoRButton({ chargeId, customerId, amount }: { chargeId: stri
       {open && (
         <div style={{ display: "grid", gap: 6, marginTop: 6, padding: 8, border: "1px solid #e3e6ea", borderRadius: 8, maxWidth: 400, background: "#fff" }}>
           <strong style={{ fontSize: 13 }}>Emitir Remito R</strong>
+          {missingFiscal.length > 0 && <MissingFiscalData missing={missingFiscal} />}
           <label style={{ fontSize: 13 }}>
             Condición del cliente frente al IVA
             <select value={form.condition} onChange={(e) => setForm({ ...form, condition: e.target.value as RemitoIssueForm["condition"] })}>
@@ -132,13 +156,17 @@ export function RemitoRButton({ chargeId, customerId, amount }: { chargeId: stri
             <input type="checkbox" checked={showValues} onChange={(e) => setShowValues(e.target.checked)} /> Mostrar precios en el remito
           </label>
           <div style={{ display: "flex", gap: 6 }}>
-            <button disabled={busy} onClick={() => void handleIssue()}>Emitir e imprimir</button>
+            <button disabled={busy || missingFiscal.length > 0} onClick={() => void handleIssue()}>Emitir e imprimir</button>
             <button className="secondary" disabled={busy} onClick={() => setOpen(false)}>Cancelar</button>
           </div>
           <span className="muted" style={{ fontSize: 12 }}>Toma el próximo número del CAI. Si te equivocás, se anula desde Facturas → Remito R.</span>
         </div>
       )}
-      {message && <div style={{ fontSize: 12, color: "#8b1e1e", maxWidth: 400 }}>{message}</div>}
+      {message && (message.startsWith(FISCAL_ERROR) && missingFiscal.length === 0 ? (
+        <div style={{ marginTop: 6, maxWidth: 420 }}><MissingFiscalData missing={["los datos fiscales del negocio"]} /></div>
+      ) : (
+        <div className="message warning" style={{ marginTop: 6, maxWidth: 420, fontSize: 13 }}>{message}</div>
+      ))}
       {printing && <RemitoRPrint remito={printing} onDone={() => setPrinting(null)} />}
     </>
   );

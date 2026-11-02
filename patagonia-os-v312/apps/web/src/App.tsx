@@ -12,6 +12,7 @@ import { BranchProvider } from "./features/branches/BranchProvider";
 import { isSupabaseConfigured } from "./lib/supabase";
 import { setSerialTabPage } from "./features/inventory/kretz/serial-tabs";
 import { trackPageVisit } from "./lib/page-usage";
+import { NAVIGATE_EVENT } from "./lib/navigate";
 
 // Mostrador e Inicio van en el paquete principal; el resto se baja al abrirlo (ver LazyPage.tsx).
 const Inventory = lazyPage(() => import("./features/inventory/Inventory"), "Inventory");
@@ -55,6 +56,16 @@ export default function App() {
 
   useEffect(() => {
     prefetchPages();
+  }, []);
+
+  // Una pantalla puede pedir ir a otra (lib/navigate.ts); si el usuario no la puede ver, el guard de abajo lo devuelve.
+  useEffect(() => {
+    const onNavigate = (e: Event) => {
+      const target = (e as CustomEvent<Page>).detail;
+      if (target) setPage(target);
+    };
+    window.addEventListener(NAVIGATE_EVENT, onNavigate);
+    return () => window.removeEventListener(NAVIGATE_EVENT, onNavigate);
   }, []);
 
   // Qué pantallas usa cada empresa (pestaña Resumen del panel de plataforma).
