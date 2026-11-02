@@ -1,4 +1,5 @@
 import type { Customer, CustomerBalance, CustomerCharge, CustomerPayment } from "@patagonia/domain";
+import { fetchProductNames } from "../products/product-names";
 import { supabase } from "../../lib/supabase";
 import { fetchAllPages } from "../../lib/paginate";
 
@@ -292,13 +293,16 @@ export async function listChargeItemsForCharges(chargeIds: string[]): Promise<Ch
   for (let i = 0; i < chargeIds.length; i += 100) {
     const { data, error } = await supabase
       .from("customer_charge_items")
-      .select("charge_id,description,quantity,unit_price,line_total,created_at,products(name,unit)")
+      .select("charge_id,product_id,description,quantity,unit_price,line_total,created_at")
       .in("charge_id", chargeIds.slice(i, i + 100))
       .order("created_at");
     if (error) throw error;
-    type Row = { charge_id: string; description: string | null; quantity: number; unit_price: number; line_total: number; products: { name: string; unit: string } | { name: string; unit: string }[] | null };
-    for (const row of (data ?? []) as unknown as Row[]) {
-      const product = Array.isArray(row.products) ? row.products[0] : row.products;
+    // Los nombres van aparte (ver product-names.ts: embeber products(name,unit) da 403).
+    type Row = { charge_id: string; product_id: string | null; description: string | null; quantity: number; unit_price: number; line_total: number };
+    const rows = (data ?? []) as unknown as Row[];
+    const names = await fetchProductNames(rows.map((r) => r.product_id));
+    for (const row of rows) {
+      const product = row.product_id ? names.get(row.product_id) : undefined;
       result.push({
         chargeId: row.charge_id,
         name: product?.name ?? row.description ?? "Producto",
