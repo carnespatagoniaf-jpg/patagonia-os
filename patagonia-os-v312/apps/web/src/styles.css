@@ -1305,3 +1305,107 @@ td.emp-date { color: var(--muted); width: 1%; white-space: nowrap; }
   .emp-scroll, .emp-scroll.tall { max-height: none; overflow: visible; }
   .emp-main.panel { padding: 0; }
 }
+
+/* Pantallas "lista a la izquierda + ficha a la derecha" (Clientes, Compras; 2026-11-02, mismo criterio que Empleados):
+   la acción arriba, una sola a la vez, y las tablas largas en una caja con su propia barra para que la página no crezca. */
+.ws-layout { display: grid; grid-template-columns: 300px minmax(0, 1fr); gap: 16px; align-items: start; }
+.ws-list.panel { padding: 16px; position: sticky; top: 12px; }
+.ws-list .panel-title { margin-bottom: 10px; }
+.ws-list .panel-title h2 { font-size: 16px; display: flex; align-items: center; gap: 6px; }
+.ws-list-total { margin: 0 0 8px; font-size: 13px; color: var(--ink-2); }
+.ws-search { width: 100%; margin-bottom: 8px; }
+.ws-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 8px; }
+.ws-chip { background: #eef1f5; color: var(--ink-2); border: 0; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 700; min-height: 0; }
+.ws-chip:hover { background: #e2e6ec; }
+.ws-chip.active { background: var(--ink); color: #fff; }
+.ws-list-items { display: grid; gap: 2px; max-height: 560px; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+.ws-item { display: flex; justify-content: space-between; align-items: center; gap: 10px; text-align: left; background: transparent; border: 1px solid transparent; border-radius: var(--r); padding: 9px 11px; color: var(--ink); }
+.ws-item:hover { background: var(--surface-2); }
+.ws-item.active { background: var(--brand-soft); border-color: var(--brand-line); }
+.ws-item-main { display: grid; gap: 1px; min-width: 0; }
+.ws-item-main b { overflow: hidden; text-overflow: ellipsis; }
+.ws-item-main small { color: var(--muted); font-size: 12px; }
+.ws-item-side { display: grid; justify-items: end; gap: 2px; white-space: nowrap; }
+.ws-main.panel { padding: 18px 20px; min-width: 0; }
+.ws-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.ws-head h2 { margin: 0; font-size: 20px; }
+.ws-head p { margin: 2px 0 0; font-size: 13px; }
+.ws-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--line); border-radius: var(--r-lg); overflow: hidden; margin-top: 14px; }
+.ws-summary > div { padding: 12px 14px; border-right: 1px solid var(--line); display: grid; gap: 2px; align-content: start; min-width: 0; }
+.ws-summary > div:last-child { border-right: 0; }
+.ws-summary span { color: var(--muted); font-size: 12px; }
+.ws-summary strong { font-size: 21px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ws-summary small { font-size: 12px; font-weight: 600; }
+.ws-summary .bad { background: var(--danger-soft); }
+.ws-summary .bad strong { color: var(--danger); }
+.ws-summary .good { background: var(--ok-soft); }
+.ws-summary .good strong { color: var(--ok); }
+.ws-seg { display: inline-flex; flex-wrap: wrap; border: 1px solid var(--field-line); border-radius: 12px; overflow: hidden; margin-top: 14px; }
+.ws-seg button { background: #fff; border: 0; border-right: 1px solid var(--field-line); border-radius: 0; padding: 9px 16px; font-weight: 700; font-size: 13px; color: var(--ink); min-height: 0; }
+.ws-seg button:last-child { border-right: 0; }
+.ws-seg button:hover:not(.active) { background: var(--surface-2); }
+.ws-seg button.active { background: var(--ink); color: #fff; }
+.ws-form { border: 1px solid var(--line); border-radius: var(--r-lg); background: var(--surface-2); padding: 12px 14px; margin-top: 10px; }
+.ws-form-row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; }
+.ws-field { display: grid; gap: 4px; font-size: 12px; font-weight: 700; color: var(--ink-2); }
+.ws-field input, .ws-field select { font-weight: 400; }
+.ws-field-label { display: block; font-size: 12px; font-weight: 700; color: var(--ink-2); margin-bottom: 4px; }
+.ws-grow { flex: 1 1 220px; min-width: 0; }
+.ws-grow input, input.ws-grow { width: 100%; }
+.ws-form .pos-search { font-size: 15px; padding: 10px 12px 10px 40px; }
+.ws-form .pos-cart { margin-top: 10px; background: #fff; }
+.ws-form-total { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+.ws-form-total > span:first-child { font-size: 15px; }
+.ws-form-total > span:first-child b { font-size: 22px; margin-left: 6px; }
+.ws-form-total .ws-go { margin-left: auto; padding: 11px 20px; font-size: 15px; }
+.ws-box { border: 1px solid var(--line); border-radius: var(--r-lg); margin-top: 14px; min-width: 0; overflow: hidden; }
+.ws-box > h3 { margin: 0; font-size: 14px; padding: 10px 14px; border-bottom: 1px solid var(--line-soft); display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
+.ws-box > h3 > span.muted { font-weight: 600; }
+.ws-scroll { max-height: 440px; overflow: auto; }
+.ws-scroll .data-table thead th { position: sticky; top: 0; background: #fafbfc; z-index: 1; }
+.ws-box .data-table td { padding: 7px 12px; font-size: 13px; vertical-align: top; }
+.ws-box .data-table th { padding: 7px 12px; }
+.ws-empty { margin: 0; padding: 12px 14px; font-size: 13px; }
+td.ws-date { color: var(--muted); width: 1%; white-space: nowrap; }
+td.ws-concept small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; }
+.ws-row-actions { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+.ws-row-actions button { min-height: 28px; padding: 3px 9px; font-size: 12px; border-radius: 8px; }
+.ws-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--line-soft); padding: 0 8px; }
+.ws-tabs button { background: transparent; border: 0; border-bottom: 2px solid transparent; border-radius: 0; padding: 10px 12px; font-weight: 700; font-size: 13px; color: var(--muted); min-height: 0; }
+.ws-tabs button.active { color: var(--brand); border-bottom-color: var(--brand); }
+/* Tarjetas de saldos (Tesorería). */
+.ws-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 12px; margin-bottom: 16px; }
+.ws-card { background: #fff; border: 1px solid var(--line); border-radius: var(--r-lg); padding: 13px 15px; display: grid; gap: 2px; min-width: 0; }
+.ws-card > span { color: var(--muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-card > strong { font-size: 20px; white-space: nowrap; }
+.ws-card > small { font-size: 12px; font-weight: 600; color: var(--muted); }
+.ws-card.total { background: var(--ink); border-color: var(--ink); color: #fff; }
+.ws-card.total > span, .ws-card.total > small { color: #aeb6c2; }
+.ws-card.inactive { opacity: .55; }
+.ws-cols { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1fr); gap: 16px; align-items: start; }
+@media (max-width: 1100px) {
+  .ws-layout { grid-template-columns: 250px minmax(0, 1fr); }
+  .ws-cols { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .ws-layout { grid-template-columns: minmax(0, 1fr); }
+  .ws-list.panel { position: static; }
+  .ws-list-items { max-height: 240px; }
+  .ws-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ws-summary > div:nth-child(2) { border-right: 0; }
+  .ws-summary > div:nth-child(-n+2) { border-bottom: 1px solid var(--line); }
+  .ws-seg { display: flex; }
+  .ws-seg button { flex: 1 1 auto; }
+  .ws-form-total .ws-go { width: 100%; margin-left: 0; }
+}
+@media print {
+  .ws-scroll { max-height: none; overflow: visible; }
+  .ws-main.panel { padding: 0; }
+  .ws-box { border: 0; }
+}
+/* Pie de una caja (totales) y barras de ventas por día (Tesorería). */
+.ws-box-foot { display: flex; justify-content: space-between; gap: 10px; padding: 9px 14px; border-top: 1px solid var(--line-soft); font-weight: 700; font-size: 13px; }
+.ws-bar { height: 8px; border-radius: 999px; background: #eef1f5; overflow: hidden; margin-top: 5px; }
+.ws-bar > i { display: block; height: 100%; background: var(--brand); border-radius: 999px; }
+.ws-box > h3 input[type="date"], .ws-box > h3 select { padding: 4px 8px; font-size: 12px; min-height: 30px; width: auto; }
+.ws-box > h3 button { min-height: 30px; padding: 4px 10px; font-size: 12px; }
