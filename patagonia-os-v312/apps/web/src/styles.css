@@ -1409,3 +1409,28 @@ td.ws-concept small { display: block; color: var(--muted); font-size: 12px; marg
 .ws-bar > i { display: block; height: 100%; background: var(--brand); border-radius: 999px; }
 .ws-box > h3 input[type="date"], .ws-box > h3 select { padding: 4px 8px; font-size: 12px; min-height: 30px; width: auto; }
 .ws-box > h3 button { min-height: 30px; padding: 4px 10px; font-size: 12px; }
+/* Aviso suave dentro de una ficha (Deudas: próximo pago). */
+.ws-note { margin-top: 10px; background: var(--warn-soft); color: var(--warn); border-radius: var(--r); padding: 8px 12px; font-size: 13px; }
+/* Stock (rediseño 2026-11-02): tarjetas que filtran, menú "Más opciones" y margen con color. */
+.ws-header-actions { align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.ws-cards-4 { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+button.ws-card-button { text-align: left; font: inherit; color: inherit; cursor: pointer; }
+button.ws-card-button:hover { border-color: #c3cad5; }
+.ws-card.bad { background: var(--danger-soft); border-color: #f4c7c2; }
+.ws-card.bad > strong { color: var(--danger); }
+.ws-card.warn { background: var(--warn-soft); border-color: #f5d9a8; }
+.ws-card.warn > strong { color: var(--warn); }
+.ws-card.active { outline: 2px solid var(--ink); outline-offset: -2px; }
+.ws-chips-sep { width: 1px; align-self: stretch; background: var(--line); margin: 0 2px; }
+.ws-menu { position: relative; }
+.ws-menu > summary { list-style: none; cursor: pointer; display: inline-flex; align-items: center; min-height: 38px; padding: 8px 14px; border-radius: 10px; border: 1px solid var(--field-line); background: #fff; font-size: 14px; font-weight: 700; color: var(--ink); }
+.ws-menu > summary::-webkit-details-marker { display: none; }
+.ws-menu-list { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; background: #fff; border: 1px solid var(--line); border-radius: 12px; box-shadow: 0 12px 30px rgba(24,32,43,.14); padding: 6px; min-width: 250px; display: grid; }
+.ws-menu-list button { background: transparent; border: 0; text-align: left; padding: 9px 10px; border-radius: 8px; font-size: 14px; font-weight: 500; color: var(--ink); min-height: 0; justify-content: flex-start; }
+.ws-menu-list button:hover { background: var(--surface-2); }
+.margin-badge { display: inline-block; font-size: 12px; font-weight: 800; border-radius: 999px; padding: 2px 8px; }
+.margin-badge.ok { background: var(--ok-soft); color: var(--ok); }
+.margin-badge.low { background: var(--warn-soft); color: var(--warn); }
+.margin-badge.none { background: var(--danger-soft); color: var(--danger); }
+.num-warn { color: var(--warn); font-weight: 600; }
+@media (max-width: 900px) { .ws-cards-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
