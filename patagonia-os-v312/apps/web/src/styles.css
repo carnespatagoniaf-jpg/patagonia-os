@@ -726,14 +726,6 @@ a.button-link:hover { background: #731818; }
 .my-scale-head h2 { margin: 0; font-size: 22px; }
 .my-scale-head p { margin: 2px 0 0; }
 .my-scale-icon { width: 44px; height: 44px; border-radius: 12px; background: #8b1e1e; color: white; display: grid; place-items: center; flex: none; }
-.my-scale-steps { list-style: none; display: flex; gap: 8px; margin: 0; padding: 0; flex-wrap: wrap; }
-.my-scale-steps li { display: flex; align-items: center; gap: 8px; color: #8b95a5; font-weight: 600; font-size: 14px; }
-.my-scale-steps li + li::before { content: ""; width: 28px; height: 2px; background: #e5e7eb; }
-.my-scale-steps li span { width: 26px; height: 26px; border-radius: 50%; border: 2px solid #d6dce5; display: grid; place-items: center; font-size: 13px; }
-.my-scale-steps li.current { color: #18202b; }
-.my-scale-steps li.current span { border-color: #8b1e1e; color: #8b1e1e; }
-.my-scale-steps li.done { color: #18202b; }
-.my-scale-steps li.done span { background: #8b1e1e; border-color: #8b1e1e; color: white; }
 .my-scale-body { display: grid; gap: 12px; justify-items: start; padding: 8px 0 4px; }
 .my-scale-body p { margin: 0; }
 .my-scale-status { font-size: 19px; font-weight: 700; display: flex; align-items: flex-start; gap: 8px; color: #18202b; }
@@ -1137,9 +1129,10 @@ input[type="file"], main textarea { max-width: 100%; }
 .cash-out-option small { color: var(--muted); font-size: 12.5px; }
 
 /* Mis balanzas: los 5 pasos de la instalación (install-status.ts) */
+.my-scale-steps { min-width: 0; }
 .my-scale-steps ol { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
 .my-scale-steps li { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
-.my-scale-steps li > div { display: grid; gap: 2px; min-width: 0; }
+.my-scale-steps li > div { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
 .my-scale-steps li.ok svg { color: var(--success, #15803d); flex: none; margin-top: 2px; }
 .my-scale-steps li.todo strong { color: var(--muted, #6b7280); }
 .my-scale-step-dot { width: 14px; height: 14px; margin: 3px 2px 0; border-radius: 50%; border: 2px solid var(--border, #cbd5e1); flex: none; }
