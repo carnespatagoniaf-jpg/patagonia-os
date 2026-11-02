@@ -254,6 +254,23 @@ export function validateRemitoIssue(f: RemitoIssueForm, amount: number): string 
   return null;
 }
 
+/** Datos del negocio que issue_remito exige (van impresos en el remito). Devuelve los que faltan, en palabras. */
+export function missingRemitoIssuerFields(f: { cuit: string; businessName: string; address: string; grossIncomeNumber: string; activityStart: string } | null): string[] {
+  if (!f) return ["CUIT", "razón social", "domicilio comercial", "N.º de Ingresos Brutos", "inicio de actividades"];
+  const missing: string[] = [];
+  if (!f.cuit.trim()) missing.push("CUIT");
+  if (!f.businessName.trim()) missing.push("razón social");
+  if (!f.address.trim()) missing.push("domicilio comercial");
+  if (!f.grossIncomeNumber.trim()) missing.push("N.º de Ingresos Brutos");
+  if (!f.activityStart.trim()) missing.push("inicio de actividades");
+  return missing;
+}
+
+/** "a", "a y b", "a, b y c". */
+export function listInWords(items: string[]): string {
+  return items.length <= 1 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} y ${items[items.length - 1]}`;
+}
+
 /** ¿El remito identifica al destinatario o va solo "A CONSUMIDOR FINAL"? */
 export function receiverIdentified(r: Pick<Remito, "receiver" | "total">): boolean {
   return r.receiver.taxCondition !== "consumidor_final" || Boolean(r.receiver.taxId) || Boolean(r.receiver.address) || r.total >= CONSUMER_ID_THRESHOLD;

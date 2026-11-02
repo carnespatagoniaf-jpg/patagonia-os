@@ -41,6 +41,8 @@ import {
 } from "./invoicing-view";
 import { InvoiceRequestFields } from "./InvoiceRequestFields";
 import { RemitoRPanel } from "./RemitoRPanel";
+import { listInWords, missingRemitoIssuerFields } from "./remito-r";
+import { OPEN_FISCAL_KEY } from "../../lib/navigate";
 import { useAuth } from "../auth/AuthProvider";
 import { planAllows } from "../auth/permissions";
 
@@ -91,6 +93,17 @@ export function Invoicing() {
   const filterDigits = saleFilter.replace(/[.\s]/g, "").split(",")[0].replace(/\D/g, "");
   const filteredSales = filterDigits ? sales.filter((s) => String(Math.round(s.total)).includes(filterDigits)) : sales;
   const [loading, setLoading] = useState(isSupabaseConfigured);
+  // Llegó desde Clientes → "Remito R" porque faltaban datos (lib/navigate.ts): se abre la sección y se dice qué falta.
+  const [fromRemito] = useState(() => {
+    try {
+      const flag = sessionStorage.getItem(OPEN_FISCAL_KEY) === "1";
+      sessionStorage.removeItem(OPEN_FISCAL_KEY);
+      return flag;
+    } catch {
+      return false;
+    }
+  });
+  const remitoMissing = settings ? missingRemitoIssuerFields(settings) : [];
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [printReceipt, setPrintReceipt] = useState<ReceiptState | null>(null);
@@ -351,10 +364,14 @@ export function Invoicing() {
 
         <SettingSection
           title="Datos fiscales del negocio"
-          status={settings ? `${ISSUER_CONDITION_LABEL[settings.taxCondition]} · CUIT ${formatCuit(settings.cuit)} · PV ${settings.pointOfSale}` : "Sin cargar"}
-          tone={settings ? "ok" : "warn"}
+          status={
+            settings
+              ? `${ISSUER_CONDITION_LABEL[settings.taxCondition]} · CUIT ${formatCuit(settings.cuit)} · PV ${settings.pointOfSale}${fromRemito && remitoMissing.length > 0 ? ` · Para el Remito R falta: ${listInWords(remitoMissing)}` : ""}`
+              : "Sin cargar"
+          }
+          tone={settings && !(fromRemito && remitoMissing.length > 0) ? "ok" : "warn"}
           actionLabel={settings ? "Cambiar" : "Cargar"}
-          defaultOpen={!settings && !loading}
+          defaultOpen={(!settings && !loading) || fromRemito}
         >
           <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", maxWidth: 760 }}>
             <label className="muted">
