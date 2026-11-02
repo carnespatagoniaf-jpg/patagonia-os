@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { fetchProductNames } from "../products/product-names";
 import type { FrigoCamara, FrigoDt, FrigoMedia, FrigoSalida, SalidaKind } from "./frigo-logic";
 
 // Frigorífico (migración 169): las tablas se leen directo (RLS por empresa y
@@ -56,15 +57,17 @@ export async function listSalidas(): Promise<FrigoSalida[]> {
   const rows = await allRows<{
     id: string; number: number; salida_date: string; kind: SalidaKind; customer_id: string | null; price_per_kg: number | string | null;
     total_kg: number | string; total: number | string; notes: string | null; voided_at: string | null; voided_reason: string | null;
-    customers: { name: string } | null; dest: { name: string } | null; products: { name: string } | null;
+    customers: { name: string } | null; dest: { name: string } | null; product_id: string | null;
   }>(
     "frigo_salidas",
-    "id,number,salida_date,kind,customer_id,price_per_kg,total_kg,total,notes,voided_at,voided_reason,customers(name),dest:branches!frigo_salidas_dest_branch_id_fkey(name),products(name)",
+    "id,number,salida_date,kind,customer_id,price_per_kg,total_kg,total,notes,voided_at,voided_reason,customers(name),dest:branches!frigo_salidas_dest_branch_id_fkey(name),product_id",
     "number"
   );
+  // El nombre del producto va aparte (ver product-names.ts: embeber products(name) da 403).
+  const names = await fetchProductNames(rows.map((r) => r.product_id));
   return rows.map((r) => ({
     id: r.id, number: r.number, salidaDate: r.salida_date, kind: r.kind, customerId: r.customer_id, customerName: r.customers?.name ?? null,
-    destBranchName: r.dest?.name ?? null, productName: r.products?.name ?? null,
+    destBranchName: r.dest?.name ?? null, productName: r.product_id ? names.get(r.product_id)?.name ?? null : null,
     pricePerKg: r.price_per_kg == null ? null : Number(r.price_per_kg), totalKg: Number(r.total_kg), total: Number(r.total),
     notes: r.notes, voidedAt: r.voided_at, voidedReason: r.voided_reason
   }));

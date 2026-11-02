@@ -1,6 +1,7 @@
 import { supabase } from "../../lib/supabase";
 import type { CustomerOrder, OrderDraftItem, OrderStatus, OrderUnit } from "./orders-logic";
 import { demoSeedOrders } from "./orders-demo";
+import { fetchProductNames, type ProductNameUnit } from "../products/product-names";
 
 // Pedidos de clientes (migración 187). Se lee directo de las tablas (RLS: empresa + sucursal + pantalla 'pedidos')
 // y se escribe solo por RPC (migración 175). Sin Supabase (modo demostración) se guarda en este navegador.
@@ -24,7 +25,6 @@ interface OrderRow {
     unit: OrderUnit;
     notes: string | null;
     position: number;
-    products: { name: string } | null;
   }> | null;
 }
 
@@ -33,7 +33,7 @@ function missingTable(error: { code?: string } | null): boolean {
   return !!error && (error.code === "42P01" || error.code === "PGRST205" || error.code === "PGRST200");
 }
 
-function fromRow(r: OrderRow): CustomerOrder {
+function fromRow(r: OrderRow, names: Map<string, ProductNameUnit>): CustomerOrder {
   return {
     id: r.id,
     branchId: r.branch_id,
@@ -51,7 +51,7 @@ function fromRow(r: OrderRow): CustomerOrder {
       .sort((a, b) => a.position - b.position)
       .map((i) => ({
         productId: i.product_id,
-        productName: i.products?.name ?? "Producto",
+        productName: names.get(i.product_id)?.name ?? "Producto",
         quantity: Number(i.quantity),
         unit: i.unit,
         notes: i.notes
@@ -61,7 +61,13 @@ function fromRow(r: OrderRow): CustomerOrder {
 
 const SELECT =
   "id,branch_id,customer_id,customer_name,customer_phone,pickup_date,pickup_time,notes,total,deposit,status,created_at," +
-  "customer_order_items(product_id,quantity,unit,notes,position,products(name))";
+  "customer_order_items(product_id,quantity,unit,notes,position)";
+
+/** Los nombres van aparte (ver product-names.ts: embeber products(name) daba 403 y la lista no cargaba). */
+async function withNames(rows: OrderRow[]): Promise<CustomerOrder[]> {
+  const names = await fetchProductNames(rows.flatMap((r) => (r.customer_order_items ?? []).map((i) => i.product_id)));
+  return rows.map((r) => fromRow(r, names));
+}
 
 /** Pedidos entre dos días (inclusive). branchId null = todas las sucursales que la persona puede ver. */
 export async function listOrders(branchId: string | null, from: string, to: string): Promise<CustomerOrder[]> {
@@ -71,7 +77,7 @@ export async function listOrders(branchId: string | null, from: string, to: stri
   const { data, error } = await query;
   if (missingTable(error)) return [];
   if (error) throw error;
-  return ((data ?? []) as unknown as OrderRow[]).map(fromRow);
+  return withNames((data ?? []) as unknown as OrderRow[]);
 }
 
 /** Pedidos abiertos (pendientes o listos) de días anteriores: los que se quedaron sin entregar. */
@@ -82,7 +88,7 @@ export async function listOverdueBefore(branchId: string | null, before: string)
   const { data, error } = await query;
   if (missingTable(error)) return [];
   if (error) throw error;
-  return ((data ?? []) as unknown as OrderRow[]).map(fromRow);
+  return withNames((data ?? []) as unknown as OrderRow[]);
 }
 
 export interface OrderInput {

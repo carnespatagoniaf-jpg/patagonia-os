@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { fetchProductNames } from "../products/product-names";
 
 // Decomisos (migraciones 151 y 152, todos los planes): lo que se tira (vencido, en mal estado,
 // roto) se carga en Mostrador, descuenta el stock y queda en Reportes → Merma.
@@ -52,12 +53,15 @@ export async function listShiftWastes(posShiftId: string): Promise<StockWaste[]>
   if (!supabase) return [];
   const { data, error } = await supabase
     .from("stock_wastes")
-    .select("id,product_id,quantity,unit_cost,reason,notes,created_at,voided_at,products(name,unit)")
+    .select("id,product_id,quantity,unit_cost,reason,notes,created_at,voided_at")
     .eq("pos_shift_id", posShiftId)
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return ((data ?? []) as unknown as Array<Record<string, unknown>>).map((r) => {
-    const product = (r.products ?? {}) as { name?: string; unit?: string };
+  // Los nombres van aparte (ver product-names.ts: embeber products(name,unit) da 403).
+  const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
+  const names = await fetchProductNames(rows.map((r) => r.product_id as string | null));
+  return rows.map((r) => {
+    const product: { name?: string; unit?: string } = names.get(String(r.product_id)) ?? {};
     return {
       id: String(r.id),
       productId: String(r.product_id),
