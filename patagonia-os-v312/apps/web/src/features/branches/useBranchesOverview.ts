@@ -2,8 +2,20 @@ import { useCallback, useEffect, useState } from "react";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { getBranchesOverview, transferBranchStock, type BranchOverview, type TransferBranchStockInput } from "./branches-overview-service";
 
+// Modo demo: tres locales vacíos, para que se vea el tablero.
+const DEMO_OVERVIEW: BranchOverview[] = ["Centro", "Shopping", "Ruta 3"].map((name, i) => ({
+  branchId: i === 0 ? "demo-branch" : `demo-branch-${i + 1}`,
+  branchName: name,
+  salesMode: "mostrador",
+  stockValue: 0,
+  productCount: 0,
+  salesTodayCount: 0,
+  salesTodayTotal: 0,
+  shiftOpen: i !== 2
+}));
+
 export function useBranchesOverview() {
-  const [branches, setBranches] = useState<BranchOverview[]>([]);
+  const [branches, setBranches] = useState<BranchOverview[]>(isSupabaseConfigured ? [] : DEMO_OVERVIEW);
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [error, setError] = useState<string | null>(null);
 

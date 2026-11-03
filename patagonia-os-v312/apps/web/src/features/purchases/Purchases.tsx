@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import type { PaymentMethod, Product } from "@patagonia/domain";
 import { marginPercent, purchaseTotal } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
@@ -6,6 +6,7 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { bulkUpdateProductPrices, listProductsForBranch } from "../inventory/inventory-service";
 import { LOW_MARGIN_ALERT, costChangesFromPurchase } from "../inventory/price-tools";
 import { useSuppliers } from "./useSuppliers";
+import { listSupplierBalances } from "./suppliers-service";
 import { usePurchases } from "./usePurchases";
 import { useTreasury } from "../shifts/useTreasury";
 import { addSupplierAdjustment, deleteSupplierAdjustment, fetchSupplierAdjustmentsEnabled, type PurchaseLineInput } from "./purchases-service";
@@ -129,6 +130,12 @@ interface LedgerRow {
   adjustmentId?: string;
 }
 
+/** "2026-10-31" → "31/10". */
+function shortDate(iso: string) {
+  const [, m, d] = iso.slice(0, 10).split("-");
+  return d && m ? `${d}/${m}` : iso;
+}
+
 export function Purchases() {
   const { suppliers, loading: suppliersLoading, error: suppliersError, create: createSupplier, update: updateSupplier, remove: removeSupplier } = useSuppliers();
   const {
@@ -198,6 +205,14 @@ export function Purchases() {
   const [products, setProducts] = useState<Product[]>(isSupabaseConfigured ? [] : demoProducts);
   const [updateCosts, setUpdateCosts] = useState(true);
   const [selectedSupplierId, setSelectedSupplierId] = useState<string | null>(null);
+  // Rediseño 2026-11-02: alta plegada, buscador, saldo de cada proveedor en la lista, una acción a la vez y el historial en pestañas.
+  const [showNewSupplier, setShowNewSupplier] = useState(false);
+  const [supplierSearch, setSupplierSearch] = useState("");
+  const [supplierFilter, setSupplierFilter] = useState<"all" | "owed">("all");
+  const [supplierBalances, setSupplierBalances] = useState<Record<string, number>>({});
+  const [action, setAction] = useState<"purchase" | "payment" | "adjustment">("purchase");
+  const [historyTab, setHistoryTab] = useState<"purchases" | "payments" | "ledger">("purchases");
+  const [openPurchaseId, setOpenPurchaseId] = useState<string | null>(null);
   const [supplierName, setSupplierName] = useState("");
   const [supplierCategory, setSupplierCategory] = useState("");
   const [supplierPhone, setSupplierPhone] = useState("");
@@ -310,6 +325,7 @@ export function Purchases() {
       setSupplierName("");
       setSupplierCategory("");
       setSupplierPhone("");
+      setShowNewSupplier(false);
       setSelectedSupplierId(supplier.id);
       setMessage("Proveedor creado.");
     } catch (error) {
@@ -693,13 +709,33 @@ export function Purchases() {
   }, [purchases, payments, adjustments, adjustmentsEnabled, items, products]);
   const adjustmentsTotal = adjustments.reduce((sum, a) => sum + a.amount, 0);
 
+  // Saldo de cada proveedor en la lista; se vuelve a leer cuando cambia el del elegido (compra, pago, anulación).
+  useEffect(() => {
+    void listSupplierBalances().then(setSupplierBalances).catch(() => setSupplierBalances({}));
+  }, [suppliers, balance]);
+
+  // Arranca con el primero de la lista elegido: la derecha nunca queda vacía.
+  useEffect(() => {
+    if (!selectedSupplierId && suppliers.length > 0) setSelectedSupplierId(suppliers[0].id);
+  }, [selectedSupplierId, suppliers]);
+
   function handlePrintLedger() {
     window.print();
   }
 
+  const owedToSupplier = balance?.balance ?? 0;
+  const lastPurchaseDate = purchases.filter((p) => p.status !== "voided").reduce<string | null>((max, p) => (max === null || p.purchaseDate > max ? p.purchaseDate : max), null);
+  const visibleSuppliers = suppliers.filter((s) => {
+    if (supplierSearch.trim() && !`${s.name} ${s.category ?? ""}`.toLowerCase().includes(supplierSearch.trim().toLowerCase())) return false;
+    if (supplierFilter === "owed" && !((supplierBalances[s.id] ?? 0) >= 1)) return false;
+    return true;
+  });
+  const owedCount = suppliers.filter((s) => (supplierBalances[s.id] ?? 0) >= 1).length;
+  const owedTotal = suppliers.reduce((sum, s) => ((supplierBalances[s.id] ?? 0) >= 1 ? sum + (supplierBalances[s.id] ?? 0) : sum), 0);
+
   return (
     <>
-      <header className="page-header">
+      <header className="page-header no-print">
         <div>
           <p className="eyebrow">COMPRAS</p>
           <h1>Compras y proveedores</h1>
@@ -707,657 +743,618 @@ export function Purchases() {
         </div>
       </header>
 
-      {message && <div className="message">{message}</div>}
-      {suppliersError && <div className="message warning">{suppliersError}</div>}
-      {purchasesError && <div className="message warning">{purchasesError}</div>}
+      {message && <div className="message no-print">{message}</div>}
+      {suppliersError && <div className="message warning no-print">{suppliersError}</div>}
+      {purchasesError && <div className="message warning no-print">{purchasesError}</div>}
 
-      <div className="content-grid">
-        <section className="panel">
+      <div className="ws-layout">
+        <section className="panel ws-list no-print">
           <div className="panel-title">
-            <h2>Proveedores <span className="muted" style={{ fontSize: 14, fontWeight: 500 }}>{suppliersLoading ? "Cargando…" : suppliers.length}</span></h2>
+            <h2>Proveedores <span className="badge">{suppliersLoading ? "…" : suppliers.length}</span></h2>
+            {!showNewSupplier && <button className="secondary" onClick={() => setShowNewSupplier(true)}>+ Nuevo</button>}
           </div>
 
-          <div className="panel-list-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Nombre</th>
-                  <th>Rubro</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {suppliers.map((supplier) => (
-                  <tr key={supplier.id} className={supplier.id === selectedSupplierId ? "row-selected" : "row-clickable"} onClick={() => setSelectedSupplierId(supplier.id)}>
-                    <td><strong>{supplier.name}</strong></td>
-                    <td>{supplier.category}</td>
-                    <td onClick={(e) => e.stopPropagation()}>
-                      {confirmDeleteSupplierId === supplier.id ? (
-                        <div style={{ whiteSpace: "normal", display: "grid", gap: 6, maxWidth: 280 }}>
-                          <span className="muted" style={{ fontSize: 12 }}>¿Seguro? Si ya tiene compras o pagos, queda dado de baja y se guarda su historia.</span>
-                          <div className="row-actions" style={{ justifyContent: "flex-start" }}>
-                            <button className="danger" disabled={deleteSupplierBusy} onClick={() => handleConfirmDeleteSupplier(supplier.id)}>
-                              {deleteSupplierBusy ? "Eliminando…" : "Sí, borrar"}
-                            </button>
-                            <button className="secondary" disabled={deleteSupplierBusy} onClick={() => setConfirmDeleteSupplierId(null)}>Cancelar</button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div className="row-actions">
-                          {supplier.id === selectedSupplierId ? (
-                            <span className="badge brand">Viendo</span>
-                          ) : (
-                            <button className="secondary" onClick={() => setSelectedSupplierId(supplier.id)}>Ver cuenta</button>
-                          )}
-                          <button className="danger" onClick={() => setConfirmDeleteSupplierId(supplier.id)}>Borrar</button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div className="form-box" style={{ marginTop: 16, marginBottom: 0 }}>
-            <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Proveedor nuevo</h3>
-            <div className="form-grid">
-              <label>Nombre<input value={supplierName} onChange={(e) => setSupplierName(e.target.value)} /></label>
-              <label>Rubro<input placeholder="Pollo, carne…" value={supplierCategory} onChange={(e) => setSupplierCategory(e.target.value)} /></label>
-              <label>Teléfono<input value={supplierPhone} onChange={(e) => setSupplierPhone(e.target.value)} /></label>
-            </div>
-            <div className="form-actions">
-              <button disabled={busy} onClick={handleCreateSupplier}>Agregar proveedor</button>
-            </div>
-          </div>
-        </section>
-
-        <section className="panel">
-          <div className="panel-title">
-            <h2>Cuenta corriente</h2>
-          </div>
-          {!selectedSupplier && <p className="muted">Elegí un proveedor para ver su cuenta.</p>}
-          {selectedSupplier && !editingSupplier && (
-            <div className="totals">
-              <span>Proveedor <b>{selectedSupplier.name}</b></span>
-              <span>Compras <b>{formatMoney(balance?.totalPurchases ?? 0)}</b></span>
-              <span>Pagos <b>{formatMoney(balance?.totalPayments ?? 0)}</b></span>
-              {adjustmentsEnabled && adjustmentsTotal !== 0 && (
-                <span>{adjustmentsTotal < 0 ? "Descuentos" : "Recargos"} <b>{formatMoney(Math.abs(adjustmentsTotal))}</b></span>
-              )}
-              <strong>Saldo <b>{formatMoney(balance?.balance ?? 0)}</b></strong>
-              {fiscalOn && (
-                <span className="muted" style={{ fontSize: 13 }}>
-                  {taxInfo[selectedSupplier.id]?.taxId ? `CUIT ${taxInfo[selectedSupplier.id]?.taxId}` : "Sin CUIT (cargalo con Editar, sirve para el Libro IVA)"}
-                </span>
-              )}
-              <button
-                className="secondary"
-                style={{ marginTop: 10 }}
-                onClick={() => {
-                  setEditSupplierCuit(taxInfo[selectedSupplier.id]?.taxId ?? "");
-                  setEditSupplierTaxCondition(taxInfo[selectedSupplier.id]?.taxCondition ?? "");
-                  setEditingSupplier(true);
-                }}
-              >
-                Editar
-              </button>
-            </div>
-          )}
-          {selectedSupplier && editingSupplier && (
-            <div>
+          {showNewSupplier && (
+            <div className="form-box" style={{ marginBottom: 12 }}>
+              <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Proveedor nuevo</h3>
               <div className="form-grid">
-                <label>Nombre<input value={editSupplierName} onChange={(e) => setEditSupplierName(e.target.value)} /></label>
-                <label>Rubro<input placeholder="Pollo, carne…" value={editSupplierCategory} onChange={(e) => setEditSupplierCategory(e.target.value)} /></label>
-                <label>Teléfono<input value={editSupplierPhone} onChange={(e) => setEditSupplierPhone(e.target.value)} /></label>
-                <label>Notas<input value={editSupplierNotes} onChange={(e) => setEditSupplierNotes(e.target.value)} /></label>
-                {fiscalOn && (
-                  <>
-                    <label>CUIT<input inputMode="numeric" value={editSupplierCuit} onChange={(e) => setEditSupplierCuit(e.target.value)} /></label>
-                    <label>
-                      Condición frente al IVA
-                      <select value={editSupplierTaxCondition} onChange={(e) => setEditSupplierTaxCondition(e.target.value)}>
-                        <option value="">Sin definir</option>
-                        <option value="responsable_inscripto">Responsable inscripto (te da Factura A)</option>
-                        <option value="monotributo">Monotributista (Factura C)</option>
-                        <option value="exento">Exento</option>
-                      </select>
-                    </label>
-                  </>
-                )}
-                <label>
-                  Estado
-                  <select value={editSupplierActive ? "1" : "0"} onChange={(e) => setEditSupplierActive(e.target.value === "1")}>
-                    <option value="1">Activo</option>
-                    <option value="0">Dado de baja</option>
-                  </select>
-                </label>
+                <label>Nombre<input value={supplierName} onChange={(e) => setSupplierName(e.target.value)} /></label>
+                <label>Rubro<input placeholder="Pollo, carne…" value={supplierCategory} onChange={(e) => setSupplierCategory(e.target.value)} /></label>
+                <label>Teléfono<input value={supplierPhone} onChange={(e) => setSupplierPhone(e.target.value)} /></label>
               </div>
               <div className="form-actions">
-                <button disabled={busy} onClick={handleUpdateSupplier}>Guardar</button>
-                <button className="secondary" disabled={busy} onClick={() => setEditingSupplier(false)}>Cancelar</button>
+                <button disabled={busy} onClick={handleCreateSupplier}>Agregar proveedor</button>
+                <button className="secondary" onClick={() => setShowNewSupplier(false)}>Cancelar</button>
               </div>
             </div>
+          )}
+
+          {owedCount > 0 && <p className="ws-list-total">Les debés <b>{formatMoney(owedTotal)}</b> a {owedCount} {owedCount === 1 ? "proveedor" : "proveedores"}</p>}
+          <input style={{ width: "100%", marginBottom: 8 }} placeholder="Buscar proveedor o rubro" value={supplierSearch} onChange={(e) => setSupplierSearch(e.target.value)} />
+          <div className="ws-chips">
+            <button className={supplierFilter === "all" ? "ws-chip active" : "ws-chip"} onClick={() => setSupplierFilter("all")}>Todos ({suppliers.length})</button>
+            <button className={supplierFilter === "owed" ? "ws-chip active" : "ws-chip"} onClick={() => setSupplierFilter("owed")}>Les debo ({owedCount})</button>
+          </div>
+          <div className="ws-list-items">
+            {visibleSuppliers.map((supplier) => {
+              const owed = supplierBalances[supplier.id];
+              return (
+                <button key={supplier.id} className={supplier.id === selectedSupplierId ? "ws-item active" : "ws-item"} onClick={() => setSelectedSupplierId(supplier.id)}>
+                  <span className="ws-item-main">
+                    <b>{supplier.name}</b>
+                    <small>{supplier.category || "Sin rubro"}</small>
+                  </span>
+                  {owed !== undefined && (
+                    <span className="ws-item-side">
+                      <b className={owed >= 1 ? "num-negative" : "muted"}>{formatMoney(owed)}</b>
+                    </span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+          {!suppliersLoading && suppliers.length === 0 && <p className="muted">Todavía no cargaste proveedores.</p>}
+          {suppliers.length > 0 && visibleSuppliers.length === 0 && <p className="muted">Ningún proveedor coincide.</p>}
+        </section>
+
+        <section className="panel ws-main print-area">
+          {!selectedSupplier && <p className="muted">Elegí un proveedor de la lista para ver su cuenta.</p>}
+          {selectedSupplier && (
+            <>
+              <div className="ws-head">
+                <div>
+                  <h2>{selectedSupplier.name}</h2>
+                  <p className="muted">
+                    {[
+                      selectedSupplier.category,
+                      selectedSupplier.phone,
+                      fiscalOn ? (taxInfo[selectedSupplier.id]?.taxId ? `CUIT ${taxInfo[selectedSupplier.id]?.taxId}` : "Sin CUIT (cargalo con Editar, sirve para el Libro IVA)") : ""
+                    ].filter(Boolean).join(" · ")}
+                  </p>
+                </div>
+                <div className="row-actions no-print">
+                  <button
+                    className="secondary"
+                    onClick={() => {
+                      setEditSupplierCuit(taxInfo[selectedSupplier.id]?.taxId ?? "");
+                      setEditSupplierTaxCondition(taxInfo[selectedSupplier.id]?.taxCondition ?? "");
+                      setEditingSupplier((v) => !v);
+                    }}
+                  >
+                    Editar
+                  </button>
+                  <button className="secondary" onClick={() => { setHistoryTab("ledger"); window.setTimeout(handlePrintLedger, 80); }}>Imprimir cuenta</button>
+                </div>
+              </div>
+
+              {editingSupplier && (
+                <div className="form-box no-print" style={{ marginTop: 12 }}>
+                  <div className="form-grid">
+                    <label>Nombre<input value={editSupplierName} onChange={(e) => setEditSupplierName(e.target.value)} /></label>
+                    <label>Rubro<input placeholder="Pollo, carne…" value={editSupplierCategory} onChange={(e) => setEditSupplierCategory(e.target.value)} /></label>
+                    <label>Teléfono<input value={editSupplierPhone} onChange={(e) => setEditSupplierPhone(e.target.value)} /></label>
+                    <label>Notas<input value={editSupplierNotes} onChange={(e) => setEditSupplierNotes(e.target.value)} /></label>
+                    {fiscalOn && (
+                      <>
+                        <label>CUIT<input inputMode="numeric" value={editSupplierCuit} onChange={(e) => setEditSupplierCuit(e.target.value)} /></label>
+                        <label>
+                          Condición frente al IVA
+                          <select value={editSupplierTaxCondition} onChange={(e) => setEditSupplierTaxCondition(e.target.value)}>
+                            <option value="">Sin definir</option>
+                            <option value="responsable_inscripto">Responsable inscripto (te da Factura A)</option>
+                            <option value="monotributo">Monotributista (Factura C)</option>
+                            <option value="exento">Exento</option>
+                          </select>
+                        </label>
+                      </>
+                    )}
+                    <label>
+                      Estado
+                      <select value={editSupplierActive ? "1" : "0"} onChange={(e) => setEditSupplierActive(e.target.value === "1")}>
+                        <option value="1">Activo</option>
+                        <option value="0">Dado de baja</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div className="form-actions">
+                    <button disabled={busy} onClick={handleUpdateSupplier}>Guardar</button>
+                    <button className="secondary" disabled={busy} onClick={() => setEditingSupplier(false)}>Cancelar</button>
+                    <span className="spacer" />
+                    {confirmDeleteSupplierId === selectedSupplier.id ? (
+                      <>
+                        <span className="muted" style={{ fontSize: 12, maxWidth: 260 }}>¿Seguro? Si ya tiene compras o pagos, queda dado de baja y se guarda su historia.</span>
+                        <button className="danger" disabled={deleteSupplierBusy} onClick={() => handleConfirmDeleteSupplier(selectedSupplier.id)}>{deleteSupplierBusy ? "Eliminando…" : "Sí, borrar"}</button>
+                        <button className="secondary" disabled={deleteSupplierBusy} onClick={() => setConfirmDeleteSupplierId(null)}>No</button>
+                      </>
+                    ) : (
+                      <button className="danger" onClick={() => setConfirmDeleteSupplierId(selectedSupplier.id)}>Borrar proveedor</button>
+                    )}
+                  </div>
+                </div>
+              )}
+
+              <div className="ws-summary">
+                <div className={owedToSupplier >= 1 ? "bad" : owedToSupplier <= -1 ? "good" : ""}>
+                  <span>{owedToSupplier <= -1 ? "Tenés a favor" : "Le debés"}</span>
+                  <strong>{formatMoney(Math.abs(owedToSupplier))}</strong>
+                </div>
+                <div><span>Compraste (total)</span><strong>{formatMoney(balance?.totalPurchases ?? 0)}</strong></div>
+                <div><span>Pagaste (total)</span><strong className="num-positive">{formatMoney(balance?.totalPayments ?? 0)}</strong></div>
+                {adjustmentsEnabled && adjustmentsTotal !== 0 ? (
+                  <div><span>{adjustmentsTotal < 0 ? "Descuentos" : "Recargos"}</span><strong>{formatMoney(Math.abs(adjustmentsTotal))}</strong></div>
+                ) : (
+                  <div><span>Última compra</span><strong>{lastPurchaseDate ? shortDate(lastPurchaseDate) : "—"}</strong></div>
+                )}
+              </div>
+
+              <div className="ws-seg no-print">
+                <button className={action === "purchase" ? "active" : ""} onClick={() => setAction("purchase")}>+ Nueva compra</button>
+                <button className={action === "payment" ? "active" : ""} onClick={() => setAction("payment")}>Registrar pago</button>
+                {adjustmentsEnabled && <button className={action === "adjustment" ? "active" : ""} onClick={() => setAction("adjustment")}>Descuento / recargo</button>}
+              </div>
+
+              {action === "payment" && (
+                <div className="ws-form no-print">
+                  <div className="ws-form-row">
+                    <label className="ws-field">Monto<input type="text" inputMode="decimal" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} style={{ width: 150 }} /></label>
+                    <label className="ws-field ws-grow">
+                      Pagar desde
+                      <select
+                        value={paymentAccountId}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          setPaymentAccountId(value);
+                          const cheque = portfolioCheques.find((c) => ENDORSE_PREFIX + c.id === value);
+                          if (cheque) setPaymentAmount(String(cheque.amount).replace(".", ","));
+                        }}
+                      >
+                        <option value="">Elegí de dónde sale…</option>
+                        {accounts.map((a) => (
+                          <option key={a.id} value={a.id}>{a.name}</option>
+                        ))}
+                        {canCheques && <option value={OWN_CHEQUE_OPTION}>Cheque propio / eCheq</option>}
+                        {canCheques && portfolioCheques.length > 0 && (
+                          <optgroup label="Cheque de la cartera (endosar)">
+                            {portfolioCheques.map((c) => (
+                              <option key={c.id} value={ENDORSE_PREFIX + c.id}>
+                                {chequeTitle(c)} · {formatMoney(c.amount)} · cobra {formatDay(c.payDate)}{c.customerName ? ` · de ${c.customerName}` : ""}
+                              </option>
+                            ))}
+                          </optgroup>
+                        )}
+                      </select>
+                    </label>
+                    <label className="ws-field">Fecha<input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} /></label>
+                  </div>
+                  <div className="ws-form-row" style={{ marginTop: 10 }}>
+                    <label className="ws-field ws-grow">Nota (opcional)<input value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} /></label>
+                    <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
+                  </div>
+                  {paymentAccountId === OWN_CHEQUE_OPTION && (
+                    <div style={{ marginTop: 10 }}>
+                      <div className="ws-form-row" style={{ marginBottom: 8 }}>
+                        <select value={chequeBankAccountId} onChange={(e) => setChequeBankAccountId(e.target.value)}>
+                          <option value="">¿De qué cuenta del banco sale?</option>
+                          {accounts.filter((a) => !a.isSafe).map((a) => (
+                            <option key={a.id} value={a.id}>{a.name}</option>
+                          ))}
+                        </select>
+                      </div>
+                      <ChequeFields value={paymentCheque} onChange={setPaymentCheque} withAmount={false} withDrawer={false} />
+                      <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>Lo que le debés baja ahora; la plata sale del banco en la fecha del cheque.</p>
+                    </div>
+                  )}
+                  {paymentAccountId.startsWith(ENDORSE_PREFIX) && (
+                    <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>Se paga con el monto del cheque. El cheque sale de la cartera y queda como endosado a este proveedor.</p>
+                  )}
+                  {(parseAmount(paymentAmount || "0") || 0) > 0 && (
+                    <p className="muted" style={{ margin: "8px 0 0", fontSize: 13 }}>Después del pago le vas a deber <b>{formatMoney(owedToSupplier - (parseAmount(paymentAmount || "0") || 0))}</b>.</p>
+                  )}
+                </div>
+              )}
+
+              {action === "adjustment" && adjustmentsEnabled && (
+                <div className="ws-form no-print">
+                  <p className="muted" style={{ margin: "0 0 8px", fontSize: 13 }}>Cambia lo que le debés, sin mover caja ni stock. Descuento: le debés menos. Recargo: le debés más.</p>
+                  <div className="ws-form-row">
+                    <label className="ws-field">
+                      Tipo
+                      <select value={adjustmentKind} onChange={(e) => setAdjustmentKind(e.target.value as "descuento" | "recargo")}>
+                        <option value="descuento">Descuento</option>
+                        <option value="recargo">Recargo</option>
+                      </select>
+                    </label>
+                    <label className="ws-field">Monto<input type="text" inputMode="decimal" value={adjustmentAmount} onChange={(e) => setAdjustmentAmount(e.target.value)} style={{ width: 140 }} /></label>
+                    <label className="ws-field">Fecha<input type="date" value={adjustmentDate} onChange={(e) => setAdjustmentDate(e.target.value)} /></label>
+                    <label className="ws-field ws-grow">Motivo (opcional)<input value={adjustmentNotes} onChange={(e) => setAdjustmentNotes(e.target.value)} /></label>
+                    <button disabled={busy} onClick={handleAddAdjustment}>{busy ? "Guardando…" : adjustmentKind === "descuento" ? "Cargar descuento" : "Cargar recargo"}</button>
+                  </div>
+                </div>
+              )}
+
+              {action === "purchase" && (
+                <div className="ws-form no-print">
+                  <div className="ws-form-row" style={{ marginBottom: 12 }}>
+                    <label className="ws-field">Fecha<input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} /></label>
+                    <label className="ws-field">N.º de factura o remito<input placeholder="Opcional" value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} /></label>
+                  </div>
+
+                  <div className="purchase-lines">
+                    <div className="purchase-line purchase-line-head">
+                      <span>Producto</span>
+                      <span>Cantidad</span>
+                      <span>Unidad</span>
+                      <span>Precio unitario</span>
+                      <span className="num">Subtotal</span>
+                      <span></span>
+                    </div>
+                    {lines.map((line) => {
+                      const selectedProduct = products.find((p) => p.id === line.productId);
+                      const productMatches = !line.productId && line.description.trim()
+                        ? products.filter((p) => p.name.toLowerCase().includes(line.description.toLowerCase())).slice(0, 8)
+                        : [];
+                      const qty = quantityNumber(line.quantity);
+                      const price = parseAmount(line.unitPrice);
+                      const subtotal = Number.isFinite(qty) && Number.isFinite(price) ? qty * price : 0;
+                      return (
+                        <div key={line.key} className="purchase-line">
+                          <div className="purchase-line-product">
+                            {line.carcass ? (
+                              <>
+                                <span className="purchase-carcass-question">¿Qué despostás?</span>
+                                <CarcassTypePicker value={line.animalType} chips={animalChips} onChange={(animalType) => updateLine(line.key, { animalType })} />
+                                {line.unit === "unit" && (
+                                  <label className="purchase-carcass-kg">
+                                    ¿Cuántos kilos son{line.quantity.trim() ? ` los ${line.quantity.trim()}` : ""} en total?
+                                    <input
+                                      type="text"
+                                      inputMode="decimal"
+                                      placeholder="kg"
+                                      value={line.carcassWeight}
+                                      onFocus={(e) => e.target.select()}
+                                      onChange={(e) => updateLine(line.key, { carcassWeight: e.target.value })}
+                                    />
+                                  </label>
+                                )}
+                                <small className={line.animalType.trim() && (templateCutsFor(line.animalType) > 0 || defaultCutsFor(line.animalType) > 0) ? "num-positive" : "muted"}>
+                                  {!line.animalType.trim()
+                                    ? "Tocá qué es."
+                                    : templateCutsFor(line.animalType) > 0
+                                      ? `✓ Se reparte solo en ${templateCutsFor(line.animalType)} cortes y entran a Stock.`
+                                      : defaultCutsFor(line.animalType) > 0
+                                        ? `✓ Se reparte solo en los ${defaultCutsFor(line.animalType)} cortes típicos de ${animalTypeLabel(line.animalType).toLowerCase()}.`
+                                        : "Aparece en Despiece para cargar los cortes."}
+                                </small>
+                              </>
+                            ) : selectedProduct ? (
+                              <>
+                                <span className="purchase-line-picked">
+                                  <strong>{selectedProduct.name}</strong>
+                                  <button className="secondary" onClick={() => updateLine(line.key, { productId: "", description: "" })}>Cambiar</button>
+                                </span>
+                                <small className="muted">
+                                  Costo {formatMoney(selectedProduct.cost)} · Margen {marginPercent(selectedProduct.cost, selectedProduct.priceRetail)}% · Venta {formatMoney(selectedProduct.priceRetail)}
+                                </small>
+                              </>
+                            ) : (
+                              <div className="pos-search-wrap">
+                                <input
+                                  placeholder="Buscá el producto o escribí una descripción libre…"
+                                  value={line.description}
+                                  onChange={(e) => updateLine(line.key, { description: e.target.value })}
+                                  onFocus={() => setOpenSearchKey(line.key)}
+                                  onBlur={() => setOpenSearchKey((k) => (k === line.key ? null : k))}
+                                  onKeyDown={(e) => { if (e.key === "Escape") (e.target as HTMLInputElement).blur(); }}
+                                />
+                                {openSearchKey === line.key && productMatches.length > 0 && (
+                                  <div className="pos-dropdown">
+                                    {productMatches.map((product) => (
+                                      <button
+                                        key={product.id}
+                                        type="button"
+                                        className="pos-dropdown-item"
+                                        onMouseDown={(e) => e.preventDefault()}
+                                        onClick={() => { updateLine(line.key, { productId: product.id, description: "" }); setOpenSearchKey(null); }}
+                                      >
+                                        <span>{product.name}</span>
+                                        <strong>{formatMoney(product.cost)}</strong>
+                                      </button>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            )}
+                            {canCarcass && (
+                              <label className="muted" style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, marginTop: 4, whiteSpace: "nowrap" }} title="Media res, cajones de pollo…: aparece solo en Despiece">
+                                <input
+                                  type="checkbox"
+                                  checked={line.carcass}
+                                  style={{ width: "auto", margin: 0 }}
+                                  onChange={(e) => updateLine(line.key, e.target.checked
+                                    ? {
+                                        carcass: true,
+                                        productId: "",
+                                        animalType: line.animalType
+                                          || (line.description.trim() ? findSameType(line.description, animalChips.all) : undefined)
+                                          || supplierCarcassTypes[0]
+                                          || ""
+                                      }
+                                    : { carcass: false })}
+                                />
+                                <span>Para despostar</span>
+                              </label>
+                            )}
+                          </div>
+                          <input type="text" inputMode="decimal" aria-label="Cantidad" value={line.quantity} onFocus={(e) => e.target.select()} onChange={(e) => updateLine(line.key, { quantity: e.target.value })} />
+                          <select aria-label="Unidad" value={line.unit} onChange={(e) => updateLine(line.key, { unit: e.target.value as "kg" | "unit" })}>
+                            <option value="kg">kg</option>
+                            <option value="unit">unidad</option>
+                          </select>
+                          <input type="text" aria-label="Precio unitario" inputMode="decimal" value={line.unitPrice} onChange={(e) => updateLine(line.key, { unitPrice: e.target.value })} />
+                          <strong className="num purchase-line-subtotal">{subtotal > 0 ? formatMoney(subtotal) : "-"}</strong>
+                          <button className="danger" aria-label="Quitar ítem" onClick={() => removeLine(line.key)}>✕</button>
+                        </div>
+                      );
+                    })}
+                  </div>
+                  <datalist id="purchase-animal-types">
+                    {animalChips.all.map((name) => <option key={name} value={name} />)}
+                  </datalist>
+                  <div className="ws-form-row" style={{ marginTop: 10 }}>
+                    <button className="secondary" onClick={addLine}>+ Agregar ítem</button>
+                    <span className="muted" style={{ fontSize: 12, flex: "1 1 260px" }}>
+                      Para una descripción libre, escribí el nombre y tocá afuera o Esc.
+                      {canCarcass && " Lo que se desposta (media res, cajones de pollo) marcalo \"Para despostar\": aparece solo en Despiece."}
+                    </span>
+                  </div>
+                  <div className="ws-form-total">
+                    <span>Total <b>{formatMoney(draftTotal)}</b></span>
+                    <label className="price-tools-check" style={{ margin: 0 }}>
+                      <input type="checkbox" checked={updateCosts} onChange={(e) => setUpdateCosts(e.target.checked)} />
+                      Actualizar el costo de los productos con estos precios
+                    </label>
+                    <button className="charge-button ws-go" disabled={busy} onClick={handleCreatePurchase}>{busy ? "Registrando…" : "Registrar compra"}</button>
+                  </div>
+                </div>
+              )}
+
+              <div className="ws-box">
+                <div className="ws-tabs no-print">
+                  <button className={historyTab === "purchases" ? "active" : ""} onClick={() => setHistoryTab("purchases")}>Compras <span className="badge">{purchases.length}</span></button>
+                  <button className={historyTab === "payments" ? "active" : ""} onClick={() => setHistoryTab("payments")}>Pagos <span className="badge">{payments.length}</span></button>
+                  <button className={historyTab === "ledger" ? "active" : ""} onClick={() => setHistoryTab("ledger")}>Cuenta corriente</button>
+                </div>
+
+                {historyTab === "purchases" && (
+                  <div className="ws-scroll no-print">
+                    {purchasesLoading && <p className="muted ws-empty">Cargando…</p>}
+                    <table className="data-table">
+                      <thead>
+                        <tr><th>Fecha</th><th className="hide-sm">Comprobante</th><th>Qué</th><th className="num">Total</th><th></th></tr>
+                      </thead>
+                      <tbody>
+                        {purchases.map((purchase) => {
+                          const purchaseItems = items[purchase.id] ?? [];
+                          const itemNames = purchaseItems.map((item) => item.description ?? products.find((p) => p.id === item.productId)?.name ?? "Producto");
+                          const voided = purchase.status === "voided";
+                          return (
+                            <Fragment key={purchase.id}>
+                              <tr style={voided ? { opacity: 0.55 } : undefined}>
+                                <td className="ws-date">
+                                  {editingDatePurchaseId === purchase.id ? (
+                                    <span className="ws-form-row" style={{ gap: 4 }}>
+                                      <input type="date" value={editPurchaseDateValue} onChange={(e) => setEditPurchaseDateValue(e.target.value)} />
+                                      <button disabled={busy} onClick={() => handleSavePurchaseDate(purchase.id)}>Guardar</button>
+                                      <button className="secondary" disabled={busy} onClick={() => setEditingDatePurchaseId(null)}>Cancelar</button>
+                                    </span>
+                                  ) : (
+                                    shortDate(purchase.purchaseDate)
+                                  )}
+                                </td>
+                                <td className="hide-sm">{purchase.invoiceNumber || "—"}</td>
+                                <td className="ws-concept">
+                                  <span style={{ textDecoration: voided ? "line-through" : undefined }}>
+                                    {itemNames.slice(0, 3).join(", ") || "—"}{itemNames.length > 3 ? ` y ${itemNames.length - 3} más` : ""}
+                                  </span>
+                                  {voided && <span className="badge" style={{ marginLeft: 6 }}>Anulada</span>}
+                                  {fiscalOn && purchaseVouchers[purchase.id] && <span className="badge ok" style={{ marginLeft: 6 }}>Libro IVA</span>}
+                                </td>
+                                <td className="num"><b>{formatMoney(purchase.total)}</b></td>
+                                <td>
+                                  <div className="ws-row-actions">
+                                    <button className="secondary" onClick={() => setOpenPurchaseId(openPurchaseId === purchase.id ? null : purchase.id)}>{openPurchaseId === purchase.id ? "Cerrar" : "Ver"}</button>
+                                    {!voided && <button className="secondary" disabled={busy} onClick={() => handleVoidPurchase(purchase.id)}>Anular</button>}
+                                  </div>
+                                </td>
+                              </tr>
+                              {openPurchaseId === purchase.id && (
+                                <tr className="row-editor">
+                                  <td colSpan={5}>
+                                    <div className="row-actions" style={{ justifyContent: "flex-start", marginBottom: 8 }}>
+                                      {editingDatePurchaseId !== purchase.id && (
+                                        <button className="secondary" disabled={busy} onClick={() => { setEditingDatePurchaseId(purchase.id); setEditPurchaseDateValue(purchase.purchaseDate); }}>Editar fecha</button>
+                                      )}
+                                      {fiscalOn && !voided && (
+                                        <button className="secondary" title="Datos de la factura del proveedor para el Libro IVA Compras (pantalla Contable)" onClick={() => setVoucherFormFor(voucherFormFor === purchase.id ? null : purchase.id)}>
+                                          {purchaseVouchers[purchase.id] ? "✓ Factura en el Libro IVA" : "Factura (Libro IVA)"}
+                                        </button>
+                                      )}
+                                    </div>
+                                    {fiscalOn && voucherFormFor === purchase.id && (
+                                      <div style={{ margin: "0 0 12px" }}>
+                                        {purchaseVouchers[purchase.id] && (
+                                          <p className="muted" style={{ margin: "0 0 6px", fontSize: 13 }}>
+                                            Cargada: {voucherTypeLabel(purchaseVouchers[purchase.id].voucherType)} {voucherNumber(purchaseVouchers[purchase.id].pointOfSale, purchaseVouchers[purchase.id].number)}. Podés corregirla acá.{" "}
+                                            <VoucherAttachment
+                                              companyId={profile?.company_id ?? null}
+                                              voucher={purchaseVouchers[purchase.id]}
+                                              canWrite
+                                              onChanged={(msg) => {
+                                                setMessage(msg);
+                                                void listVouchersForPurchases(purchases.map((p) => p.id)).then(setPurchaseVouchers);
+                                              }}
+                                            />
+                                          </p>
+                                        )}
+                                        <PurchaseVoucherForm
+                                          suppliers={suppliers.map((sp) => ({ id: sp.id, name: sp.name, taxId: taxInfo[sp.id]?.taxId ?? null, taxCondition: taxInfo[sp.id]?.taxCondition ?? null }))}
+                                          existing={purchaseVouchers[purchase.id] ?? null}
+                                          purchase={{ purchaseId: purchase.id, date: purchase.purchaseDate, supplierId: selectedSupplier.id, invoiceNumber: purchase.invoiceNumber ?? null, total: purchase.total }}
+                                          branchId={branchId}
+                                          onCancel={() => setVoucherFormFor(null)}
+                                          onSaved={(msg) => {
+                                            setVoucherFormFor(null);
+                                            setMessage(msg + " Ya está en el Libro IVA Compras (Contable).");
+                                            void listVouchersForPurchases(purchases.map((p) => p.id)).then(setPurchaseVouchers);
+                                            void listSupplierTaxInfo().then(setTaxInfo);
+                                          }}
+                                        />
+                                      </div>
+                                    )}
+                                    <table className="data-table no-stack">
+                                      <thead>
+                                        <tr><th>Producto</th><th>Cantidad</th><th className="num">Precio</th><th className="num">Subtotal</th><th></th></tr>
+                                      </thead>
+                                      <tbody>
+                                        {purchaseItems.map((item) => (
+                                          <tr key={item.id}>
+                                            <td>
+                                              {item.description ?? products.find((p) => p.id === item.productId)?.name ?? "Producto"}
+                                              {item.carcassAnimalType && (
+                                                <small className="muted" style={{ display: "block" }}>
+                                                  Para despostar{item.unit === "unit" && item.carcassWeight ? ` · ${item.carcassWeight} kg` : ""} · está en Despiece
+                                                </small>
+                                              )}
+                                            </td>
+                                            {editingItemId === item.id ? (
+                                              <>
+                                                <td><input type="text" inputMode="decimal" value={editQuantity} onChange={(e) => setEditQuantity(e.target.value)} style={{ width: 80 }} /> {item.unit}</td>
+                                                <td className="num"><input type="text" inputMode="decimal" value={editUnitPrice} onChange={(e) => setEditUnitPrice(e.target.value)} style={{ width: 90 }} /></td>
+                                                <td></td>
+                                                <td>
+                                                  <div className="ws-row-actions">
+                                                    <button disabled={busy} onClick={() => handleSaveEdit(item.id)}>Guardar</button>
+                                                    <button className="secondary" disabled={busy} onClick={() => setEditingItemId(null)}>Cancelar</button>
+                                                  </div>
+                                                </td>
+                                              </>
+                                            ) : (
+                                              <>
+                                                <td>{item.quantity} {item.unit}</td>
+                                                <td className="num">{formatMoney(item.unitPrice)}</td>
+                                                <td className="num">{formatMoney(item.lineTotal)}</td>
+                                                <td>
+                                                  {!voided && (
+                                                    <div className="ws-row-actions">
+                                                      <button className="secondary" onClick={() => { setEditingItemId(item.id); setEditQuantity(String(item.quantity)); setEditUnitPrice(String(item.unitPrice)); }}>Editar</button>
+                                                    </div>
+                                                  )}
+                                                </td>
+                                              </>
+                                            )}
+                                          </tr>
+                                        ))}
+                                      </tbody>
+                                    </table>
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                    {!purchasesLoading && purchases.length === 0 && <p className="muted ws-empty">Todavía no hay compras cargadas.</p>}
+                  </div>
+                )}
+
+                {historyTab === "payments" && (
+                  <div className="ws-scroll no-print">
+                    <table className="data-table">
+                      <thead>
+                        <tr><th>Fecha</th><th className="num">Monto</th><th>Cuenta y nota</th><th></th></tr>
+                      </thead>
+                      <tbody>
+                        {payments.map((payment) =>
+                          editingPaymentId === payment.id ? (
+                            <tr key={payment.id} className="row-editor">
+                              <td colSpan={4}>
+                                <div className="ws-form-row">
+                                  <input type="date" value={editPaymentDate} onChange={(e) => setEditPaymentDate(e.target.value)} />
+                                  <input type="text" inputMode="decimal" value={editPaymentAmount} onChange={(e) => setEditPaymentAmount(e.target.value)} style={{ width: 120 }} />
+                                  <select value={editPaymentAccountId} onChange={(e) => setEditPaymentAccountId(e.target.value)}>
+                                    <option value="">Pagar desde…</option>
+                                    {accounts.map((a) => (
+                                      <option key={a.id} value={a.id}>{a.name}</option>
+                                    ))}
+                                  </select>
+                                  <input placeholder="Nota" value={editPaymentNotes} onChange={(e) => setEditPaymentNotes(e.target.value)} style={{ flex: "1 1 160px", minWidth: 0 }} />
+                                  <button disabled={busy} onClick={handleSavePayment}>Guardar</button>
+                                  <button className="secondary" disabled={busy} onClick={() => setEditingPaymentId(null)}>Cancelar</button>
+                                </div>
+                              </td>
+                            </tr>
+                          ) : (
+                            <tr key={payment.id}>
+                              <td className="ws-date">{shortDate(payment.paymentDate)}</td>
+                              <td className="num num-positive">{formatMoney(payment.amount)}</td>
+                              <td className="ws-concept">
+                                {payment.accountName ?? PAYMENT_METHOD_LABELS[payment.paymentMethod]}
+                                {payment.notes && <small>{payment.notes}</small>}
+                              </td>
+                              <td>
+                                <div className="ws-row-actions">
+                                  <button className="secondary" disabled={busy} onClick={() => startEditPayment(payment)}>Editar</button>
+                                  <button className="danger" disabled={busy} onClick={() => handleDeletePayment(payment.id)}>Borrar</button>
+                                </div>
+                              </td>
+                            </tr>
+                          )
+                        )}
+                      </tbody>
+                    </table>
+                    {payments.length === 0 && <p className="muted ws-empty">Todavía no hay pagos registrados.</p>}
+                  </div>
+                )}
+
+                {historyTab === "ledger" && (
+                  <div className="ws-scroll">
+                    <table className="data-table">
+                      <thead>
+                        <tr>
+                          <th>Fecha</th>
+                          <th>Comprobante</th>
+                          <th className="num">{adjustmentsEnabled ? "Debe (compras, recargos)" : "Debe (compras)"}</th>
+                          <th className="num">{adjustmentsEnabled ? "Haber (pagos, descuentos)" : "Haber (pagos)"}</th>
+                          <th className="num">Saldo</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {ledger.map((row) => (
+                          <tr key={row.key}>
+                            <td className="ws-date">{shortDate(row.date)}</td>
+                            <td className="ws-concept">
+                              {row.detail}
+                              {row.adjustmentId && (
+                                <button className="secondary no-print" style={{ marginLeft: 8, minHeight: 26, padding: "2px 8px", fontSize: 12 }} disabled={busy} onClick={() => handleDeleteAdjustment(row.adjustmentId!)}>Borrar</button>
+                              )}
+                              {row.lines && row.lines.length > 0 && <small>{row.lines.join(" · ")}</small>}
+                            </td>
+                            <td className="num">{row.debit > 0 ? formatMoney(row.debit) : ""}</td>
+                            <td className="num num-positive">{row.credit > 0 ? formatMoney(row.credit) : ""}</td>
+                            <td className="num"><b>{formatMoney(row.balance)}</b></td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                    {ledger.length === 0 && <p className="muted ws-empty">Todavía no hay movimientos para este proveedor.</p>}
+                  </div>
+                )}
+              </div>
+            </>
           )}
         </section>
       </div>
-
-      {selectedSupplier && (
-        <>
-          <section className="panel no-print" style={{ marginTop: 18 }}>
-            <div className="panel-title">
-              <h2>Registrar pago a {selectedSupplier.name}</h2>
-            </div>
-              <div className="form-grid">
-                <label>Fecha<input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} /></label>
-                <label>Monto<input type="text" inputMode="decimal" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} /></label>
-                <label className="span-2">
-                  Pagar desde
-                <select
-                  value={paymentAccountId}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    setPaymentAccountId(value);
-                    const cheque = portfolioCheques.find((c) => ENDORSE_PREFIX + c.id === value);
-                    if (cheque) setPaymentAmount(String(cheque.amount).replace(".", ","));
-                  }}
-                >
-                  <option value="">Elegí de dónde sale…</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                  {canCheques && <option value={OWN_CHEQUE_OPTION}>Cheque propio / eCheq</option>}
-                  {canCheques && portfolioCheques.length > 0 && (
-                    <optgroup label="Cheque de la cartera (endosar)">
-                      {portfolioCheques.map((c) => (
-                        <option key={c.id} value={ENDORSE_PREFIX + c.id}>
-                          {chequeTitle(c)} · {formatMoney(c.amount)} · cobra {formatDay(c.payDate)}{c.customerName ? ` · de ${c.customerName}` : ""}
-                        </option>
-                      ))}
-                    </optgroup>
-                  )}
-                </select>
-                </label>
-                <label className="span-2">Nota (opcional)<input value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} /></label>
-              </div>
-              {paymentAccountId === OWN_CHEQUE_OPTION && (
-                <div style={{ marginTop: 10 }}>
-                  <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 8 }}>
-                    <select value={chequeBankAccountId} onChange={(e) => setChequeBankAccountId(e.target.value)}>
-                      <option value="">¿De qué cuenta del banco sale?</option>
-                      {accounts.filter((a) => !a.isSafe).map((a) => (
-                        <option key={a.id} value={a.id}>{a.name}</option>
-                      ))}
-                    </select>
-                  </div>
-                  <ChequeFields value={paymentCheque} onChange={setPaymentCheque} withAmount={false} withDrawer={false} />
-                  <p className="muted" style={{ margin: "6px 0 0", fontSize: 12 }}>Lo que le debés baja ahora; la plata sale del banco en la fecha del cheque.</p>
-                </div>
-              )}
-              {paymentAccountId.startsWith(ENDORSE_PREFIX) && (
-                <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>Se paga con el monto del cheque. El cheque sale de la cartera y queda como endosado a este proveedor.</p>
-              )}
-              <div className="form-actions">
-                <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
-              </div>
-          </section>
-
-          {adjustmentsEnabled && (
-            <section className="panel no-print" style={{ marginTop: 18 }}>
-              <div className="panel-title">
-                <h2>Descuento o recargo a {selectedSupplier.name}</h2>
-              </div>
-              <p className="muted" style={{ marginTop: 0 }}>Cambia lo que le debés, sin mover caja ni stock. Descuento: le debés menos. Recargo: le debés más.</p>
-              <div className="form-grid">
-                <label>
-                  Tipo
-                  <select value={adjustmentKind} onChange={(e) => setAdjustmentKind(e.target.value as "descuento" | "recargo")}>
-                    <option value="descuento">Descuento</option>
-                    <option value="recargo">Recargo</option>
-                  </select>
-                </label>
-                <label>Fecha<input type="date" value={adjustmentDate} onChange={(e) => setAdjustmentDate(e.target.value)} /></label>
-                <label>Monto<input type="text" inputMode="decimal" value={adjustmentAmount} onChange={(e) => setAdjustmentAmount(e.target.value)} /></label>
-                <label className="span-2">Motivo (opcional)<input value={adjustmentNotes} onChange={(e) => setAdjustmentNotes(e.target.value)} /></label>
-              </div>
-              <div className="form-actions">
-                <button disabled={busy} onClick={handleAddAdjustment}>{busy ? "Guardando…" : adjustmentKind === "descuento" ? "Cargar descuento" : "Cargar recargo"}</button>
-              </div>
-            </section>
-          )}
-
-          <section className="panel no-print" style={{ marginTop: 18 }}>
-            <div className="panel-title">
-              <h2>Nueva compra</h2>
-            </div>
-            <div style={{ display: "flex", gap: 16, flexWrap: "wrap", marginBottom: 18 }}>
-              <div className="field">
-                <span>Fecha</span>
-                <input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} />
-              </div>
-              <div className="field" style={{ minWidth: 180 }}>
-                <span>N° de factura</span>
-                <input placeholder="Opcional" value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} />
-              </div>
-            </div>
-
-            <div className="purchase-lines">
-              <div className="purchase-line purchase-line-head">
-                <span>Producto</span>
-                <span>Cantidad</span>
-                <span>Unidad</span>
-                <span>Precio unitario</span>
-                <span className="num">Subtotal</span>
-                <span></span>
-              </div>
-              {lines.map((line) => {
-                const selectedProduct = products.find((p) => p.id === line.productId);
-                const productMatches = !line.productId && line.description.trim()
-                  ? products.filter((p) => p.name.toLowerCase().includes(line.description.toLowerCase())).slice(0, 8)
-                  : [];
-                const qty = quantityNumber(line.quantity);
-                const price = parseAmount(line.unitPrice);
-                const subtotal = Number.isFinite(qty) && Number.isFinite(price) ? qty * price : 0;
-                return (
-                  <div key={line.key} className="purchase-line">
-                    <div className="purchase-line-product">
-                      {line.carcass ? (
-                        <>
-                          <span className="purchase-carcass-question">¿Qué despostás?</span>
-                          <CarcassTypePicker value={line.animalType} chips={animalChips} onChange={(animalType) => updateLine(line.key, { animalType })} />
-                          {line.unit === "unit" && (
-                            <label className="purchase-carcass-kg">
-                              ¿Cuántos kilos son{line.quantity.trim() ? ` los ${line.quantity.trim()}` : ""} en total?
-                              <input
-                                type="text"
-                                inputMode="decimal"
-                                placeholder="kg"
-                                value={line.carcassWeight}
-                                onFocus={(e) => e.target.select()}
-                                onChange={(e) => updateLine(line.key, { carcassWeight: e.target.value })}
-                              />
-                            </label>
-                          )}
-                          <small className={line.animalType.trim() && (templateCutsFor(line.animalType) > 0 || defaultCutsFor(line.animalType) > 0) ? "num-positive" : "muted"}>
-                            {!line.animalType.trim()
-                              ? "Tocá qué es."
-                              : templateCutsFor(line.animalType) > 0
-                                ? `✓ Se reparte solo en ${templateCutsFor(line.animalType)} cortes y entran a Stock.`
-                                : defaultCutsFor(line.animalType) > 0
-                                  ? `✓ Se reparte solo en los ${defaultCutsFor(line.animalType)} cortes típicos de ${animalTypeLabel(line.animalType).toLowerCase()}.`
-                                  : "Aparece en Despiece para cargar los cortes."}
-                          </small>
-                        </>
-                      ) : selectedProduct ? (
-                        <>
-                          <span className="purchase-line-picked">
-                            <strong>{selectedProduct.name}</strong>
-                            <button className="secondary" onClick={() => updateLine(line.key, { productId: "", description: "" })}>Cambiar</button>
-                          </span>
-                          <small className="muted">
-                            Costo {formatMoney(selectedProduct.cost)} · Margen {marginPercent(selectedProduct.cost, selectedProduct.priceRetail)}% · Venta {formatMoney(selectedProduct.priceRetail)}
-                          </small>
-                        </>
-                      ) : (
-                        <div className="pos-search-wrap">
-                          <input
-                            placeholder="Buscá el producto o escribí una descripción libre…"
-                            value={line.description}
-                            onChange={(e) => updateLine(line.key, { description: e.target.value })}
-                            onFocus={() => setOpenSearchKey(line.key)}
-                            onBlur={() => setOpenSearchKey((k) => (k === line.key ? null : k))}
-                            onKeyDown={(e) => { if (e.key === "Escape") (e.target as HTMLInputElement).blur(); }}
-                          />
-                          {openSearchKey === line.key && productMatches.length > 0 && (
-                            <div className="pos-dropdown">
-                              {productMatches.map((product) => (
-                                <button
-                                  key={product.id}
-                                  type="button"
-                                  className="pos-dropdown-item"
-                                  onMouseDown={(e) => e.preventDefault()}
-                                  onClick={() => { updateLine(line.key, { productId: product.id, description: "" }); setOpenSearchKey(null); }}
-                                >
-                                  <span>{product.name}</span>
-                                  <strong>{formatMoney(product.cost)}</strong>
-                                </button>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      )}
-                      {canCarcass && (
-                        <label className="muted" style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12, marginTop: 4, whiteSpace: "nowrap" }} title="Media res, cajones de pollo…: aparece solo en Despiece">
-                          <input
-                            type="checkbox"
-                            checked={line.carcass}
-                            style={{ width: "auto", margin: 0 }}
-                            onChange={(e) => updateLine(line.key, e.target.checked
-                              ? {
-                                  carcass: true,
-                                  productId: "",
-                                  animalType: line.animalType
-                                    || (line.description.trim() ? findSameType(line.description, animalChips.all) : undefined)
-                                    || supplierCarcassTypes[0]
-                                    || ""
-                                }
-                              : { carcass: false })}
-                          />
-                          <span>Para despostar</span>
-                        </label>
-                      )}
-                    </div>
-                    <input
-                      type="text"
-                      inputMode="decimal"
-                      aria-label="Cantidad"
-                      value={line.quantity}
-                      onFocus={(e) => e.target.select()}
-                      onChange={(e) => updateLine(line.key, { quantity: e.target.value })}
-                    />
-                    <select aria-label="Unidad" value={line.unit} onChange={(e) => updateLine(line.key, { unit: e.target.value as "kg" | "unit" })}>
-                      <option value="kg">kg</option>
-                      <option value="unit">unidad</option>
-                    </select>
-                    <input
-                      type="text"
-                      aria-label="Precio unitario"
-                      inputMode="decimal"
-                      value={line.unitPrice}
-                      onChange={(e) => updateLine(line.key, { unitPrice: e.target.value })}
-                    />
-                    <strong className="num purchase-line-subtotal">{subtotal > 0 ? formatMoney(subtotal) : "-"}</strong>
-                    <button className="danger" aria-label="Quitar ítem" onClick={() => removeLine(line.key)}>✕</button>
-                  </div>
-                );
-              })}
-            </div>
-            <datalist id="purchase-animal-types">
-              {animalChips.all.map((name) => <option key={name} value={name} />)}
-            </datalist>
-            <p className="muted" style={{ margin: "8px 0 0", fontSize: 12 }}>
-              Para una descripción libre (sin elegir un producto de la lista): escribí el nombre y tocá afuera o Esc.
-              {canCarcass && " Lo que se desposta (media res, cajones de pollo) marcalo \"Para despostar\": aparece solo en Despiece, no hace falta cargarlo dos veces."}
-            </p>
-
-            <div style={{ marginTop: 12 }}>
-              <button className="secondary" onClick={addLine}>+ Agregar ítem</button>
-            </div>
-
-            <div className="totals" style={{ marginTop: 14 }}>
-              <strong>Total <b>{formatMoney(draftTotal)}</b></strong>
-            </div>
-
-            <label className="price-tools-check" style={{ marginTop: 14 }}>
-              <input type="checkbox" checked={updateCosts} onChange={(e) => setUpdateCosts(e.target.checked)} />
-              Actualizar el costo de los productos con los precios de esta compra
-            </label>
-
-            <button className="charge-button" style={{ marginTop: 6 }} disabled={busy} onClick={handleCreatePurchase}>
-              {busy ? "Registrando…" : "Registrar compra"}
-            </button>
-          </section>
-
-          <div className="content-grid" style={{ marginTop: 18 }}>
-            <section className="panel">
-              <div className="panel-title">
-                <h2>Compras</h2>
-                <span>{purchasesLoading ? "Cargando…" : `${purchases.length} facturas`}</span>
-              </div>
-              {purchases.map((purchase) => (
-                <div key={purchase.id} style={{ marginBottom: 16, opacity: purchase.status === "voided" ? 0.5 : 1 }}>
-                  <div className="list-row">
-                    {editingDatePurchaseId === purchase.id ? (
-                      <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
-                        <input type="date" value={editPurchaseDateValue} onChange={(e) => setEditPurchaseDateValue(e.target.value)} />
-                        <button disabled={busy} onClick={() => handleSavePurchaseDate(purchase.id)}>Guardar</button>
-                        <button className="secondary" disabled={busy} onClick={() => setEditingDatePurchaseId(null)}>Cancelar</button>
-                      </span>
-                    ) : (
-                      <strong style={{ textDecoration: purchase.status === "voided" ? "line-through" : undefined }}>
-                        {purchase.purchaseDate}{purchase.invoiceNumber ? ` · Fact. ${purchase.invoiceNumber}` : ""}
-                        {purchase.status === "voided" && " · Anulada"}
-                      </strong>
-                    )}
-                    <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
-                      <span className="num">Total {formatMoney(purchase.total)}</span>
-                      {editingDatePurchaseId !== purchase.id && (
-                        <button
-                          className="secondary"
-                          disabled={busy}
-                          onClick={() => {
-                            setEditingDatePurchaseId(purchase.id);
-                            setEditPurchaseDateValue(purchase.purchaseDate);
-                          }}
-                        >
-                          Editar fecha
-                        </button>
-                      )}
-                      {fiscalOn && purchase.status === "active" && (
-                        <button
-                          className={purchaseVouchers[purchase.id] ? "link-button" : "secondary"}
-                          title="Datos de la factura del proveedor para el Libro IVA Compras (pantalla Contable)"
-                          onClick={() => setVoucherFormFor(voucherFormFor === purchase.id ? null : purchase.id)}
-                        >
-                          {purchaseVouchers[purchase.id] ? "✓ Factura en el Libro IVA" : "Factura (Libro IVA)"}
-                        </button>
-                      )}
-                      {purchase.status === "active" && (
-                        <button className="secondary" disabled={busy} onClick={() => handleVoidPurchase(purchase.id)}>Anular</button>
-                      )}
-                    </span>
-                  </div>
-                  {fiscalOn && voucherFormFor === purchase.id && selectedSupplier && (
-                    <div style={{ margin: "8px 0 12px" }}>
-                      {purchaseVouchers[purchase.id] && (
-                        <p className="muted" style={{ margin: "0 0 6px", fontSize: 13 }}>
-                          Cargada: {voucherTypeLabel(purchaseVouchers[purchase.id].voucherType)} {voucherNumber(purchaseVouchers[purchase.id].pointOfSale, purchaseVouchers[purchase.id].number)}. Podés corregirla acá.{" "}
-                          <VoucherAttachment
-                            companyId={profile?.company_id ?? null}
-                            voucher={purchaseVouchers[purchase.id]}
-                            canWrite
-                            onChanged={(msg) => {
-                              setMessage(msg);
-                              void listVouchersForPurchases(purchases.map((p) => p.id)).then(setPurchaseVouchers);
-                            }}
-                          />
-                        </p>
-                      )}
-                      <PurchaseVoucherForm
-                        suppliers={suppliers.map((sp) => ({ id: sp.id, name: sp.name, taxId: taxInfo[sp.id]?.taxId ?? null, taxCondition: taxInfo[sp.id]?.taxCondition ?? null }))}
-                        existing={purchaseVouchers[purchase.id] ?? null}
-                        purchase={{ purchaseId: purchase.id, date: purchase.purchaseDate, supplierId: selectedSupplier.id, invoiceNumber: purchase.invoiceNumber ?? null, total: purchase.total }}
-                        branchId={branchId}
-                        onCancel={() => setVoucherFormFor(null)}
-                        onSaved={(msg) => {
-                          setVoucherFormFor(null);
-                          setMessage(msg + " Ya está en el Libro IVA Compras (Contable).");
-                          void listVouchersForPurchases(purchases.map((p) => p.id)).then(setPurchaseVouchers);
-                          void listSupplierTaxInfo().then(setTaxInfo);
-                        }}
-                      />
-                    </div>
-                  )}
-                  <table className="data-table">
-                    <thead>
-                      <tr>
-                        <th>Producto</th>
-                        <th>Cantidad</th>
-                        <th className="num">Precio</th>
-                        <th className="num">Subtotal</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(items[purchase.id] ?? []).map((item) => (
-                        <tr key={item.id}>
-                          <td>
-                            {item.description ?? products.find((p) => p.id === item.productId)?.name ?? "Producto"}
-                            {item.carcassAnimalType && (
-                              <small className="muted" style={{ display: "block" }}>
-                                Para despostar{item.unit === "unit" && item.carcassWeight ? ` · ${item.carcassWeight} kg` : ""} · está en Despiece
-                              </small>
-                            )}
-                          </td>
-                          {editingItemId === item.id ? (
-                            <>
-                              <td>
-                                <input
-                                  type="text"
-                                  inputMode="decimal"
-                                  value={editQuantity}
-                                  onChange={(e) => setEditQuantity(e.target.value)}
-                                  style={{ width: 80 }}
-                                />
-                                {" "}{item.unit}
-                              </td>
-                              <td className="num">
-                                <input type="text" inputMode="decimal" value={editUnitPrice} onChange={(e) => setEditUnitPrice(e.target.value)} style={{ width: 90 }} />
-                              </td>
-                              <td className="num">
-                                <div className="row-actions">
-                                  <button disabled={busy} onClick={() => handleSaveEdit(item.id)}>Guardar</button>
-                                  <button className="secondary" disabled={busy} onClick={() => setEditingItemId(null)}>Cancelar</button>
-                                </div>
-                              </td>
-                            </>
-                          ) : (
-                            <>
-                              <td>{item.quantity} {item.unit}</td>
-                              <td className="num">{formatMoney(item.unitPrice)}</td>
-                              <td className="num">
-                                {formatMoney(item.lineTotal)}{" "}
-                                <button
-                                  className="secondary"
-                                  onClick={() => {
-                                    setEditingItemId(item.id);
-                                    setEditQuantity(String(item.quantity));
-                                    setEditUnitPrice(String(item.unitPrice));
-                                  }}
-                                >
-                                  Editar
-                                </button>
-                              </td>
-                            </>
-                          )}
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              ))}
-              {purchases.length === 0 && <p className="muted">Todavía no hay compras cargadas.</p>}
-            </section>
-
-            <section className="panel">
-              <div className="panel-title">
-                <h2>Pagos</h2>
-              </div>
-              <div className="table-scroll">
-              <table className="data-table compact">
-                <thead>
-                  <tr><th>Fecha</th><th className="num">Monto</th><th>Cuenta y nota</th><th></th></tr>
-                </thead>
-                <tbody>
-                  {payments.map((payment) => (
-                    editingPaymentId === payment.id ? (
-                      <tr key={payment.id}>
-                        <td><input type="date" value={editPaymentDate} onChange={(e) => setEditPaymentDate(e.target.value)} /></td>
-                        <td>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            className="num"
-                            value={editPaymentAmount}
-                            onChange={(e) => setEditPaymentAmount(e.target.value)}
-                            style={{ width: 100 }}
-                          />
-                        </td>
-                        <td>
-                          <select value={editPaymentAccountId} onChange={(e) => setEditPaymentAccountId(e.target.value)}>
-                            <option value="">Pagar desde…</option>
-                            {accounts.map((a) => (
-                              <option key={a.id} value={a.id}>{a.name}</option>
-                            ))}
-                          </select>
-                          <input placeholder="Nota" value={editPaymentNotes} onChange={(e) => setEditPaymentNotes(e.target.value)} style={{ marginTop: 6, width: "100%" }} />
-                        </td>
-                        <td>
-                          <div className="row-actions">
-                            <button disabled={busy} onClick={handleSavePayment}>Guardar</button>
-                            <button className="secondary" disabled={busy} onClick={() => setEditingPaymentId(null)}>Cancelar</button>
-                          </div>
-                        </td>
-                      </tr>
-                    ) : (
-                      <tr key={payment.id}>
-                        <td style={{ whiteSpace: "nowrap" }}>{payment.paymentDate}</td>
-                        <td className="num">{formatMoney(payment.amount)}</td>
-                        <td>
-                          {payment.accountName ?? PAYMENT_METHOD_LABELS[payment.paymentMethod]}
-                          {payment.notes && <span className="cell-sub" style={{ whiteSpace: "normal" }}>{payment.notes}</span>}
-                        </td>
-                        <td>
-                          <div className="row-actions">
-                            <button className="secondary" disabled={busy} onClick={() => startEditPayment(payment)}>Editar</button>
-                            <button className="danger" disabled={busy} onClick={() => handleDeletePayment(payment.id)}>Borrar</button>
-                          </div>
-                        </td>
-                      </tr>
-                    )
-                  ))}
-                </tbody>
-              </table>
-              </div>
-              {payments.length === 0 && <p className="muted">Todavía no hay pagos registrados.</p>}
-            </section>
-          </div>
-
-          <section className="panel print-area" style={{ marginTop: 18 }}>
-            <div className="panel-title">
-              <h2>Detalle de cuenta corriente</h2>
-              <button className="secondary no-print" onClick={handlePrintLedger}>Imprimir</button>
-            </div>
-            <p className="muted print-only-header">
-              {selectedSupplier.name} · {selectedSupplier.category}
-            </p>
-            <div className="table-scroll">
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Fecha</th>
-                  <th>Comprobante</th>
-                  <th className="num">{adjustmentsEnabled ? "Debe (compras, recargos)" : "Debe (compras)"}</th>
-                  <th className="num">{adjustmentsEnabled ? "Haber (pagos, descuentos)" : "Haber (pagos)"}</th>
-                  <th className="num">Saldo</th>
-                </tr>
-              </thead>
-              <tbody>
-                {ledger.map((row) => (
-                  <tr key={row.key}>
-                    <td style={{ whiteSpace: "nowrap" }}>{row.date}</td>
-                    <td>
-                      {row.detail}
-                      {row.adjustmentId && (
-                        <button className="secondary no-print" style={{ marginLeft: 8 }} disabled={busy} onClick={() => handleDeleteAdjustment(row.adjustmentId!)}>Borrar</button>
-                      )}
-                      {row.lines && row.lines.length > 0 && (
-                        <ul style={{ margin: "4px 0 0", paddingLeft: 18, fontSize: 13 }}>
-                          {row.lines.map((line, index) => <li key={index}>{line}</li>)}
-                        </ul>
-                      )}
-                    </td>
-                    <td className="num">{row.debit > 0 ? formatMoney(row.debit) : "-"}</td>
-                    <td className="num">{row.credit > 0 ? formatMoney(row.credit) : "-"}</td>
-                    <td className="num">{formatMoney(row.balance)}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-            </div>
-            {ledger.length === 0 && <p className="muted">Todavía no hay movimientos para este proveedor.</p>}
-          </section>
-        </>
-      )}
     </>
   );
 }
