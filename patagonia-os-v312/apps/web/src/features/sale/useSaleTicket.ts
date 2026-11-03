@@ -576,10 +576,11 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     const unitPrice = product.priceRetail > 0 ? product.priceRetail : p1;
     setCart((current) => [
       ...current,
-      { key: `${product.id}|etiqueta|${Date.now()}|${current.length}`, kind: "product", productId: product.id, name: product.name, unit: product.unit, quantity, unitPrice, source: "scale", scaleTickets: 1, scalePending: true }
+      { key: `${product.id}|etiqueta|${Date.now()}|${current.length}`, kind: "product", productId: product.id, name: product.name, unit: product.unit, quantity, unitPrice, source: "scale", scaleTickets: 1 }
     ]);
+    // Como cualquier etiqueta de balanza: entra con su precio y listo, sin esperar el TOTAL (dueño, 2026-11-03).
     const qty = product.unit === "kg" ? `${quantity.toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg` : `${quantity} u.`;
-    setMessage(`Agregado: ${product.name} ${qty}. Al terminar, escaneá el código del TOTAL del ticket para confirmar los importes.`);
+    setMessage(`Agregado: ${product.name} ${qty}.`);
     setSearch("");
     setHighlightedIndex(-1);
     searchInputRef.current?.focus();

@@ -1,26 +1,22 @@
 import { useEffect, useRef, useState } from "react";
 import type { Product } from "@patagonia/domain";
-import { parseAmount } from "../../lib/money";
-import { formatMoney, localDateIso } from "../shifts/format";
-import type { DecodedScan } from "../scales/sale/profile";
+import { formatMoney } from "../shifts/format";
 import { decodeAcross } from "../scales/sale/multi-decode";
-import { addLibreFromPaper, addScannedItem, closePaper, describeItem, emptyPaper, paperFingerprint, setLibreAmount, type Paper } from "../scales/sale/paper";
+import { addScannedItem, describeItem, emptyPaper, type Paper } from "../scales/sale/paper";
 import { loadScaleSetups, type ScaleSetup } from "../scales/sale/scale-sale-service";
 import type { CreatePosSaleInput } from "./sale-service";
 import type { TicketLine } from "./sale-model";
+import { SAME_SALE_LABEL_QUESTION } from "./scale-repeat";
 
 /**
  * Mostrador con balanza "artículos + TOTAL" (migración 119; lógica en features/scales/sale).
  *
- * Flujo del cajero:
- * 1. Escanea el código de cada producto del papel: queda "esperando el TOTAL".
- * 2. Escanea el TOTAL: se valida la cantidad de artículos y que la suma dé EXACTO.
- * 3. Cobra como siempre. El stock baja al cobrar, una sola vez (create_pos_scale_sale).
- *
- * Solo pregunta lo que no se puede saber del código:
- * - el importe de una venta libre;
- * - los importes del papel si hubo precio a mano;
- * - "¿es otro ticket igual?".
+ * Flujo del cajero (2026-11-03, dueño: "igual que todas las balanzas: escanea cada producto y listo"):
+ * escanea el código de cada producto (de uno o de varios tickets) y cada uno entra con el precio de Patagonia,
+ * como una etiqueta de Kretz. El TOTAL del ticket ya no hace falta y no se pregunta nada: antes cada producto
+ * quedaba "esperando el TOTAL" y al cerrar el papel se pedían importes a mano (Los gringos, muy lento con gente).
+ * Una venta libre de la balanza (sin producto de Patagonia) no se puede cobrar sola: se carga a mano.
+ * El precio de la balanza puede ser distinto al de Patagonia: manda el de Patagonia (mantener la balanza al día).
  *
  * Solo se activa si la sucursal tiene una balanza de venta configurada (scale_profiles). Con varias (migración
  * 133), cada código se lee con la balanza que lo imprimió (multi-decode.ts) y un papel es siempre de UNA balanza.
@@ -59,6 +55,8 @@ export function useScalePapers(deps: {
   const [open, setOpen] = useState<OpenPaper>(newPaper);
   const [confirmed, setConfirmed] = useState<ConfirmedPaper[]>([]);
   const seq = useRef(0);
+  /** Códigos escaneados en esta venta: el mismo papel dos veces (la pistola leyó doble) se pregunta, como en Kretz. */
+  const scanned = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!enabled || !branchId) {
@@ -100,113 +98,32 @@ export function useScalePapers(deps: {
       return true;
     }
     if (d.kind === "total") {
-      closeOpen(d, setup);
+      setMessage(cart.some((l) => l.source === "scale")
+        ? "El TOTAL del ticket no hace falta: los productos ya están cargados con su precio."
+        : "Ese es el TOTAL del ticket. Escaneá el código de cada producto (el que está debajo de cada uno): el TOTAL no hace falta.");
       return true;
     }
-    const r = addScannedItem(open.paper, d, setup.links, products);
+    const r = addScannedItem(emptyPaper(), d, setup.links, products);
     if (!r.ok) {
       setMessage(r.reason);
       return true;
     }
+    const it = r.item;
+    if (it.kind !== "product" || !it.productId) {
+      setMessage(`No se agregó: ${describeItem(it)} es venta libre de la balanza (sin producto de Patagonia). Cargala a mano con su importe.`);
+      return true;
+    }
+    if (scanned.current.has(raw) && !window.confirm(SAME_SALE_LABEL_QUESTION)) {
+      setMessage("No se agregó: esa etiqueta ya estaba en esta venta.");
+      return true;
+    }
+    scanned.current.add(raw);
+    const product = products.find((p) => p.id === it.productId);
+    const unitPrice = product && product.priceRetail > 0 ? product.priceRetail : it.prices[0] ?? 0;
     const key = lineKey();
-    setCart((c) => [...c, lineFor(r.item, key, open.id)]);
-    setOpen({ ...open, paper: r.paper, keys: [...open.keys, key], scaleKey: setup.profile.scaleKey });
-    setMessage(`Agregado: ${describeItem(r.item)}. Seguí con los demás productos de ese ticket y al final escaneá el TOTAL.`);
+    setCart((c) => [...c, { key, kind: "product", productId: it.productId!, name: it.name, unit: it.unit === "kg" ? "kg" : "unit", quantity: it.quantity, unitPrice, source: "scale", scaleTickets: 1 }]);
+    setMessage(`Agregado: ${describeItem(it)}.`);
     return true;
-  }
-
-  function closeOpen(total: Extract<DecodedScan, { kind: "total" }>, setup: ScaleSetup) {
-    if (open.paper.items.length === 0) {
-      setMessage("Ese es el TOTAL del ticket. Primero escaneá el código de cada producto (el que está debajo de cada uno) y al final el TOTAL.");
-      return;
-    }
-    let paper = open.paper;
-    const keys = [...open.keys];
-    const added: TicketLine[] = [];
-    let r = closePaper(paper, total);
-    for (let step = 0; step < 4 && !r.ok; step++) {
-      if (r.need === "fix" && total.articles !== null && total.articles > paper.items.length) {
-        const missing = total.articles - paper.items.length;
-        if (!window.confirm(`El ticket dice ${total.articles} artículos y escaneaste ${paper.items.length}.\n\n¿Lo que falta es VENTA LIBRE de la balanza (precio puesto a mano, sin código debajo)?\n\nAceptar = escribir su importe.\nCancelar = escaneá el producto que falta.`)) break;
-        for (let i = 0; i < missing; i++) {
-          const n = Math.round(parseAmount(window.prompt(`Importe de la venta libre ${missing > 1 ? `${i + 1} de ${missing} ` : ""}(está en el ticket impreso):`) ?? "") || 0);
-          if (!(n > 0)) {
-            setMessage("No se confirmó el ticket: falta el importe de la venta libre.");
-            return;
-          }
-          paper = addLibreFromPaper(paper, n);
-          const key = lineKey();
-          keys.push(key);
-          added.push(lineFor(paper.items[paper.items.length - 1], key, open.id));
-        }
-      } else if (r.need === "libre_amounts") {
-        for (const idx of r.indexes) {
-          const n = Math.round(parseAmount(window.prompt(`Importe de "${describeItem(paper.items[idx])}" (venta libre, está en el ticket impreso):`) ?? "") || 0);
-          if (!(n > 0)) {
-            setMessage("No se confirmó el ticket: falta el importe de la venta libre.");
-            return;
-          }
-          paper = setLibreAmount(paper, idx, n);
-        }
-      } else if (r.need === "confirm_split" && window.confirm(`Mirá el ticket impreso: ${r.question}.\n\n¿Es así?\n\nAceptar = sí.\nCancelar = escribir el importe de cada uno.`)) {
-        r = closePaper(paper, total, undefined, { acceptSplit: true });
-        continue;
-      } else if (r.need === "paper_amounts" || r.need === "confirm_split") {
-        const ask = r.need === "confirm_split" ? "Escribí el IMPORTE impreso en el ticket para:" : `No se puede saber con seguridad el precio de cada producto (${r.reason}).\nEscribí el IMPORTE impreso en el ticket para:`;
-        const amounts: number[] = [];
-        for (const it of paper.items) {
-          if (it.kind !== "product") continue;
-          const n = Math.round(parseAmount(window.prompt(`${ask}\n${describeItem(it)}`) ?? "") || 0);
-          if (!(n > 0)) {
-            setMessage("No se confirmó el ticket: falta el importe de un producto.");
-            return;
-          }
-          amounts.push(n);
-        }
-        r = closePaper(paper, total, amounts);
-        continue;
-      } else {
-        break;
-      }
-      r = closePaper(paper, total);
-    }
-    if (!r.ok) {
-      setMessage(`No se confirmó el ticket: ${r.reason}.`);
-      return;
-    }
-    const amounts = r.amounts;
-    const fingerprint = paperFingerprint(total.barcode, paper);
-    // ¿El mismo papel se cobró recién en ESTA caja, o ya está en esta venta? Se pregunta solo dentro de la ventana
-    // (real: con 3 minutos, 6 avisos por semana en vez de 94). Las otras cajas las controla el servidor al cobrar.
-    const windowMs = (setup.repeatWindowMinutes ?? 3) * 60_000;
-    const recentHere = loadRecentPapers().find((x) => x.fp === fingerprint && Date.now() - x.at < windowMs);
-    const inThisSale = confirmed.some((p) => p.fingerprint === fingerprint);
-    let repeatConfirmed = false;
-    if (recentHere || inThisSale) {
-      const when = recentHere ? `en esta caja hace ${Math.max(1, Math.round((Date.now() - recentHere.at) / 60_000))} min` : "en esta misma venta";
-      if (!window.confirm(`Este mismo ticket de la balanza ya se cobró ${when}.\n\n¿Es OTRO ticket igual (otro cliente que llevó exactamente lo mismo)?\n\nAceptar = sí, es otro.\nCancelar = es el mismo papel: no se agrega.`)) {
-        const drop = new Set(keys);
-        setCart((c) => c.filter((l) => !drop.has(l.key)));
-        setOpen(newPaper());
-        setMessage("No se agregó: ese ticket de la balanza ya estaba cobrado.");
-        return;
-      }
-      repeatConfirmed = true;
-    }
-    const byKey = new Map(keys.map((k, i) => [k, i]));
-    setCart((c) =>
-      [...c, ...added].map((l) => {
-        const i = byKey.get(l.key);
-        if (i === undefined) return l;
-        const it = paper.items[i];
-        return it.kind === "product"
-          ? { ...l, scalePending: false, scaleAmount: amounts[i], unitPrice: Math.round((amounts[i] / l.quantity) * 100) / 100, scaleTicket: `${fingerprint}#${i}` }
-          : { ...l, scalePending: false, unitPrice: amounts[i] };
-      })
-    );
-    setConfirmed((c) => [...c, { id: open.id, fingerprint, ticketDate: localDateIso(), total: total.amount, articles: total.articles, keys, repeatConfirmed, scaleKey: setup.profile.scaleKey }]);
-    setOpen(newPaper());
-    setMessage(`Ticket de la balanza confirmado: ${formatMoney(total.amount)} (${r.detail}).`);
   }
 
   /** Claves que hay que sacar junto con esta línea (un papel confirmado va entero). */
@@ -226,6 +143,7 @@ export function useScalePapers(deps: {
   }
 
   function reset() {
+    scanned.current = new Set();
     setOpen(newPaper());
     setConfirmed([]);
   }
@@ -271,14 +189,6 @@ function saveRecentPapers(list: Array<{ fp: string; at: number }>) {
   } catch {
     // sin localStorage: queda el control del servidor
   }
-}
-
-function lineFor(it: Paper["items"][number], key: string, paperId: string): TicketLine {
-  if (it.kind === "product") {
-    return { key, kind: "product", productId: it.productId!, name: it.name, unit: it.unit === "kg" ? "kg" : "unit", quantity: it.quantity, unitPrice: it.prices[0] ?? 0, source: "scale", scaleTickets: 1, scalePending: true, scalePaper: paperId, scaleCode: it.scaleCode };
-  }
-  const qty = it.barcode && it.unit === "kg" ? ` ${it.quantity.toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg` : "";
-  return { key, kind: "manual", name: `${it.name}${qty}`, unit: "unit", quantity: 1, unitPrice: it.amount ?? 0, scalePending: true, scalePaper: paperId, scaleCode: it.scaleCode };
 }
 
 export type ScalePapers = ReturnType<typeof useScalePapers>;
