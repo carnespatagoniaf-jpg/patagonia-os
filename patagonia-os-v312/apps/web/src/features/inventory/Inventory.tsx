@@ -19,7 +19,7 @@ import {
   updateProductCategory,
   type ProductCategory
 } from "./product-categories-service";
-import { parseAmount } from "../../lib/money";
+import { amountInputText, parseAmount } from "../../lib/money";
 import { marginToInput, moneyToInput, onCostOrMargin, onPrice, productWithCode } from "./product-pricing";
 import { downloadScaleExportCsv } from "./scale-export";
 import { ScaleSyncPanel } from "./ScaleSyncPanel";
@@ -36,7 +36,7 @@ const SHOW_SYSTEL_PANEL = false;
 const SystelLabPanel = import.meta.env.VITE_SYSTEL_LAB === "1" ? lazy(() => import("./systel/SystelLabPanel")) : null;
 import { PriceTools } from "./PriceTools";
 import { PriceListsPanel } from "../pricing/PriceListsPanel";
-import { listPriceLists, setProductListPrices } from "../pricing/price-lists-service";
+import { listPriceLists, savePriceList, setProductListPrices } from "../pricing/price-lists-service";
 import { ruleLabel, rulePrice, sellingLists, type PriceList } from "../pricing/price-lists";
 import { quantityNumber } from "../sale/quantity";
 
@@ -46,6 +46,12 @@ function formatMoney(value: number) {
 
 const UNIT_LABELS: Record<Product["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
 const PRODUCT_COLS = 8;
+/**
+ * Columna "Mayorista" de una empresa que todavía no tiene listas (2026-11-03, dueño: "más simple", en todos los
+ * planes): se muestra igual y la lista se crea sola (minorista + 0%) con el primer precio escrito.
+ */
+const NEW_WHOLESALE_ID = "nueva-mayorista";
+const NEW_WHOLESALE: PriceList = { id: NEW_WHOLESALE_ID, name: "Mayorista", base: "retail", pct: 0, active: true };
 
 interface DraftProduct {
   code: string;
@@ -172,11 +178,15 @@ export function Inventory() {
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
   const [showPriceLists, setShowPriceLists] = useState(false);
   const activeLists = priceLists.filter((l) => l.active);
-  const canManageLists = (profile?.role === "owner" || profile?.role === "admin") && planAllows(profile, "full");
+  // Precio mayorista en todos los planes (migración 193): solo dueño o administrador lo escriben.
+  const canManageLists = profile?.role === "owner" || profile?.role === "admin";
+  /** Listas que se ven como columna y en Agregar/Editar: sin ninguna, la "Mayorista" que se crea sola. */
+  const shownLists = activeLists.length > 0 ? activeLists : canManageLists && isSupabaseConfigured ? [NEW_WHOLESALE] : [];
+  const createdListId = useRef<string | null>(null);
   // "Solo lectura" ve Stock pero no lo cambia (la base lo rechaza desde la 178): sin botones de editar. Por rol, no por
   // el tilde "Ajustar stock" (a un encargado sin ese tilde no se le esconde Editar; revisión 30/10).
   const canEdit = profile?.role !== "readonly";
-  const productCols = PRODUCT_COLS + activeLists.length;
+  const productCols = PRODUCT_COLS + shownLists.length;
 
 
   async function reload() {
@@ -447,7 +457,7 @@ export function Inventory() {
   /** Precios a mano por lista escritos en el formulario → lo que hay que mandar (null = vuelve a la regla). */
   function listPriceChanges(draft: DraftProduct, original?: Product): { listId: string; price: number | null }[] {
     const changes: { listId: string; price: number | null }[] = [];
-    for (const l of activeLists) {
+    for (const l of shownLists) {
       const typed = (draft.listPrices[l.id] ?? "").trim();
       const wanted = typed ? parseAmount(typed) : null;
       if (wanted !== null && (!Number.isFinite(wanted) || wanted < 0)) throw new Error(`Precio ${l.name} inválido.`);
@@ -457,11 +467,60 @@ export function Inventory() {
     return changes;
   }
 
+  /** Guarda precios de lista; si es la "Mayorista" que todavía no existe, primero la crea. true = se creó. */
+  async function saveListPrices(items: { productId: string; listId: string; price: number | null }[]): Promise<boolean> {
+    let created = false;
+    const resolved: { productId: string; listId: string; price: number | null }[] = [];
+    for (const item of items) {
+      if (item.listId !== NEW_WHOLESALE_ID) {
+        resolved.push(item);
+        continue;
+      }
+      if (item.price === null) continue;
+      if (!createdListId.current) {
+        createdListId.current = await savePriceList({ name: NEW_WHOLESALE.name, base: "retail", pct: 0, active: true });
+        created = true;
+      }
+      resolved.push({ ...item, listId: createdListId.current });
+    }
+    await setProductListPrices(resolved);
+    return created;
+  }
+
+  /** Casillero Mayorista en la tabla de Stock: se guarda al salir. Vacío = se cobra el precio normal. */
+  async function saveListCell(product: Product, list: PriceList, text: string) {
+    const typed = text.trim();
+    const wanted = typed ? parseAmount(typed) : null;
+    if (wanted !== null && (!Number.isFinite(wanted) || wanted < 0)) {
+      setMessage(`Precio ${list.name} inválido.`);
+      return;
+    }
+    const current = product.listPrices?.[list.id]?.manual ? product.listPrices[list.id].price : null;
+    if (wanted === current) return;
+    try {
+      const created = await saveListPrices([{ productId: product.id, listId: list.id, price: wanted }]);
+      if (created) {
+        await reload();
+        setMessage(`Listo: ${product.name} a ${formatMoney(wanted ?? 0)} mayorista. En Mostrador ya aparece el botón "Mayorista".`);
+        return;
+      }
+      setProducts((all) => all.map((p) => {
+        if (p.id !== product.id) return p;
+        const listPrices = { ...(p.listPrices ?? {}) };
+        listPrices[list.id] = wanted === null ? { price: rulePrice(list, p.cost, p.priceRetail, !!p.stockSourceId), manual: false } : { price: wanted, manual: true };
+        return { ...p, listPrices };
+      }));
+      setMessage(wanted === null ? `${product.name}: sin precio ${list.name} (se cobra el normal).` : `${product.name}: ${list.name} ${formatMoney(wanted)}.`);
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : "No se pudo guardar el precio.");
+    }
+  }
+
   /** Casilleros de cada lista (Mayorista…) en Agregar/Editar: vacío = sale de la regla. */
   function listPriceInfo(draft: DraftProduct, isPresentation: boolean) {
     const cost = draft.cost.trim() ? parseAmount(draft.cost) : 0;
     const retail = draft.priceRetail.trim() ? parseAmount(draft.priceRetail) : 0;
-    return activeLists.map((l) => {
+    return shownLists.map((l) => {
       const ruled = rulePrice(l, Number.isFinite(cost) ? cost : 0, Number.isFinite(retail) ? retail : 0, isPresentation);
       const typed = (draft.listPrices[l.id] ?? "").trim();
       const shown = typed ? parseAmount(typed) : ruled;
@@ -530,7 +589,7 @@ export function Inventory() {
       const newVat = vatFromSelect(newDraft.vatRate);
       if (newVat !== null) await setProductsVatRate({ codes: [newDraft.code.trim()], rate: newVat });
       const newListPrices = listPriceChanges(newDraft);
-      if (newListPrices.length > 0) await setProductListPrices(newListPrices.map((c) => ({ ...c, productId: created.id })));
+      if (newListPrices.length > 0) await saveListPrices(newListPrices.map((c) => ({ ...c, productId: created.id })));
       if (initialStock > 0) await adjustProductStock({ branchId, productId: created.id, countedQuantity: initialStock, reason: "Stock inicial al crear el producto" });
       setNewDraft(emptyDraft());
       setShowNewForm(false);
@@ -590,7 +649,7 @@ export function Inventory() {
       const wantedVat = vatFromSelect(editDraft.vatRate);
       if (wantedVat !== (vatRates[editingId] ?? null)) await setProductsVatRate({ productIds: [editingId], rate: wantedVat });
       const editListPrices = listPriceChanges(editDraft, original);
-      if (editListPrices.length > 0) await setProductListPrices(editListPrices.map((c) => ({ ...c, productId: editingId })));
+      if (editListPrices.length > 0) await saveListPrices(editListPrices.map((c) => ({ ...c, productId: editingId })));
       let linkMessage = "";
       if (wantedStock !== null && original && wantedStock !== Number(original.stock)) {
         const r = await adjustProductStock({ branchId, productId: editingId, countedQuantity: wantedStock, reason: "Corrección de stock desde Editar" });
@@ -1170,8 +1229,8 @@ export function Inventory() {
               <th className="num hide-sm">Costo</th>
               <th className="num hide-sm">Margen</th>
               <th className="num">{activeLists.length > 0 ? "Minorista" : "Venta"}</th>
-              {activeLists.map((l) => (
-                <th key={l.id} className="num">{l.name}</th>
+              {shownLists.map((l) => (
+                <th key={l.id} className="num" title="Vacío = se cobra el precio normal">{l.name}</th>
               ))}
               <th className="num">Stock</th>
               <th className="num hide-md" title="Avisa en Inicio cuando el stock queda en este número o menos. No es el stock.">Mínimo</th>
@@ -1226,8 +1285,27 @@ export function Inventory() {
                   {formatMoney(product.priceRetail)}
                   <span className="cell-sub">IVA {productVatLabel(vatRates[product.id], generalVatRate)}</span>
                 </td>
-                {activeLists.map((l) => {
+                {shownLists.map((l) => {
                   const lp = product.listPrices?.[l.id];
+                  if (canManageLists && canEdit) {
+                    const manual = lp?.manual ? lp.price : null;
+                    const ruled = lp?.price ?? product.priceRetail;
+                    return (
+                      <td key={l.id} className="num">
+                        <input
+                          key={`${l.id}-${manual ?? ""}`}
+                          type="text"
+                          inputMode="decimal"
+                          style={{ width: 96, textAlign: "right" }}
+                          aria-label={`Precio ${l.name} de ${product.name}`}
+                          defaultValue={manual !== null ? amountInputText(manual) : ""}
+                          placeholder={l.pct !== 0 || l.base === "cost" ? formatMoney(ruled) : "—"}
+                          onKeyDown={(e) => { if (e.key === "Enter") e.currentTarget.blur(); }}
+                          onBlur={(e) => void saveListCell(product, l, e.currentTarget.value)}
+                        />
+                      </td>
+                    );
+                  }
                   return (
                     <td key={l.id} className="num">
                       {formatMoney(lp?.price ?? product.priceRetail)}
