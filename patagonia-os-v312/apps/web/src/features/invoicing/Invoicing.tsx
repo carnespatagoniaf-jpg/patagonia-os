@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { formatMoney } from "../shifts/format";
 import { useActiveBranch } from "../branches/BranchProvider";
-import { SettingSection } from "../../components/SettingSection";
 import {
   authorizeInvoices,
   discardPendingInvoice,
@@ -41,6 +40,7 @@ import {
 } from "./invoicing-view";
 import { InvoiceRequestFields } from "./InvoiceRequestFields";
 import { RemitoRPanel } from "./RemitoRPanel";
+import { ArcaSetup } from "./ArcaSetup";
 import { listInWords, missingRemitoIssuerFields } from "./remito-r";
 import { OPEN_FISCAL_KEY } from "../../lib/navigate";
 import { useAuth } from "../auth/AuthProvider";
@@ -190,7 +190,7 @@ export function Invoicing() {
       a.download = `pedido-certificado-${settings?.cuit ?? "arca"}.csr`;
       a.click();
       URL.revokeObjectURL(url);
-      setMessage("Pedido de certificado descargado (está en Descargas). Seguí con el paso 2 en ARCA.");
+      setMessage("Pedido de certificado descargado: está en Descargas y termina en .csr. Seguí con el paso 3, en la página de ARCA.");
       setCert(await getArcaCertificateStatus().catch(() => cert));
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo generar el pedido.");
@@ -206,7 +206,7 @@ export function Invoicing() {
     setMessage("");
     try {
       const result = await uploadArcaCertificate(await file.text());
-      setMessage(`Certificado cargado (vence el ${new Date(result.certExpiresAt).toLocaleDateString("es-AR")}). Seguí con los pasos 4 y 5 y después Probar conexión.`);
+      setMessage(`Certificado cargado (vence el ${new Date(result.certExpiresAt).toLocaleDateString("es-AR")}). Seguí con el paso 5, en la página de ARCA, y después probá la conexión.`);
       setCert(await getArcaCertificateStatus().catch(() => cert));
     } catch (err) {
       setMessage(err instanceof Error ? err.message : "No se pudo cargar el certificado.");
@@ -338,12 +338,6 @@ export function Invoicing() {
     }
   }
 
-  const status = !settings
-    ? { text: "Primero cargá los datos fiscales del negocio.", tone: "warn" as const }
-    : !settings.enabled
-      ? { text: "Datos cargados. Falta conectar con ARCA (abajo).", tone: "warn" as const }
-      : { text: "Activa: en Mostrador, al cobrar, aparece la opción \"Factura\".", tone: "ok" as const };
-
   return (
     <>
       <header className="page-header">
@@ -354,134 +348,76 @@ export function Invoicing() {
         </div>
       </header>
 
-      {message && <div className="message">{message}</div>}
+      {message && settings?.enabled && <div className="message">{message}</div>}
 
-      <section className="panel" style={{ marginBottom: 18 }}>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", marginBottom: 6 }}>
-          <strong>Estado</strong>
-          <span className={`setting-status ${status.tone}`}>{loading ? "Cargando…" : status.text}</span>
-        </div>
-
-        <SettingSection
-          title="Datos fiscales del negocio"
-          status={
-            settings
-              ? `${ISSUER_CONDITION_LABEL[settings.taxCondition]} · CUIT ${formatCuit(settings.cuit)} · PV ${settings.pointOfSale}${fromRemito && remitoMissing.length > 0 ? ` · Para el Remito R falta: ${listInWords(remitoMissing)}` : ""}`
-              : "Sin cargar"
-          }
-          tone={settings && !(fromRemito && remitoMissing.length > 0) ? "ok" : "warn"}
-          actionLabel={settings ? "Cambiar" : "Cargar"}
-          defaultOpen={(!settings && !loading) || fromRemito}
-        >
-          <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", maxWidth: 760 }}>
-            <label className="muted">
-              CUIT
-              <input name="fiscal-cuit" autoComplete="off" inputMode="numeric" placeholder="20-12345678-6" value={form.cuit} onChange={(e) => setForm({ ...form, cuit: e.target.value })} style={{ width: "100%" }} />
-            </label>
-            <label className="muted">
-              Razón social (titular del CUIT, como figura en ARCA)
-              <input name="fiscal-name" autoComplete="off" value={form.businessName} onChange={(e) => setForm({ ...form, businessName: e.target.value })} style={{ width: "100%" }} />
-            </label>
-            <label className="muted">
-              Nombre de fantasía (opcional, va grande arriba)
-              <input name="fiscal-trade-name" autoComplete="off" placeholder="CARNES" value={form.tradeName} onChange={(e) => setForm({ ...form, tradeName: e.target.value })} style={{ width: "100%" }} />
-            </label>
-            <label className="muted">
-              Condición frente al IVA
-              <select value={form.taxCondition} onChange={(e) => setForm({ ...form, taxCondition: e.target.value as IssuerCondition })} style={{ width: "100%" }}>
-                <option value="monotributo">Monotributo (Factura C)</option>
-                <option value="responsable_inscripto">Responsable inscripto (Factura A y B)</option>
-              </select>
-            </label>
-            <label className="muted">
-              Punto de venta (el que creaste en ARCA)
-              <input name="fiscal-pos" autoComplete="off" inputMode="numeric" placeholder="5" value={form.pointOfSale} onChange={(e) => setForm({ ...form, pointOfSale: e.target.value.replace(/\D/g, "") })} style={{ width: "100%" }} />
-            </label>
-            <label className="muted">
-              Domicilio comercial
-              <input name="fiscal-address" autoComplete="off" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} style={{ width: "100%" }} />
-            </label>
-            <label className="muted">
-              Ingresos Brutos (N.º)
-              <input name="fiscal-iibb" autoComplete="off" value={form.grossIncomeNumber} onChange={(e) => setForm({ ...form, grossIncomeNumber: e.target.value })} style={{ width: "100%" }} />
-            </label>
-            <label className="muted">
-              Inicio de actividades
-              <input type="date" value={form.activityStart} onChange={(e) => setForm({ ...form, activityStart: e.target.value })} style={{ width: "100%" }} />
-            </label>
-            {form.taxCondition === "responsable_inscripto" && (
-              <label className="muted">
-                IVA general
-                <select value={form.defaultVatRate} onChange={(e) => setForm({ ...form, defaultVatRate: e.target.value })} style={{ width: "100%" }}>
-                  <option value="10.5">10,5% (carne fresca)</option>
-                  <option value="21">21%</option>
-                </select>
-                <span style={{ fontSize: 12 }}>Para los productos que no tienen su propio IVA. Cada producto se cambia en Stock → Editar (columna IVA), o toda una categoría en "Gestionar categorías".</span>
-              </label>
-            )}
-          </div>
-          <p className="setting-help">Estos datos salen impresos en la factura. Si cambiás el CUIT, la condición o el punto de venta, hay que volver a probar la conexión con ARCA.</p>
-          <div>
-            <button disabled={busy} onClick={() => void handleSave()}>{busy ? "Guardando…" : "Guardar datos fiscales"}</button>
-          </div>
-        </SettingSection>
-
-        <SettingSection
-          title="Conectar con ARCA (una sola vez)"
-          status={settings?.enabled ? "Conectado" : "Sin conectar"}
-          tone={settings?.enabled ? "ok" : "neutral"}
-          actionLabel="Ver pasos"
-        >
-          {cert?.usesShared ? (
-            <p className="setting-help">Este negocio factura con el certificado de Patagonia OS, que es de su mismo CUIT: solo hace falta el punto de venta "Web Services" y probar la conexión.</p>
-          ) : (
-            <ol style={{ margin: 0, paddingLeft: 20, display: "grid", gap: 8, fontSize: 14 }}>
-              <li>
-                <strong>Bajá el pedido de certificado</strong> (es de este negocio, con su CUIT).{" "}
-                <button className="secondary" disabled={busy || !settings} onClick={() => void handleDownloadRequest()}>
-                  {cert?.hasRequest ? "Volver a bajar el pedido" : "Bajar pedido de certificado"}
-                </button>
-              </li>
-              <li>
-                Entrá a <strong>arca.gob.ar</strong> con la clave fiscal del negocio (nivel 3) → <strong>Administración de Certificados Digitales</strong> (si no aparece:
-                Administrador de Relaciones → Adherir servicio → ARCA → Servicios Interactivos) → <strong>Agregar alias</strong> → Alias: <strong>{cert?.alias ?? "patagonia"}</strong> →
-                elegí el archivo del paso 1 → Agregar alias → en la lista, <strong>Ver</strong> → <strong>Descargar</strong>.
-              </li>
-              <li>
-                <strong>Subí el certificado</strong> que bajaste de ARCA:{" "}
-                <input type="file" accept=".crt,.cer,.pem,.txt" disabled={busy || !cert?.hasRequest} onChange={(e) => void handleUploadCertificate(e.target.files?.[0])} />
-                {cert?.hasCertificate && cert.certExpiresAt && (
-                  <span className="setting-status ok" style={{ marginLeft: 8 }}>Cargado · vence {new Date(cert.certExpiresAt).toLocaleDateString("es-AR")}</span>
+      <ArcaSetup
+        companyId={profile?.company_id ?? null}
+        settings={settings}
+        cert={cert}
+        loading={loading}
+        busy={busy}
+        message={message}
+        openDatos={fromRemito}
+        fiscalNote={fromRemito && remitoMissing.length > 0 ? `Para el Remito R falta: ${listInWords(remitoMissing)}.` : undefined}
+        onDownloadRequest={(regenerate) => void handleDownloadRequest(regenerate)}
+        onUploadCertificate={(file) => void handleUploadCertificate(file)}
+        onCheck={() => void handleCheck()}
+        fiscalForm={
+          <>
+              <div style={{ display: "grid", gap: 10, gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", maxWidth: 760 }}>
+                <label className="muted">
+                  CUIT
+                  <input name="fiscal-cuit" autoComplete="off" inputMode="numeric" placeholder="20-12345678-6" value={form.cuit} onChange={(e) => setForm({ ...form, cuit: e.target.value })} style={{ width: "100%" }} />
+                </label>
+                <label className="muted">
+                  Razón social (titular del CUIT, como figura en ARCA)
+                  <input name="fiscal-name" autoComplete="off" value={form.businessName} onChange={(e) => setForm({ ...form, businessName: e.target.value })} style={{ width: "100%" }} />
+                </label>
+                <label className="muted">
+                  Nombre de fantasía (opcional, va grande arriba)
+                  <input name="fiscal-trade-name" autoComplete="off" placeholder="CARNES" value={form.tradeName} onChange={(e) => setForm({ ...form, tradeName: e.target.value })} style={{ width: "100%" }} />
+                </label>
+                <label className="muted">
+                  Condición frente al IVA
+                  <select value={form.taxCondition} onChange={(e) => setForm({ ...form, taxCondition: e.target.value as IssuerCondition })} style={{ width: "100%" }}>
+                    <option value="monotributo">Monotributo (Factura C)</option>
+                    <option value="responsable_inscripto">Responsable inscripto (Factura A y B)</option>
+                  </select>
+                </label>
+                <label className="muted">
+                  Punto de venta (el que creaste en ARCA)
+                  <input name="fiscal-pos" autoComplete="off" inputMode="numeric" placeholder="5" value={form.pointOfSale} onChange={(e) => setForm({ ...form, pointOfSale: e.target.value.replace(/\D/g, "") })} style={{ width: "100%" }} />
+                </label>
+                <label className="muted">
+                  Domicilio comercial
+                  <input name="fiscal-address" autoComplete="off" value={form.address} onChange={(e) => setForm({ ...form, address: e.target.value })} style={{ width: "100%" }} />
+                </label>
+                <label className="muted">
+                  Ingresos Brutos (N.º)
+                  <input name="fiscal-iibb" autoComplete="off" value={form.grossIncomeNumber} onChange={(e) => setForm({ ...form, grossIncomeNumber: e.target.value })} style={{ width: "100%" }} />
+                </label>
+                <label className="muted">
+                  Inicio de actividades
+                  <input type="date" value={form.activityStart} onChange={(e) => setForm({ ...form, activityStart: e.target.value })} style={{ width: "100%" }} />
+                </label>
+                {form.taxCondition === "responsable_inscripto" && (
+                  <label className="muted">
+                    IVA general
+                    <select value={form.defaultVatRate} onChange={(e) => setForm({ ...form, defaultVatRate: e.target.value })} style={{ width: "100%" }}>
+                      <option value="10.5">10,5% (carne fresca)</option>
+                      <option value="21">21%</option>
+                    </select>
+                    <span style={{ fontSize: 12 }}>Para los productos que no tienen su propio IVA. Cada producto se cambia en Stock → Editar (columna IVA), o toda una categoría en "Gestionar categorías".</span>
+                  </label>
                 )}
-              </li>
-              <li>
-                En ARCA → <strong>Administrador de Relaciones de Clave Fiscal</strong> → <strong>Nueva Relación</strong> → Servicio: ARCA → WebServices →{" "}
-                <strong>Facturación Electrónica</strong> → Representante: Buscar → <strong>Computador Fiscal "{cert?.alias ?? "patagonia"}"</strong> → Confirmar.
-              </li>
-              <li>
-                En <strong>Administración de puntos de venta y domicilios</strong> → A/B/M → Agregar un punto de venta con el sistema de <strong>Web Services</strong> (Monotributo:
-                "Factura Electrónica - Monotributo - Web Services"; Responsable inscripto: "RECE para aplicativo y web services"). No sirve el de "Factura en Línea". Su número va arriba, en "Punto de venta".
-              </li>
-              <li>Tocá <strong>Probar conexión con ARCA</strong>. Si da bien, la factura queda activa en Mostrador y en Clientes.</li>
-            </ol>
-          )}
-          <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
-            <button disabled={busy || !settings} onClick={() => void handleCheck()}>{busy ? "Probando…" : "Probar conexión con ARCA"}</button>
-            {!settings && <span className="setting-help">Primero guardá los datos fiscales.</span>}
-          </div>
-          {cert?.hasCertificate && !cert.usesShared && (
-            <p className="setting-help">
-              ¿Hay que renovarlo o cambió algo?{" "}
-              <button className="link-button" disabled={busy} onClick={() => void handleDownloadRequest(true)}>Generar un certificado nuevo</button>
-            </p>
-          )}
-          {settings?.lastCheckAt && (
-            <p className="setting-help">
-              Última prueba: {new Date(settings.lastCheckAt).toLocaleString("es-AR")} — {settings.lastCheckOk ? "bien" : `falló: ${settings.lastCheckMessage ?? ""}`}
-            </p>
-          )}
-        </SettingSection>
-      </section>
+              </div>
+              <p className="setting-help">Estos datos salen impresos en la factura. Si cambiás el CUIT, la condición o el punto de venta, hay que volver a probar la conexión con ARCA.</p>
+              <div>
+                <button disabled={busy} onClick={() => void handleSave()}>{busy ? "Guardando…" : "Guardar datos fiscales"}</button>
+              </div>
+          </>
+        }
+      />
 
       {settings?.enabled && (
         <section className="panel" style={{ marginBottom: 18 }}>
