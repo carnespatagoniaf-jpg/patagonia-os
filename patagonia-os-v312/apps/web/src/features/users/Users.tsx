@@ -1,9 +1,12 @@
-import { Fragment, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { PERMISSION_LABELS, planAllows, rolePermissions, type Permission } from "../auth/permissions";
 import { useAuth } from "../auth/AuthProvider";
 import { useUsers } from "./useUsers";
-import type { CompanyUser, CreateStaffUserResult, StaffRole } from "./users-service";
+import { listProfileBranches, setProfileBranches, type CompanyUser, type CreateStaffUserResult, type StaffRole } from "./users-service";
+
+/** Papeles que pueden tener varios locales a cargo (plan Empresa). Dueño, administrador y contador ya ven todos. */
+const MULTI_BRANCH_ROLES: StaffRole[] = ["manager", "cashier", "production", "readonly"];
 
 const ASSIGNABLE_ROLES: StaffRole[] = ["admin", "manager", "cashier", "production", "readonly", "accountant"];
 
@@ -47,11 +50,19 @@ export function Users() {
   const [deleteBusy, setDeleteBusy] = useState(false);
 
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [editDraft, setEditDraft] = useState<Draft & { active: boolean; deniedPermissions: string[] }>({
+  const [editDraft, setEditDraft] = useState<Draft & { active: boolean; deniedPermissions: string[]; extraBranchIds: string[] }>({
     ...emptyDraft(""),
     active: true,
-    deniedPermissions: []
+    deniedPermissions: [],
+    extraBranchIds: []
   });
+  // Locales a cargo (plan Empresa, migración 191).
+  const empresa = planAllows(profile, "empresa");
+  const [extraBranches, setExtraBranches] = useState<Map<string, string[]>>(new Map());
+  useEffect(() => {
+    if (empresa) void listProfileBranches().then(setExtraBranches);
+  }, [empresa, users]);
+  const branchName = (id: string) => branches.find((b) => b.id === id)?.name ?? "";
 
   function openNewForm() {
     setNewDraft(emptyDraft(branches[0]?.id ?? ""));
@@ -90,7 +101,8 @@ export function Users() {
       role: (user.role === "owner" ? "admin" : user.role) as StaffRole,
       branchId: user.branchId ?? branches[0]?.id ?? "",
       active: user.active,
-      deniedPermissions: user.deniedPermissions
+      deniedPermissions: user.deniedPermissions,
+      extraBranchIds: extraBranches.get(user.id) ?? []
     });
   }
 
@@ -138,6 +150,12 @@ export function Users() {
         active: editDraft.active,
         deniedPermissions: editDraft.deniedPermissions
       });
+      const before = (extraBranches.get(editingId) ?? []).slice().sort().join(",");
+      const after = MULTI_BRANCH_ROLES.includes(editDraft.role) ? editDraft.extraBranchIds.filter((id) => id !== editDraft.branchId) : [];
+      if (empresa && after.slice().sort().join(",") !== before) {
+        await setProfileBranches(editingId, after);
+        setExtraBranches(await listProfileBranches());
+      }
       setEditingId(null);
       setMessage(editDraft.active ? "Usuario actualizado." : "Usuario desactivado (sigue en la lista, marcado Inactivo, para no perder su historial).");
     } catch (err) {
@@ -222,7 +240,12 @@ export function Users() {
                     <>
                       <td>{user.fullName}</td>
                       <td>{ROLE_LABELS[user.role]}</td>
-                      <td>{user.branchName ?? "—"}</td>
+                      <td>
+                        {user.branchName ?? "—"}
+                        {(extraBranches.get(user.id) ?? []).length > 0 && (
+                          <span className="cell-sub">también {(extraBranches.get(user.id) ?? []).map(branchName).filter(Boolean).join(", ")}</span>
+                        )}
+                      </td>
                       <td>{user.active ? "Activo" : "Inactivo"}</td>
                       <td>
                         {user.role !== "owner" && (
@@ -245,6 +268,34 @@ export function Users() {
                     </>
                   )}
                 </tr>
+                {editingId === user.id && empresa && MULTI_BRANCH_ROLES.includes(editDraft.role) && branches.length > 1 && (
+                  <tr>
+                    <td colSpan={5} style={{ background: "#f4f7fb" }}>
+                      <p className="muted" style={{ margin: "4px 0 8px" }}>
+                        Locales a cargo de {editDraft.fullName || "esta persona"}, además de {branchName(editDraft.branchId) || "su local"}: los elige arriba, en el selector de sucursal, y solo ve esos.
+                      </p>
+                      <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 18px" }}>
+                        {branches
+                          .filter((b) => b.id !== editDraft.branchId)
+                          .map((b) => (
+                            <label key={b.id} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13 }}>
+                              <input
+                                type="checkbox"
+                                checked={editDraft.extraBranchIds.includes(b.id)}
+                                onChange={(e) =>
+                                  setEditDraft((d) => ({
+                                    ...d,
+                                    extraBranchIds: e.target.checked ? [...d.extraBranchIds, b.id] : d.extraBranchIds.filter((id) => id !== b.id)
+                                  }))
+                                }
+                              />
+                              {b.name}
+                            </label>
+                          ))}
+                      </div>
+                    </td>
+                  </tr>
+                )}
                 {editingId === user.id && planAllows(profile, "full") && (
                   <tr>
                     <td colSpan={5} style={{ background: "#f8f5f2" }}>

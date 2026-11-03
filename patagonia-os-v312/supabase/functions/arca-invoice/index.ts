@@ -15,6 +15,9 @@
 // Acciones (POST JSON):
 //   { action: "check" }                    dueño/administrador: prueba la conexión
 //                                          y, si da bien, activa la factura (enabled).
+//   { action: "check", branchId }          lo mismo con el punto de venta de ese local
+//                                          (branch_fiscal_settings, migración 191): guarda
+//                                          el resultado en el local, no toca enabled.
 //   { action: "authorize", invoiceId? }    cualquiera de la empresa: pide el CAE de
 //                                          esa factura, o de las pendientes (hasta 10).
 //   { action: "cert_status" }              dueño/administrador: estado del certificado.
@@ -295,15 +298,22 @@ async function fiscalSettings(admin: SupabaseClient, companyId: string): Promise
 
 // ---------- "Probar conexión con ARCA" ----------
 
-async function checkConnection(admin: SupabaseClient, companyId: string, userId: string) {
+async function checkConnection(admin: SupabaseClient, companyId: string, userId: string, branchId?: string) {
   const settings = await fiscalSettings(admin, companyId);
   if (!settings) throw new UserError("Primero guardá los datos fiscales del negocio.");
+  // Punto de venta de un local (migración 191): se prueba ese número y el resultado queda en el local.
+  let branchPoint: Row | null = null;
+  if (branchId) {
+    const { data } = await admin.from("branch_fiscal_settings").select("*").eq("branch_id", branchId).eq("company_id", companyId).maybeSingle();
+    if (!data) throw new UserError("Ese local no tiene un punto de venta propio guardado.");
+    branchPoint = data;
+    settings.point_of_sale = data.point_of_sale;
+  }
   const save = async (ok: boolean, message: string) => {
-    await admin
-      .from("company_fiscal_settings")
-      .update({ enabled: ok, last_check_at: new Date().toISOString(), last_check_ok: ok, last_check_message: message })
-      .eq("company_id", companyId);
-    await admin.from("audit_log").insert({ company_id: companyId, user_id: userId, action: "fiscal.check", entity_type: "company", entity_id: companyId, new_data: { ok, message, env: ARCA_ENV } });
+    const check = { last_check_at: new Date().toISOString(), last_check_ok: ok, last_check_message: message };
+    if (branchPoint) await admin.from("branch_fiscal_settings").update(check).eq("branch_id", branchId);
+    else await admin.from("company_fiscal_settings").update({ enabled: ok, ...check }).eq("company_id", companyId);
+    await admin.from("audit_log").insert({ company_id: companyId, branch_id: branchId ?? null, user_id: userId, action: "fiscal.check", entity_type: "company", entity_id: companyId, new_data: { ok, message, env: ARCA_ENV, point_of_sale: settings.point_of_sale } });
     return { ok, message, env: ARCA_ENV };
   };
 
@@ -642,7 +652,7 @@ Deno.serve(async (req) => {
     const who = await caller(req, admin);
     if (body.action === "check") {
       if (who.role !== "owner" && who.role !== "admin") throw new UserError("Solo el dueño o un administrador prueba la conexión.");
-      return jsonResponse(await checkConnection(admin, who.companyId, who.userId));
+      return jsonResponse(await checkConnection(admin, who.companyId, who.userId, typeof body.branchId === "string" ? body.branchId : undefined));
     }
     if (body.action === "authorize") {
       const olderThan = typeof body.olderThanSeconds === "number" && body.olderThanSeconds > 0 ? Math.min(body.olderThanSeconds, 86_400) : 0;

@@ -98,10 +98,21 @@ export interface Invoice {
   relatedInvoiceId: string | null;
   errorMessage: string | null;
   createdAt: string;
+  /** Domicilio del local que la emitió (plan Empresa, migración 191). null = el de los datos generales. */
+  issuerAddress: string | null;
 }
 
-const INVOICE_COLUMNS =
+const BASE_INVOICE_COLUMNS =
   "id,pos_sale_id,customer_charge_id,kind,letter,voucher_type,point_of_sale,number,status,cae,cae_due,issued_on,customer_doc_type,customer_doc_number,customer_name,customer_tax_condition,total,net,vat,vat_rate,vat_breakdown,related_invoice_id,error_message,created_at";
+// issuer_address es de la migración 191: si la base todavía no la tiene (42703), se pide sin ella y se recuerda.
+let INVOICE_COLUMNS = `${BASE_INVOICE_COLUMNS},issuer_address`;
+
+async function selectInvoices<T>(run: (columns: string) => PromiseLike<{ data: T; error: { code?: string } | null }>): Promise<{ data: T; error: { code?: string } | null }> {
+  const first = await run(INVOICE_COLUMNS);
+  if (first.error?.code !== "42703" || INVOICE_COLUMNS === BASE_INVOICE_COLUMNS) return first;
+  INVOICE_COLUMNS = BASE_INVOICE_COLUMNS;
+  return run(INVOICE_COLUMNS);
+}
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function mapInvoice(row: any): Invoice {
@@ -129,13 +140,15 @@ function mapInvoice(row: any): Invoice {
     vatLines: parseInvoiceVatLines(row.vat_breakdown),
     relatedInvoiceId: row.related_invoice_id ?? null,
     errorMessage: row.error_message,
-    createdAt: row.created_at
+    createdAt: row.created_at,
+    issuerAddress: row.issuer_address ?? null
   };
 }
 
 export async function listInvoices(limit = 200): Promise<Invoice[]> {
   if (!supabase) return [];
-  const { data, error } = await supabase.from("invoices").select(INVOICE_COLUMNS).order("created_at", { ascending: false }).limit(limit);
+  const db = supabase;
+  const { data, error } = await selectInvoices((columns) => db.from("invoices").select(columns).order("created_at", { ascending: false }).limit(limit));
   if (error) throw error;
   return (data ?? []).map(mapInvoice);
 }
@@ -218,6 +231,42 @@ export async function checkArcaConnection(): Promise<{ ok: boolean; message: str
   return invokeArca({ action: "check" });
 }
 
+/** Prueba con ARCA el punto de venta propio de un local (plan Empresa, migración 191). No activa ni desactiva la factura. */
+export async function checkBranchArcaConnection(branchId: string): Promise<{ ok: boolean; message: string; env: "homo" | "prod" }> {
+  return invokeArca({ action: "check", branchId });
+}
+
+export interface BranchFiscal {
+  branchId: string;
+  pointOfSale: number;
+  address: string | null;
+  lastCheckAt: string | null;
+  lastCheckOk: boolean | null;
+  lastCheckMessage: string | null;
+}
+
+/** Punto de venta y domicilio de cada local que tiene los suyos. Sin la migración 191, vacío. */
+export async function listBranchFiscal(): Promise<BranchFiscal[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase.from("branch_fiscal_settings").select("branch_id,point_of_sale,address,last_check_at,last_check_ok,last_check_message");
+  if (error) return [];
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    branchId: String(r.branch_id),
+    pointOfSale: Number(r.point_of_sale),
+    address: (r.address as string | null) ?? null,
+    lastCheckAt: (r.last_check_at as string | null) ?? null,
+    lastCheckOk: (r.last_check_ok as boolean | null) ?? null,
+    lastCheckMessage: (r.last_check_message as string | null) ?? null
+  }));
+}
+
+/** pointOfSale null = el local vuelve a facturar con los datos generales. */
+export async function saveBranchFiscal(branchId: string, pointOfSale: number | null, address: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("save_branch_fiscal_settings", { p_branch_id: branchId, p_point_of_sale: pointOfSale, p_address: address });
+  if (error) throw error;
+}
+
 export interface AuthorizeOutcome {
   id: string;
   status: InvoiceStatus;
@@ -265,7 +314,8 @@ export async function requestCreditNote(invoiceId: string): Promise<string> {
 
 export async function getInvoice(invoiceId: string): Promise<Invoice | null> {
   if (!supabase) return null;
-  const { data, error } = await supabase.from("invoices").select(INVOICE_COLUMNS).eq("id", invoiceId).maybeSingle();
+  const db = supabase;
+  const { data, error } = await selectInvoices((columns) => db.from("invoices").select(columns).eq("id", invoiceId).maybeSingle());
   if (error) throw error;
   return data ? mapInvoice(data) : null;
 }
@@ -273,7 +323,8 @@ export async function getInvoice(invoiceId: string): Promise<Invoice | null> {
 /** Facturas de un grupo de ventas en cuenta corriente (para marcar cuáles ya tienen). */
 export async function listChargeInvoices(chargeIds: string[]): Promise<Invoice[]> {
   if (!supabase || chargeIds.length === 0) return [];
-  const { data, error } = await supabase.from("invoices").select(INVOICE_COLUMNS).in("customer_charge_id", chargeIds);
+  const db = supabase;
+  const { data, error } = await selectInvoices((columns) => db.from("invoices").select(columns).in("customer_charge_id", chargeIds));
   if (error) throw error;
   return (data ?? []).map(mapInvoice);
 }
@@ -295,7 +346,8 @@ export function invoicePrintFrom(inv: Invoice, fiscal: FiscalSettings, related?:
       tradeName: fiscal.tradeName,
       cuit: fiscal.cuit,
       taxCondition: fiscal.taxCondition,
-      address: fiscal.address,
+      // El domicilio del local que la emitió, si tiene uno propio (plan Empresa, migración 191).
+      address: inv.issuerAddress ?? fiscal.address,
       grossIncomeNumber: fiscal.grossIncomeNumber,
       activityStart: fiscal.activityStart
     },

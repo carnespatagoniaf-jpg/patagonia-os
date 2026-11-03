@@ -15,6 +15,8 @@ export interface UserProfile {
   plan?: "basico" | "estandar" | "full" | "empresa";
   /** Pantallas extra a pedido de esa empresa (migración 143, companies.features). Ver permissions.ts: PAGE_REQUIRED_FEATURE. */
   features?: string[];
+  /** Plan Empresa (migración 191): otros locales a su cargo, además de branch_id. Ver BranchProvider. */
+  extra_branch_ids?: string[];
 }
 
 interface AuthContextValue {
@@ -133,7 +135,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const companyActive = data.company_id ? company?.active === true : true;
     if (!companyActive) throw new DefinitiveProfileError("Esta empresa está desactivada.");
     setIsPlatformAdmin(false);
-    setProfile({ ...(data as unknown as UserProfile), plan: company?.plan, features: company?.features ?? [] });
+    // Locales a cargo (plan Empresa, migración 191). Si la consulta falla (base sin la migración), solo su local.
+    let extraBranchIds: string[] = [];
+    if (company?.plan === "empresa" && data.role !== "owner" && data.role !== "admin") {
+      const { data: extra } = await supabase.from("profile_branches").select("branch_id").eq("profile_id", userId);
+      extraBranchIds = ((extra ?? []) as Array<{ branch_id: string }>).map((r) => r.branch_id).filter((id) => id !== data.branch_id);
+    }
+    setProfile({ ...(data as unknown as UserProfile), plan: company?.plan, features: company?.features ?? [], extra_branch_ids: extraBranchIds });
     loadedProfileUserIdRef.current = userId;
   }
 

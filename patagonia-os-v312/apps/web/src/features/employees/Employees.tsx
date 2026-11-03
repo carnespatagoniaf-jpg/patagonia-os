@@ -9,6 +9,9 @@ import { listPayrollLiquidationDetail, type PayrollLiquidationLineItem } from ".
 import { listPosCashiers } from "../sale/pos-shift-service";
 import { setEmployeePosPin } from "../sale/cash-control-service";
 import { earlierPending, shortDate } from "./payroll-period";
+import { EmployeeBranches } from "./EmployeeBranches";
+import { useAuth } from "../auth/AuthProvider";
+import { planAllows } from "../auth/permissions";
 
 const ADJUSTMENT_TYPE_LABELS: Record<PayrollAdjustmentType, string> = {
   bonus: "Premio",
@@ -46,6 +49,7 @@ function daysBetweenInclusive(start: string, end: string) {
 }
 
 export function Employees() {
+  const { profile } = useAuth();
   const {
     employees,
     loading,
@@ -536,6 +540,7 @@ export function Employees() {
                       <button className="secondary" disabled={pinBusy} onClick={() => handleSavePin(selectedEmployee.id, null)}>Quitar PIN</button>
                     )}
                   </div>
+                  {planAllows(profile, "empresa") && <EmployeeBranches employee={selectedEmployee} />}
                 </div>
               )}
 
