@@ -12,7 +12,7 @@ export interface UserProfile {
   active: boolean;
   denied_permissions?: string[];
   /** Plan de la empresa (migración 101). Ver permissions.ts: profilePlan(). */
-  plan?: "basico" | "estandar" | "full" | "empresa";
+  plan?: "basico" | "estandar" | "full" | "empresa" | "planta";
   /** Pantallas extra a pedido de esa empresa (migración 143, companies.features). Ver permissions.ts: PAGE_REQUIRED_FEATURE. */
   features?: string[];
   /** Plan Empresa (migración 191): otros locales a su cargo, además de branch_id. Ver BranchProvider. */
@@ -137,7 +137,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsPlatformAdmin(false);
     // Locales a cargo (plan Empresa, migración 191). Si la consulta falla (base sin la migración), solo su local.
     let extraBranchIds: string[] = [];
-    if (company?.plan === "empresa" && data.role !== "owner" && data.role !== "admin") {
+    if ((company?.plan === "empresa" || company?.plan === "planta") && data.role !== "owner" && data.role !== "admin") {
       const { data: extra } = await supabase.from("profile_branches").select("branch_id").eq("profile_id", userId);
       extraBranchIds = ((extra ?? []) as Array<{ branch_id: string }>).map((r) => r.branch_id).filter((id) => id !== data.branch_id);
     }

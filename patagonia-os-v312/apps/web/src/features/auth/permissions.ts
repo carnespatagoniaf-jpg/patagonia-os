@@ -29,7 +29,8 @@ export type Permission =
   | "frigo.manage"
   | "orders.view"
   | "orders.manage"
-  | "transfers.manage";
+  | "transfers.manage"
+  | "planta.manage";
 
 // "owner" es interno nuestro (el equipo de Patagonia OS): ve todo, incluidas
 // herramientas todavía en prueba (Auditoría) antes de decidir si pasan a
@@ -90,15 +91,17 @@ export const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> 
     "scales.manage",
     "route.sell",
     "frigo.manage",
-    "transfers.manage"
+    "transfers.manage",
+    "planta.manage"
   ],
   // frigo.manage: el encargado carga DT, faena y salidas (la pantalla solo existe si la empresa tiene 'frigorifico').
   // transfers.manage (migración 190, plan Empresa): pedir, preparar, despachar y recibir mercadería, solo de su local.
-  manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view", "frigo.manage", "orders.view", "orders.manage", "transfers.manage"],
+  manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view", "frigo.manage", "orders.view", "orders.manage", "transfers.manage", "planta.manage"],
   // "route.sell": vendedor de un camión (venta en ruta, migración 161); la pantalla además pide companies.features "venta_ruta".
   // Pedidos (migración 187): el cajero los carga y los entrega, solo en su sucursal (la base lo exige).
   cashier: ["pos.sell", "products.view", "sales.create", "pos.treasury", "route.sell", "orders.view", "orders.manage", "transfers.manage"],
-  production: ["dashboard.view", "inventory.view", "inventory.adjust", "transfers.manage"],
+  // planta.manage (migración 194, plan Planta): envasar, imprimir etiquetas y despachar paquetes, solo en su local.
+  production: ["dashboard.view", "inventory.view", "inventory.adjust", "transfers.manage", "planta.manage"],
   readonly: ["dashboard.view", "inventory.view", "reports.view"],
   // El contador (migración 155): solo la pantalla Contable. La base le corta toda escritura.
   accountant: ["accounting.view"]
@@ -135,26 +138,30 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   "frigo.manage": "Frigorífico (tropa, garrón y kilo)",
   "orders.view": "Pedidos (ver)",
   "orders.manage": "Pedidos (cargar, entregar y cancelar)",
-  "transfers.manage": "Mercadería entre locales (pedir, despachar y recibir)"
+  "transfers.manage": "Mercadería entre locales (pedir, despachar y recibir)",
+  "planta.manage": "Planta (envasar, etiquetas y despachar paquetes)"
 };
 
 /** Planes que se venden (migración 101). El plan de la empresa se chequea
  * también en la base (require_plan en cada función + RLS); esto es para no
  * mostrar lo que el plan no incluye. */
 // "empresa" (migración 189, 2026-11-02): arriba de Full, para cadenas. Incluye todo Full, sin límites.
-export type Plan = "basico" | "estandar" | "full" | "empresa";
+// "planta" (migración 194, 2026-11-03): Empresa + la pantalla Planta (paquetes con código para locales de
+// autoservicio). Mismo orden que Empresa: todo lo de Empresa le sirve; lo de Planta pide el plan exacto.
+export type Plan = "basico" | "estandar" | "full" | "empresa" | "planta";
 
-export const PLAN_LABELS: Record<Plan, string> = { basico: "Básico", estandar: "Estándar", full: "Full", empresa: "Empresa" };
+export const PLAN_LABELS: Record<Plan, string> = { basico: "Básico", estandar: "Estándar", full: "Full", empresa: "Empresa", planta: "Planta" };
 
 /** Mismos límites que plan_limits() en la base (null = sin límite). */
 export const PLAN_LIMITS: Record<Plan, { maxBranches: number | null; maxUsers: number | null }> = {
   basico: { maxBranches: 1, maxUsers: 3 },
   estandar: { maxBranches: 2, maxUsers: 8 },
   full: { maxBranches: null, maxUsers: null },
-  empresa: { maxBranches: null, maxUsers: null }
+  empresa: { maxBranches: null, maxUsers: null },
+  planta: { maxBranches: null, maxUsers: null }
 };
 
-const PLAN_RANK: Record<Plan, number> = { basico: 1, estandar: 2, full: 3, empresa: 4 };
+const PLAN_RANK: Record<Plan, number> = { basico: 1, estandar: 2, full: 3, empresa: 4, planta: 4 };
 
 /** Permisos que solo existen desde cierto plan. Lo que no está acá va en todos. */
 const PERMISSION_MIN_PLAN: Partial<Record<Permission, Plan>> = {
@@ -169,6 +176,9 @@ const PERMISSION_MIN_PLAN: Partial<Record<Permission, Plan>> = {
   "transfers.manage": "empresa"
 };
 
+/** Permisos de un plan exacto, no "desde" (Planta tiene el orden de Empresa, pero Empresa no trae Planta). */
+const PERMISSION_ONLY_PLAN: Partial<Record<Permission, Plan>> = { "planta.manage": "planta" };
+
 /** Páginas que piden un plan más alto que su permiso (ej. Sucursales: el
  * permiso branches.manage también maneja el selector de sucursal, que
  * Estándar necesita, pero la pantalla de resumen es de Full). */
@@ -180,7 +190,7 @@ const PAGE_MIN_PLAN: Partial<Record<string, Plan>> = { branches: "full", reconci
  * un dato que falta. */
 export function profilePlan(profile: UserProfile | null): Plan {
   const plan = profile?.plan;
-  return plan === "basico" || plan === "estandar" || plan === "full" || plan === "empresa" ? plan : "full";
+  return plan === "basico" || plan === "estandar" || plan === "full" || plan === "empresa" || plan === "planta" ? plan : "full";
 }
 
 export function planAllows(profile: UserProfile | null, min: Plan): boolean {
@@ -191,6 +201,8 @@ export function can(profile: UserProfile | null, permission: Permission) {
   if (!profile) return false;
   const minPlan = PERMISSION_MIN_PLAN[permission];
   if (minPlan && !planAllows(profile, minPlan)) return false;
+  const onlyPlan = PERMISSION_ONLY_PLAN[permission];
+  if (onlyPlan && profilePlan(profile) !== onlyPlan) return false;
   const permissions = rolePermissions[profile.role];
   const grantedByRole = permissions.includes("*") || permissions.includes(permission);
   if (!grantedByRole) return false;
@@ -243,7 +255,9 @@ export const PAGE_PERMISSIONS = {
   frigorifico: "frigo.manage",
   // Mercadería entre locales (migración 190, plan Empresa): la pantalla del local. Dueño y administrador la usan
   // como pestaña de Sucursales (PAGE_ONLY_ROLES).
-  transfers: "transfers.manage"
+  transfers: "transfers.manage",
+  // Planta (migración 194, plan Planta): envasar con etiqueta, paquetes y despachar escaneando.
+  planta: "planta.manage"
 } as const satisfies Record<string, Permission>;
 
 export type Page = keyof typeof PAGE_PERMISSIONS;

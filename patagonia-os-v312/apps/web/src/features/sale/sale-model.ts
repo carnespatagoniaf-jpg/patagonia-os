@@ -24,6 +24,8 @@ export interface TicketLine {
   scaleAmount?: number;
   /** Identidad del ticket de la balanza del que salió este artículo. */
   scaleTicket?: string;
+  /** Código del paquete de la planta escaneado (plan Planta, migración 194): viaja en scale_ticket y lo marca vendido. */
+  packageCode?: string;
   /** Etiqueta de una Systel esperando el código del TOTAL para saber su importe (no se puede cobrar así). */
   scalePending?: boolean;
   /** Papel de la balanza ("artículos + TOTAL", migración 119) al que pertenece esta línea. */
