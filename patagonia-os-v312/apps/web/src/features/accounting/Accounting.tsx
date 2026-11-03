@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
+import { goToFiscalSettings } from "../../lib/navigate";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { useSuppliers } from "../purchases/useSuppliers";
 import { readStatementFile } from "../reconciliation/read-statement-file";
@@ -66,6 +67,15 @@ function downloadBlob(name: string, data: BlobPart, type: string) {
 const signed = (p: { voucherType: number }, n: number) => (isCreditNote(p.voucherType) ? -n : n);
 
 type Tab = "resumen" | "libros" | "iibb" | "saldos" | "inventario";
+/** Una línea por pestaña: qué es, en palabras de alguien que no es contador (2026-11-02, el dueño: "que le vaya explicando bien"). */
+const TAB_HELP: Record<Tab, string> = {
+  resumen: "Lo que pasó en el mes y lo que tenés que hacer: qué vas a pagar, cuándo vence y la carpeta para el contador.",
+  libros: "El IVA Ventas son tus facturas emitidas; el IVA Compras, las facturas que te dieron tus proveedores. Cuantas más compras tengan su factura cargada, menos IVA pagás.",
+  iibb: "Ingresos Brutos es el impuesto de la provincia sobre lo que vendés. Acá se calcula con tu alícuota y se le restan las percepciones y retenciones que ya te cobraron.",
+  saldos: "Quién te debe y a quién le debés, separado por antigüedad (0-30, 31-60, 61-90 y más de 90 días).",
+  inventario: "Una foto del stock a costo en una fecha (por ejemplo el último día del año): el contador la usa para el balance."
+};
+
 const TABS: { key: Tab; label: string }[] = [
   { key: "resumen", label: "Resumen" },
   { key: "libros", label: "Libros de IVA" },
@@ -355,17 +365,82 @@ export function Accounting() {
       {data && (
         <>
           {!data.company.taxCondition && (
-            <div className="message">Faltan los datos fiscales del negocio (CUIT y condición frente al IVA). Se cargan en Facturas → "Datos fiscales del negocio".</div>
+            <div className="message warning" style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+              <span>Faltan los datos fiscales del negocio (CUIT y condición frente al IVA): sin eso no se puede calcular el IVA ni los vencimientos.</span>
+              <button onClick={goToFiscalSettings}>Cargarlos en Facturas</button>
+            </div>
           )}
 
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 14 }}>
+          <div className="page-tabs" style={{ marginBottom: 6 }}>
             {TABS.map((t) => (
-              <button key={t.key} className={tab === t.key ? "" : "secondary"} onClick={() => setTab(t.key)}>{t.label}</button>
+              <button key={t.key} className={tab === t.key ? "page-tab active" : "page-tab"} onClick={() => setTab(t.key)}>{t.label}</button>
             ))}
           </div>
+          <p className="muted acc-tab-help">{TAB_HELP[tab]}</p>
 
           {tab === "resumen" && (
           <>
+          <section className="panel acc-todo">
+            <div className="panel-title" style={{ marginBottom: 8 }}>
+              <h2>Tu mes, en simple</h2>
+              <span className="muted">{monthLabel(month)}</span>
+            </div>
+            <ul className="acc-todo-list">
+              <li className={data.purchasesWithoutVoucher.length > 0 ? "warn" : "ok"}>
+                <span className="acc-todo-icon">{data.purchasesWithoutVoucher.length > 0 ? "!" : "✓"}</span>
+                <span>
+                  {data.purchasesWithoutVoucher.length > 0 ? (
+                    <><b>Te faltan cargar {data.purchasesWithoutVoucher.length} {data.purchasesWithoutVoucher.length === 1 ? "factura de compra" : "facturas de compra"}.</b> Son las que te dio el proveedor: {ri ? "con ellas pagás menos IVA" : "el contador las necesita para tus libros"}.</>
+                  ) : (
+                    <><b>Todas las compras del mes tienen su factura cargada.</b></>
+                  )}
+                </span>
+                {data.purchasesWithoutVoucher.length > 0 && <button className="secondary" onClick={() => setTab("libros")}>Cargarlas</button>}
+              </li>
+              {ri && position && (
+                <li className="info">
+                  <span className="acc-todo-icon">$</span>
+                  <span>
+                    <b>{position.balance >= 0 ? `Vas a pagar unos ${formatMoney(position.balance)} de IVA` : `Te quedan ${formatMoney(Math.abs(position.balance))} de IVA a favor`}</b> (estimado): el IVA que cobraste en tus facturas menos el que pagaste en tus compras y las percepciones.
+                  </span>
+                </li>
+              )}
+              {mono && (
+                <li className={mono.level === "ok" ? "info" : "warn"}>
+                  <span className="acc-todo-icon">{mono.level === "ok" ? "$" : "!"}</span>
+                  <span>
+                    {mono.level === "excede" ? (
+                      <><b>En los últimos 12 meses facturaste más que el tope del monotributo.</b> Hablá con tu contador.</>
+                    ) : (
+                      <><b>Monotributo categoría {mono.category}: usaste el {String(mono.usedPct).replace(".", ",")}% del tope.</b> Te quedan {formatMoney(mono.remaining ?? 0)} para facturar en 12 meses sin cambiar de categoría.</>
+                    )}
+                  </span>
+                </li>
+              )}
+              {iibbResult?.applies && (
+                <li className="info">
+                  <span className="acc-todo-icon">$</span>
+                  <span>
+                    <b>{iibbResult.balance >= 0 ? `Ingresos Brutos: unos ${formatMoney(iibbResult.balance)} a pagar` : `Ingresos Brutos: ${formatMoney(Math.abs(iibbResult.balance))} a favor`}</b> (estimado, con lo que ya te percibieron o retuvieron).
+                  </span>
+                </li>
+              )}
+              {calendar.items[0] && (
+                <li className={calendar.items[0].daysLeft <= 7 ? "warn" : "info"}>
+                  <span className="acc-todo-icon">⏰</span>
+                  <span>
+                    <b>Próximo vencimiento: {calendar.items[0].title}, el {calendar.items[0].date.slice(8, 10)}/{calendar.items[0].date.slice(5, 7)}</b>{" "}
+                    ({calendar.items[0].daysLeft === 0 ? "hoy" : calendar.items[0].daysLeft === 1 ? "mañana" : `en ${calendar.items[0].daysLeft} días`}){calendar.items[0].kind === "estimada" ? ", fecha estimada: confirmala en ARCA" : ""}.
+                  </span>
+                </li>
+              )}
+              <li className="info">
+                <span className="acc-todo-icon">📁</span>
+                <span><b>A principio de mes, mandale al contador la carpeta del mes anterior.</b> Es un Excel con todo lo que te pide.</span>
+                <button className="secondary" onClick={() => void downloadPackage()}>Bajar la carpeta</button>
+              </li>
+            </ul>
+          </section>
           <section className="kpi-grid" style={{ gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))" }}>
             {ri && position ? (
               <>

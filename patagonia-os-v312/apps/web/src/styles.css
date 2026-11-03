@@ -1434,3 +1434,37 @@ button.ws-card-button:hover { border-color: #c3cad5; }
 .margin-badge.none { background: var(--danger-soft); color: var(--danger); }
 .num-warn { color: var(--warn); font-weight: 600; }
 @media (max-width: 900px) { .ws-cards-4 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+/* Rentabilidad y Contable (2026-11-02, el dueño: "que le vaya explicando bien"). */
+.acc-tab-help { margin: 0 0 14px; font-size: 13px; max-width: 860px; }
+.acc-todo { margin-bottom: 16px; }
+.acc-todo-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.acc-todo-list li { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; border: 1px solid var(--line); border-radius: var(--r); padding: 9px 12px; font-size: 14px; }
+.acc-todo-list li > span:nth-child(2) { flex: 1 1 280px; min-width: 0; }
+.acc-todo-list li.warn { background: var(--warn-soft); border-color: #f5d9a8; }
+.acc-todo-list li.ok { background: var(--ok-soft); border-color: #cfe6d3; }
+.acc-todo-icon { width: 26px; height: 26px; flex: none; border-radius: 50%; display: grid; place-items: center; font-weight: 800; font-size: 13px; background: #eef1f5; color: var(--ink-2); }
+.acc-todo-list li.warn .acc-todo-icon { background: var(--warn); color: #fff; }
+.acc-todo-list li.ok .acc-todo-icon { background: var(--ok); color: #fff; }
+.prof-period.panel { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; flex-wrap: wrap; padding: 14px 18px; margin-bottom: 16px; }
+.prof-grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(260px, 1fr); gap: 16px; align-items: start; }
+.prof-side { display: grid; gap: 16px; }
+.prof-side .panel { padding: 16px 18px; }
+.prof-side-title { margin: 0 0 6px; font-size: 15px; }
+.prof-big { font-size: 26px; display: block; }
+.prof-cash { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 14px; }
+.prof-cash b { text-align: right; }
+.prof-waterfall td { padding: 9px 12px; vertical-align: top; }
+.prof-waterfall td small { display: block; color: var(--muted); font-size: 12px; margin-top: 2px; font-weight: 400; }
+.prof-waterfall td.num { white-space: nowrap; font-size: 15px; }
+.prof-waterfall tr.prof-main td, .prof-waterfall tr.prof-sub td { font-weight: 700; }
+.prof-waterfall tr.prof-sub td { background: var(--surface-2); }
+.prof-waterfall tr.prof-total td { background: var(--ok-soft); font-weight: 800; font-size: 16px; border-bottom: 0; }
+.prof-waterfall tr.prof-total td.num b { font-size: 20px; color: var(--ok); }
+.prof-waterfall tr.prof-total.neg td { background: var(--danger-soft); }
+.prof-waterfall tr.prof-total.neg td.num b { color: var(--danger); }
+.prof-change { display: block; font-size: 11.5px; font-weight: 700; margin-top: 2px; }
+.prof-change.up { color: var(--ok); }
+.prof-change.down { color: var(--danger); }
+.prof-count-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 10px; }
+.prof-count-grid input { width: 100%; }
+@media (max-width: 1000px) { .prof-grid { grid-template-columns: minmax(0, 1fr); } }
