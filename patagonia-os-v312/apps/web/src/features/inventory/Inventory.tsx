@@ -5,6 +5,7 @@ import { LOW_MARGIN_ALERT } from "./price-tools";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
+import { useBranchZone } from "../pricing/useBranchZone";
 import { useAuth } from "../auth/AuthProvider";
 import { planAllows } from "../auth/permissions";
 import { adjustProductStock, clearProductPackages, createProduct, deleteProduct, listProductPackages, listProductsForBranch, listProductVatRates, registerProductPackages, setProductActive, setProductsVatRate, setProductStockSource, updateProduct } from "./inventory-service";
@@ -36,7 +37,7 @@ const SystelLabPanel = import.meta.env.VITE_SYSTEL_LAB === "1" ? lazy(() => impo
 import { PriceTools } from "./PriceTools";
 import { PriceListsPanel } from "../pricing/PriceListsPanel";
 import { listPriceLists, setProductListPrices } from "../pricing/price-lists-service";
-import { ruleLabel, rulePrice, type PriceList } from "../pricing/price-lists";
+import { ruleLabel, rulePrice, sellingLists, type PriceList } from "../pricing/price-lists";
 import { quantityNumber } from "../sale/quantity";
 
 function formatMoney(value: number) {
@@ -123,6 +124,9 @@ export function Inventory() {
   const { profile } = useAuth();
 
   const [products, setProducts] = useState<Product[]>(isSupabaseConfigured ? [] : demoProducts);
+  // A la balanza de este local van los precios de su zona (plan Empresa, migración 192); Stock edita el precio general.
+  const branchZone = useBranchZone(branchId);
+  const scaleProducts = branchZone.withZonePrices(products);
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [message, setMessage] = useState("");
   // Los dados de baja no se muestran salvo que se pida (siguen existiendo, con su historia).
@@ -186,7 +190,8 @@ export function Inventory() {
         listPriceLists().catch(() => [] as PriceList[])
       ]);
       setProducts(list);
-      setPriceLists(lists);
+      // Las zonas de precios (plan Empresa) se manejan en Sucursales → Precios por zona, no como columna de Stock.
+      setPriceLists(sellingLists(lists));
       setVatRates(rates);
       setPackages(packs);
     } finally {
@@ -894,16 +899,16 @@ export function Inventory() {
         {/* Todo lo de la balanza, guardado en un panel (pedido del dueño 15/10): Mi balanza, la lista para cargar a mano y,
             solo para soporte, las herramientas técnicas (migración 120). */}
         <ScaleButton>
-          {planAllows(profile, "estandar") && <MyScale products={products} branchId={branchId} />}
+          {planAllows(profile, "estandar") && <MyScale products={scaleProducts} branchId={branchId} />}
           <div>
-            <button className="secondary" onClick={() => downloadScaleExportCsv(products, categories)}>Descargar lista para balanza</button>
+            <button className="secondary" onClick={() => downloadScaleExportCsv(scaleProducts, categories)}>Descargar lista para balanza</button>
           </div>
           {planAllows(profile, "estandar") && (
             <ScaleSupportTools>
               {SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? "") ? (
-                <SystelPanel products={products} pilot extra={<ScaleLinksPanel branchId={branchId} products={products} />} />
+                <SystelPanel products={scaleProducts} pilot extra={<ScaleLinksPanel branchId={branchId} products={scaleProducts} />} />
               ) : (
-                <ScaleSyncPanel products={products} onDownloadCsv={() => downloadScaleExportCsv(products, categories)} />
+                <ScaleSyncPanel products={scaleProducts} onDownloadCsv={() => downloadScaleExportCsv(scaleProducts, categories)} />
               )}
               {SHOW_SYSTEL_PANEL && <SystelPanel products={products} />}
               {SystelLabPanel && (
@@ -923,7 +928,7 @@ export function Inventory() {
                 <button onClick={() => pickMore(() => setShowPriceLists((v) => !v))}>🏷️ {showPriceLists ? "Ocultar listas de precios" : activeLists.length > 0 ? "Listas de precios" : "Precio mayorista"}</button>
               )}
               <button onClick={() => pickMore(() => setShowPriceTools((v) => !v))}>💲 {showPriceTools ? "Ocultar actualizar precios" : "Actualizar precios (inflación)"}</button>
-              <button onClick={() => pickMore(() => downloadScaleExportCsv(products, categories))}>⬇️ Bajar lista para la balanza</button>
+              <button onClick={() => pickMore(() => downloadScaleExportCsv(scaleProducts, categories))}>⬇️ Bajar lista para la balanza</button>
             </div>
           </details>
         )}

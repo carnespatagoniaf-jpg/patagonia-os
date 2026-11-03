@@ -33,7 +33,7 @@ import { ChequeFields, EMPTY_CHEQUE, readChequeForm, type ChequeForm } from "../
 import { receiveCustomerCheque } from "../cheques/cheques-service";
 import { cleanCuit } from "../cheques/cheque-logic";
 import { listPriceLists, setCustomerPriceList } from "../pricing/price-lists-service";
-import { activeList, productPrice, type PriceList } from "../pricing/price-lists";
+import { activeList, productPrice, sellingLists, type PriceList } from "../pricing/price-lists";
 
 /** Valor del selector "Entra a…" para cobrar con cheque (migración 150). */
 const CHEQUE_OPTION = "__cheque";
@@ -157,7 +157,7 @@ export function Customers() {
   useEffect(() => {
     if (!branchId) return;
     void listProductsForBranch(branchId).then(setProducts);
-    if (isSupabaseConfigured) void listPriceLists().then(setPriceLists).catch(() => setPriceLists([]));
+    if (isSupabaseConfigured) void listPriceLists().then((l) => setPriceLists(sellingLists(l))).catch(() => setPriceLists([]));
   }, [branchId]);
 
   useEffect(() => {

@@ -29,6 +29,7 @@ import { useCarcassTemplates } from "../carcass/useCarcassTemplates";
 import { listDefaultCarcassCuts, type DefaultCarcassCut } from "../carcass/carcass-templates-service";
 import { listCarcassBatches } from "../carcass/carcass-service";
 import { animalTypeLabel, buildTypeChips, carcassTypeKey, findSameType, type TypeChips } from "../carcass/carcass-types";
+import { PurchaseDistribute } from "./PurchaseDistribute";
 
 interface DraftLine {
   key: string;
@@ -277,6 +278,9 @@ export function Purchases() {
   const [editSupplierTaxCondition, setEditSupplierTaxCondition] = useState("");
   const [purchaseVouchers, setPurchaseVouchers] = useState<Record<string, PurchaseVoucher>>({});
   const [voucherFormFor, setVoucherFormFor] = useState<string | null>(null);
+  // Compra centralizada que se reparte a los locales (plan Empresa, migración 192).
+  const distributeOn = isSupabaseConfigured && planAllows(profile, "empresa") && ["owner", "admin", "manager"].includes(profile?.role ?? "");
+  const [distributeFor, setDistributeFor] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isSupabaseConfigured || !branchId) return;
@@ -1174,12 +1178,27 @@ export function Purchases() {
                                       {editingDatePurchaseId !== purchase.id && (
                                         <button className="secondary" disabled={busy} onClick={() => { setEditingDatePurchaseId(purchase.id); setEditPurchaseDateValue(purchase.purchaseDate); }}>Editar fecha</button>
                                       )}
+                                      {distributeOn && !voided && (
+                                        <button className="secondary" onClick={() => setDistributeFor(distributeFor === purchase.id ? null : purchase.id)}>
+                                          Repartir a los locales
+                                        </button>
+                                      )}
                                       {fiscalOn && !voided && (
                                         <button className="secondary" title="Datos de la factura del proveedor para el Libro IVA Compras (pantalla Contable)" onClick={() => setVoucherFormFor(voucherFormFor === purchase.id ? null : purchase.id)}>
                                           {purchaseVouchers[purchase.id] ? "✓ Factura en el Libro IVA" : "Factura (Libro IVA)"}
                                         </button>
                                       )}
                                     </div>
+                                    {distributeOn && distributeFor === purchase.id && (
+                                      <PurchaseDistribute
+                                        purchaseId={purchase.id}
+                                        branchId={purchase.branchId}
+                                        onDone={(text) => {
+                                          setMessage(text);
+                                          setDistributeFor(null);
+                                        }}
+                                      />
+                                    )}
                                     {fiscalOn && voucherFormFor === purchase.id && (
                                       <div style={{ margin: "0 0 12px" }}>
                                         {purchaseVouchers[purchase.id] && (

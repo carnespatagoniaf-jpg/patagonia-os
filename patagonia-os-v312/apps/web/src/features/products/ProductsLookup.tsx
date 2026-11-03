@@ -8,6 +8,7 @@ import { ScaleSupportTools } from "../scales/ScaleSupportTools";
 import { ScaleButton } from "../scales/ScaleButton";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { useAuth } from "../auth/AuthProvider";
+import { useBranchZone } from "../pricing/useBranchZone";
 import { planAllows } from "../auth/permissions";
 import { compareByCode, getCompanyName, listProductPrices, type ProductPriceRow } from "./products-service";
 import { buildPosterHtml, defaultDetail } from "./price-poster";
@@ -63,7 +64,7 @@ const DEMO_ROWS: ProductPriceRow[] = demoProducts
   .sort((a, b) => compareByCode(a.code, b.code));
 
 export function ProductsLookup() {
-  const [products, setProducts] = useState<ProductPriceRow[]>(isSupabaseConfigured ? [] : DEMO_ROWS);
+  const [rawProducts, setProducts] = useState<ProductPriceRow[]>(isSupabaseConfigured ? [] : DEMO_ROWS);
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [search, setSearch] = useState("");
   const [labelProduct, setLabelProduct] = useState<ProductPriceRow | null>(null);
@@ -72,6 +73,9 @@ export function ProductsLookup() {
   const [companyName, setCompanyName] = useState(isSupabaseConfigured ? "" : "Carnes Patagonia");
   const { profile } = useAuth();
   const { branchId } = useActiveBranch();
+  // Plan Empresa (migración 192): el precio de la zona de este local (consulta, cartel y balanza).
+  const zone = useBranchZone(branchId);
+  const products = zone.withZonePrices(rawProducts);
 
   useEffect(() => {
     if (!isSupabaseConfigured) return;

@@ -18,6 +18,8 @@ interface BranchContextValue {
   loading: boolean;
   setBranchId(id: string): void;
   addBranch(name: string): Promise<Branch>;
+  /** Vuelve a leer los locales (después de abrir uno copiando otro, migración 192). */
+  reloadBranches(): Promise<void>;
   renameBranch(branchId: string, name: string): Promise<void>;
   setSalesMode(branchId: string, mode: SalesMode): Promise<void>;
 }
@@ -104,7 +106,7 @@ export function BranchProvider({ children }: { children: ReactNode }) {
 
   const activeBranch = branches.find((b) => b.id === branchId) ?? null;
 
-  const value: BranchContextValue = { branchId, branches: visibleBranches, activeBranch, canSwitch, canManage, loading, setBranchId, addBranch, renameBranch, setSalesMode };
+  const value: BranchContextValue = { branchId, branches: visibleBranches, activeBranch, canSwitch, canManage, loading, setBranchId, addBranch, reloadBranches: reload, renameBranch, setSalesMode };
 
   return <BranchContext.Provider value={value}>{children}</BranchContext.Provider>;
 }

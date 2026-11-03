@@ -4,6 +4,7 @@ import { parseAmount } from "../../lib/money";
 import { formatMoney } from "../shifts/format";
 import { parseQuantity } from "./quantity";
 import { lineGross, UNIT_LABELS } from "./sale-model";
+import { productPrice } from "../pricing/price-lists";
 import type { SaleTicket } from "./useSaleTicket";
 
 // Columna izquierda de Mostrador: buscador, ticket armándose, descuentos,
@@ -114,7 +115,7 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
               onClick={() => void addProductFromSearch(product)}
             >
               <span>{product.name} <span className="muted">({UNIT_LABELS[product.unit]})</span></span>
-              <strong>{formatMoney(product.priceRetail)}</strong>
+              <strong>{formatMoney(productPrice(product, ticket.displayListId))}</strong>
             </button>
           ))}
         </div>
@@ -191,7 +192,7 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
                   <tr key={product.id}>
                     <td>{product.code}</td>
                     <td>{product.name} <span className="muted">({UNIT_LABELS[product.unit]})</span></td>
-                    <td className="num">{formatMoney(product.priceRetail)}</td>
+                    <td className="num">{formatMoney(productPrice(product, ticket.displayListId))}</td>
                     <td><button className="secondary" onClick={() => void addProductFromSearch(product)}>+ Agregar</button></td>
                   </tr>
                 ))}

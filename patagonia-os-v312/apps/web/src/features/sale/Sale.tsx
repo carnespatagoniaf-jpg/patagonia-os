@@ -37,7 +37,8 @@ import { useSaleTicket } from "./useSaleTicket";
 import { applySoldToStock } from "./sale-stock";
 import { getMostradorPin } from "./company-settings-service";
 import { PriceListToggle } from "../pricing/PriceListToggle";
-import { listPriceLists } from "../pricing/price-lists-service";
+import { getBranchZone, listPriceLists } from "../pricing/price-lists-service";
+import { sellingLists } from "../pricing/price-lists";
 import type { PriceList } from "../pricing/price-lists";
 import { buildCloseTicket as buildCloseTicketBytes, buildMovementTicket as buildMovementTicketBytes, buildReceiptTicket as buildReceiptTicketBytes } from "./sale-tickets";
 import { type ReceiptLine, type ReceiptState, type MovementReceiptState, STALE_SHIFT_HOURS, formatShiftStart, getAutoPrintEnabled, saveAutoPrintEnabled, loadStoredReceipt, saveStoredReceipt } from "./sale-model";
@@ -170,9 +171,19 @@ export function Sale() {
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
   useEffect(() => {
     if (!isSupabaseConfigured) return;
-    listPriceLists().then((l) => setPriceLists(l.filter((x) => x.active))).catch(() => setPriceLists([]));
+    listPriceLists().then((l) => setPriceLists(sellingLists(l).filter((x) => x.active))).catch(() => setPriceLists([]));
   }, []);
-  const ticket = useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot: SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? ""), scaleBranchId: branchId ?? null });
+  // Zona de precios del local (plan Empresa, migración 192): Mostrador cobra ese precio sin elegir nada.
+  const [zoneListId, setZoneListId] = useState<string | null>(null);
+  useEffect(() => {
+    if (!isSupabaseConfigured || !branchId) return;
+    let cancelled = false;
+    void getBranchZone(branchId).then((z) => !cancelled && setZoneListId(z)).catch(() => !cancelled && setZoneListId(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [branchId]);
+  const ticket = useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot: SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? ""), scaleBranchId: branchId ?? null, zoneListId });
   const {
     cart,
     itemDiscounts,

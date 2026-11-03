@@ -2,6 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   buildSuggestions,
+  fillToMinimum,
+  splitByWeights,
   diffSummary,
   effectiveMin,
   formatQty,
@@ -160,4 +162,18 @@ test("preparar: arranca con lo pedido; si ya se guardó, con lo guardado", () =>
     items: [item({ productId: "a", requested: 26, sent: 26.4 }), item({ productId: "p", requested: 9, sent: 0 }), item({ productId: "c", requested: null, sent: 13 })]
   });
   assert.deepEqual(prepLinesFrom(guardado).map((l) => l.send), ["26,4", "0", "13"]);
+});
+
+test("reparto proporcional a lo que vende cada local, en enteros y sin pasarse", () => {
+  assert.deepEqual(splitByWeights(400, [60, 80, 40, 50, 50]), [86, 114, 57, 72, 71]);
+  assert.equal(splitByWeights(400, [60, 80, 40, 50, 50]).reduce((a, b) => a + b, 0), 400);
+  assert.deepEqual(splitByWeights(10, [0, 0]), [5, 5], "sin ventas: partes iguales");
+  assert.deepEqual(splitByWeights(10.7, [1, 1, 1]), [4, 3, 3], "los decimales quedan en el origen");
+  assert.deepEqual(splitByWeights(0, [1, 2]), [0, 0]);
+});
+
+test("completar hasta el mínimo, sin pasarse de lo comprado", () => {
+  assert.deepEqual(fillToMinimum(100, [30, 50, 0]), [30, 50, 0]);
+  assert.deepEqual(fillToMinimum(60, [30, 50, 10.2]), [10, 50, 0]);
+  assert.deepEqual(fillToMinimum(60, [-5, 20]), [0, 20]);
 });

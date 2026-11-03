@@ -13,6 +13,13 @@ export interface PriceList {
   base: "retail" | "cost";
   pct: number;
   active: boolean;
+  /** Zona de precios de uno o más locales (plan Empresa, migración 192): no se elige como lista. */
+  isZone?: boolean;
+}
+
+/** Las listas que se eligen al vender (Mayorista…): sin las zonas de precios de los locales. */
+export function sellingLists<T extends Pick<PriceList, "isZone">>(lists: T[]): T[] {
+  return lists.filter((l) => !l.isZone);
 }
 
 /** Precio que sale de la regla de la lista (sin precio a mano). Las presentaciones van a minorista. */
