@@ -4,6 +4,7 @@ import { formatMoney } from "../shifts/format";
 import { listProductsForBranch } from "../inventory/inventory-service";
 import { useBranchesOverview } from "./useBranchesOverview";
 import { quantityNumber } from "../sale/quantity";
+import { BranchCashTab, BranchDashboard } from "./BranchDashboard";
 
 // Sucursales: resumen de cada una (stock, ventas de hoy, turno abierto) con
 // el total de todas juntas, y transferir stock de una sucursal a otra. Solo
@@ -56,6 +57,8 @@ export function Branches() {
   const { branches, loading, error, transfer } = useBranchesOverview();
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  // Rediseño 2026-11-02: el tablero de una cadena primero; el pase de mercadería y la caja, en pestañas.
+  const [tab, setTab] = useState<"tablero" | "mercaderia" | "caja">("tablero");
 
   const [fromBranchId, setFromBranchId] = useState("");
   const [toBranchId, setToBranchId] = useState("");
@@ -124,18 +127,31 @@ export function Branches() {
     <>
       <header className="page-header">
         <div>
-          <p className="eyebrow">EQUIPO</p>
-          <h1>Sucursales</h1>
-          <p className="muted">Resumen de cada sucursal y de toda la empresa junta, y traspaso de stock entre sucursales.</p>
+          <p className="eyebrow">SUCURSALES</p>
+          <h1>{branches.length > 1 ? `Tus ${branches.length} locales` : "Sucursales"}</h1>
+          <p className="muted">Cómo le va a cada local, comparados entre sí y con el período anterior.</p>
         </div>
       </header>
 
+      <div className="page-tabs">
+        <button className={tab === "tablero" ? "page-tab active" : "page-tab"} onClick={() => setTab("tablero")}>Tablero</button>
+        <button className={tab === "mercaderia" ? "page-tab active" : "page-tab"} onClick={() => setTab("mercaderia")}>Pasar mercadería</button>
+        <button className={tab === "caja" ? "page-tab active" : "page-tab"} onClick={() => setTab("caja")}>Caja de cada local</button>
+      </div>
+
       {message && <div className="message">{message}</div>}
       {error && <div className="message warning">{error}</div>}
+      {loading && branches.length === 0 && <p className="muted">Cargando…</p>}
+
+      {tab === "tablero" && branches.length > 0 && <BranchDashboard branches={branches} onTab={setTab} />}
+      {tab === "caja" && branches.length > 0 && <BranchCashTab branches={branches} />}
+
+      {tab === "mercaderia" && (
+      <>
 
       <section className="panel" style={{ marginBottom: 18 }}>
         <div className="panel-title">
-          <h2>Todas las sucursales</h2>
+          <h2>Stock y ventas de hoy</h2>
           <span>{loading ? "Cargando…" : `${branches.length} sucursales`}</span>
         </div>
         <div className="kpi-grid">
@@ -250,6 +266,8 @@ export function Branches() {
           </>
         )}
       </section>
+      </>
+      )}
     </>
   );
 }
