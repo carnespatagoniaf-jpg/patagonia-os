@@ -7,6 +7,7 @@
  */
 
 import { getAgentPrinterName, pingPrintAgent, printViaAgent } from "./printer-agent";
+import { qrRasterCommand } from "./qr-raster";
 
 const ESC = 0x1b;
 const GS = 0x1d;
@@ -199,16 +200,10 @@ class TicketBuilder {
     return this;
   }
 
-  /** Código QR nativo de la impresora (ESC/POS GS ( k, modelo 2). Lo traen casi
-   * todas las térmicas de 80 mm; la factura de ARCA lo exige (RG 4892). */
-  qr(data: string, moduleSize = 5) {
-    const bytes = Array.from(new TextEncoder().encode(data));
-    const len = bytes.length + 3;
-    this.bytes.push(GS, 0x28, 0x6b, 4, 0, 49, 65, 50, 0); // modelo 2
-    this.bytes.push(GS, 0x28, 0x6b, 3, 0, 49, 67, Math.max(1, Math.min(16, moduleSize))); // tamaño del punto
-    this.bytes.push(GS, 0x28, 0x6b, 3, 0, 49, 69, 48); // corrección de errores L
-    this.bytes.push(GS, 0x28, 0x6b, len & 0xff, (len >> 8) & 0xff, 49, 80, 48, ...bytes); // guardar
-    this.bytes.push(GS, 0x28, 0x6b, 3, 0, 49, 81, 48); // imprimir
+  /** Código QR de la factura de ARCA (RG 4892) como imagen de puntos (GS v 0, ver qr-raster.ts). El QR
+   * "nativo" (GS ( k) no lo traen muchas térmicas: imprimían la URL como texto (Carnes Premium, 03/11/2026). */
+  qr(data: string, maxDots = 300) {
+    for (const b of qrRasterCommand(data, maxDots)) this.bytes.push(b);
     this.bytes.push(LF);
     return this;
   }
