@@ -1,4 +1,4 @@
-import { BarChart3, Banknote, Beef, BookOpenCheck, Boxes, ClipboardList, FileText, HandCoins, Handshake, History, Truck, KeyRound, Landmark, MapPin, NotebookPen, Upload, PackagePlus, Receipt, Snowflake, Tag, Users, Wallet } from "lucide-react";
+import { ArrowLeftRight, BarChart3, Banknote, Beef, BookOpenCheck, Boxes, ClipboardList, FileText, HandCoins, Handshake, History, Truck, KeyRound, Landmark, MapPin, NotebookPen, Upload, PackagePlus, Receipt, Snowflake, Tag, Users, Wallet } from "lucide-react";
 import type { Page } from "../features/auth/permissions";
 
 export type NavItem = {
@@ -38,6 +38,8 @@ export const navGroups: Array<{ heading: string | null; items: NavItem[] }> = [
       { page: "products", label: "Productos", icon: Tag },
       { page: "inventory", label: "Stock", icon: Boxes, tabs: [{ page: "inventory", label: "Stock" }, { page: "recipes", label: "Recetas" }] },
       { page: "purchases", label: "Compras", icon: PackagePlus },
+      // Plan Empresa (migración 190): encargado, cajero y producción. El dueño lo ve en Sucursales.
+      { page: "transfers", label: "Entre locales", icon: ArrowLeftRight },
       { page: "carcass", label: "Despiece", icon: Beef },
       // Solo para la empresa con 'frigorifico' en companies.features (migración 169).
       { page: "frigorifico", label: "Frigorífico", icon: Snowflake }

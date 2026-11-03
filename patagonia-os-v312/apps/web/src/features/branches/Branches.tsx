@@ -5,6 +5,9 @@ import { listProductsForBranch } from "../inventory/inventory-service";
 import { useBranchesOverview } from "./useBranchesOverview";
 import { quantityNumber } from "../sale/quantity";
 import { BranchCashTab, BranchDashboard } from "./BranchDashboard";
+import { useAuth } from "../auth/AuthProvider";
+import { planAllows } from "../auth/permissions";
+import { Transfers } from "../transfers/Transfers";
 
 // Sucursales: resumen de cada una (stock, ventas de hoy, turno abierto) con
 // el total de todas juntas, y transferir stock de una sucursal a otra. Solo
@@ -55,6 +58,9 @@ function ProductPicker({ products, placeholder, onPick }: { products: Product[];
 
 export function Branches() {
   const { branches, loading, error, transfer } = useBranchesOverview();
+  const { profile } = useAuth();
+  // Plan Empresa (migración 189): pedidos entre locales con remito y recepción (migración 190).
+  const empresa = planAllows(profile, "empresa");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   // Rediseño 2026-11-02: el tablero de una cadena primero; el pase de mercadería y la caja, en pestañas.
@@ -123,6 +129,80 @@ export function Branches() {
     }
   }
 
+  // El pase instantáneo de siempre (migración 098). Con plan Empresa es el "Pase rápido" de Mercadería entre locales.
+  const quickTransfer = (
+    <section className="panel">
+      <div className="panel-title">
+        <h2>Transferir stock entre sucursales</h2>
+      </div>
+      <p className="muted" style={{ marginTop: -8, marginBottom: 14 }}>
+        Descuenta el producto de la sucursal de origen y lo suma en la de destino, con el mismo criterio que una compra o un ajuste de stock.
+      </p>
+      <div className="cash-banner-form" style={{ flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div>
+          <label className="muted" style={{ display: "block", marginBottom: 4 }}>Desde</label>
+          <select value={fromBranchId} onChange={(e) => void handleFromChange(e.target.value)}>
+            <option value="">Elegí la sucursal de origen…</option>
+            {branches.map((b) => (
+              <option key={b.branchId} value={b.branchId}>{b.branchName}</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="muted" style={{ display: "block", marginBottom: 4 }}>Hacia</label>
+          <select value={toBranchId} onChange={(e) => setToBranchId(e.target.value)}>
+            <option value="">Elegí la sucursal de destino…</option>
+            {branches.map((b) => (
+              <option key={b.branchId} value={b.branchId} disabled={b.branchId === fromBranchId}>{b.branchName}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {fromBranchId && (
+        <div style={{ marginTop: 14 }}>
+          <label className="muted" style={{ display: "block", marginBottom: 4 }}>Producto</label>
+          {productsLoading ? (
+            <p className="muted">Cargando el stock de esa sucursal…</p>
+          ) : (
+            <ProductPicker products={fromProducts} placeholder="Buscá el producto por nombre o código…" onPick={setProduct} />
+          )}
+          {product && (
+            <p style={{ margin: "8px 0 0" }}>
+              <strong>{product.name}</strong> <span className="muted">— disponible: {product.stock} {product.unit === "kg" ? "kg" : "u."}</span>{" "}
+              <button className="secondary" onClick={() => setProduct(null)}>Cambiar</button>
+            </p>
+          )}
+        </div>
+      )}
+
+      {product && (
+        <>
+          <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 14 }}>
+            <div>
+              <label className="muted" style={{ display: "block", marginBottom: 4 }}>Cantidad</label>
+              <input
+                type="text"
+                inputMode="decimal"
+                placeholder={product.unit === "kg" ? "kg" : "unidades"}
+                value={quantity}
+                onChange={(e) => setQuantity(e.target.value)}
+                style={{ width: 100 }}
+              />
+            </div>
+            <div style={{ flex: 1, minWidth: 200 }}>
+              <label className="muted" style={{ display: "block", marginBottom: 4 }}>Motivo (opcional)</label>
+              <input placeholder="Ej. reparto semanal" value={notes} onChange={(e) => setNotes(e.target.value)} style={{ width: "100%" }} />
+            </div>
+          </div>
+          <button disabled={busy} style={{ marginTop: 14 }} onClick={() => void handleTransfer()}>
+            {busy ? "Transfiriendo…" : "Transferir stock"}
+          </button>
+        </>
+      )}
+    </section>
+  );
+
   return (
     <>
       <header className="page-header">
@@ -135,7 +215,7 @@ export function Branches() {
 
       <div className="page-tabs">
         <button className={tab === "tablero" ? "page-tab active" : "page-tab"} onClick={() => setTab("tablero")}>Tablero</button>
-        <button className={tab === "mercaderia" ? "page-tab active" : "page-tab"} onClick={() => setTab("mercaderia")}>Pasar mercadería</button>
+        <button className={tab === "mercaderia" ? "page-tab active" : "page-tab"} onClick={() => setTab("mercaderia")}>{empresa ? "Mercadería entre locales" : "Pasar mercadería"}</button>
         <button className={tab === "caja" ? "page-tab active" : "page-tab"} onClick={() => setTab("caja")}>Caja de cada local</button>
       </div>
 
@@ -146,7 +226,8 @@ export function Branches() {
       {tab === "tablero" && branches.length > 0 && <BranchDashboard branches={branches} onTab={setTab} />}
       {tab === "caja" && branches.length > 0 && <BranchCashTab branches={branches} />}
 
-      {tab === "mercaderia" && (
+      {tab === "mercaderia" && empresa && <Transfers admin quickTransfer={quickTransfer} />}
+      {tab === "mercaderia" && !empresa && (
       <>
 
       <section className="panel" style={{ marginBottom: 18 }}>
@@ -196,76 +277,7 @@ export function Branches() {
         {!loading && branches.length === 0 && <p className="muted">Todavía no hay sucursales.</p>}
       </section>
 
-      <section className="panel">
-        <div className="panel-title">
-          <h2>Transferir stock entre sucursales</h2>
-        </div>
-        <p className="muted" style={{ marginTop: -8, marginBottom: 14 }}>
-          Descuenta el producto de la sucursal de origen y lo suma en la de destino, con el mismo criterio que una compra o un ajuste de stock.
-        </p>
-        <div className="cash-banner-form" style={{ flexWrap: "wrap", alignItems: "flex-end" }}>
-          <div>
-            <label className="muted" style={{ display: "block", marginBottom: 4 }}>Desde</label>
-            <select value={fromBranchId} onChange={(e) => void handleFromChange(e.target.value)}>
-              <option value="">Elegí la sucursal de origen…</option>
-              {branches.map((b) => (
-                <option key={b.branchId} value={b.branchId}>{b.branchName}</option>
-              ))}
-            </select>
-          </div>
-          <div>
-            <label className="muted" style={{ display: "block", marginBottom: 4 }}>Hacia</label>
-            <select value={toBranchId} onChange={(e) => setToBranchId(e.target.value)}>
-              <option value="">Elegí la sucursal de destino…</option>
-              {branches.map((b) => (
-                <option key={b.branchId} value={b.branchId} disabled={b.branchId === fromBranchId}>{b.branchName}</option>
-              ))}
-            </select>
-          </div>
-        </div>
-
-        {fromBranchId && (
-          <div style={{ marginTop: 14 }}>
-            <label className="muted" style={{ display: "block", marginBottom: 4 }}>Producto</label>
-            {productsLoading ? (
-              <p className="muted">Cargando el stock de esa sucursal…</p>
-            ) : (
-              <ProductPicker products={fromProducts} placeholder="Buscá el producto por nombre o código…" onPick={setProduct} />
-            )}
-            {product && (
-              <p style={{ margin: "8px 0 0" }}>
-                <strong>{product.name}</strong> <span className="muted">— disponible: {product.stock} {product.unit === "kg" ? "kg" : "u."}</span>{" "}
-                <button className="secondary" onClick={() => setProduct(null)}>Cambiar</button>
-              </p>
-            )}
-          </div>
-        )}
-
-        {product && (
-          <>
-            <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 14 }}>
-              <div>
-                <label className="muted" style={{ display: "block", marginBottom: 4 }}>Cantidad</label>
-                <input
-                  type="text"
-                  inputMode="decimal"
-                  placeholder={product.unit === "kg" ? "kg" : "unidades"}
-                  value={quantity}
-                  onChange={(e) => setQuantity(e.target.value)}
-                  style={{ width: 100 }}
-                />
-              </div>
-              <div style={{ flex: 1, minWidth: 200 }}>
-                <label className="muted" style={{ display: "block", marginBottom: 4 }}>Motivo (opcional)</label>
-                <input placeholder="Ej. reparto semanal" value={notes} onChange={(e) => setNotes(e.target.value)} style={{ width: "100%" }} />
-              </div>
-            </div>
-            <button disabled={busy} style={{ marginTop: 14 }} onClick={() => void handleTransfer()}>
-              {busy ? "Transfiriendo…" : "Transferir stock"}
-            </button>
-          </>
-        )}
-      </section>
+      {quickTransfer}
       </>
       )}
     </>

@@ -12,7 +12,7 @@ export interface UserProfile {
   active: boolean;
   denied_permissions?: string[];
   /** Plan de la empresa (migración 101). Ver permissions.ts: profilePlan(). */
-  plan?: "basico" | "estandar" | "full";
+  plan?: "basico" | "estandar" | "full" | "empresa";
   /** Pantallas extra a pedido de esa empresa (migración 143, companies.features). Ver permissions.ts: PAGE_REQUIRED_FEATURE. */
   features?: string[];
 }

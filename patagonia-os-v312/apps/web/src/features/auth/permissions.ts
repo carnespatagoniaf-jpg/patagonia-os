@@ -28,7 +28,8 @@ export type Permission =
   | "route.sell"
   | "frigo.manage"
   | "orders.view"
-  | "orders.manage";
+  | "orders.manage"
+  | "transfers.manage";
 
 // "owner" es interno nuestro (el equipo de Patagonia OS): ve todo, incluidas
 // herramientas todavía en prueba (Auditoría) antes de decidir si pasan a
@@ -88,14 +89,16 @@ export const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> 
     "import.data",
     "scales.manage",
     "route.sell",
-    "frigo.manage"
+    "frigo.manage",
+    "transfers.manage"
   ],
   // frigo.manage: el encargado carga DT, faena y salidas (la pantalla solo existe si la empresa tiene 'frigorifico').
-  manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view", "frigo.manage", "orders.view", "orders.manage"],
+  // transfers.manage (migración 190, plan Empresa): pedir, preparar, despachar y recibir mercadería, solo de su local.
+  manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view", "frigo.manage", "orders.view", "orders.manage", "transfers.manage"],
   // "route.sell": vendedor de un camión (venta en ruta, migración 161); la pantalla además pide companies.features "venta_ruta".
   // Pedidos (migración 187): el cajero los carga y los entrega, solo en su sucursal (la base lo exige).
-  cashier: ["pos.sell", "products.view", "sales.create", "pos.treasury", "route.sell", "orders.view", "orders.manage"],
-  production: ["dashboard.view", "inventory.view", "inventory.adjust"],
+  cashier: ["pos.sell", "products.view", "sales.create", "pos.treasury", "route.sell", "orders.view", "orders.manage", "transfers.manage"],
+  production: ["dashboard.view", "inventory.view", "inventory.adjust", "transfers.manage"],
   readonly: ["dashboard.view", "inventory.view", "reports.view"],
   // El contador (migración 155): solo la pantalla Contable. La base le corta toda escritura.
   accountant: ["accounting.view"]
@@ -131,24 +134,27 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   "route.sell": "Venta en ruta (camión)",
   "frigo.manage": "Frigorífico (tropa, garrón y kilo)",
   "orders.view": "Pedidos (ver)",
-  "orders.manage": "Pedidos (cargar, entregar y cancelar)"
+  "orders.manage": "Pedidos (cargar, entregar y cancelar)",
+  "transfers.manage": "Mercadería entre locales (pedir, despachar y recibir)"
 };
 
 /** Planes que se venden (migración 101). El plan de la empresa se chequea
  * también en la base (require_plan en cada función + RLS); esto es para no
  * mostrar lo que el plan no incluye. */
-export type Plan = "basico" | "estandar" | "full";
+// "empresa" (migración 189, 2026-11-02): arriba de Full, para cadenas. Incluye todo Full, sin límites.
+export type Plan = "basico" | "estandar" | "full" | "empresa";
 
-export const PLAN_LABELS: Record<Plan, string> = { basico: "Básico", estandar: "Estándar", full: "Full" };
+export const PLAN_LABELS: Record<Plan, string> = { basico: "Básico", estandar: "Estándar", full: "Full", empresa: "Empresa" };
 
 /** Mismos límites que plan_limits() en la base (null = sin límite). */
 export const PLAN_LIMITS: Record<Plan, { maxBranches: number | null; maxUsers: number | null }> = {
   basico: { maxBranches: 1, maxUsers: 3 },
   estandar: { maxBranches: 2, maxUsers: 8 },
-  full: { maxBranches: null, maxUsers: null }
+  full: { maxBranches: null, maxUsers: null },
+  empresa: { maxBranches: null, maxUsers: null }
 };
 
-const PLAN_RANK: Record<Plan, number> = { basico: 1, estandar: 2, full: 3 };
+const PLAN_RANK: Record<Plan, number> = { basico: 1, estandar: 2, full: 3, empresa: 4 };
 
 /** Permisos que solo existen desde cierto plan. Lo que no está acá va en todos. */
 const PERMISSION_MIN_PLAN: Partial<Record<Permission, Plan>> = {
@@ -159,7 +165,8 @@ const PERMISSION_MIN_PLAN: Partial<Record<Permission, Plan>> = {
   "profitability.view": "estandar",
   "creditors.manage": "estandar",
   "scales.manage": "estandar",
-  "route.sell": "estandar"
+  "route.sell": "estandar",
+  "transfers.manage": "empresa"
 };
 
 /** Páginas que piden un plan más alto que su permiso (ej. Sucursales: el
@@ -173,7 +180,7 @@ const PAGE_MIN_PLAN: Partial<Record<string, Plan>> = { branches: "full", reconci
  * un dato que falta. */
 export function profilePlan(profile: UserProfile | null): Plan {
   const plan = profile?.plan;
-  return plan === "basico" || plan === "estandar" || plan === "full" ? plan : "full";
+  return plan === "basico" || plan === "estandar" || plan === "full" || plan === "empresa" ? plan : "full";
 }
 
 export function planAllows(profile: UserProfile | null, min: Plan): boolean {
@@ -233,7 +240,10 @@ export const PAGE_PERMISSIONS = {
   sales_report: "customers.manage",
   route_trucks: "treasury.manage",
   // Frigorífico (migración 169, a pedido): stock de medias por tropa, garrón y kilo.
-  frigorifico: "frigo.manage"
+  frigorifico: "frigo.manage",
+  // Mercadería entre locales (migración 190, plan Empresa): la pantalla del local. Dueño y administrador la usan
+  // como pestaña de Sucursales (PAGE_ONLY_ROLES).
+  transfers: "transfers.manage"
 } as const satisfies Record<string, Permission>;
 
 export type Page = keyof typeof PAGE_PERMISSIONS;
@@ -243,7 +253,7 @@ const PAGE_REQUIRED_FEATURE: Partial<Record<string, string>> = { accounts: "cuen
 
 /** Pantallas que son solo del local, no de la administración: ni el dueño ("*") ni el administrador las ven.
  * Pedidos (migración 187) es el cuaderno de cada sucursal: solo cajero y encargado (la base exige lo mismo). */
-const PAGE_ONLY_ROLES: Partial<Record<string, UserProfile["role"][]>> = { orders: ["cashier", "manager"] };
+const PAGE_ONLY_ROLES: Partial<Record<string, UserProfile["role"][]>> = { orders: ["cashier", "manager"], transfers: ["manager", "cashier", "production"] };
 
 export function canAccessPage(profile: UserProfile | null, page: Page) {
   const onlyRoles = PAGE_ONLY_ROLES[page];

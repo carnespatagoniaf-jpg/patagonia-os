@@ -44,7 +44,7 @@ function daysBetween(fromIso: string, toIso: string) {
 }
 
 export interface PlanUsage {
-  plan: "basico" | "estandar" | "full";
+  plan: "basico" | "estandar" | "full" | "empresa";
   activeBranches: number;
   activeUsers: number;
 }
@@ -65,7 +65,7 @@ export function upgradeCandidates(
   const out: { companyId: string; reason: string }[] = [];
   for (const id of companyIds) {
     const p = plans[id];
-    if (!p || p.plan === "full") continue;
+    if (!p || p.plan === "full" || p.plan === "empresa") continue;
     const l = limits[p.plan];
     if (!l) continue;
     const reasons: string[] = [];
