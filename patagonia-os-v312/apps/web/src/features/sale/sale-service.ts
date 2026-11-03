@@ -11,6 +11,8 @@ export interface CreatePosSaleItemInput {
   /** Importe de la balanza (ticket leído de una Systel): el servidor lo usa en vez del precio del catálogo. */
   scaleAmount?: number;
   scaleTicket?: string;
+  /** Paquete de la planta (migración 194): se manda como scale_ticket, sin importe; la base lo marca vendido. */
+  packageCode?: string;
   /** Código de la balanza escaneado (venta "artículos + TOTAL", migración 119); null = venta libre sin código. */
   scaleCode?: number | null;
   /** Lista de precios (Mayorista, migración 167): el servidor cobra el precio de esa lista. */
@@ -66,6 +68,7 @@ export async function createPosSale(input: CreatePosSaleInput): Promise<CreatePo
         : { description: item.description, unit_price: item.unitPrice, quantity: item.quantity, discount_amount: item.discountAmount }),
       ...(item.source ? { source: item.source, scale_tickets: item.scaleTickets ?? 1 } : {}),
       ...(item.scaleAmount !== undefined && item.scaleTicket ? { scale_amount: item.scaleAmount, scale_ticket: item.scaleTicket } : {}),
+      ...(item.productId && item.packageCode && item.scaleAmount === undefined ? { scale_ticket: item.packageCode } : {}),
       ...(item.scaleCode !== undefined ? { scale_code: item.scaleCode } : {}),
       ...(item.productId && item.priceListId ? { price_list_id: item.priceListId } : {}),
       ...(item.productId && item.chargedUnitPrice !== undefined ? { charged_unit_price: item.chargedUnitPrice } : {})

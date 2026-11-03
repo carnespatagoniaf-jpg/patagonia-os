@@ -32,6 +32,7 @@ const Recipes = lazyPage(() => import("./features/recipes/Recipes"), "Recipes");
 const Frigorifico = lazyPage(() => import("./features/frigorifico/Frigorifico"), "Frigorifico");
 const Orders = lazyPage(() => import("./features/orders/Orders"), "Orders");
 const TransfersPage = lazyPage(() => import("./features/transfers/TransfersPage"), "TransfersPage");
+const Planta = lazyPage(() => import("./features/planta/Planta"), "Planta");
 const Scales = lazyPage(() => import("./features/scales/Scales"), "Scales");
 const Reconciliation = lazyPage(() => import("./features/reconciliation/Reconciliation"), "Reconciliation");
 const Cheques = lazyPage(() => import("./features/cheques/Cheques"), "Cheques");
@@ -120,6 +121,7 @@ export default function App() {
         {allowed && page === "frigorifico" && <Frigorifico />}
         {allowed && page === "orders" && <Orders />}
         {allowed && page === "transfers" && <TransfersPage />}
+        {allowed && page === "planta" && <Planta />}
         {allowed && page === "scales" && <Scales />}
         {allowed && page === "reconciliation" && <Reconciliation />}
         {allowed && page === "cheques" && <Cheques />}

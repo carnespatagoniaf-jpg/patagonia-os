@@ -25,6 +25,8 @@ import { chargedTicketQuestion, detailedTotalKey, SAME_SALE_LABEL_QUESTION, type
 import { hourAr, undoVoidQuestion, voidedTicketQuestion } from "./scale-void-warning";
 import { parseQuantity } from "./quantity";
 import { addDetailLine, detailGroupKeys, detailRemaining } from "./ticket-detail";
+import { isPackageCode, normalizePackageCode, saleScanProblem } from "../planta/planta-logic";
+import { findPackage } from "../planta/planta-service";
 
 // Estado y acciones del ticket que se está armando en Mostrador: búsqueda,
 // carrito, descuentos y recargos, medios de pago y sus totales. Es la parte
@@ -228,6 +230,38 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     searchInputRef.current?.focus();
   }
 
+  /** Paquete de la planta escaneado: una línea propia (cada paquete es uno) con el código, que la venta guarda y la
+   * base usa para marcarlo vendido. Sin conexión no se puede leer: se carga el producto a mano. */
+  async function addPackage(code: string) {
+    if (cart.some((l) => l.packageCode === code)) {
+      setMessage(`El paquete ${code} ya está en esta venta.`);
+      return;
+    }
+    let pkg: Awaited<ReturnType<typeof findPackage>>;
+    try {
+      pkg = await findPackage(code);
+    } catch {
+      setMessage("No se pudo leer el paquete (¿sin internet?). Buscá el producto y escribí los kilos de la etiqueta.");
+      return;
+    }
+    const problem = saleScanProblem(pkg ? { code, status: pkg.status } : undefined);
+    const product = pkg ? products.find((p) => p.id === pkg.productId) : undefined;
+    if (problem || !pkg) {
+      setMessage(problem ?? "");
+      return;
+    }
+    if (!product) {
+      setMessage(`El producto del paquete ${code} no está a la venta en este local. Revisalo en Stock.`);
+      return;
+    }
+    const quantity = pkg.quantity;
+    setCart((current) => current.some((l) => l.packageCode === code)
+      ? current
+      : [...current, { key: `${product.id}|${code}`, kind: "product", productId: product.id, name: product.name, unit: product.unit, quantity, unitPrice: product.priceRetail, packageCode: code }]);
+    setMessage(`Agregado: ${product.name}, ${quantity.toLocaleString("es-AR", { maximumFractionDigits: 3 })} ${product.unit === "kg" ? "kg" : "u."} (paquete ${code}).`);
+    searchInputRef.current?.focus();
+  }
+
   /** Agregar un producto elegido por nombre o código. Si hay balanza por cable
    * activada y el producto es por kg, el peso lo trae la balanza; si no se
    * puede leer, NO se agrega nada (mejor que vender 1 kg por error). */
@@ -299,6 +333,14 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     if (e.key !== "Enter") return;
     const raw = search.trim();
     if (!raw) return;
+
+    // Paquete envasado en la planta (plan Planta, migración 194): su producto con sus kilos, al precio de hoy.
+    if (isPackageCode(raw) && !products.some((p) => p.code === raw)) {
+      setSearch("");
+      setHighlightedIndex(-1);
+      void addPackage(normalizePackageCode(raw));
+      return;
+    }
 
     // Balanza "artículos + TOTAL" de la sucursal (si tiene): sus códigos los lee useScalePapers.
     if (!products.some((p) => p.code === raw) && papers.handleScan(raw)) {

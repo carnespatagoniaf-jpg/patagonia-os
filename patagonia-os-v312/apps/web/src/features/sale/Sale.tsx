@@ -692,6 +692,7 @@ export function Sale() {
         scaleTickets: l.scaleTickets,
         scaleAmount: l.scaleAmount,
         scaleTicket: l.scaleTicket,
+        ...(l.packageCode ? { packageCode: l.packageCode } : {}),
         ...(l.scalePaper ? { scaleCode: l.scaleCode ?? null } : {}),
         ...(l.kind === "product" && l.priceListId ? { priceListId: l.priceListId } : {}),
         // Precio cobrado en pantalla: si cambió mientras no había internet, la venta no se pierde (179).

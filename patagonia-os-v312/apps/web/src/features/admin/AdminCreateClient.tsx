@@ -21,9 +21,9 @@ import { AdminContacts } from "./AdminContacts";
 import { AdminFinance } from "./AdminFinance";
 import { mpFailedChargeMessage, mpProblem, toArDate, type MpSubscription } from "./mercadopago";
 
-const PLAN_OPTIONS: Plan[] = ["basico", "estandar", "full", "empresa"];
-const PLAN_PRICES: Record<Plan, string> = { basico: "$20.000", estandar: "$39.000", full: "$69.000", empresa: "precio a definir" };
-const PLAN_PRICE_VALUES: Record<Plan, number> = { basico: 20000, estandar: 39000, full: 69000, empresa: 0 };
+const PLAN_OPTIONS: Plan[] = ["basico", "estandar", "full", "empresa", "planta"];
+const PLAN_PRICES: Record<Plan, string> = { basico: "$20.000", estandar: "$39.000", full: "$69.000", empresa: "precio a definir", planta: "precio a definir" };
+const PLAN_PRICE_VALUES: Record<Plan, number> = { basico: 20000, estandar: 39000, full: 69000, empresa: 0, planta: 0 };
 const MONTH_OPTIONS = [1, 2, 3, 6, 12];
 
 const BILLING_TONE: Record<BillingStatus, string> = {
