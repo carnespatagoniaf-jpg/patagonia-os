@@ -112,3 +112,56 @@ export function shortDay(isoDate: string): string {
   const names = ["dom", "lun", "mar", "mié", "jue", "vie", "sáb"];
   return `${names[at(isoDate).getUTCDay()]} ${isoDate.slice(8, 10)}/${isoDate.slice(5, 7)}`;
 }
+
+// ---------- Pagos de clientes en un período (a pedido de Martínez, 03/11/2026) ----------
+
+export interface ReportPayment {
+  id: string;
+  date: string;
+  customerId: string;
+  customerName: string;
+  amount: number;
+  /** Cuenta donde entró la plata (Efectivo, Banco…). */
+  accountName: string | null;
+  notes: string | null;
+}
+
+export interface PaymentsSummary {
+  count: number;
+  total: number;
+  byAccount: { name: string; count: number; total: number }[];
+  byCustomer: { customerId: string; name: string; count: number; total: number }[];
+  byDay: { date: string; total: number; payments: ReportPayment[] }[];
+}
+
+/** Total cobrado, por cuenta, por cliente (el que más pagó primero) y por día. Suma en centavos. */
+export function summarizePayments(payments: ReportPayment[]): PaymentsSummary {
+  const accounts = new Map<string, { name: string; count: number; total: number }>();
+  const customers = new Map<string, { customerId: string; name: string; count: number; total: number }>();
+  const days = new Map<string, { date: string; total: number; payments: ReportPayment[] }>();
+  let total = 0;
+  for (const p of [...payments].sort((a, b) => a.date.localeCompare(b.date) || a.customerName.localeCompare(b.customerName))) {
+    const c = cents(p.amount);
+    total += c;
+    const accName = p.accountName ?? "Sin cuenta";
+    const a = accounts.get(accName) ?? { name: accName, count: 0, total: 0 };
+    a.count += 1;
+    a.total += c;
+    accounts.set(accName, a);
+    const cu = customers.get(p.customerId) ?? { customerId: p.customerId, name: p.customerName, count: 0, total: 0 };
+    cu.count += 1;
+    cu.total += c;
+    customers.set(p.customerId, cu);
+    const d = days.get(p.date) ?? { date: p.date, total: 0, payments: [] };
+    d.total += c;
+    d.payments.push(p);
+    days.set(p.date, d);
+  }
+  return {
+    count: payments.length,
+    total: total / 100,
+    byAccount: [...accounts.values()].map((a) => ({ ...a, total: a.total / 100 })).sort((x, y) => y.total - x.total),
+    byCustomer: [...customers.values()].map((c) => ({ ...c, total: c.total / 100 })).sort((x, y) => y.total - x.total || x.name.localeCompare(y.name)),
+    byDay: [...days.values()].map((d) => ({ ...d, total: d.total / 100 }))
+  };
+}
