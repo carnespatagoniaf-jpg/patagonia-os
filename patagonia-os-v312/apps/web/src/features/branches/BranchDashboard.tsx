@@ -7,6 +7,8 @@ import { listProductsForBranch } from "../inventory/inventory-service";
 import type { ProductSalesRow } from "../shifts/sales-by-category";
 import type { BranchOverview } from "./branches-overview-service";
 import { branchAlerts, branchTotals, rankBranches, salesByWeekday, type BranchRow, type BranchStats } from "./branch-dashboard";
+import { effectiveMin } from "../transfers/transfer-logic";
+import { listBranchMinStock } from "../transfers/transfers-service";
 
 type Preset = "hoy" | "ayer" | "semana" | "mes" | "mes_pasado";
 
@@ -46,8 +48,10 @@ function argHour() {
   return new Date(Date.now() - 3 * 3600_000).getUTCHours();
 }
 
-function isLowStock(p: Product) {
-  return (p.active ?? true) && !p.stockSourceId && (p.stock < 0 || (p.minStock > 0 && p.stock <= p.minStock));
+/** Debajo del mínimo: el del local (plan Empresa, migración 190) o, si no tiene, el general del producto. */
+function isLowStock(p: Product, branchMins?: Map<string, number>) {
+  const min = effectiveMin(p.minStock, branchMins?.get(p.id));
+  return (p.active ?? true) && !p.stockSourceId && (p.stock < 0 || (min > 0 && p.stock <= min));
 }
 
 const fmtPct = (n: number | null) => (n === null ? "—" : `${String(n).replace(".", ",")}%`);
@@ -58,7 +62,7 @@ interface BranchExtra {
 }
 
 /** Junta, local por local, lo que ya calculan Reportes y Rentabilidad. */
-async function loadBranch(b: BranchOverview, from: string, to: string): Promise<{ stats: BranchStats; hours: { dow: number; total: number }[]; extra: BranchExtra }> {
+async function loadBranch(b: BranchOverview, from: string, to: string, branchMins?: Map<string, number>): Promise<{ stats: BranchStats; hours: { dow: number; total: number }[]; extra: BranchExtra }> {
   const n = days(from, to);
   const [result, prev, activity, sold, products] = await Promise.all([
     getPeriodResult(b.branchId, from, to).then(computePeriodResult).catch(() => null),
@@ -74,7 +78,7 @@ async function loadBranch(b: BranchOverview, from: string, to: string): Promise<
     .sort((a, b) => (b.shortShifts ?? 0) - (a.shortShifts ?? 0))[0];
   // Faltantes: se suman los cajeros que dieron negativo (un cajero con sobrante no tapa el faltante de otro).
   const cashShort = cashiers.reduce((acc, c) => acc + Math.min(0, c.cashDifference ?? 0), 0);
-  const lowProducts = products.filter(isLowStock);
+  const lowProducts = products.filter((p) => isLowStock(p, branchMins));
   return {
     stats: {
       branchId: b.branchId,
@@ -115,7 +119,10 @@ export function BranchDashboard({ branches, onTab }: { branches: BranchOverview[
     if (branches.length === 0) return;
     let cancelled = false;
     setLoading(true);
-    void Promise.all(branches.map((b) => loadBranch(b, from, to)))
+    // Mínimos por local (plan Empresa); sin el plan o sin la migración viene vacío.
+    void listBranchMinStock()
+      .catch(() => new Map<string, Map<string, number>>())
+      .then((mins) => Promise.all(branches.map((b) => loadBranch(b, from, to, mins.get(b.branchId)))))
       .then((list) => {
         if (cancelled) return;
         setStats(list.map((l) => l.stats));
