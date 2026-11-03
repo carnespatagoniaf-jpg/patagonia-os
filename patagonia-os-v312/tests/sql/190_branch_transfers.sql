@@ -53,6 +53,18 @@ begin
   if public.plan_display_name('empresa') <> 'Empresa' then raise exception 'nombre del plan'; end if;
 end $$;
 
+-- Con plan Empresa, una cajera con PIN hace que la caja pida PIN (pos_cashier_required tenía los planes a mano).
+insert into employees (id, company_id, branch_id, full_name) values
+  ('00000000-0000-0000-0000-0000000c90e1', '00000000-0000-0000-0000-0000000c9001', '00000000-0000-0000-0000-0000000c9003', 'Cajera con PIN');
+insert into employee_pos_pins (employee_id, company_id, pin_hash) values
+  ('00000000-0000-0000-0000-0000000c90e1', '00000000-0000-0000-0000-0000000c9001', extensions.crypt('1234', extensions.gen_salt('bf')));
+do $$
+begin
+  if not public.pos_cashier_required('00000000-0000-0000-0000-0000000c9001', '00000000-0000-0000-0000-0000000c9003') then
+    raise exception 'con plan Empresa la caja no pide PIN';
+  end if;
+end $$;
+
 -- Ayudas de la prueba (sesión, solo para esta prueba).
 create function pg_temp.stock(p_branch text, p_product text) returns numeric language sql as $$
   select coalesce(sum(quantity), 0) from public.inventory_movements

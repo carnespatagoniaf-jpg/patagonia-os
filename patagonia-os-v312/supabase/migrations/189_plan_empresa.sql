@@ -55,6 +55,21 @@ $$;
 revoke all on function public.set_company_plan(uuid, text) from public, anon;
 grant execute on function public.set_company_plan(uuid, text) to authenticated;
 
+-- pos_cashier_required (117) tenía la lista de planes escrita a mano ('estandar', 'full'): con Empresa una caja
+-- nunca pediría PIN. Pasa a comparar por orden de plan, como require_plan (cambio sobre la definición viva).
+do $$
+declare
+  v_fn record;
+begin
+  for v_fn in
+    select p.oid from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.prosrc like '%coalesce(c.plan, ''full'') in (''estandar'', ''full'')%'
+  loop
+    execute replace(pg_get_functiondef(v_fn.oid), 'coalesce(c.plan, ''full'') in (''estandar'', ''full'')',
+      'public.plan_rank(coalesce(c.plan, ''full'')) >= public.plan_rank(''estandar'')');
+  end loop;
+end $$;
+
 notify pgrst, 'reload schema';
 
 insert into public.schema_migrations (version) values ('189_plan_empresa') on conflict do nothing;
