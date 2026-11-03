@@ -65,7 +65,7 @@ function shortDate(iso: string) {
 }
 
 export function Treasury() {
-  const { accounts, allAccounts, balances, movements, loading, error, create, adjust, transfer, registerExpense, removeExpense, setActive, setAccountBranch } = useTreasury();
+  const { accounts, allAccounts, balances, movements, loading, error, create, adjust, transfer, registerExpense, removeExpense, setActive, setAccountBranch } = useTreasury({ withMovements: true });
   const { loadRange } = useShifts();
   const { branches: allBranches } = useActiveBranch();
   const { profile } = useAuth();

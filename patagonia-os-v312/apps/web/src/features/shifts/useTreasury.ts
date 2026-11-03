@@ -29,7 +29,12 @@ const DEMO_ACCOUNTS: TreasuryAccount[] = [
   { id: "demo-bank", name: "Banco Provincia", paymentMethod: "bank_province", initialBalance: 10000, active: true }
 ];
 
-export function useTreasury() {
+/**
+ * `withMovements`: solo Tesorería muestra los últimos movimientos. Las demás pantallas (Mostrador, Clientes,
+ * Compras…) usan solo las cuentas, y esa consulta era de las más pesadas del sistema (2026-11-03).
+ */
+export function useTreasury(options: { withMovements?: boolean } = {}) {
+  const withMovements = options.withMovements ?? false;
   const { branchId } = useActiveBranch();
 
   const [accounts, setAccounts] = useState<TreasuryAccount[]>(isSupabaseConfigured ? [] : DEMO_ACCOUNTS);
@@ -53,7 +58,7 @@ export function useTreasury() {
         listTreasuryAccounts(branchId ?? undefined),
         listAllTreasuryAccounts(),
         listTreasuryBalances(),
-        listTreasuryMovements()
+        withMovements ? listTreasuryMovements() : Promise.resolve([] as TreasuryMovementRow[])
       ]);
       setAccounts(accountList);
       setAllAccounts(allAccountList);
@@ -64,7 +69,7 @@ export function useTreasury() {
     } finally {
       setLoading(false);
     }
-  }, [branchId]);
+  }, [branchId, withMovements]);
 
   useEffect(() => {
     void reload();

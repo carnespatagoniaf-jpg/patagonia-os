@@ -812,19 +812,21 @@ Cancelar = es el mismo papel: no cobrar.`)) {
       ticket.papers.commit();
       clearTicket();
       setInvoiceDraft(emptyInvoiceDraft());
-      // El ticket tiene que salir sí o sí -- se imprime antes de refrescar
-      // stock/turno, y esos dos refrescos van en su propio try/catch para
-      // que un problema de red ahí (la venta ya está guardada, o ya quedó
-      // en la cola offline) no tape el ticket ni dispare el mensaje de "no
-      // se pudo registrar la venta" sobre una venta que en realidad sí se
-      // cobró.
-      await autoPrintReceipt(newReceipt);
       // El stock se descuenta en pantalla con lo cobrado (también si quedó en
       // la cola sin conexión: se va a descontar cuando suba) y el botón queda
       // libre ya. Stock y turno reales se traen de fondo, sin hacer esperar
       // a la cajera (antes eran ~6 pedidos seguidos con "Cobrando…").
       setProducts((current) => applySoldToStock(current, itemsPayload));
       setBusy(false);
+      // El ticket sale de fondo: la venta ya está guardada (o en la cola), así
+      // que la cajera no espera a la impresora. El programa de impresión
+      // tardaba segundos por ticket y el botón seguía en "Cobrando…" todo ese
+      // rato (2026-11-03, "el mostrador es lento cuando cobran"). Se manda
+      // antes de refrescar stock/turno, y un error de impresión nunca se
+      // muestra como "no se pudo registrar la venta".
+      void autoPrintReceipt(newReceipt).catch((err) => {
+        setMessage(err instanceof Error ? `La venta se cobró, pero el ticket no salió: ${err.message}` : "La venta se cobró, pero el ticket no salió.");
+      });
       if (queuedOffline) {
         setMessage("Sin conexión: la venta se guardó en este equipo y se sube sola apenas vuelva internet." + invoiceText);
       } else {
