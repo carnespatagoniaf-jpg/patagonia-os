@@ -236,3 +236,36 @@ export function transferDiffRows(transfers: Transfer[]): Array<{ transfer: Trans
   }
   return out;
 }
+
+/**
+ * Reparte un total entre locales en proporción a un peso (lo que vende cada uno), en números enteros (kilos o
+ * unidades): lo que sobra del redondeo va a los de mayor resto. Sin pesos (nadie vendió), en partes iguales.
+ */
+export function splitByWeights(total: number, weights: number[]): number[] {
+  if (weights.length === 0 || !(total > 0)) return weights.map(() => 0);
+  const whole = Math.floor(total);
+  const sum = weights.reduce((a, w) => a + Math.max(w, 0), 0);
+  const shares = weights.map((w) => (sum > 0 ? (whole * Math.max(w, 0)) / sum : whole / weights.length));
+  const out = shares.map((s) => Math.floor(s));
+  let left = whole - out.reduce((a, b) => a + b, 0);
+  const order = shares.map((s, i) => ({ i, frac: s - Math.floor(s) })).sort((a, b) => b.frac - a.frac || a.i - b.i);
+  for (const { i } of order) {
+    if (left <= 0) break;
+    out[i] += 1;
+    left -= 1;
+  }
+  return out;
+}
+
+/** Completar hasta el mínimo de cada local sin pasarse de lo que hay para repartir (en orden, el más vacío primero). */
+export function fillToMinimum(total: number, needs: number[]): number[] {
+  const out = needs.map(() => 0);
+  let left = Math.floor(Math.max(total, 0));
+  const order = needs.map((n, i) => ({ i, n: Math.ceil(Math.max(n, 0)) })).sort((a, b) => b.n - a.n || a.i - b.i);
+  for (const { i, n } of order) {
+    const give = Math.min(n, left);
+    out[i] = give;
+    left -= give;
+  }
+  return out;
+}

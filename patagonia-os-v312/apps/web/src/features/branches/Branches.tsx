@@ -8,6 +8,9 @@ import { BranchCashTab, BranchDashboard } from "./BranchDashboard";
 import { useAuth } from "../auth/AuthProvider";
 import { planAllows } from "../auth/permissions";
 import { Transfers } from "../transfers/Transfers";
+import { useActiveBranch } from "./BranchProvider";
+import { ZonesTab } from "./ZonesTab";
+import { NewBranchCopy } from "./NewBranchCopy";
 
 // Sucursales: resumen de cada una (stock, ventas de hoy, turno abierto) con
 // el total de todas juntas, y transferir stock de una sucursal a otra. Solo
@@ -57,14 +60,15 @@ function ProductPicker({ products, placeholder, onPick }: { products: Product[];
 }
 
 export function Branches() {
-  const { branches, loading, error, transfer } = useBranchesOverview();
+  const { branches, loading, error, transfer, reload: reloadOverview } = useBranchesOverview();
   const { profile } = useAuth();
   // Plan Empresa (migración 189): pedidos entre locales con remito y recepción (migración 190).
   const empresa = planAllows(profile, "empresa");
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   // Rediseño 2026-11-02: el tablero de una cadena primero; el pase de mercadería y la caja, en pestañas.
-  const [tab, setTab] = useState<"tablero" | "mercaderia" | "caja">("tablero");
+  const [tab, setTab] = useState<"tablero" | "mercaderia" | "caja" | "zonas" | "local">("tablero");
+  const { branchId: activeBranchId, reloadBranches } = useActiveBranch();
 
   const [fromBranchId, setFromBranchId] = useState("");
   const [toBranchId, setToBranchId] = useState("");
@@ -217,6 +221,8 @@ export function Branches() {
         <button className={tab === "tablero" ? "page-tab active" : "page-tab"} onClick={() => setTab("tablero")}>Tablero</button>
         <button className={tab === "mercaderia" ? "page-tab active" : "page-tab"} onClick={() => setTab("mercaderia")}>{empresa ? "Mercadería entre locales" : "Pasar mercadería"}</button>
         <button className={tab === "caja" ? "page-tab active" : "page-tab"} onClick={() => setTab("caja")}>Caja de cada local</button>
+        {empresa && <button className={tab === "zonas" ? "page-tab active" : "page-tab"} onClick={() => setTab("zonas")}>Precios por zona</button>}
+        {empresa && <button className={tab === "local" ? "page-tab active" : "page-tab"} onClick={() => setTab("local")}>Abrir un local</button>}
       </div>
 
       {message && <div className="message">{message}</div>}
@@ -225,6 +231,17 @@ export function Branches() {
 
       {tab === "tablero" && branches.length > 0 && <BranchDashboard branches={branches} onTab={setTab} />}
       {tab === "caja" && branches.length > 0 && <BranchCashTab branches={branches} />}
+      {tab === "zonas" && empresa && activeBranchId && <ZonesTab activeBranchId={activeBranchId} />}
+      {tab === "local" && empresa && (
+        <NewBranchCopy
+          branches={branches.map((b) => ({ id: b.branchId, name: b.branchName }))}
+          onCreated={(_id, text) => {
+            setMessage(text);
+            void reloadBranches();
+            void reloadOverview();
+          }}
+        />
+      )}
 
       {tab === "mercaderia" && empresa && <Transfers admin quickTransfer={quickTransfer} />}
       {tab === "mercaderia" && !empresa && (

@@ -3,6 +3,7 @@ import { listProductsForBranch } from "../inventory/inventory-service";
 import { listCustomersWithBalance } from "../customers/customers-service";
 import { listTreasuryAccounts } from "../shifts/treasury-service";
 import { listPriceLists } from "../pricing/price-lists-service";
+import { sellingLists } from "../pricing/price-lists";
 import type { QueuedRouteSale, RouteCustomer, RouteProduct } from "./route-logic";
 
 /** Venta en ruta (migración 161). Cada camión es una sucursal con is_vehicle. */
@@ -54,7 +55,7 @@ export async function loadRouteCatalog(vehicleId: string): Promise<RouteCatalog>
     listProductsForBranch(vehicleId),
     listCustomersWithBalance(),
     listTreasuryAccounts(vehicleId),
-    listPriceLists().catch(() => [])
+    listPriceLists().then(sellingLists).catch(() => [])
   ]);
   const activeListName = new Map(priceLists.filter((l) => l.active).map((l) => [l.id, l.name]));
   return {
