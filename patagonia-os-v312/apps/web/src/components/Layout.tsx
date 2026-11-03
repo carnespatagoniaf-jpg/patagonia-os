@@ -30,7 +30,7 @@ interface Props {
 }
 
 function BranchSwitcher() {
-  const { branchId, branches, canSwitch, setBranchId, addBranch, renameBranch } = useActiveBranch();
+  const { branchId, branches, canSwitch, canManage, setBranchId, addBranch, renameBranch } = useActiveBranch();
   const [showNewForm, setShowNewForm] = useState(false);
   const [newName, setNewName] = useState("");
   const [showRename, setShowRename] = useState(false);
@@ -42,6 +42,19 @@ function BranchSwitcher() {
 
   if (!canSwitch) {
     return currentName ? <div className="branch-switcher-label">{currentName}</div> : null;
+  }
+
+  // A cargo de varios locales (plan Empresa): elige entre los suyos, sin crear ni renombrar.
+  if (!canManage) {
+    return (
+      <div className="branch-switcher">
+        <select value={branchId ?? ""} onChange={(e) => setBranchId(e.target.value)}>
+          {branches.map((b) => (
+            <option key={b.id} value={b.id}>{b.name}</option>
+          ))}
+        </select>
+      </div>
+    );
   }
 
   async function handleAdd() {

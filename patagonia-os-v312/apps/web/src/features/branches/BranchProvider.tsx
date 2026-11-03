@@ -11,7 +11,10 @@ interface BranchContextValue {
   branchId: string | null;
   branches: Branch[];
   activeBranch: Branch | null;
+  /** Puede cambiar de local arriba: dueño/administrador, o alguien a cargo de varios locales (plan Empresa). */
   canSwitch: boolean;
+  /** Crear y renombrar locales: solo dueño/administrador. */
+  canManage: boolean;
   loading: boolean;
   setBranchId(id: string): void;
   addBranch(name: string): Promise<Branch>;
@@ -27,7 +30,13 @@ function storageKey(companyId: string) {
 
 export function BranchProvider({ children }: { children: ReactNode }) {
   const { profile } = useAuth();
-  const canSwitch = can(profile, "branches.manage");
+  const canManage = can(profile, "branches.manage");
+  // Encargado de varios locales (plan Empresa, migración 191): su local y los que tiene a cargo.
+  const ownBranchIds = useMemo(
+    () => (profile && !canManage && (profile.extra_branch_ids?.length ?? 0) > 0 ? [profile.branch_id, ...(profile.extra_branch_ids ?? [])] : null),
+    [profile, canManage]
+  );
+  const canSwitch = canManage || ownBranchIds !== null;
 
   const [branches, setBranches] = useState<Branch[]>(isSupabaseConfigured ? [] : [DEMO_BRANCH]);
   const [loading, setLoading] = useState(isSupabaseConfigured);
@@ -55,14 +64,17 @@ export function BranchProvider({ children }: { children: ReactNode }) {
       return;
     }
     const stored = window.localStorage.getItem(storageKey(profile.company_id));
-    setSelectedId(stored ?? profile.branch_id);
-  }, [profile, canSwitch]);
+    setSelectedId(stored && (!ownBranchIds || ownBranchIds.includes(stored)) ? stored : profile.branch_id);
+  }, [profile, canSwitch, ownBranchIds]);
 
   const branchId = useMemo(() => {
     if (!isSupabaseConfigured) return DEMO_BRANCH_ID;
     if (!canSwitch) return profile?.branch_id ?? null;
+    if (ownBranchIds) return selectedId && ownBranchIds.includes(selectedId) ? selectedId : profile?.branch_id ?? null;
     return selectedId ?? profile?.branch_id ?? branches[0]?.id ?? null;
-  }, [canSwitch, selectedId, profile, branches]);
+  }, [canSwitch, ownBranchIds, selectedId, profile, branches]);
+
+  const visibleBranches = useMemo(() => (ownBranchIds ? branches.filter((b) => ownBranchIds.includes(b.id)) : branches), [branches, ownBranchIds]);
 
   function setBranchId(id: string) {
     setSelectedId(id);
@@ -92,7 +104,7 @@ export function BranchProvider({ children }: { children: ReactNode }) {
 
   const activeBranch = branches.find((b) => b.id === branchId) ?? null;
 
-  const value: BranchContextValue = { branchId, branches, activeBranch, canSwitch, loading, setBranchId, addBranch, renameBranch, setSalesMode };
+  const value: BranchContextValue = { branchId, branches: visibleBranches, activeBranch, canSwitch, canManage, loading, setBranchId, addBranch, renameBranch, setSalesMode };
 
   return <BranchContext.Provider value={value}>{children}</BranchContext.Provider>;
 }

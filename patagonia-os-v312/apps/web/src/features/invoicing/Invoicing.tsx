@@ -40,6 +40,7 @@ import {
 } from "./invoicing-view";
 import { InvoiceRequestFields } from "./InvoiceRequestFields";
 import { RemitoRPanel } from "./RemitoRPanel";
+import { BranchFiscalPanel } from "./BranchFiscalPanel";
 import { ArcaSetup } from "./ArcaSetup";
 import { listInWords, missingRemitoIssuerFields } from "./remito-r";
 import { OPEN_FISCAL_KEY } from "../../lib/navigate";
@@ -480,6 +481,9 @@ export function Invoicing() {
           }}
         />
       )}
+
+      {/* Punto de venta y domicilio de cada local (migración 191): plan Empresa, una vez cargados los datos generales. */}
+      {planAllows(profile, "empresa") && settings && <BranchFiscalPanel generalPointOfSale={settings.pointOfSale ?? null} />}
 
       {/* Remito R con CAI (migración 147): plan Full. */}
       {planAllows(profile, "full") && <RemitoRPanel issuerCondition={settings?.taxCondition ?? null} />}

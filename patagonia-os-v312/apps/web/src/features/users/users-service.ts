@@ -122,3 +122,19 @@ export async function deleteStaffUser(id: string): Promise<void> {
     throw new Error((data as { error?: string })?.error ?? "No se pudo eliminar el usuario.");
   }
 }
+
+/** Locales a cargo además del principal (plan Empresa, migración 191): usuario → locales. Sin la migración, vacío. */
+export async function listProfileBranches(): Promise<Map<string, string[]>> {
+  const out = new Map<string, string[]>();
+  if (!supabase) return out;
+  const { data, error } = await supabase.from("profile_branches").select("profile_id,branch_id");
+  if (error) return out;
+  for (const r of (data ?? []) as Array<{ profile_id: string; branch_id: string }>) out.set(r.profile_id, [...(out.get(r.profile_id) ?? []), r.branch_id]);
+  return out;
+}
+
+export async function setProfileBranches(profileId: string, branchIds: string[]): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("set_profile_branches", { p_profile_id: profileId, p_branch_ids: branchIds });
+  if (error) throw error;
+}
