@@ -236,8 +236,11 @@ describe("QR y ticket fiscal", () => {
     assert.match(text, /CAE 76423000000012/);
     assert.match(text, /Vto\. CAE 30\/10\/2026/);
     assert.doesNotMatch(text, /NO VALIDO COMO FACTURA/);
-    // Comando de QR (GS ( k ... 49 80 48) seguido de la URL.
-    assert.ok(text.includes("1P0https://www.afip.gob.ar/fe/qr/?p=abc"));
+    // El QR va como imagen de puntos (GS v 0): la URL no se imprime como texto (Carnes Premium, 03/11/2026).
+    assert.ok(!text.includes("afip.gob.ar"));
+    const at = bytes.findIndex((b, i) => b === 0x1d && bytes[i + 1] === 0x76 && bytes[i + 2] === 0x30);
+    assert.ok(at > 0, "falta la imagen del QR");
+    assert.ok(!Array.from(bytes).some((b, i) => b === 0x1d && bytes[i + 1] === 0x28 && bytes[i + 2] === 0x6b), "quedó el QR nativo");
   });
 });
 
