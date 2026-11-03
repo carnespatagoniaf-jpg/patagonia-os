@@ -1,6 +1,7 @@
 import { Fragment, lazy, Suspense, useEffect, useRef, useState } from "react";
 import type { Product } from "@patagonia/domain";
 import { marginPercent } from "@patagonia/domain";
+import { LOW_MARGIN_ALERT } from "./price-tools";
 import { demoProducts } from "../../lib/demo-data";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
@@ -125,7 +126,10 @@ export function Inventory() {
   const [loading, setLoading] = useState(isSupabaseConfigured);
   const [message, setMessage] = useState("");
   // Los dados de baja no se muestran salvo que se pida (siguen existiendo, con su historia).
-  const [showInactive, setShowInactive] = useState(false);
+  // Rediseño 2026-11-02: filtros rápidos (reemplazan "Ver dados de baja") y lo que se usa poco en "Más opciones".
+  const [quickFilter, setQuickFilter] = useState<"" | "low" | "nocost" | "lowmargin" | "inactive">("");
+  const [showPriceTools, setShowPriceTools] = useState(false);
+  const moreMenuRef = useRef<HTMLDetailsElement | null>(null);
 
   const [showNewForm, setShowNewForm] = useState(false);
   const newNameRef = useRef<HTMLInputElement>(null);
@@ -308,12 +312,36 @@ export function Inventory() {
   // Buscador: por nombre o código, sin importar acentos ni mayúsculas; se suma al filtro de categoría.
   const searchText = plainText(productSearch);
   const inactiveCount = products.filter((p) => !(p.active ?? true)).length;
+  const isActive = (p: Product) => p.active ?? true;
+  const isLow = (p: Product) => isActive(p) && !p.stockSourceId && (p.stock < 0 || (p.minStock > 0 && p.stock <= p.minStock));
+  const hasNoCost = (p: Product) => isActive(p) && !(p.cost > 0);
+  const hasLowMargin = (p: Product) => isActive(p) && p.cost > 0 && marginPercent(p.cost, p.priceRetail) < LOW_MARGIN_ALERT;
   const visibleProducts = products.filter(
     (p) =>
-      (showInactive || (p.active ?? true)) &&
+      (quickFilter === "inactive" ? !isActive(p) : isActive(p)) &&
+      (quickFilter !== "low" || isLow(p)) &&
+      (quickFilter !== "nocost" || hasNoCost(p)) &&
+      (quickFilter !== "lowmargin" || hasLowMargin(p)) &&
       (!categoryFilter || p.categoryId === categoryFilter) &&
       (!searchText || plainText(p.name).includes(searchText) || plainText(p.code).includes(searchText))
   );
+
+  // Tarjetas de arriba: sin las presentaciones (su stock es el del principal) y solo activos.
+  const stockSummary = (() => {
+    const own = products.filter((p) => isActive(p) && !p.stockSourceId);
+    return {
+      active: products.filter(isActive).length,
+      cost: own.reduce((sum, p) => sum + Math.max(p.stock, 0) * (p.cost || 0), 0),
+      retail: own.reduce((sum, p) => sum + Math.max(p.stock, 0) * (p.priceRetail || 0), 0),
+      low: products.filter(isLow).length,
+      noCost: products.filter(hasNoCost).length,
+      lowMargin: products.filter(hasLowMargin).length
+    };
+  })();
+  function pickMore(action: () => void) {
+    moreMenuRef.current?.removeAttribute("open");
+    action();
+  }
 
   const productById = new Map(products.map((p) => [p.id, p]));
   function presentationsOf(principalId: string) {
@@ -860,8 +888,9 @@ export function Inventory() {
         <div>
           <p className="eyebrow">STOCK</p>
           <h1>Productos, costos y márgenes</h1>
-          <p className="muted">Costo, margen y precio de venta por producto — se usa en Compras y en Rentabilidad.</p>
+          <p className="muted">Costo, margen y precio de venta por producto: se usa en Mostrador, Compras y Rentabilidad.</p>
         </div>
+        <div className="row-actions ws-header-actions">
         {/* Todo lo de la balanza, guardado en un panel (pedido del dueño 15/10): Mi balanza, la lista para cargar a mano y,
             solo para soporte, las herramientas técnicas (migración 120). */}
         <ScaleButton>
@@ -885,17 +914,50 @@ export function Inventory() {
             </ScaleSupportTools>
           )}
         </ScaleButton>
+        {canEdit && (
+          <details className="ws-menu" ref={moreMenuRef}>
+            <summary className="secondary">Más opciones ▾</summary>
+            <div className="ws-menu-list">
+              <button onClick={() => pickMore(() => setShowCategoryManager((v) => !v))}>📂 {showCategoryManager ? "Ocultar categorías" : "Categorías"}</button>
+              {canManageLists && (
+                <button onClick={() => pickMore(() => setShowPriceLists((v) => !v))}>🏷️ {showPriceLists ? "Ocultar listas de precios" : activeLists.length > 0 ? "Listas de precios" : "Precio mayorista"}</button>
+              )}
+              <button onClick={() => pickMore(() => setShowPriceTools((v) => !v))}>💲 {showPriceTools ? "Ocultar actualizar precios" : "Actualizar precios (inflación)"}</button>
+              <button onClick={() => pickMore(() => downloadScaleExportCsv(products, categories))}>⬇️ Bajar lista para la balanza</button>
+            </div>
+          </details>
+        )}
+        {!showNewForm && canEdit && <button onClick={() => setShowNewForm(true)}>+ Producto</button>}
+        </div>
       </header>
 
       {message && <div className="message">{message}</div>}
 
-      <section className="panel">
-        <div className="panel-title">
-          <h2>Productos <span className="muted" style={{ fontSize: 14, fontWeight: 500 }}>{loading ? "Cargando…" : `${visibleProducts.length} productos`}</span></h2>
-          {!showNewForm && canEdit && <button onClick={() => setShowNewForm(true)}>+ Agregar producto</button>}
+      <div className="ws-cards ws-cards-4">
+        <div className="ws-card">
+          <span>Productos activos</span>
+          <strong>{loading ? "…" : stockSummary.active}</strong>
+          <small>{categories.length} {categories.length === 1 ? "categoría" : "categorías"}</small>
         </div>
+        <div className="ws-card">
+          <span>Mercadería a costo</span>
+          <strong>{formatMoney(stockSummary.cost)}</strong>
+          <small>a precio de venta {formatMoney(stockSummary.retail)}</small>
+        </div>
+        <button className={`ws-card ws-card-button${stockSummary.low > 0 ? " bad" : ""}${quickFilter === "low" ? " active" : ""}`} onClick={() => setQuickFilter(quickFilter === "low" ? "" : "low")}>
+          <span>Debajo del mínimo</span>
+          <strong>{stockSummary.low}</strong>
+          <small>{quickFilter === "low" ? "tocá para ver todos" : "tocá para verlos"}</small>
+        </button>
+        <button className={`ws-card ws-card-button${stockSummary.noCost > 0 ? " warn" : ""}${quickFilter === "nocost" ? " active" : ""}`} onClick={() => setQuickFilter(quickFilter === "nocost" ? "" : "nocost")}>
+          <span>Sin costo cargado</span>
+          <strong>{stockSummary.noCost}</strong>
+          <small>su margen no se sabe</small>
+        </button>
+      </div>
 
-        <div className="cash-banner-form" style={{ flexWrap: "wrap", marginBottom: 14 }}>
+      <section className="panel">
+        <div className="ws-form-row" style={{ marginBottom: 12 }}>
           <input
             type="search"
             name="stock-product-search"
@@ -917,31 +979,34 @@ export function Inventory() {
             }}
             style={{ flex: "1 1 260px", minWidth: 220 }}
           />
-          <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
-            <option value="">Todas las categorías</option>
-            {categories.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-          {canEdit && (
-            <button className="secondary" onClick={() => setShowCategoryManager((v) => !v)}>
-              {showCategoryManager ? "Ocultar categorías" : "Gestionar categorías"}
-            </button>
+          {categories.length > 10 && (
+            <select value={categoryFilter} onChange={(e) => setCategoryFilter(e.target.value)}>
+              <option value="">Todas las categorías</option>
+              {categories.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
           )}
-          {canManageLists && (
-            <button className="secondary" onClick={() => setShowPriceLists((v) => !v)}>
-              {showPriceLists ? "Ocultar listas de precios" : activeLists.length > 0 ? "Listas de precios" : "Precio mayorista"}
-            </button>
+        </div>
+        <div className="ws-chips" style={{ marginBottom: 12 }}>
+          {categories.length > 0 && categories.length <= 10 && (
+            <>
+              <button className={categoryFilter === "" ? "ws-chip active" : "ws-chip"} onClick={() => setCategoryFilter("")}>Todas</button>
+              {categories.map((c) => (
+                <button key={c.id} className={categoryFilter === c.id ? "ws-chip active" : "ws-chip"} onClick={() => setCategoryFilter(categoryFilter === c.id ? "" : c.id)}>{c.name}</button>
+              ))}
+              <span className="ws-chips-sep" />
+            </>
           )}
+          <button className={quickFilter === "low" ? "ws-chip active" : "ws-chip"} onClick={() => setQuickFilter(quickFilter === "low" ? "" : "low")}>Bajo mínimo ({stockSummary.low})</button>
+          <button className={quickFilter === "nocost" ? "ws-chip active" : "ws-chip"} onClick={() => setQuickFilter(quickFilter === "nocost" ? "" : "nocost")}>Sin costo ({stockSummary.noCost})</button>
+          <button className={quickFilter === "lowmargin" ? "ws-chip active" : "ws-chip"} onClick={() => setQuickFilter(quickFilter === "lowmargin" ? "" : "lowmargin")} title={`Margen menor al ${LOW_MARGIN_ALERT}% sobre el costo`}>Margen bajo ({stockSummary.lowMargin})</button>
           {inactiveCount > 0 && (
-            <label className="muted" style={{ display: "flex", gap: 6, alignItems: "center" }}>
-              <input type="checkbox" checked={showInactive} onChange={(e) => setShowInactive(e.target.checked)} />
-              Ver dados de baja ({inactiveCount})
-            </label>
+            <button className={quickFilter === "inactive" ? "ws-chip active" : "ws-chip"} onClick={() => setQuickFilter(quickFilter === "inactive" ? "" : "inactive")}>Dados de baja ({inactiveCount})</button>
           )}
         </div>
 
-        {canEdit && <PriceTools products={products} categories={categories} onApplied={reload} />}
+        {canEdit && showPriceTools && <PriceTools products={products} categories={categories} onApplied={reload} initialOpen />}
 
         {showPriceLists && canManageLists && <PriceListsPanel lists={priceLists} onChanged={reload} onMessage={setMessage} />}
 
@@ -1144,8 +1209,14 @@ export function Inventory() {
                     </span>
                   )}
                 </td>
-                <td className="num hide-sm">{formatMoney(product.cost)}</td>
-                <td className="num hide-sm">{marginPercent(product.cost, product.priceRetail)}%</td>
+                <td className="num hide-sm">{product.cost > 0 ? formatMoney(product.cost) : <span className="num-warn">sin costo</span>}</td>
+                <td className="num hide-sm">
+                  {product.cost > 0 ? (
+                    <span className={`margin-badge ${marginPercent(product.cost, product.priceRetail) < LOW_MARGIN_ALERT ? "low" : "ok"}`} title={`${marginPercent(product.cost, product.priceRetail)}% sobre el costo`}>{Math.round(marginPercent(product.cost, product.priceRetail))}%</span>
+                  ) : (
+                    <span className="margin-badge none" title="Sin costo cargado no se sabe el margen">?</span>
+                  )}
+                </td>
                 <td className="num">
                   {formatMoney(product.priceRetail)}
                   <span className="cell-sub">IVA {productVatLabel(vatRates[product.id], generalVatRate)}</span>
@@ -1160,10 +1231,9 @@ export function Inventory() {
                   );
                 })}
                 <td className="num">
-                  <span className={product.stock < 0 ? "num-negative" : undefined}>
-                    {product.stock} {UNIT_LABELS[product.unit]}
-                  </span>
-                  {product.stock < 0 || (product.minStock > 0 && product.stock <= product.minStock) ? " ⚠" : ""}
+                  <b className={isLow(product) ? "num-negative" : undefined} title={isLow(product) ? "Está en el mínimo o debajo" : undefined}>
+                    {formatQty(product.stock)} {UNIT_LABELS[product.unit]}
+                  </b>
                   {/* Solo productos por kilo (envasados al vacío): en uno por unidad, paquete = unidad y se confundía con el stock (real M2, 24/10). */}
                   {showPackages && !product.stockSourceId && product.unit === "kg" && (
                     <div style={{ fontSize: 12, fontWeight: 500 }}>

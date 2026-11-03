@@ -96,6 +96,14 @@ export interface SupplierBalance {
   balance: number;
 }
 
+/** Saldo de todos los proveedores de la empresa (la vista filtra por empresa adentro): para la lista de Compras. */
+export async function listSupplierBalances(): Promise<Record<string, number>> {
+  if (!supabase) return {};
+  const { data, error } = await supabase.from("supplier_balance").select("supplier_id,balance");
+  if (error) throw error;
+  return Object.fromEntries((data ?? []).map((row) => [row.supplier_id as string, Number(row.balance)]));
+}
+
 export async function fetchSupplierBalance(supplierId: string): Promise<SupplierBalance | null> {
   if (!supabase) return null;
 

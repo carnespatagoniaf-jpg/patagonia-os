@@ -21,9 +21,10 @@ const ROUNDING_OPTIONS: { value: PriceRounding; label: string }[] = [
 
 /** Herramienta de inflación: sube/baja precios por porcentaje o los lleva a un
  * margen mínimo, con vista previa de cada cambio antes de guardar. */
-export function PriceTools({ products, categories, onApplied }: Props) {
+export function PriceTools({ products, categories, onApplied, initialOpen = false }: Props & { initialOpen?: boolean }) {
   const { profile } = useAuth();
-  const [open, setOpen] = useState(false);
+  // Desde Stock → "Más opciones" → "Actualizar precios" ya se abre desplegado.
+  const [open, setOpen] = useState(initialOpen);
   const [mode, setMode] = useState<PriceMode>("percent");
   const [percentText, setPercentText] = useState("");
   const [marginText, setMarginText] = useState("30");

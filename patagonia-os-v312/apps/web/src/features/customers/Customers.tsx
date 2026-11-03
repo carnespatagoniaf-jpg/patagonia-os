@@ -2,7 +2,7 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { Product } from "@patagonia/domain";
 import { useCustomers } from "./useCustomers";
 import { useTreasury } from "../shifts/useTreasury";
-import { todayIso } from "../shifts/format";
+import { addDaysIso, todayIso } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
 import { listProductsForBranch } from "../inventory/inventory-service";
 import { deleteCustomer, type CustomerChargeItem } from "./customers-service";
@@ -48,6 +48,9 @@ function formatShortDate(iso: string) {
   const [y, m, d] = iso.slice(0, 10).split("-");
   return `${d}/${m}/${y.slice(2)}`;
 }
+
+/** Qué parte de la cuenta corriente se ve (la caja tiene su barra; "Todo" muestra todo). */
+type LedgerRange = "month" | "quarter" | "all";
 
 const UNIT_LABELS: Record<Product["unit"], string> = { kg: "kg", unit: "unidad", box: "caja" };
 
@@ -236,6 +239,10 @@ export function Customers() {
   const finalChargeTotal = Math.round(chargeTotal) + chargeAdjustment;
   const [busy, setBusy] = useState(false);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Rediseño 2026-11-02: alta de cliente plegada, una sola acción a la vez (venta / pago / saldo anterior).
+  const [showNewCustomer, setShowNewCustomer] = useState(false);
+  const [action, setAction] = useState<"charge" | "payment" | "opening">("charge");
+  const [ledgerRange, setLedgerRange] = useState<LedgerRange>("all");
 
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
@@ -320,6 +327,12 @@ export function Customers() {
     setSelectedId(id);
     void loadDetail(id);
   }
+
+  // Arranca con el primero de la lista elegido (el que más debe, según el orden): la derecha nunca queda vacía.
+  useEffect(() => {
+    if (!selectedId && visibleCustomers.length > 0) selectCustomer(visibleCustomers[0].id);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedId, visibleCustomers]);
 
   /** Sin ventas ni pagos se borra; con historia queda dado de baja (sale de la lista, se guarda todo). */
   async function handleDeleteCustomer() {
@@ -450,6 +463,7 @@ export function Customers() {
       setLocality("");
       setProvince("");
       setOpeningBalance("");
+      setShowNewCustomer(false);
       setNewPriceListId("");
       selectCustomer(result.id);
       const created = result.number !== undefined ? `Cliente creado: es el N.º ${result.number}.` : "Cliente creado.";
@@ -772,38 +786,67 @@ export function Customers() {
     }
   }
 
+  const ledgerCutoff = ledgerRange === "all" ? null : addDaysIso(today, ledgerRange === "month" ? -30 : -90);
+  const visibleLedger = ledgerCutoff ? ledger.filter((row) => row.date.slice(0, 10) >= ledgerCutoff) : ledger;
+  const owed = balance?.balance ?? 0;
+
   return (
     <>
-      <header className="page-header">
+      <header className="page-header no-print">
         <div>
           <p className="eyebrow">CLIENTES</p>
           <h1>Clientes y cuenta corriente</h1>
-          <p className="muted">Clientes a los que les vendés fiado, sin cobrar en el momento (mayoristas, etc.). Elegí un cliente de la lista y abajo vas a poder cargarle una venta o registrar un pago.</p>
+          <p className="muted">Clientes a los que les vendés fiado (mayoristas, etc.): elegí uno de la lista y a la derecha le cargás una venta o un pago.</p>
         </div>
       </header>
 
-      {message && <div className="message">{message}</div>}
-      {error && <div className="message warning">{error}</div>}
+      {message && <div className="message no-print">{message}</div>}
+      {error && <div className="message warning no-print">{error}</div>}
 
-      <div className="content-grid">
-        <section className="panel">
+      <div className="ws-layout">
+        <section className="panel ws-list no-print">
           <div className="panel-title">
-            <h2>Clientes</h2>
-            <span>{loading ? "Cargando…" : `${visibleCustomers.length} de ${customers.length}`}</span>
+            <h2>Clientes <span className="badge">{customers.length}</span></h2>
+            {!showNewCustomer && <button className="secondary" onClick={() => setShowNewCustomer(true)}>+ Nuevo</button>}
           </div>
-          {!loading && statusCounts.owes > 0 && (
-            <div className="totals" style={{ marginBottom: 10 }}>
-              <strong>Te deben en total <b>{formatMoney(totalOwed)}</b></strong>
-              <span className="muted">entre {statusCounts.owes} {statusCounts.owes === 1 ? "cliente" : "clientes"}</span>
+
+          {showNewCustomer && (
+            <div className="form-box" style={{ marginBottom: 12 }}>
+              <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Cliente nuevo</h3>
+              <div className="form-grid">
+                <label>Nombre<input value={name} onChange={(e) => setName(e.target.value)} /></label>
+                <label>Teléfono (opcional)<input value={phone} onChange={(e) => setPhone(e.target.value)} /></label>
+                <label>Localidad (opcional)<input value={locality} onChange={(e) => setLocality(e.target.value)} /></label>
+                <label>Provincia (opcional)<input value={province} onChange={(e) => setProvince(e.target.value)} /></label>
+                <label>Nota (opcional)<input value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
+                <label title="Si el cliente ya te debía antes de usar el sistema, poné cuánto. Queda como primer movimiento de su cuenta.">
+                  Saldo anterior (opcional)
+                  <input type="text" inputMode="decimal" placeholder="Lo que ya te debe" value={openingBalance} onChange={(e) => setOpeningBalance(e.target.value)} />
+                </label>
+                {canSetPriceList && (
+                  <label title="Con una lista, sus ventas salen solas a esos precios">
+                    Precio
+                    <select value={newPriceListId} onChange={(e) => setNewPriceListId(e.target.value)}>
+                      <option value="">Minorista</option>
+                      {activePriceLists.map((l) => (
+                        <option key={l.id} value={l.id}>{l.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                )}
+              </div>
+              <div className="form-actions">
+                <button disabled={busy} onClick={handleCreateCustomer}>Agregar cliente</button>
+                <button className="secondary" onClick={() => setShowNewCustomer(false)}>Cancelar</button>
+              </div>
             </div>
           )}
-          <input
-            placeholder="Buscar por número, nombre, teléfono o localidad"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            style={{ width: "100%", marginBottom: 8 }}
-          />
-          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
+
+          {!loading && statusCounts.owes > 0 && (
+            <p className="ws-list-total">Te deben <b>{formatMoney(totalOwed)}</b> entre {statusCounts.owes} {statusCounts.owes === 1 ? "cliente" : "clientes"}</p>
+          )}
+          <input style={{ width: "100%", marginBottom: 8 }} placeholder="Buscar por número, nombre, teléfono o localidad" value={search} onChange={(e) => setSearch(e.target.value)} />
+          <div className="ws-chips">
             {(
               [
                 ["all", `Todos (${statusCounts.all})`],
@@ -812,134 +855,376 @@ export function Customers() {
                 ["clear", `Al día (${statusCounts.clear})`]
               ] as [CustomerFilter, string][]
             ).map(([value, label]) => (
-              <button key={value} className={listFilter === value ? "" : "secondary"} onClick={() => setListFilter(value)}>
+              <button key={value} className={listFilter === value ? "ws-chip active" : "ws-chip"} onClick={() => setListFilter(value)}>
                 {label}
               </button>
             ))}
           </div>
-          <div className="panel-list-scroll">
-            <table className="data-table">
-              <thead>
-                <tr><th>N.º</th><th>Nombre</th><th>Estado</th><th className="num">Saldo</th><th>Últ. movimiento</th><th></th></tr>
-              </thead>
-              <tbody>
-                {visibleCustomers.map((c) => {
-                  const status = customerStatus(c, today);
-                  const badge = STATUS_BADGE[status];
-                  return (
-                    <tr key={c.id} className={c.id === selectedId ? "row-selected" : "row-clickable"} onClick={() => selectCustomer(c.id)} style={status === "overdue" && c.id !== selectedId ? { background: "#fdecea" } : undefined}>
-                      <td><b>{c.number ?? "—"}</b></td>
-                      <td>
-                        {c.name}
-                        {activeList(priceLists, c.priceListId) && <span className="badge" style={{ marginLeft: 6 }}>{activeList(priceLists, c.priceListId)!.name}</span>}
-                      </td>
-                      <td>
-                        <span style={{ display: "inline-block", padding: "1px 8px", borderRadius: 999, fontSize: 11, fontWeight: 600, background: badge.bg, color: badge.color, whiteSpace: "nowrap" }}>
-                          {status === "clear" && c.balance <= -1 ? "A favor" : badge.label}
-                        </span>
-                      </td>
-                      <td className="num" style={{ color: status === "clear" ? "#2e7d32" : undefined }}>{formatMoney(c.balance)}</td>
-                      <td className="muted" style={{ whiteSpace: "nowrap" }}>{c.lastActivityDate ? formatShortDate(c.lastActivityDate) : "—"}</td>
-                      <td>
-                        {c.id === selectedId ? (
-                          <span className="badge brand">Viendo</span>
-                        ) : (
-                          <button className="secondary" onClick={() => selectCustomer(c.id)}>Ver cuenta</button>
-                        )}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+          {loading && <p className="muted">Cargando…</p>}
+          <div className="ws-list-items">
+            {visibleCustomers.map((c) => {
+              const status = customerStatus(c, today);
+              return (
+                <button key={c.id} className={c.id === selectedId ? "ws-item active" : "ws-item"} onClick={() => selectCustomer(c.id)}>
+                  <span className="ws-item-main">
+                    <b>{c.name}</b>
+                    <small>
+                      {c.number !== undefined ? `N.º ${c.number} · ` : ""}
+                      {c.lastActivityDate ? formatShortDate(c.lastActivityDate) : "sin movimientos"}
+                      {activeList(priceLists, c.priceListId) ? ` · ${activeList(priceLists, c.priceListId)!.name}` : ""}
+                    </small>
+                  </span>
+                  <span className="ws-item-side">
+                    <b className={status === "clear" ? "num-positive" : "num-negative"}>{formatMoney(c.balance)}</b>
+                    {status === "overdue" && <span className="badge danger">Atrasado</span>}
+                    {status === "clear" && c.balance <= -1 && <span className="badge ok">A favor</span>}
+                  </span>
+                </button>
+              );
+            })}
           </div>
           {customers.length === 0 && !loading && <p className="muted">Todavía no cargaste ningún cliente.</p>}
           {customers.length > 0 && visibleCustomers.length === 0 && <p className="muted">Ningún cliente coincide con la búsqueda.</p>}
-
-          <div className="form-box" style={{ marginTop: 16, marginBottom: 0 }}>
-            <h3 style={{ margin: "0 0 10px", fontSize: 15 }}>Cliente nuevo</h3>
-            <div className="form-grid">
-              <label>Nombre<input value={name} onChange={(e) => setName(e.target.value)} /></label>
-              <label>Teléfono (opcional)<input value={phone} onChange={(e) => setPhone(e.target.value)} /></label>
-              <label>Localidad (opcional)<input value={locality} onChange={(e) => setLocality(e.target.value)} /></label>
-              <label>Provincia (opcional)<input value={province} onChange={(e) => setProvince(e.target.value)} /></label>
-              <label>Nota (opcional)<input value={notes} onChange={(e) => setNotes(e.target.value)} /></label>
-              <label title="Si el cliente ya te debía antes de usar el sistema, poné cuánto. Queda como primer movimiento de su cuenta.">
-                Saldo anterior (opcional)
-                <input type="text" inputMode="decimal" placeholder="Lo que ya te debe" value={openingBalance} onChange={(e) => setOpeningBalance(e.target.value)} />
-              </label>
-              {canSetPriceList && (
-                <label title="Con una lista, sus ventas salen solas a esos precios">
-                  Precio
-                  <select value={newPriceListId} onChange={(e) => setNewPriceListId(e.target.value)}>
-                    <option value="">Minorista</option>
-                    {activePriceLists.map((l) => (
-                      <option key={l.id} value={l.id}>{l.name}</option>
-                    ))}
-                  </select>
-                </label>
-              )}
-            </div>
-            <div className="form-actions">
-              <button disabled={busy} onClick={handleCreateCustomer}>Agregar cliente</button>
-            </div>
-          </div>
         </section>
 
-        <section className="panel">
-          <div className="panel-title">
-            <h2>Cuenta corriente</h2>
-          </div>
-          {!selectedCustomer && <p className="muted">Elegí un cliente para ver su cuenta.</p>}
-          {selectedCustomer && !editingCustomer && (
-            <div className="totals">
-              <span>Cliente <b>{selectedCustomer.number !== undefined ? `N.º ${selectedCustomer.number} · ` : ""}{selectedCustomer.name}</b></span>
-              <span>Total vendido <b>{formatMoney(balance?.totalCharged ?? 0)}</b></span>
-              <span>Pagado <b>{formatMoney(balance?.totalPaid ?? 0)}</b></span>
-              <strong>Saldo (te debe) <b>{formatMoney(balance?.balance ?? 0)}</b></strong>
-              <span>Plazo de pago <b>{selectedCustomer.paymentTermDays ? `${selectedCustomer.paymentTermDays} días` : "sin definir"}</b></span>
-              {activePriceLists.length > 0 && <span>Precio <b>{customerList?.name ?? "Minorista"}</b></span>}
-              {(selectedCustomer.locality || selectedCustomer.province) && (
-                <span>Ubicación <b>{[selectedCustomer.locality, selectedCustomer.province].filter(Boolean).join(", ")}</b></span>
+        <section className={`panel ws-main${printCharge ? "" : " print-area"}`}>
+          {!selectedCustomer && <p className="muted">Elegí un cliente de la lista para ver su cuenta.</p>}
+          {selectedCustomer && (
+            <>
+              <div className="ws-head">
+                <div>
+                  <h2>{selectedCustomer.name}</h2>
+                  <p className="muted">
+                    {[
+                      selectedCustomer.number !== undefined ? `N.º ${selectedCustomer.number}` : "",
+                      selectedCustomer.phone ?? "",
+                      [selectedCustomer.locality, selectedCustomer.province].filter(Boolean).join(", "),
+                      activePriceLists.length > 0 ? `Precio ${customerList?.name ?? "Minorista"}` : "",
+                      selectedCustomer.paymentTermDays ? `Paga a ${selectedCustomer.paymentTermDays} días` : ""
+                    ].filter(Boolean).join(" · ")}
+                  </p>
+                </div>
+                <div className="row-actions no-print">
+                  <button className="secondary" onClick={() => setEditingCustomer((v) => !v)}>Editar</button>
+                  <button className="secondary" disabled={pdfBusy || ledger.length === 0} onClick={handleDownloadPdf}>{pdfBusy ? "Armando PDF…" : "PDF"}</button>
+                  <button className="secondary" onClick={handlePrint}>Imprimir</button>
+                </div>
+              </div>
+
+              {editingCustomer && (
+                <div className="form-box no-print" style={{ marginTop: 12 }}>
+                  <div className="form-grid">
+                    <label>Nombre<input value={editName} onChange={(e) => setEditName(e.target.value)} /></label>
+                    <label>Teléfono<input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} /></label>
+                    <label>Localidad<input value={editLocality} onChange={(e) => setEditLocality(e.target.value)} /></label>
+                    <label>Provincia<input value={editProvince} onChange={(e) => setEditProvince(e.target.value)} /></label>
+                    <label>Nota<input value={editNotesField} onChange={(e) => setEditNotesField(e.target.value)} /></label>
+                    <label>Plazo de pago (días)<input type="number" value={editTermDays} onChange={(e) => setEditTermDays(e.target.value)} /></label>
+                    {canSetPriceList && (
+                      <label title="Con una lista, sus ventas salen solas a esos precios">
+                        Precio
+                        <select value={editPriceListId} onChange={(e) => setEditPriceListId(e.target.value)}>
+                          <option value="">Minorista</option>
+                          {activePriceLists.map((l) => (
+                            <option key={l.id} value={l.id}>{l.name}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                    <label>
+                      Estado
+                      <select value={editActive ? "1" : "0"} onChange={(e) => setEditActive(e.target.value === "1")}>
+                        <option value="1">Activo</option>
+                        <option value="0">Dado de baja</option>
+                      </select>
+                    </label>
+                  </div>
+                  <div className="form-actions">
+                    <button disabled={busy} onClick={handleUpdateCustomer}>Guardar</button>
+                    <button className="secondary" disabled={busy} onClick={() => setEditingCustomer(false)}>Cancelar</button>
+                    <span className="spacer" />
+                    <button className="danger" disabled={busy} onClick={() => void handleDeleteCustomer()}>Eliminar cliente</button>
+                  </div>
+                </div>
               )}
-              <button className="secondary" style={{ marginTop: 10 }} onClick={() => setEditingCustomer(true)}>Editar</button>
-            </div>
-          )}
-          {selectedCustomer && editingCustomer && (
-            <div>
-              <div className="form-grid">
-                <label>Nombre<input value={editName} onChange={(e) => setEditName(e.target.value)} /></label>
-                <label>Teléfono<input value={editPhone} onChange={(e) => setEditPhone(e.target.value)} /></label>
-                <label>Localidad<input value={editLocality} onChange={(e) => setEditLocality(e.target.value)} /></label>
-                <label>Provincia<input value={editProvince} onChange={(e) => setEditProvince(e.target.value)} /></label>
-                <label>Nota<input value={editNotesField} onChange={(e) => setEditNotesField(e.target.value)} /></label>
-                <label>Plazo de pago (días)<input type="number" value={editTermDays} onChange={(e) => setEditTermDays(e.target.value)} /></label>
-                {canSetPriceList && (
-                  <label title="Con una lista, sus ventas salen solas a esos precios">
-                    Precio
-                    <select value={editPriceListId} onChange={(e) => setEditPriceListId(e.target.value)}>
-                      <option value="">Minorista</option>
-                      {activePriceLists.map((l) => (
-                        <option key={l.id} value={l.id}>{l.name}</option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-                <label>
-                  Estado
-                  <select value={editActive ? "1" : "0"} onChange={(e) => setEditActive(e.target.value === "1")}>
-                    <option value="1">Activo</option>
-                    <option value="0">Dado de baja</option>
-                  </select>
-                </label>
+
+              <div className="ws-summary">
+                <div className={owed >= 1 ? "bad" : owed <= -1 ? "good" : ""}>
+                  <span>{owed <= -1 ? "Tiene a favor" : "Debe hoy"}</span>
+                  <strong>{formatMoney(Math.abs(owed))}</strong>
+                </div>
+                <div><span>Le vendiste (total)</span><strong>{formatMoney(balance?.totalCharged ?? 0)}</strong></div>
+                <div><span>Pagó (total)</span><strong className="num-positive">{formatMoney(balance?.totalPaid ?? 0)}</strong></div>
+                <div>
+                  <span>Último movimiento</span>
+                  <strong>{selectedCustomer.lastActivityDate ? formatShortDate(selectedCustomer.lastActivityDate) : "—"}</strong>
+                  {customerStatus(selectedCustomer, today) === "overdue" && <small className="num-negative">Atrasado</small>}
+                </div>
               </div>
-              <div className="form-actions">
-                <button disabled={busy} onClick={handleUpdateCustomer}>Guardar</button>
-                <button className="secondary" disabled={busy} onClick={() => setEditingCustomer(false)}>Cancelar</button>
-                <span className="spacer" />
-                <button className="danger" disabled={busy} onClick={() => void handleDeleteCustomer()}>Eliminar cliente</button>
+
+              <div className="ws-seg no-print">
+                <button className={action === "charge" ? "active" : ""} onClick={() => setAction("charge")}>+ Venta a cuenta</button>
+                <button className={action === "payment" ? "active" : ""} onClick={() => setAction("payment")}>Registrar pago</button>
+                <button className={action === "opening" ? "active" : ""} onClick={() => setAction("opening")}>Saldo anterior</button>
               </div>
-            </div>
+
+              {action === "charge" && (
+                <div className="ws-form no-print">
+                  <div className="ws-form-row">
+                    <label className="ws-field">Fecha<input type="date" value={chargeDate} onChange={(e) => setChargeDate(e.target.value)} /></label>
+                    <div className="pos-search-wrap ws-grow">
+                      <label className="ws-field-label">Producto</label>
+                      <input type="text" className="pos-search" placeholder="Buscá el producto que le vendés…" value={chargeSearch} onChange={(e) => setChargeSearch(e.target.value)} />
+                      {chargeMatches.length > 0 && (
+                        <div className="pos-dropdown">
+                          {chargeMatches.map((product) => (
+                            <button key={product.id} type="button" className="pos-dropdown-item" onClick={() => addProductToCharge(product)}>
+                              <span>{product.name} <span className="muted">({UNIT_LABELS[product.unit]})</span></span>
+                              <strong>{formatMoney(productPrice(product, customerList?.id))}</strong>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                    <button className={`secondary${showManualForm ? " active" : ""}`} onClick={() => setShowManualForm((v) => !v)}>+ Sin código</button>
+                  </div>
+                  {products.length === 0 && (
+                    <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>Todavía no cargaste productos: usá "+ Sin código" para cargar la venta igual.</p>
+                  )}
+
+                  {showManualForm && (
+                    <div className="pos-manual-card">
+                      <input placeholder="Descripción" value={manualDesc} onChange={(e) => setManualDesc(e.target.value)} style={{ flex: 1, minWidth: 160 }} />
+                      <input type="text" inputMode="decimal" placeholder={manualUnit === "kg" ? "Precio /kg" : "Precio"} value={manualPrice} onChange={(e) => setManualPrice(e.target.value)} style={{ width: 100 }} />
+                      <input type="text" inputMode="decimal" placeholder={manualUnit === "kg" ? "Kilos" : "Cant."} value={manualQty} onFocus={(e) => e.target.select()} onChange={(e) => setManualQty(e.target.value)} style={{ width: 70 }} />
+                      <select
+                        value={manualUnit}
+                        onChange={(e) => {
+                          const unit = e.target.value as Product["unit"];
+                          setManualUnit(unit);
+                          // Por kilo no arranca en "1": queda vacío para tipear los kilos (igual que Mostrador).
+                          if (unit === "kg" && manualQty === "1") setManualQty("");
+                          if (unit !== "kg" && manualQty === "") setManualQty("1");
+                        }}
+                      >
+                        <option value="unit">Unidad</option>
+                        <option value="kg">Kg</option>
+                      </select>
+                      <button onClick={addManualItem}>Agregar</button>
+                      <button className="secondary" onClick={() => setShowManualForm(false)}>Cancelar</button>
+                    </div>
+                  )}
+
+                  {chargeCart.length > 0 && (
+                    <>
+                      <div className="pos-cart">
+                        {chargeCart.map((line) => (
+                          <div className="pos-cart-row" key={line.key} style={{ gridTemplateColumns: "1fr 90px 110px 34px" }}>
+                            <div className="name">
+                              {line.name}
+                              <small>{formatMoney(line.unitPrice)} /{UNIT_LABELS[line.unit]}</small>
+                            </div>
+                            <QuantityInput className="pos-qty-input" value={line.quantity} onChange={(q) => updateChargeItemQty(line.key, String(q))} />
+                            <span className="pos-line-total">{formatMoney(line.quantity * line.unitPrice)}</span>
+                            <button className="pos-remove-btn" onClick={() => removeChargeItem(line.key)} aria-label="Quitar" title="Quitar">×</button>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="ws-form-row" style={{ marginTop: 10 }}>
+                        <input style={{ flex: "1 1 220px", minWidth: 0 }} placeholder="Nota (opcional, ej. nº de factura)" value={chargeNote} onChange={(e) => setChargeNote(e.target.value)} />
+                        {salesDetail && (
+                          <>
+                            <select value={chargeAdjKind} onChange={(e) => setChargeAdjKind(e.target.value as "descuento" | "recargo")}>
+                              <option value="descuento">Descuento</option>
+                              <option value="recargo">Recargo</option>
+                            </select>
+                            <input type="text" inputMode="decimal" placeholder="Monto (opcional)" value={chargeAdjAmount} onChange={(e) => setChargeAdjAmount(e.target.value)} style={{ width: 150 }} />
+                          </>
+                        )}
+                      </div>
+                      {salesDetail && chargeAdjustment !== 0 && (
+                        <p className="muted" style={{ fontSize: 13, margin: "6px 0 0" }}>
+                          Productos {formatMoney(Math.round(chargeTotal))} {chargeAdjustment < 0 ? "−" : "+"} {formatMoney(Math.abs(chargeAdjustment))}
+                        </p>
+                      )}
+                      {fiscal?.enabled && (
+                        <InvoiceRequestFields issuer={fiscal.taxCondition} draft={newInvoiceDraft} total={chargeTotal} onChange={setNewInvoiceDraft} />
+                      )}
+                      <div className="ws-form-total">
+                        <span>Total <b>{formatMoney(salesDetail ? finalChargeTotal : chargeTotal)}</b></span>
+                        <span className="muted">Va a deber {formatMoney(owed + (salesDetail ? finalChargeTotal : chargeTotal))}</span>
+                        <button className="charge-button ws-go" disabled={busy} onClick={handleAddCharge}>{busy ? "Registrando…" : "Registrar venta"}</button>
+                      </div>
+                    </>
+                  )}
+                  {chargeCart.length === 0 && <p className="muted" style={{ margin: "10px 0 0", fontSize: 13 }}>Buscá y agregá lo que le vendés. Descuenta stock y suma a su saldo, igual que el Mostrador.</p>}
+                </div>
+              )}
+
+              {action === "payment" && (
+                <div className="ws-form no-print">
+                  <div className="ws-form-row">
+                    <label className="ws-field">Monto<input type="text" inputMode="decimal" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} style={{ width: 150 }} /></label>
+                    <label className="ws-field">
+                      Entra a
+                      <select value={paymentAccountId} onChange={(e) => setPaymentAccountId(e.target.value)}>
+                        <option value="">Elegí la cuenta…</option>
+                        {accounts.map((a) => (
+                          <option key={a.id} value={a.id}>{a.name}</option>
+                        ))}
+                        {canCheques && <option value={CHEQUE_OPTION}>Cheque / eCheq</option>}
+                      </select>
+                    </label>
+                    <label className="ws-field ws-grow">Nota (opcional)<input value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} /></label>
+                    <label className="ws-field">Fecha<input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} /></label>
+                    <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
+                  </div>
+                  {paymentAccountId === CHEQUE_OPTION && (
+                    <div style={{ marginTop: 10 }}>
+                      <ChequeFields value={paymentCheque} onChange={setPaymentCheque} withAmount={false} />
+                    </div>
+                  )}
+                  {(parseAmount(paymentAmount || "0") || 0) > 0 && (
+                    <p className="muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
+                      Después del pago va a deber <b>{formatMoney(owed - (parseAmount(paymentAmount || "0") || 0))}</b>.
+                    </p>
+                  )}
+                </div>
+              )}
+
+              {action === "opening" && (
+                <div className="ws-form no-print">
+                  <p className="muted" style={{ margin: "0 0 8px", fontSize: 13 }}>Lo que ya te debía antes de usar el sistema. No toca stock ni caja.</p>
+                  <div className="ws-form-row">
+                    <label className="ws-field">Cuánto te debía<input type="text" inputMode="decimal" value={openingAmount} onChange={(e) => setOpeningAmount(e.target.value)} style={{ width: 160 }} /></label>
+                    <label className="ws-field">Fecha<input type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} /></label>
+                    <button disabled={busy} onClick={handleOpeningBalance}>Cargar saldo anterior</button>
+                  </div>
+                </div>
+              )}
+
+              <div className="ws-box">
+                <h3>
+                  Cuenta corriente
+                  <span className="ws-chips no-print" style={{ margin: 0 }}>
+                    {(
+                      [
+                        ["month", "Último mes"],
+                        ["quarter", "3 meses"],
+                        ["all", "Todo"]
+                      ] as [LedgerRange, string][]
+                    ).map(([value, label]) => (
+                      <button key={value} className={ledgerRange === value ? "ws-chip active" : "ws-chip"} onClick={() => setLedgerRange(value)}>{label}</button>
+                    ))}
+                  </span>
+                </h3>
+                <div className="ws-scroll">
+                  <table className="data-table ws-ledger">
+                    <thead>
+                      <tr>
+                        <th>Fecha</th>
+                        <th>Concepto</th>
+                        <th className="num">Venta</th>
+                        <th className="num">Pago</th>
+                        <th className="num">Saldo</th>
+                        <th className="no-print"></th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {visibleLedger.map((row) =>
+                        editingRowKey === row.key ? (
+                          <tr key={row.key} className="row-editor no-print">
+                            <td colSpan={6}>
+                              <div className="ws-form-row">
+                                <input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} />
+                                {row.type === "charge" ? (
+                                  <input style={{ flex: "1 1 220px", minWidth: 0 }} placeholder="Detalle" value={editReason} onChange={(e) => setEditReason(e.target.value)} />
+                                ) : (
+                                  <input style={{ flex: "1 1 220px", minWidth: 0 }} placeholder="Nota" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
+                                )}
+                                <input type="text" inputMode="decimal" value={editAmount} onChange={(e) => setEditAmount(e.target.value)} style={{ width: 120 }} />
+                                {row.type === "payment" && (
+                                  <select value={editAccountId} onChange={(e) => setEditAccountId(e.target.value)}>
+                                    <option value="">Entra a…</option>
+                                    {accounts.map((a) => (
+                                      <option key={a.id} value={a.id}>{a.name}</option>
+                                    ))}
+                                  </select>
+                                )}
+                                <button disabled={busy} onClick={() => handleSaveRow(row)}>Guardar</button>
+                                <button className="secondary" disabled={busy} onClick={() => setEditingRowKey(null)}>Cancelar</button>
+                              </div>
+                            </td>
+                          </tr>
+                        ) : (
+                          <Fragment key={row.key}>
+                            <tr>
+                              <td className="ws-date">{formatShortDate(row.date)}</td>
+                              <td className="ws-concept">
+                                {row.detail}
+                                {row.type === "charge" && invoiceForCharge(row.id) && <span className="badge ok" style={{ marginLeft: 6 }}>{invoiceLabel(invoiceForCharge(row.id)!)}</span>}
+                                {row.lines && <small>{row.lines.join(" · ")}</small>}
+                              </td>
+                              <td className="num">{row.debit > 0 ? formatMoney(row.debit) : ""}</td>
+                              <td className="num num-positive">{row.credit > 0 ? formatMoney(row.credit) : ""}</td>
+                              <td className="num"><b>{formatMoney(row.balance)}</b></td>
+                              <td className="no-print">
+                                <div className="ws-row-actions">
+                                  {/* El saldo anterior no tiene productos: sin remito ni factura. */}
+                                  {row.type === "charge" && !/Saldo anterior$/.test(row.detail) && (
+                                    <>
+                                      <button className="secondary" disabled={remitoBusyId === row.id} onClick={() => handleShowRemito(row)}>
+                                        {remitoBusyId === row.id ? "…" : "Remito"}
+                                      </button>
+                                      {remitoR && <RemitoRButton chargeId={row.id} customerId={selectedCustomer.id} amount={row.debit} />}
+                                      {(() => {
+                                        const inv = invoiceForCharge(row.id);
+                                        if (inv?.status === "autorizada") {
+                                          return <button className="secondary" disabled={remitoBusyId === row.id} onClick={() => handleShowInvoice(row, inv)}>Factura</button>;
+                                        }
+                                        if (inv) return <span className="muted" style={{ fontSize: 12 }}>Factura pendiente</span>;
+                                        if (!fiscal?.enabled) return null;
+                                        return (
+                                          <button
+                                            className="secondary"
+                                            disabled={busy}
+                                            onClick={() => setInvoicingCharge(invoicingCharge?.chargeId === row.id ? null : { chargeId: row.id, draft: { ...newInvoiceDraft, wanted: true } })}
+                                          >
+                                            Facturar
+                                          </button>
+                                        );
+                                      })()}
+                                    </>
+                                  )}
+                                  <button className="secondary" disabled={busy} onClick={() => startEditRow(row)}>Editar</button>
+                                  <button className="secondary" disabled={busy} onClick={() => handleDeleteRow(row)}>Borrar</button>
+                                </div>
+                              </td>
+                            </tr>
+                            {invoicingCharge?.chargeId === row.id && fiscal && (
+                              <tr className="row-editor no-print">
+                                <td colSpan={6}>
+                                  <InvoiceRequestFields
+                                    issuer={fiscal.taxCondition}
+                                    draft={invoicingCharge.draft}
+                                    total={row.debit}
+                                    onChange={(draft) => setInvoicingCharge({ chargeId: row.id, draft: { ...draft, wanted: true } })}
+                                  />
+                                  <button disabled={busy} onClick={() => void handleInvoiceExisting(row)}>Pedir factura a ARCA</button>{" "}
+                                  <button className="secondary" onClick={() => setInvoicingCharge(null)}>Cancelar</button>
+                                </td>
+                              </tr>
+                            )}
+                          </Fragment>
+                        )
+                      )}
+                    </tbody>
+                  </table>
+                  {ledger.length === 0 && !detailLoading && <p className="muted ws-empty">Todavía no hay movimientos para este cliente.</p>}
+                  {ledger.length > 0 && visibleLedger.length === 0 && <p className="muted ws-empty">No hubo movimientos en este período. Tocá "Todo" para ver los anteriores.</p>}
+                </div>
+              </div>
+            </>
           )}
         </section>
       </div>
@@ -987,333 +1272,6 @@ export function Customers() {
           </div>
           {printCharge.invoice && <InvoicePaperFooter invoice={printCharge.invoice} />}
         </section>
-      )}
-
-      {selectedCustomer && (
-        <>
-          <div className="content-grid" style={{ marginTop: 18 }}>
-            <section className="panel">
-              <div className="panel-title">
-                <h2>Nueva venta (fiado)</h2>
-                <span className="muted" style={{ fontSize: 12 }}>Descuenta stock y suma al saldo del cliente, igual que una venta del Mostrador</span>
-              </div>
-              <div className="cash-banner-form" style={{ marginBottom: 10 }}>
-                <label className="muted">Fecha</label>
-                <input type="date" value={chargeDate} onChange={(e) => setChargeDate(e.target.value)} />
-              </div>
-              <div className="pos-search-wrap">
-                <label className="muted" style={{ display: "block", marginBottom: 4 }}>Producto</label>
-                <input
-                  type="text"
-                  className="pos-search"
-                  placeholder="Buscá el producto que le vendés…"
-                  value={chargeSearch}
-                  onChange={(e) => setChargeSearch(e.target.value)}
-                  style={{ fontSize: 16, padding: "12px 14px 12px 42px" }}
-                />
-                {chargeMatches.length > 0 && (
-                  <div className="pos-dropdown">
-                    {chargeMatches.map((product) => (
-                      <button key={product.id} type="button" className="pos-dropdown-item" onClick={() => addProductToCharge(product)}>
-                        <span>{product.name} <span className="muted">({UNIT_LABELS[product.unit]})</span></span>
-                        <strong>{formatMoney(productPrice(product, customerList?.id))}</strong>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              {products.length === 0 && (
-                <p className="muted" style={{ fontSize: 12, marginTop: 4 }}>
-                  Todavía no cargaste productos en el catálogo — usá "Vender algo sin código" para cargar la venta igual.
-                </p>
-              )}
-
-              <div className="pos-toolbar">
-                <button className={`pos-toolbar-btn${showManualForm ? " active" : ""}`} onClick={() => setShowManualForm((v) => !v)}>
-                  + Vender algo sin código
-                </button>
-              </div>
-
-              {showManualForm && (
-                <div className="pos-manual-card">
-                  <input placeholder="Descripción" value={manualDesc} onChange={(e) => setManualDesc(e.target.value)} style={{ flex: 1, minWidth: 160 }} />
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder={manualUnit === "kg" ? "Precio /kg" : "Precio"}
-                    value={manualPrice}
-                    onChange={(e) => setManualPrice(e.target.value)}
-                    style={{ width: 100 }}
-                  />
-                  <input
-                    type="text"
-                    inputMode="decimal"
-                    placeholder={manualUnit === "kg" ? "Kilos" : "Cant."}
-                    value={manualQty}
-                    onFocus={(e) => e.target.select()}
-                    onChange={(e) => setManualQty(e.target.value)}
-                    style={{ width: 70 }}
-                  />
-                  <select
-                    value={manualUnit}
-                    onChange={(e) => {
-                      const unit = e.target.value as Product["unit"];
-                      setManualUnit(unit);
-                      // Por kilo no arranca en "1": queda vacío para tipear los kilos (igual que Mostrador).
-                      if (unit === "kg" && manualQty === "1") setManualQty("");
-                      if (unit !== "kg" && manualQty === "") setManualQty("1");
-                    }}
-                  >
-                    <option value="unit">Unidad</option>
-                    <option value="kg">Kg</option>
-                  </select>
-                  <button onClick={addManualItem}>Agregar</button>
-                  <button className="secondary" onClick={() => setShowManualForm(false)}>Cancelar</button>
-                </div>
-              )}
-
-              {chargeCart.length === 0 ? (
-                <p className="muted" style={{ marginTop: 12 }}>Buscá y agregá los productos que le estás vendiendo.</p>
-              ) : (
-                <div className="pos-cart">
-                  {chargeCart.map((line) => (
-                    <div className="pos-cart-row" key={line.key} style={{ gridTemplateColumns: "1fr 90px 110px 34px" }}>
-                      <div className="name">
-                        {line.name}
-                        <small>{formatMoney(line.unitPrice)} /{UNIT_LABELS[line.unit]}</small>
-                      </div>
-                      <QuantityInput className="pos-qty-input" value={line.quantity} onChange={(q) => updateChargeItemQty(line.key, String(q))} />
-                      <span className="pos-line-total">{formatMoney(line.quantity * line.unitPrice)}</span>
-                      <button className="pos-remove-btn" onClick={() => removeChargeItem(line.key)} aria-label="Quitar" title="Quitar">×</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-
-              {chargeCart.length > 0 && (
-                <>
-                  <div className="cash-banner-form" style={{ marginTop: 12 }}>
-                    <input placeholder="Nota (opcional, ej. nº de factura)" value={chargeNote} onChange={(e) => setChargeNote(e.target.value)} style={{ flex: 1, minWidth: 200 }} />
-                  </div>
-                  {salesDetail && (
-                    <div className="cash-banner-form" style={{ marginTop: 8, flexWrap: "wrap", alignItems: "center" }}>
-                      <select value={chargeAdjKind} onChange={(e) => setChargeAdjKind(e.target.value as "descuento" | "recargo")}>
-                        <option value="descuento">Descuento</option>
-                        <option value="recargo">Recargo</option>
-                      </select>
-                      <input
-                        type="text"
-                        inputMode="decimal"
-                        placeholder="Monto (opcional)"
-                        value={chargeAdjAmount}
-                        onChange={(e) => setChargeAdjAmount(e.target.value)}
-                        style={{ width: 150 }}
-                      />
-                      {chargeAdjustment !== 0 && (
-                        <span className="muted" style={{ fontSize: 13 }}>
-                          Productos {formatMoney(Math.round(chargeTotal))} {chargeAdjustment < 0 ? "−" : "+"} {formatMoney(Math.abs(chargeAdjustment))}
-                        </span>
-                      )}
-                    </div>
-                  )}
-                  {fiscal?.enabled && (
-                    <InvoiceRequestFields issuer={fiscal.taxCondition} draft={newInvoiceDraft} total={chargeTotal} onChange={setNewInvoiceDraft} />
-                  )}
-                  <div className="pos-total-bar" style={{ marginTop: 12 }}>
-                    <div>
-                      <p className="pos-total-label">Total de la venta</p>
-                      <strong className="pos-total-value">{formatMoney(salesDetail ? finalChargeTotal : chargeTotal)}</strong>
-                    </div>
-                    <button className="charge-button pos-charge-btn" disabled={busy} onClick={handleAddCharge}>
-                      {busy ? "Registrando…" : "Registrar venta"}
-                    </button>
-                  </div>
-                </>
-              )}
-            </section>
-
-            <section className="panel">
-              <div className="panel-title">
-                <h2>Registrar pago</h2>
-              </div>
-              <div className="form-grid" style={{ marginBottom: 10 }}>
-                <label>Fecha<input type="date" value={paymentDate} onChange={(e) => setPaymentDate(e.target.value)} /></label>
-                <label>Monto<input type="text" inputMode="decimal" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} /></label>
-                <label>
-                  Entra a
-                  <select value={paymentAccountId} onChange={(e) => setPaymentAccountId(e.target.value)}>
-                    <option value="">Elegí la cuenta…</option>
-                    {accounts.map((a) => (
-                      <option key={a.id} value={a.id}>{a.name}</option>
-                    ))}
-                    {canCheques && <option value={CHEQUE_OPTION}>Cheque / eCheq</option>}
-                  </select>
-                </label>
-                <label className="span-2">Nota (opcional)<input value={paymentNotes} onChange={(e) => setPaymentNotes(e.target.value)} /></label>
-              </div>
-              {paymentAccountId === CHEQUE_OPTION && (
-                <div style={{ marginBottom: 10 }}>
-                  <ChequeFields value={paymentCheque} onChange={setPaymentCheque} withAmount={false} />
-                </div>
-              )}
-              <div className="form-actions" style={{ marginTop: 0 }}>
-                <button disabled={busy} onClick={handleRegisterPayment}>{busy ? "Registrando…" : "Registrar pago"}</button>
-              </div>
-              <div style={{ marginTop: 12 }}>
-                {!showOpening ? (
-                  <button className="link-button" onClick={() => setShowOpening(true)}>Cargar saldo anterior (lo que ya debía antes del sistema)</button>
-                ) : (
-                  <div className="form-box" style={{ marginBottom: 0 }}>
-                    <div className="form-grid">
-                      <label>Fecha<input type="date" value={openingDate} onChange={(e) => setOpeningDate(e.target.value)} /></label>
-                      <label>Cuánto te debía<input type="text" inputMode="decimal" value={openingAmount} onChange={(e) => setOpeningAmount(e.target.value)} /></label>
-                    </div>
-                    <div className="form-actions">
-                      <button disabled={busy} onClick={handleOpeningBalance}>Cargar saldo anterior</button>
-                      <button className="secondary" onClick={() => setShowOpening(false)}>Cancelar</button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </section>
-          </div>
-
-          <section className={`panel${printCharge ? "" : " print-area"}`} style={{ marginTop: 18 }}>
-            <div className="panel-title">
-              <h2>Detalle de cuenta corriente</h2>
-              <div className="no-print" style={{ display: "flex", gap: 8 }}>
-                <button className="secondary" disabled={pdfBusy || ledger.length === 0} onClick={handleDownloadPdf}>
-                  {pdfBusy ? "Armando PDF…" : "Descargar PDF"}
-                </button>
-                <button className="secondary" onClick={handlePrint}>Imprimir</button>
-              </div>
-            </div>
-            <p className="muted print-only-header">{selectedCustomer.name}</p>
-            <table className="data-table">
-              <thead>
-                <tr>
-                  <th>Fecha</th>
-                  <th>Concepto</th>
-                  <th className="num">Venta</th>
-                  <th className="num">Pago</th>
-                  <th className="num">Saldo</th>
-                  <th className="no-print"></th>
-                </tr>
-              </thead>
-              <tbody>
-                {ledger.map((row) =>
-                  editingRowKey === row.key ? (
-                    <Fragment key={row.key}>
-                      <tr className="no-print">
-                        <td><input type="date" value={editDate} onChange={(e) => setEditDate(e.target.value)} /></td>
-                        <td>
-                          {row.type === "charge" ? (
-                            <input placeholder="Detalle" value={editReason} onChange={(e) => setEditReason(e.target.value)} />
-                          ) : (
-                            <input placeholder="Nota" value={editNotes} onChange={(e) => setEditNotes(e.target.value)} />
-                          )}
-                        </td>
-                        <td colSpan={2}>
-                          <input
-                            type="text"
-                            inputMode="decimal"
-                            className="num"
-                            value={editAmount}
-                            onChange={(e) => setEditAmount(e.target.value)}
-                            style={{ width: 100 }}
-                          />{" "}
-                          {row.type === "payment" && (
-                            <select value={editAccountId} onChange={(e) => setEditAccountId(e.target.value)}>
-                              <option value="">Entra a…</option>
-                              {accounts.map((a) => (
-                                <option key={a.id} value={a.id}>{a.name}</option>
-                              ))}
-                            </select>
-                          )}
-                        </td>
-                        <td colSpan={2}>
-                          <button disabled={busy} onClick={() => handleSaveRow(row)}>Guardar</button>{" "}
-                          <button className="secondary" disabled={busy} onClick={() => setEditingRowKey(null)}>Cancelar</button>
-                        </td>
-                      </tr>
-                    </Fragment>
-                  ) : (
-                    <Fragment key={row.key}>
-                    <tr>
-                      <td>{row.date}</td>
-                      <td>
-                        {row.detail}
-                        {row.type === "charge" && invoiceForCharge(row.id) && (
-                          <span className="muted" style={{ fontSize: 12 }}> · {invoiceLabel(invoiceForCharge(row.id)!)}</span>
-                        )}
-                        {row.lines && (
-                          <ul style={{ margin: "4px 0 0", paddingLeft: 18, fontSize: 13 }}>
-                            {row.lines.map((line, index) => <li key={index}>{line}</li>)}
-                          </ul>
-                        )}
-                      </td>
-                      <td className="num">{row.debit > 0 ? formatMoney(row.debit) : "-"}</td>
-                      <td className="num">{row.credit > 0 ? formatMoney(row.credit) : "-"}</td>
-                      <td className="num">{formatMoney(row.balance)}</td>
-                      <td className="no-print">
-                        {/* El saldo anterior no tiene productos: sin remito ni factura. */}
-                        {row.type === "charge" && !/Saldo anterior$/.test(row.detail) && (
-                          <>
-                            <button className="secondary" disabled={remitoBusyId === row.id} onClick={() => handleShowRemito(row)}>
-                              {remitoBusyId === row.id ? "…" : "Remito"}
-                            </button>{" "}
-                            {remitoR && selectedCustomer && <RemitoRButton chargeId={row.id} customerId={selectedCustomer.id} amount={row.debit} />}
-                            {(() => {
-                              const inv = invoiceForCharge(row.id);
-                              if (inv?.status === "autorizada") {
-                                return (
-                                  <>
-                                    <button className="secondary" disabled={remitoBusyId === row.id} onClick={() => handleShowInvoice(row, inv)}>Factura</button>{" "}
-                                  </>
-                                );
-                              }
-                              if (inv) return <span className="muted" style={{ fontSize: 12 }}>Factura pendiente </span>;
-                              if (!fiscal?.enabled) return null;
-                              return (
-                                <>
-                                  <button
-                                    className="secondary"
-                                    disabled={busy}
-                                    onClick={() => setInvoicingCharge(invoicingCharge?.chargeId === row.id ? null : { chargeId: row.id, draft: { ...newInvoiceDraft, wanted: true } })}
-                                  >
-                                    Facturar
-                                  </button>{" "}
-                                </>
-                              );
-                            })()}
-                          </>
-                        )}
-                        <button className="secondary" disabled={busy} onClick={() => startEditRow(row)}>Editar</button>{" "}
-                        <button className="secondary" disabled={busy} onClick={() => handleDeleteRow(row)}>Borrar</button>
-                      </td>
-                    </tr>
-                    {invoicingCharge?.chargeId === row.id && fiscal && (
-                      <tr className="no-print">
-                        <td colSpan={6}>
-                          <InvoiceRequestFields
-                            issuer={fiscal.taxCondition}
-                            draft={invoicingCharge.draft}
-                            total={row.debit}
-                            onChange={(draft) => setInvoicingCharge({ chargeId: row.id, draft: { ...draft, wanted: true } })}
-                          />
-                          <button disabled={busy} onClick={() => void handleInvoiceExisting(row)}>Pedir factura a ARCA</button>{" "}
-                          <button className="secondary" onClick={() => setInvoicingCharge(null)}>Cancelar</button>
-                        </td>
-                      </tr>
-                    )}
-                    </Fragment>
-                  )
-                )}
-              </tbody>
-            </table>
-            {ledger.length === 0 && !detailLoading && <p className="muted">Todavía no hay movimientos para este cliente.</p>}
-          </section>
-        </>
       )}
     </>
   );
