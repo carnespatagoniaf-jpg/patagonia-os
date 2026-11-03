@@ -18,7 +18,7 @@
 
 $ErrorActionPreference = "Stop"
 $Port = 9101
-$AgentVersion = 4
+$AgentVersion = 5
 
 Add-Type -TypeDefinition @'
 using System;
@@ -186,10 +186,23 @@ function Get-PrinterList {
   return ,$list
 }
 
+$script:PrinterList = $null
+$script:PrinterListAt = $null
+function Get-PrinterListCached([switch]$Fresh) {
+  if ($Fresh -or $script:PrinterListAt -eq $null -or ((Get-Date) - $script:PrinterListAt).TotalSeconds -gt 300) {
+    $script:PrinterList = Get-PrinterList
+    $script:PrinterListAt = Get-Date
+  }
+  return ,$script:PrinterList
+}
+
 # Devuelve el nombre de la cola a la que hay que mandar los bytes crudos.
+$script:RawQueues = @{}
 function Get-RawQueueName($p) {
   if ($p.driverMajor -ne 4) { return $p.name }
   $companion = $p.name + $CompanionSuffix
+  # La cola ya se preparo en este arranque para ese puerto: no se vuelve a preguntar a Windows en cada ticket.
+  if ($script:RawQueues[$companion] -eq $p.port) { return $companion }
   $existing = Get-Printer -Name $companion -ErrorAction SilentlyContinue
   if (-not $existing) {
     if (-not (Get-PrinterDriver -Name $RawDriverName -ErrorAction SilentlyContinue)) {
@@ -200,6 +213,7 @@ function Get-RawQueueName($p) {
     # El puerto USB cambia de numero si conectan la impresora en otro lugar.
     Set-Printer -Name $companion -PortName $p.port
   }
+  $script:RawQueues[$companion] = $p.port
   return $companion
 }
 
@@ -469,7 +483,13 @@ function Handle-Request($ctx) {
     }
 
     $printerName = $req.QueryString["printer"]
-    $printers = Get-PrinterList
+    # Leer las impresoras de Windows tarda segundos: se recuerda la lista 5 minutos y solo se vuelve a leer si la
+    # impresora pedida no esta en ella o si fallo el ultimo ticket (version 5, 2026-11-03: la cajera esperaba esto
+    # en cada cobro).
+    $printers = Get-PrinterListCached
+    if ($printerName -and -not ($printers | Where-Object { $_.name -eq $printerName })) {
+      $printers = Get-PrinterListCached -Fresh
+    }
     $target = $null
     if ([string]::IsNullOrWhiteSpace($printerName)) {
       $target = $printers | Where-Object { $_.isDefault } | Select-Object -First 1
@@ -497,6 +517,7 @@ function Handle-Request($ctx) {
     }
 
     $result = [PatagoniaRawPrinter]::Send($queue, $bytes)
+    if ($result -ne "OK") { $script:PrinterListAt = $null; $script:RawQueues = @{} }
     if ($result -eq "OK") {
       Send-Json $ctx 200 @{ ok = $true; printer = $target.name; queue = $queue; bytes = $bytes.Length } $origin
     } else {
