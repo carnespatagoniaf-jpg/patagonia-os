@@ -175,7 +175,9 @@ Built for "La primera" (3 sellers of cold cuts selling from trucks). Pages "Vent
 - Tested end to end on staging (Don Julio, "Camión Prueba"): load, offline sale, upload without duplicates, settlement with shortages.
 - **Hiding screens a whole company doesn't use**: `companies.features` entry `no:<permission>` makes `can()` return false for EVERY user of that company, including users created later (unlike per-person `denied_permissions`). La primera has `no:pos.sell`, `no:carcass.manage`, `no:recipes.manage`.
 
-## Listas de precios / mayorista (migration 167, 2026-10-28, LIVE on prod (checked 2026-11-03); plan Full to create lists)
+## Listas de precios / mayorista (migration 167, 2026-10-28, LIVE on prod (checked 2026-11-03); all plans since 193)
+
+**All plans since migration 193 (2026-11-03, owner: "más simple"):** `save_price_list` no longer has `require_plan('full')` (the only plan check lists ever had). Stock shows a "Mayorista" column to owner/admin even with no list (`NEW_WHOLESALE` in `Inventory.tsx`); each cell is an input saved on blur, and the first price typed creates the list (retail + 0%, so an empty cell = normal price). `PriceListsPanel` (rules with %) stays under "Más opciones".
 
 Owner request: one product, one PLU, several prices (minorista + mayorista), instead of duplicating products. Presentaciones (111) stay for real different products (pechito x 2 kg, cajón x15).
 - `price_lists` (name, `base` retail|cost, `pct`, active): price = round(retail × (1+pct/100)) or round(cost × (1+pct/100)), whole pesos. Minorista is `products.price_retail` (not a stored list). `product_list_prices` = manual price per product+list (overrides the rule). A presentación without a manual price uses its own `price_retail` (already an offer). The same math lives in SQL `price_list_price`, in the view `product_list_prices_view` (company-filtered inside) and in `pricing/price-lists.ts` `rulePrice`: change all three together.
