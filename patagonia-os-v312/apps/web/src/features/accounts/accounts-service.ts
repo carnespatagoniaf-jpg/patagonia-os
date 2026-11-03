@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import type { ReportPayment } from "./sales-report";
 
 /** Reporte de cuentas y Gastos (migración 143, pantallas a pedido de Martínez).
  * Solo lee views/tablas que ya filtran por empresa (customer_balance,
@@ -122,6 +123,41 @@ export async function listSalesInRange(from: string, to: string): Promise<{ id: 
         customerName: c ? `${c.number ? `${c.number} · ` : ""}${c.name}` : "Cliente",
         amount: Number(row.amount),
         reason: row.reason
+      });
+    }
+    if (!data || data.length < PAGE) break;
+  }
+  return out;
+}
+
+/** Pagos de clientes de un período (Reporte de ventas → Pagos, a pedido de Martínez), con la cuenta donde entró la plata. */
+export async function listPaymentsInRange(from: string, to: string): Promise<ReportPayment[]> {
+  if (!supabase) return [];
+  const out: ReportPayment[] = [];
+  const PAGE = 1000;
+  for (let start = 0; ; start += PAGE) {
+    const { data, error } = await supabase
+      .from("customer_payments")
+      .select("id,customer_id,payment_date,amount,notes,created_at,customers(name,number),treasury_accounts(name)")
+      .gte("payment_date", from)
+      .lte("payment_date", to)
+      .order("payment_date")
+      .order("created_at")
+      .range(start, start + PAGE - 1);
+    if (error) throw error;
+    type One<T> = T | T[] | null;
+    type Row = { id: string; customer_id: string; payment_date: string; amount: number; notes: string | null; customers: One<{ name: string; number: number | null }>; treasury_accounts: One<{ name: string }> };
+    const first = <T,>(v: One<T>) => (Array.isArray(v) ? v[0] : v) ?? null;
+    for (const row of (data ?? []) as unknown as Row[]) {
+      const c = first(row.customers);
+      out.push({
+        id: row.id,
+        date: row.payment_date,
+        customerId: row.customer_id,
+        customerName: c ? `${c.number ? `${c.number} · ` : ""}${c.name}` : "Cliente",
+        amount: Number(row.amount),
+        accountName: first(row.treasury_accounts)?.name ?? null,
+        notes: row.notes
       });
     }
     if (!data || data.length < PAGE) break;

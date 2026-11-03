@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { listChargeItemsForCharges } from "../customers/customers-service";
 import { formatMoney, localDateIso } from "../shifts/format";
 import { listSalesInRange } from "./accounts-service";
+import { PaymentsReport } from "./PaymentsReport";
 import { PERIOD_LABELS, periodRange, shortDay, summarizeSales, type PeriodPreset, type ReportItem, type ReportSale } from "./sales-report";
 
 const PRESETS: PeriodPreset[] = ["semana_pasada", "esta_semana", "ultimos_7", "este_mes", "mes_pasado"];
@@ -22,6 +23,8 @@ export function SalesReport() {
   const [items, setItems] = useState<ReportItem[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  // Ventas a cuenta o pagos de los clientes (Pagos: a pedido de Martínez, 03/11/2026).
+  const [view, setView] = useState<"ventas" | "pagos">("ventas");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -38,8 +41,8 @@ export function SalesReport() {
   }, [range]);
 
   useEffect(() => {
-    void load();
-  }, [load]);
+    if (view === "ventas") void load();
+  }, [load, view]);
 
   const summary = useMemo(() => summarizeSales(sales, items), [sales, items]);
 
@@ -54,11 +57,17 @@ export function SalesReport() {
         <div>
           <p className="eyebrow">VENTAS</p>
           <h1>Reporte de ventas</h1>
-          <p className="muted">Todas las ventas de un período, con el detalle de cada una. Para guardarlo en PDF: "Guardar PDF" y elegí "Guardar como PDF".</p>
+          <p className="muted">
+            {view === "ventas" ? "Todas las ventas de un período, con el detalle de cada una." : "Cuánto pagaron los clientes en un período, en qué cuenta entró y cuánto debe hoy cada uno."} Para guardarlo en PDF: "Guardar PDF" y elegí "Guardar como PDF".
+          </p>
         </div>
       </header>
 
       <section className="panel no-print">
+        <div className="ws-seg" style={{ marginTop: 0, marginBottom: 12 }}>
+          <button type="button" className={view === "ventas" ? "active" : ""} onClick={() => setView("ventas")}>Ventas</button>
+          <button type="button" className={view === "pagos" ? "active" : ""} onClick={() => setView("pagos")}>Pagos de clientes</button>
+        </div>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 10 }}>
           {PRESETS.map((p) => (
             <button key={p} className={preset === p ? "" : "secondary"} onClick={() => choose(p)}>{PERIOD_LABELS[p]}</button>
@@ -73,16 +82,21 @@ export function SalesReport() {
             Hasta
             <input type="date" value={range.to} onChange={(e) => { setPreset(null); setRange({ ...range, to: e.target.value }); }} />
           </label>
-          <button disabled={loading || summary.count === 0} onClick={() => window.print()}>Guardar PDF</button>
+          <button disabled={view === "ventas" && (loading || summary.count === 0)} onClick={() => window.print()}>Guardar PDF</button>
         </div>
       </section>
 
-      {error && <div className="message warning">{error}</div>}
+      {view === "ventas" && error && <div className="message warning">{error}</div>}
 
       <div className="print-area">
         <div className="print-only-header">
-          <strong>Reporte de ventas</strong> · del {dmy(range.from)} al {dmy(range.to)}
+          <strong>{view === "ventas" ? "Reporte de ventas" : "Pagos de clientes"}</strong> · del {dmy(range.from)} al {dmy(range.to)}
         </div>
+
+        {view === "pagos" ? (
+          <PaymentsReport from={range.from} to={range.to} />
+        ) : (
+        <>
 
         <section className="panel" style={{ marginTop: 18 }}>
           <div className="panel-title">
@@ -168,6 +182,8 @@ export function SalesReport() {
             </div>
           ))}
         </section>
+        </>
+        )}
       </div>
     </>
   );
