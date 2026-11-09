@@ -134,6 +134,16 @@ export async function setOrderStatus(id: string, status: OrderStatus): Promise<v
   if (error) throw error;
 }
 
+/** Cobrado en Mostrador (196): entregado + qué venta fue (null si la venta quedó en la cola sin conexión). */
+export async function deliverOrder(id: string, posSaleId: string | null): Promise<void> {
+  if (!supabase) {
+    demoWrite(demoList().map((o) => (o.id === id ? { ...o, status: "entregado" as const } : o)));
+    return;
+  }
+  const { error } = await supabase.rpc("deliver_customer_order", { p_id: id, p_pos_sale_id: posSaleId });
+  if (error) throw error;
+}
+
 // Modo demostración ---------------------------------------------------------
 
 const DEMO_KEY = "patagonia-demo-orders";

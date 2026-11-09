@@ -26,6 +26,9 @@ import { closePosShift, deletePosShiftAdjustment, getOpenPosShift, listPosCashie
 import { CashControlPanel } from "./CashControlPanel";
 import { formatMoney } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
+import { matchOrderItems, takeOrderToCharge, type OrderToCharge } from "../orders/order-to-charge";
+import { deliverOrder } from "../orders/orders-service";
+import { notifyOrdersChanged } from "../orders/useOrdersToday";
 import { buildTestTicket, getThermalPrintSettings, isThermalPrinterPaired, printBytes } from "./thermal-printer";
 import { pingPrintAgent } from "./printer-agent";
 import { DEFAULT_SCALE_CONFIG, getBranchScaleConfig, type ScaleConfig } from "./scale-config-service";
@@ -184,6 +187,27 @@ export function Sale() {
     };
   }, [branchId]);
   const ticket = useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot: SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? ""), scaleBranchId: branchId ?? null, zoneListId });
+
+  // Pedido que se cobra (Pedidos → "Cobrar en Mostrador", migración 196): se cargan sus productos una sola vez, con la
+  // lista de productos ya cargada, y al cobrar queda entregado.
+  const [chargingOrder, setChargingOrder] = useState<OrderToCharge | null>(null);
+  useEffect(() => {
+    if (products.length === 0 || !branchId) return;
+    const order = takeOrderToCharge(branchId);
+    if (!order) return;
+    const { found, missing } = matchOrderItems(order, products);
+    ticket.clearTicket();
+    for (const { product, quantity } of found) ticket.quickAdd(product, quantity);
+    // La seña es solo un dato del pedido (187): esa plata todavía no entró al sistema, así que se cobra el total y el
+    // aviso de arriba pide dividir el pago (seña por donde llegó + el resto). Descontarla la perdería de Tesorería.
+    setChargingOrder(order);
+    setMessage(missing.length > 0 ? `Del pedido no se encontró: ${missing.join(", ")}. Agregalo a mano si corresponde.` : "");
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- solo cuando llegan los productos de la sucursal
+  }, [products.length > 0, branchId]);
+  // Si se vacía el ticket a mano, ya no es el pedido.
+  useEffect(() => {
+    if (chargingOrder && ticket.cart.length === 0 && !busy) setChargingOrder(null);
+  }, [ticket.cart.length, chargingOrder, busy]);
   const {
     cart,
     itemDiscounts,
@@ -588,6 +612,7 @@ export function Sale() {
 
   async function checkout() {
     if (cart.length === 0 || !shift) return;
+    const orderBeingCharged = chargingOrder;
     // Etiquetas de una Systel sin su TOTAL: todavía no se sabe qué precio cobró la balanza.
     if (cart.some((l) => l.scalePending)) {
       setMessage("Falta escanear el código del TOTAL del ticket de la balanza: confirma el importe de cada artículo.");
@@ -677,6 +702,10 @@ export function Sale() {
         setMovementReceipt(null);
         clearTicket();
         setMessage("Venta registrada (modo demo, no se descuenta stock real).");
+        if (orderBeingCharged) {
+          setChargingOrder(null);
+          await deliverOrder(orderBeingCharged.orderId, null).then(() => notifyOrdersChanged()).catch(() => undefined);
+        }
         await autoPrintReceipt(demoReceipt);
         return;
       }
@@ -819,6 +848,13 @@ Cancelar = es el mismo papel: no cobrar.`)) {
       // a la cajera (antes eran ~6 pedidos seguidos con "Cobrando…").
       setProducts((current) => applySoldToStock(current, itemsPayload));
       setBusy(false);
+      // Pedido cobrado (196): queda entregado con su venta. Sin conexión no hay número de venta todavía.
+      if (orderBeingCharged) {
+        setChargingOrder(null);
+        void deliverOrder(orderBeingCharged.orderId, queuedOffline ? null : saleId)
+          .then(() => notifyOrdersChanged())
+          .catch(() => setMessage(`La venta se cobró, pero el pedido de ${orderBeingCharged.customerName} no se pudo marcar entregado: marcalo en Pedidos.`));
+      }
       // El ticket sale de fondo: la venta ya está guardada (o en la cola), así
       // que la cajera no espera a la impresora. El programa de impresión
       // tardaba segundos por ticket y el botón seguía en "Cobrando…" todo ese
@@ -1134,6 +1170,17 @@ Cancelar = es el mismo papel: no cobrar.`)) {
       />
 
       {message && <div className="message">{message}</div>}
+      {chargingOrder && (
+        <div className="message" style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+          <span>
+            Cobrando el pedido de <strong>{chargingOrder.customerName}</strong>. Al cobrar queda entregado.
+            {chargingOrder.deposit > 0 && (
+              <> Ya te pagó {formatMoney(chargingOrder.deposit)} de seña: dividí el pago, esa parte en la cuenta donde la recibiste (ej. Transferencia) y el resto como te pague ahora.</>
+            )}
+          </span>
+          <button className="secondary" onClick={() => setChargingOrder(null)}>No es un pedido</button>
+        </div>
+      )}
 
       {pendingSales.length > 0 && (
         <div className="message warning" style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>

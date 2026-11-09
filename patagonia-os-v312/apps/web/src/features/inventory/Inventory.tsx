@@ -7,7 +7,8 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { useBranchZone } from "../pricing/useBranchZone";
 import { useAuth } from "../auth/AuthProvider";
-import { planAllows } from "../auth/permissions";
+import { isNotButcher, planAllows } from "../auth/permissions";
+import { parseVariants, variantProducts } from "./product-variants";
 import { adjustProductStock, clearProductPackages, createProduct, deleteProduct, listProductPackages, listProductsForBranch, listProductVatRates, registerProductPackages, setProductActive, setProductsVatRate, setProductStockSource, updateProduct } from "./inventory-service";
 import { getFiscalSettings } from "../invoicing/invoicing-service";
 import { PRODUCT_VAT_OPTIONS, productVatLabel, vatFromSelect, vatPercentLabel, vatSelectValue } from "./product-vat";
@@ -77,8 +78,8 @@ function typedCount(unit: Product["unit"], raw: string): number {
   return quantityNumber(unit !== "kg" && /^d{1,3}(.d{3})+$/.test(text) ? text.replace(/./g, "") : text);
 }
 
-function emptyDraft(): DraftProduct {
-  return { code: "", name: "", unit: "kg", cost: "", margin: "", priceRetail: "", minStock: "", stock: "", active: true, categoryId: "", vatRate: "", listPrices: {} };
+function emptyDraft(unit: Product["unit"] = "kg"): DraftProduct {
+  return { code: "", name: "", unit, cost: "", margin: "", priceRetail: "", minStock: "", stock: "", active: true, categoryId: "", vatRate: "", listPrices: {} };
 }
 
 /** Bloque "Stock" de la ficha: stock propio o descuenta de otro producto (el principal). */
@@ -143,7 +144,11 @@ export function Inventory() {
 
   const [showNewForm, setShowNewForm] = useState(false);
   const newNameRef = useRef<HTMLInputElement>(null);
-  const [newDraft, setNewDraft] = useState<DraftProduct>(emptyDraft());
+  // Negocio que no es carnicería (196): los productos nuevos arrancan por unidad y se pueden cargar con variantes.
+  const notButcher = isNotButcher(profile);
+  const newUnit: Product["unit"] = notButcher ? "unit" : "kg";
+  const [newDraft, setNewDraft] = useState<DraftProduct>(emptyDraft(newUnit));
+  const [newVariants, setNewVariants] = useState("");
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<DraftProduct>(emptyDraft());
@@ -576,6 +581,29 @@ export function Inventory() {
       const initialStock = newDraft.stock.trim() ? typedCount(newDraft.unit, newDraft.stock) : 0;
       if (!Number.isFinite(initialStock) || initialStock < 0) throw new Error("El stock no puede ser negativo.");
 
+      // Con variantes (196): un producto por variante, cada uno con su stock.
+      if (notButcher && newVariants.trim()) {
+        const parsed = parseVariants(newVariants);
+        if (parsed.error) throw new Error(parsed.error);
+        const items = variantProducts(newDraft.code, newDraft.name, parsed.variants);
+        const clash = items.map((v) => productWithCode(products, v.code)).find(Boolean);
+        if (clash) throw new Error(`El código ${clash.code} ya es de "${clash.name}". Usá otro código para el producto.`);
+        const newVatRate = vatFromSelect(newDraft.vatRate);
+        const variantListPrices = listPriceChanges(newDraft);
+        for (const v of items) {
+          const made = await createProduct({ branchId, code: v.code, name: v.name, unit: newDraft.unit, cost, priceRetail, minStock, categoryId: newDraft.categoryId || undefined });
+          if (newVatRate !== null) await setProductsVatRate({ codes: [v.code], rate: newVatRate });
+          if (variantListPrices.length > 0) await saveListPrices(variantListPrices.map((c) => ({ ...c, productId: made.id })));
+          if (v.stock) await adjustProductStock({ branchId, productId: made.id, countedQuantity: v.stock, reason: "Stock inicial al crear el producto" });
+        }
+        setNewDraft(emptyDraft(newUnit));
+        setNewVariants("");
+        setShowNewForm(false);
+        setMessage(`Se crearon ${items.length} productos: ${items.map((v) => v.name).join(", ")}.`);
+        await reload();
+        return;
+      }
+
       const created = await createProduct({
         branchId,
         code: newDraft.code.trim(),
@@ -591,7 +619,7 @@ export function Inventory() {
       const newListPrices = listPriceChanges(newDraft);
       if (newListPrices.length > 0) await saveListPrices(newListPrices.map((c) => ({ ...c, productId: created.id })));
       if (initialStock > 0) await adjustProductStock({ branchId, productId: created.id, countedQuantity: initialStock, reason: "Stock inicial al crear el producto" });
-      setNewDraft(emptyDraft());
+      setNewDraft(emptyDraft(newUnit));
       setShowNewForm(false);
       setMessage("Producto creado.");
       await reload();
@@ -1035,7 +1063,7 @@ export function Inventory() {
               const code = productSearch.trim();
               if (e.key === "Enter" && /^\d{6,}$/.test(code) && !productWithCode(products, code)) {
                 e.preventDefault();
-                setNewDraft({ ...emptyDraft(), code });
+                setNewDraft({ ...emptyDraft(newUnit), code });
                 setShowNewForm(true);
                 setProductSearch("");
                 setMessage(`El código ${code} no es de ningún producto: completá el nombre y el precio para agregarlo.`);
@@ -1193,19 +1221,41 @@ export function Inventory() {
                   ))}
                 </select>
               </label>
-              <label>
-                {newDraft.unit === "kg" ? "Stock hoy (kg)" : "Stock hoy (unidades)"}
-                <input type="text" inputMode="decimal" value={newDraft.stock} onChange={(e) => setNewDraft({ ...newDraft, stock: e.target.value })} />
-              </label>
+              {notButcher && (
+                <label className="span-2" title="Un producto por cada variante, con su propio stock. Mismo precio y categoría.">
+                  Variantes (color, modelo…)
+                  <input
+                    placeholder="ej. Negro: 3, Marrón: 2, Verde"
+                    value={newVariants}
+                    onChange={(e) => setNewVariants(e.target.value)}
+                  />
+                </label>
+              )}
+              {!(notButcher && newVariants.trim()) && (
+                <label>
+                  {newDraft.unit === "kg" ? "Stock hoy (kg)" : "Stock hoy (unidades)"}
+                  <input type="text" inputMode="decimal" value={newDraft.stock} onChange={(e) => setNewDraft({ ...newDraft, stock: e.target.value })} />
+                </label>
+              )}
               <label title="Solo para que avise en Inicio cuando quede poco. No es el stock.">
                 Mínimo (aviso)
                 <input type="text" inputMode="decimal" value={newDraft.minStock} onChange={(e) => setNewDraft({ ...newDraft, minStock: e.target.value })} />
               </label>
             </div>
             {renderListPriceHint(newDraft, false)}
+            {notButcher && newVariants.trim() && (() => {
+              const parsed = parseVariants(newVariants);
+              if (parsed.error) return <p className="message warning" style={{ margin: "8px 0 0" }}>{parsed.error}</p>;
+              const list = variantProducts(newDraft.code || "código", newDraft.name || "Nombre", parsed.variants);
+              return (
+                <p className="muted" style={{ margin: "8px 0 0", fontSize: 13 }}>
+                  Se crean {list.length} productos: {list.map((v) => `${v.name} (${v.code}${v.stock ? `, stock ${v.stock}` : ""})`).join(" · ")}
+                </p>
+              );
+            })()}
             <div className="form-actions">
-              <button onClick={handleCreate}>Guardar producto</button>
-              <button className="secondary" onClick={() => { setShowNewForm(false); setNewDraft(emptyDraft()); }}>Cancelar</button>
+              <button onClick={handleCreate}>{notButcher && newVariants.trim() ? "Guardar variantes" : "Guardar producto"}</button>
+              <button className="secondary" onClick={() => { setShowNewForm(false); setNewDraft(emptyDraft(newUnit)); setNewVariants(""); }}>Cancelar</button>
             </div>
             {(() => {
               const taken = productWithCode(products, newDraft.code);

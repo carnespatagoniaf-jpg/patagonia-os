@@ -234,6 +234,13 @@ Owner request: cashiers note customer orders ("2 kg asado + 1 morcilla for Satur
 - Printing: `printOrderOnThermal` uses the same path as Mostrador tickets (`printBytes`, agent or USB) when this PC has a thermal printer; otherwise `OrderPaperPrint` (portal `.print-area`, 72 mm column, fine on A4).
 - Phase 2 (not built): "Cobrar en Mostrador" from a delivered order with the deposit as a non-cash payment method.
 
+## Negocios que no son carnicería + Pedidos para tienda (migration 196, 2026-11-09, NOT published)
+
+Owner request for "mates and chill" (a friend's online mate shop, pickup at home, a single owner user). Two new `companies.features` keys, both in the `set_company_feature` whitelist and `COMPANY_FEATURES`:
+- `sin_carniceria` (web only): `can()` returns false for `carcass.manage`/`scales.manage`/`frigo.manage` (`isNotButcher`), `ScaleButton` renders nothing, new products start as `unit`, and Stock → "+ Producto" shows "Variantes (color, modelo…)": "Negro: 3, Marrón, Verde" creates one product per variant with its own stock, same price/category/VAT/list prices, name "<name> - <variant>", code "<code>-1", "-2"… (`product-variants.ts`, tested). No grouping column: they are found together by name.
+- `pedidos_tienda` (with `pedidos`): `orders_branch_visible`/`orders_caller` also accept owner/admin, `canAccessPage` skips `PAGE_ONLY_ROLES` for them (admin got `orders.view`/`orders.manage`, harmless without the flag). Pedidos shows "Cobrar en Mostrador": `order-to-charge.ts` (tested) puts the order in sessionStorage, Mostrador takes it once (same branch), loads the items with `quickAdd` and shows a banner; the full total is charged (the deposit is only data, so the banner asks to split the payment instead of discounting it). After the sale `deliver_customer_order(id, pos_sale_id)` marks it delivered and stores `customer_orders.pos_sale_id` (null when queued offline). `create_pos_sale` was NOT touched. Emptying the ticket drops the link.
+- Tests: `tests/sql/196_tienda_pedidos_dueno.sql` (passed on staging inside a forced rollback). Browser-checked in demo mode (`.claude/launch.json` "web-demo-tienda", `apps/web/.env.tienda.local` with `VITE_DEMO_FEATURES`); creating variants against a real DB not tried yet.
+
 ## Decomisos (migration 151, LIVE 2026-10-23; all plans since 152, owner decision the same day)
 
 Merchandise that is thrown away is recorded in Mostrador → "Decomiso" (`WasteForm.tsx`, toolbar of `ShiftPanel`). The quantity comes from scanning the scale label (`describeScaleTicket`), from "Leer peso de la balanza" (`readScaleWeight`, only when the cable scale is enabled), or typed.
