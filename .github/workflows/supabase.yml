@@ -49,6 +49,8 @@ jobs:
         working-directory: patagonia-os-v312
     steps:
       - name: ¿Está habilitado?
+        # Corre antes de bajar el código: la carpeta patagonia-os-v312 todavía no existe (el 09/11/2026 fallaba siempre acá).
+        working-directory: .
         env:
           RAMA: ${{ github.ref_name }}
           DESTINO: ${{ inputs.destino }}
