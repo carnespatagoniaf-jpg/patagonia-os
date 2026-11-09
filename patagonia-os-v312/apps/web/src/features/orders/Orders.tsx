@@ -3,7 +3,9 @@ import type { Product } from "@patagonia/domain";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { demoProducts } from "../../lib/demo-data";
 import { useAuth } from "../auth/AuthProvider";
-import { can } from "../auth/permissions";
+import { can, canAccessPage, ordersForOwner } from "../auth/permissions";
+import { goToPage } from "../../lib/navigate";
+import { orderToCharge, saveOrderToCharge } from "./order-to-charge";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { listCustomers } from "../customers/customers-service";
 import { listProductsForBranch } from "../inventory/inventory-service";
@@ -56,6 +58,8 @@ export function Orders() {
   const { profile } = useAuth();
   const { branchId, branches } = useActiveBranch();
   const canEdit = can(profile, "orders.manage");
+  // Pedidos para tienda (196): el pedido se cobra en Mostrador (baja stock y entra la plata) y queda entregado.
+  const canCharge = canEdit && ordersForOwner(profile) && canAccessPage(profile, "sale");
   const [tab, setTab] = useState<Tab>("dia");
   const [day, setDay] = useState(() => localDateIso());
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
@@ -131,6 +135,16 @@ export function Orders() {
     }
   }
 
+  function chargeInSale(order: CustomerOrder) {
+    try {
+      saveOrderToCharge(orderToCharge(order));
+    } catch {
+      setMessage("Este navegador no deja pasar el pedido a Mostrador. Cargalo a mano y marcalo Entregado.");
+      return;
+    }
+    goToPage("sale");
+  }
+
   async function handleSaved(id: string, wantPrint: boolean, pickupDate: string) {
     const wasNew = editing === "new";
     setEditing(null);
@@ -180,8 +194,11 @@ export function Orders() {
           {canEdit && order.status === "pendiente" && (
             <button disabled={busyId === order.id} onClick={() => void changeStatus(order, "listo")}>Marcar listo</button>
           )}
+          {canCharge && isOpen(order) && order.items.length > 0 && (
+            <button onClick={() => chargeInSale(order)}>Cobrar en Mostrador</button>
+          )}
           {canEdit && isOpen(order) && (
-            <button className={order.status === "listo" ? "" : "secondary"} disabled={busyId === order.id} onClick={() => void changeStatus(order, "entregado")}>
+            <button className={order.status === "listo" && !canCharge ? "" : "secondary"} disabled={busyId === order.id} onClick={() => void changeStatus(order, "entregado")}>
               Entregado
             </button>
           )}
@@ -203,7 +220,11 @@ export function Orders() {
         <div>
           <p className="eyebrow">PEDIDOS</p>
           <h1>Pedidos</h1>
-          <p className="muted">Lo que encargan los clientes para retirar otro día. Es solo informativo: no mueve la caja ni descuenta stock.</p>
+          <p className="muted">
+            {canCharge
+              ? "Lo que te encargan para retirar. Cuando lo retiran, tocá \"Cobrar en Mostrador\": baja el stock, entra la plata y el pedido queda entregado."
+              : "Lo que encargan los clientes para retirar otro día. Es solo informativo: no mueve la caja ni descuenta stock."}
+          </p>
         </div>
         {canEdit && branchId && tab === "dia" && !editing && (
           <div>

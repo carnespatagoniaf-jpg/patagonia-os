@@ -92,7 +92,10 @@ export const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> 
     "route.sell",
     "frigo.manage",
     "transfers.manage",
-    "planta.manage"
+    "planta.manage",
+    // Pedidos: solo en empresas con 'pedidos_tienda' (196); sin eso PAGE_ONLY_ROLES se los sigue sacando.
+    "orders.view",
+    "orders.manage"
   ],
   // frigo.manage: el encargado carga DT, faena y salidas (la pantalla solo existe si la empresa tiene 'frigorifico').
   // transfers.manage (migración 190, plan Empresa): pedir, preparar, despachar y recibir mercadería, solo de su local.
@@ -197,6 +200,18 @@ export function planAllows(profile: UserProfile | null, min: Plan): boolean {
   return PLAN_RANK[profilePlan(profile)] >= PLAN_RANK[min];
 }
 
+/** companies.features 'sin_carniceria' (migración 196): tienda, kiosco, etc. Se ocultan las pantallas de carne y balanza,
+ * los productos nuevos arrancan por unidad y se pueden cargar con variantes. Solo web: la base no cambia. */
+export function isNotButcher(profile: UserProfile | null): boolean {
+  return Boolean(profile?.features?.includes("sin_carniceria"));
+}
+const NOT_BUTCHER_HIDDEN: Permission[] = ["carcass.manage", "scales.manage", "frigo.manage"];
+
+/** companies.features 'pedidos_tienda' (migración 196): el dueño/administrador también carga pedidos y los cobra en Mostrador. */
+export function ordersForOwner(profile: UserProfile | null): boolean {
+  return Boolean(profile?.features?.includes("pedidos_tienda"));
+}
+
 export function can(profile: UserProfile | null, permission: Permission) {
   if (!profile) return false;
   const minPlan = PERMISSION_MIN_PLAN[permission];
@@ -209,6 +224,8 @@ export function can(profile: UserProfile | null, permission: Permission) {
   // Empresa que no usa una pantalla (ej. La primera, fiambres: sin Despiece ni Recetas): companies.features
   // "no:<permiso>" se lo saca a TODOS sus usuarios, también a los que se creen después.
   if (profile.features?.includes(`no:${permission}`)) return false;
+  // Negocio que no es carnicería (migración 196, ej. mates and chill): sin Despiece, Balanzas ni Frigorífico.
+  if (isNotButcher(profile) && NOT_BUTCHER_HIDDEN.includes(permission)) return false;
   // denied_permissions solo puede sacar permisos que el rol ya daba, nunca agregar.
   return !profile.denied_permissions?.includes(permission);
 }
@@ -271,7 +288,9 @@ const PAGE_ONLY_ROLES: Partial<Record<string, UserProfile["role"][]>> = { orders
 
 export function canAccessPage(profile: UserProfile | null, page: Page) {
   const onlyRoles = PAGE_ONLY_ROLES[page];
-  if (onlyRoles && (!profile || !onlyRoles.includes(profile.role))) return false;
+  // Pedidos para tienda (196): el dueño y el administrador también (la base exige lo mismo).
+  const ownerOrders = page === "orders" && ordersForOwner(profile) && (profile?.role === "owner" || profile?.role === "admin");
+  if (onlyRoles && !ownerOrders && (!profile || !onlyRoles.includes(profile.role))) return false;
   const feature = PAGE_REQUIRED_FEATURE[page];
   if (feature && !profile?.features?.includes(feature)) return false;
   const minPlan = PAGE_MIN_PLAN[page];

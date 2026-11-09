@@ -1,5 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Scale, X } from "lucide-react";
+import { useAuth } from "../auth/AuthProvider";
+import { isNotButcher } from "../auth/permissions";
 
 /**
  * Botón "Balanza" arriba a la derecha (Productos y Stock). Toda la configuración de la balanza (Mi balanza y, para
@@ -7,6 +9,7 @@ import { Scale, X } from "lucide-react";
  * (pedido del dueño, 15/10). El contenido no se monta hasta que se abre.
  */
 export function ScaleButton({ children }: { children: ReactNode }) {
+  const { profile } = useAuth();
   const [open, setOpen] = useState(false);
 
   useEffect(() => {
@@ -15,6 +18,9 @@ export function ScaleButton({ children }: { children: ReactNode }) {
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open]);
+
+  // Negocio que no es carnicería (196): no usa balanza.
+  if (isNotButcher(profile)) return null;
 
   return (
     <>
