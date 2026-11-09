@@ -332,7 +332,13 @@ export function Users() {
           <div className="cash-banner-form" style={{ flexWrap: "wrap", marginTop: 16 }}>
             <input placeholder="Email" value={newDraft.email} onChange={(e) => setNewDraft({ ...newDraft, email: e.target.value })} />
             <input placeholder="Nombre" value={newDraft.fullName} onChange={(e) => setNewDraft({ ...newDraft, fullName: e.target.value })} />
-            <input placeholder="Contraseña (mínimo 8 caracteres)" value={newPassword} onChange={(e) => setNewPassword(e.target.value)} style={{ width: 220 }} />
+            <input
+              placeholder="Contraseña (mínimo 8 caracteres)"
+              title="Que no sea una contraseña común (12345678, carnes123…): el sistema las rechaza. Ej.: Patagonia.Caja.2026"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              style={{ width: 220 }}
+            />
             <select value={newDraft.role} onChange={(e) => setNewDraft({ ...newDraft, role: e.target.value as StaffRole })}>
               {ASSIGNABLE_ROLES.map((r) => (
                 <option key={r} value={r}>{ROLE_LABELS[r]}</option>

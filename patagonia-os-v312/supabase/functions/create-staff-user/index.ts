@@ -28,6 +28,29 @@ function jsonResponse(body: unknown, status = 200) {
   });
 }
 
+/**
+ * Los errores de Supabase Auth vienen en inglés ("Password is known to be weak
+ * and easy to guess…"): el 09/11 el dueño no entendió por qué no se creaba un
+ * usuario. Acá se pasan a castellano los que puede causar lo que se escribió.
+ */
+function authErrorText(err: { message?: string; code?: string } | null): string {
+  const code = err?.code ?? "";
+  const msg = (err?.message ?? "").toLowerCase();
+  if (code === "weak_password" || msg.includes("weak") || msg.includes("easy to guess")) {
+    return "Esa contraseña es muy común y es fácil de adivinar. Elegí otra que no sea conocida, por ejemplo mezclando palabras con números (Patagonia.Caja.2026).";
+  }
+  if (code === "email_exists" || code === "user_already_exists" || msg.includes("already been registered") || msg.includes("already registered")) {
+    return "Ya existe un usuario con ese email. Usá otro email, o si es de esta persona, editá el usuario que ya está en la lista.";
+  }
+  if (code === "email_address_invalid" || msg.includes("invalid format") || (msg.includes("email") && msg.includes("invalid"))) {
+    return "Ese email no es válido. Revisá que esté bien escrito.";
+  }
+  if (msg.includes("password should") || msg.includes("password must")) {
+    return "La contraseña no cumple los requisitos: usá al menos 8 caracteres.";
+  }
+  return err?.message ? `No se pudo crear el usuario: ${err.message}` : "No se pudo crear el usuario.";
+}
+
 Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse({ error: "Método no permitido" }, 405);
@@ -78,7 +101,7 @@ Deno.serve(async (req) => {
       password,
       email_confirm: true
     });
-    if (createErr || !created.user) throw new Error(createErr?.message ?? "No se pudo crear el usuario");
+    if (createErr || !created.user) throw new Error(authErrorText(createErr));
 
     const { error: insertErr } = await admin.from("profiles").insert({
       id: created.user.id,

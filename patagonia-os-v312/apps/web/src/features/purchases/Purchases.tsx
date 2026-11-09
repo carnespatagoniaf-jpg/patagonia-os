@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { PaymentMethod, Product } from "@patagonia/domain";
 import { marginPercent, purchaseTotal } from "@patagonia/domain";
 import { demoProducts } from "../../lib/demo-data";
@@ -30,6 +30,19 @@ import { listDefaultCarcassCuts, type DefaultCarcassCut } from "../carcass/carca
 import { listCarcassBatches } from "../carcass/carcass-service";
 import { animalTypeLabel, buildTypeChips, carcassTypeKey, findSameType, type TypeChips } from "../carcass/carcass-types";
 import { PurchaseDistribute } from "./PurchaseDistribute";
+import { checkInvoice, draftLinesFromInvoice, matchSupplier } from "./invoice-draft";
+import { readInvoiceFile } from "./invoice-reader-service";
+
+/** Lo que se muestra arriba del formulario después de leer una factura con foto. */
+interface InvoiceNotice {
+  supplierName: string;
+  /** Proveedor de la empresa que parece haber emitido la factura, si no es el elegido. */
+  otherSupplierId: string | null;
+  total: number;
+  lines: number;
+  unmatched: number;
+  notes: string[];
+}
 
 interface DraftLine {
   key: string;
@@ -225,6 +238,9 @@ export function Purchases() {
   const [purchaseDate, setPurchaseDate] = useState(todayIso());
   const [invoiceNumber, setInvoiceNumber] = useState("");
   const [lines, setLines] = useState<DraftLine[]>([emptyLine()]);
+  const invoiceFileRef = useRef<HTMLInputElement>(null);
+  const [readingInvoice, setReadingInvoice] = useState(false);
+  const [invoiceNotice, setInvoiceNotice] = useState<InvoiceNotice | null>(null);
   // Qué renglón tiene el buscador de producto abierto ahora mismo -- antes
   // el listado de sugerencias se mostraba con solo que hubiera texto y
   // coincidencias, sin importar el foco, y al ser position:absolute tapaba
@@ -398,6 +414,44 @@ export function Purchases() {
     setLines((current) => (current.length > 1 ? current.filter((line) => line.key !== key) : current));
   }
 
+  /**
+   * "Leer factura con foto": completa fecha, número y renglones con lo que dice
+   * el papel. No registra nada: la persona revisa y toca "Registrar compra".
+   */
+  async function handleInvoiceFile(file: File | undefined) {
+    if (!file || readingInvoice) return;
+    setReadingInvoice(true);
+    setMessage("");
+    setInvoiceNotice(null);
+    try {
+      const invoice = await readInvoiceFile(file);
+      if (invoice.items.length === 0) {
+        throw new Error(invoice.warnings[0] ?? "No encontré renglones en esa foto. Probá con otra, más derecha y con buena luz.");
+      }
+      const draft = draftLinesFromInvoice(invoice, products);
+      setLines(draft.map((line) => ({ ...emptyLine(), ...line })));
+      if (invoice.date) setPurchaseDate(invoice.date);
+      if (invoice.invoiceNumber) setInvoiceNumber(invoice.invoiceNumber);
+      const supplierId = matchSupplier(
+        invoice,
+        suppliers.map((s) => ({ id: s.id, name: s.name, taxId: taxInfo[s.id]?.taxId ?? null }))
+      );
+      setInvoiceNotice({
+        supplierName: invoice.supplierName,
+        otherSupplierId: supplierId && supplierId !== selectedSupplierId ? supplierId : null,
+        total: invoice.total,
+        lines: draft.length,
+        unmatched: draft.filter((line) => !line.productId).length,
+        notes: [...checkInvoice(invoice).notes, ...invoice.warnings]
+      });
+    } catch (error) {
+      setMessage(error instanceof Error ? error.message : "No se pudo leer la factura.");
+    } finally {
+      setReadingInvoice(false);
+      if (invoiceFileRef.current) invoiceFileRef.current.value = "";
+    }
+  }
+
   async function handleCreatePurchase() {
     if (busy) return;
     setBusy(true);
@@ -425,6 +479,7 @@ export function Purchases() {
       const created = await createPurchase(selectedSupplierId, purchaseDate, invoiceNumber.trim() || undefined, parsed);
       setLines([emptyLine()]);
       setInvoiceNumber("");
+      setInvoiceNotice(null);
       const carcassNote = created.carcass
         .map((c) => c.cuts > 0
           ? ` ${c.animalType}: repartido solo en ${c.cuts} cortes, ya están en Stock (si querés, corregí los kilos reales en Despiece).`
@@ -978,6 +1033,58 @@ export function Purchases() {
 
               {action === "purchase" && (
                 <div className="ws-form no-print">
+                  {isSupabaseConfigured && (
+                    <div className="invoice-photo">
+                      <input
+                        ref={invoiceFileRef}
+                        type="file"
+                        accept="image/*,application/pdf"
+                        hidden
+                        onChange={(e) => void handleInvoiceFile(e.target.files?.[0])}
+                      />
+                      <button type="button" className="secondary" disabled={readingInvoice || busy} onClick={() => invoiceFileRef.current?.click()}>
+                        {readingInvoice ? "Leyendo la factura…" : "Leer factura con foto"}
+                      </button>
+                      <small className="muted">
+                        {readingInvoice
+                          ? "Tarda unos segundos."
+                          : "Sacale una foto a la factura o elegí el PDF: se completan los renglones y vos revisás antes de registrar."}
+                      </small>
+                    </div>
+                  )}
+                  {invoiceNotice && (
+                    <div className="invoice-photo-result" role="status">
+                      <strong>
+                        Leí {invoiceNotice.lines} renglón{invoiceNotice.lines === 1 ? "" : "es"}
+                        {invoiceNotice.supplierName ? ` de ${invoiceNotice.supplierName}` : ""}
+                        {invoiceNotice.total > 0 ? ` · total del papel ${formatMoney(invoiceNotice.total)}` : ""}.
+                      </strong>
+                      <span>
+                        Revisá cada renglón antes de registrar.
+                        {invoiceNotice.unmatched > 0
+                          ? ` ${invoiceNotice.unmatched} no ${invoiceNotice.unmatched === 1 ? "lo encontré" : "los encontré"} en tus productos: elegilo${invoiceNotice.unmatched === 1 ? "" : "s"} o dejá la descripción.`
+                          : ""}
+                      </span>
+                      {invoiceNotice.otherSupplierId && (
+                        <span>
+                          Ojo: la factura parece de <strong>{suppliers.find((s) => s.id === invoiceNotice.otherSupplierId)?.name}</strong>, no de {selectedSupplier?.name}.{" "}
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => {
+                              setSelectedSupplierId(invoiceNotice.otherSupplierId);
+                              setInvoiceNotice({ ...invoiceNotice, otherSupplierId: null });
+                            }}
+                          >
+                            Cargarla a {suppliers.find((s) => s.id === invoiceNotice.otherSupplierId)?.name}
+                          </button>
+                        </span>
+                      )}
+                      {invoiceNotice.notes.map((note) => (
+                        <span key={note} className="num-negative">{note}</span>
+                      ))}
+                    </div>
+                  )}
                   <div className="ws-form-row" style={{ marginBottom: 12 }}>
                     <label className="ws-field">Fecha<input type="date" value={purchaseDate} onChange={(e) => setPurchaseDate(e.target.value)} /></label>
                     <label className="ws-field">N.º de factura o remito<input placeholder="Opcional" value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} /></label>

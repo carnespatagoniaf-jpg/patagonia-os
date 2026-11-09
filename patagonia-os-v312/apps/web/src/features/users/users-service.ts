@@ -17,7 +17,10 @@ export async function listCompanyUsers(): Promise<CompanyUser[]> {
 
   const { data, error } = await supabase
     .from("profiles")
-    .select("id,full_name,role,active,branch_id,denied_permissions,branches(name)")
+    // Hay dos caminos de profiles a branches (branch_id y la tabla profile_branches
+    // de la migración 191): sin nombrar la FK, PostgREST contesta 300 y la lista
+    // de Usuarios quedaba vacía para todos (arreglado 09/11).
+    .select("id,full_name,role,active,branch_id,denied_permissions,branches!profiles_branch_id_fkey(name)")
     .order("full_name");
   if (error) throw error;
 
