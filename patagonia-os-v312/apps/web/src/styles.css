@@ -1590,3 +1590,9 @@ button.ws-card-button:hover { border-color: #c3cad5; }
 .tr-changed { background: #fffbea; border-color: #e0a400; }
 .transfers-min th { white-space: nowrap; }
 @media (max-width: 900px) { .transfers .ws-layout { grid-template-columns: minmax(0, 1fr); } .transfers .ws-list.panel { position: static; } }
+
+/* Compras: "Leer factura con foto" (2026-11-05). */
+.invoice-photo { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; margin-bottom: 12px; }
+.invoice-photo small { min-width: 0; flex: 1 1 260px; }
+.invoice-photo-result { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; padding: 10px 12px; border: 1px solid #c9d7ee; border-radius: 8px; background: #f3f7fd; font-size: 14px; }
+.invoice-photo-result button { margin-left: 4px; }
