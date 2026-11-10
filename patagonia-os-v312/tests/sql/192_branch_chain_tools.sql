@@ -123,16 +123,8 @@ begin
     if sqlerrm = 'el encargado abrió un local' then raise; end if;
   end;
 end $$;
-select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000c9207', true);
-do $$
-begin
-  begin
-    perform public.save_price_zone(null, 'Zona', 3, '{}');
-    raise exception 'plan Full creó una zona';
-  exception when raise_exception then
-    if sqlerrm = 'plan Full creó una zona' then raise; end if;
-  end;
-end $$;
+-- (Plan Full rechazado al crear una zona: ya no, desde la migración 197 las zonas son de todos los planes;
+-- lo prueba tests/sql/197_price_zones_all_plans.sql.)
 
 reset role;
 

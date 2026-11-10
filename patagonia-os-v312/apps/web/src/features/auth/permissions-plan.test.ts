@@ -22,12 +22,12 @@ describe("planes: qué ve cada uno", () => {
     }
   });
 
-  it("Estándar ve Clientes, Despiece, Recetas, Balanzas… pero no la pantalla Sucursales", () => {
+  it("Estándar ve Clientes, Despiece, Recetas, Balanzas y Sucursales (solo Precios por zona, migración 197)", () => {
     const p = owner("estandar");
-    for (const page of ["customers", "employees", "carcass", "recipes", "profitability", "creditors", "scales"] as const) {
+    for (const page of ["customers", "employees", "carcass", "recipes", "profitability", "creditors", "scales", "branches"] as const) {
       assert.equal(canAccessPage(p, page), true, page);
     }
-    assert.equal(canAccessPage(p, "branches"), false);
+    assert.equal(planAllows(p, "full"), false, "el tablero de Sucursales sigue siendo de Full");
     assert.equal(canAccessPage(p, "reconciliation"), false, "Conciliación es de Full");
   });
 

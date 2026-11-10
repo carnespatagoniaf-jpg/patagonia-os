@@ -7,7 +7,7 @@ import { rulePrice, type PriceList } from "../pricing/price-lists";
 import { deletePriceList, listPriceLists, listZoneBranches, savePriceZone, setProductListPrices } from "../pricing/price-lists-service";
 import { listTransferBranches, type TransferBranch } from "../transfers/transfers-service";
 
-// Sucursales → Precios por zona (plan Empresa, migración 192). Una zona = precio general ± %, con precios a mano
+// Sucursales → Precios por zona (migración 192; todos los planes desde Estándar con la 197). Una zona = precio general ± %, con precios a mano
 // por producto, para los locales que se le asignan. Mostrador de esos locales cobra el precio de la zona solo;
 // a su balanza se le mandan esos precios. El precio general es el de Stock.
 
