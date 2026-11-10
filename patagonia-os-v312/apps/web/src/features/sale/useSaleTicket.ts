@@ -18,7 +18,7 @@ import { chargedScaleTickets } from "./sale-service";
 import { useScalePapers } from "./useScalePapers";
 import { submitScaleSupportReport } from "../scales/support-service";
 import type { PosShift } from "./pos-shift-service";
-import { lineGross, withPriceList, type PaymentRow, type TicketLine } from "./sale-model";
+import { keepCurrentLists, lineGross, lineListFor, withPriceList, type PaymentRow, type TicketLine } from "./sale-model";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { findScaleTicketSale, findScaleTicketVoid, undoScaleTicketVoid } from "./scale-control-service";
 import { chargedTicketQuestion, detailedTotalKey, SAME_SALE_LABEL_QUESTION, type ChargedHit } from "./scale-repeat";
@@ -57,18 +57,45 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [showProductTable, setShowProductTable] = useState(false);
   const [baseCart, setCart] = useState<TicketLine[]>([]);
-  /** Lista de precios de esta venta (botón Minorista / Mayorista, migración 167); null = minorista. */
+  /** Lista de precios de lo que se agrega (botón Minorista / Mayorista, migración 167); null = minorista. */
   const [priceListId, setPriceListId] = useState<string | null>(null);
+  /** Minorista y mayorista en el mismo ticket (dueño, 2026-11-10: "tendría que estar todo junto"): la lista
+   * propia de cada línea (null = minorista). Una línea sin entrada sigue al botón de arriba. */
+  const [lineLists, setLineLists] = useState<Record<string, string | null>>({});
   const productById = useMemo(() => new Map(products.map((p) => [p.id, p])), [products]);
-  // El ticket que se ve y se cobra: cada línea con el precio de la lista elegida (withPriceList no
-  // pierde el precio minorista, así volver a Minorista deja todo como estaba).
+  // El ticket que se ve y se cobra: cada línea con su lista (withPriceList no pierde el precio minorista,
+  // así volver a Minorista deja todo como estaba). Minorista en un local con zona = precio de la zona.
   const cart = useMemo(
     () =>
-      baseCart.map((l) =>
-        withPriceList(l, l.productId ? productById.get(l.productId) : undefined, priceListId ?? (zoneListId && l.scaleAmount === undefined ? zoneListId : null))
-      ),
-    [baseCart, productById, priceListId, zoneListId]
+      baseCart.map((l) => {
+        const chosen = lineListFor(l.key, lineLists, priceListId);
+        return withPriceList(l, l.productId ? productById.get(l.productId) : undefined, chosen ?? (zoneListId && l.scaleAmount === undefined ? zoneListId : null));
+      }),
+    [baseCart, lineLists, productById, priceListId, zoneListId]
   );
+  // Una línea que se quitó no deja su lista guardada (si vuelve a entrar, sigue al botón de arriba).
+  useEffect(() => {
+    setLineLists((prev) => {
+      const keys = new Set(baseCart.map((l) => l.key));
+      const kept = Object.entries(prev).filter(([k]) => keys.has(k));
+      return kept.length === Object.keys(prev).length ? prev : Object.fromEntries(kept);
+    });
+  }, [baseCart]);
+  /** Botón de arriba: cambia el precio de lo que se agregue desde ahora; lo que ya está en el ticket queda como estaba. */
+  function choosePriceList(listId: string | null) {
+    if (listId === priceListId) return;
+    setLineLists((prev) => keepCurrentLists(prev, baseCart, priceListId));
+    setPriceListId(listId);
+  }
+  /** "Cobrar todo a …": todas las líneas al precio del botón de arriba. */
+  function applyPriceListToAll() {
+    setLineLists({});
+  }
+  /** Cambiar una sola línea: a Minorista, o a la lista del botón de arriba. */
+  function setLinePriceList(key: string, listId: string | null) {
+    setLineLists((prev) => ({ ...prev, [key]: listId }));
+  }
+  const mixedPrices = baseCart.some((l) => l.kind === "product" && lineListFor(l.key, lineLists, priceListId) !== priceListId);
   /** Varios tickets de la balanza con el mismo total: la persona elige cuál (nunca a ciegas). */
   const [scaleTicketChoices, setScaleTicketChoices] = useState<{ amount: number; candidates: TicketCandidate[]; charged: SystelTicket[] } | null>(null);
   const [readingScaleTicket, setReadingScaleTicket] = useState(false);
@@ -816,6 +843,7 @@ ${l.name} ${qty}`);
     papers.reset();
     setCart([]);
     setPriceListId(null);
+    setLineLists({});
     setItemDiscounts({});
     setSaleDiscount("");
     setSaleDiscountMode("amount");
@@ -903,7 +931,7 @@ ${l.name} ${qty}`);
 
   /** Lista con la que se muestran los precios al buscar: la elegida o la zona del local. */
   const displayListId = priceListId ?? zoneListId;
-  return { priceListId, setPriceListId, displayListId, search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, detailing, startTicketDetail, stopTicketDetail, commitScaleTickets, papers, readingScaleTicket, scaleTicketChoices, setScaleTicketChoices, addScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
+  return { priceListId, setPriceListId: choosePriceList, applyPriceListToAll, setLinePriceList, mixedPrices, displayListId, search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, detailing, startTicketDetail, stopTicketDetail, commitScaleTickets, papers, readingScaleTicket, scaleTicketChoices, setScaleTicketChoices, addScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
 }
 
 export type SaleTicket = ReturnType<typeof useSaleTicket>;

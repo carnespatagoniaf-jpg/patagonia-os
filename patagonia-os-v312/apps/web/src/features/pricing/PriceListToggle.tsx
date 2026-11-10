@@ -3,7 +3,8 @@ import { checkPriceListPin } from "./price-lists-service";
 import type { PriceList } from "./price-lists";
 
 /**
- * Mostrador: "Minorista / Mayorista" para la venta que se está armando. Pasar a una lista a mano
+ * Mostrador: "Minorista / Mayorista" para lo que se agrega al ticket desde ahora (desde 2026-11-10 lo que ya estaba
+ * queda a su precio, así un mismo ticket lleva productos a los dos precios; useSaleTicket.choosePriceList). Pasar a una lista a mano
  * pide el PIN de anular si la empresa tiene uno (es un descuento). Volver a Minorista no pide nada.
  * Sin conexión no se puede comprobar el PIN: se deja pasar y queda registrado en la venta.
  */

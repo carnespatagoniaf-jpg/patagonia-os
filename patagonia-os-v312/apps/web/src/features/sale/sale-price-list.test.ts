@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Product } from "@patagonia/domain";
-import { lineGross, withPriceList, type TicketLine } from "./sale-model";
+import { keepCurrentLists, lineGross, lineListFor, withPriceList, type TicketLine } from "./sale-model";
 
 const chorizo: Product = {
   id: "p1", code: "105", name: "Chorizo", unit: "kg", cost: 6000, priceRetail: 8100, stock: 10, minStock: 0,
@@ -40,5 +40,28 @@ describe("Mostrador con precio mayorista (igual que create_pos_sale)", () => {
     assert.equal(withPriceList(manual, undefined, "may"), manual);
     const pending: TicketLine = { ...weighed, scalePending: true };
     assert.equal(withPriceList(pending, chorizo, "may"), pending);
+  });
+});
+
+describe("minorista y mayorista en el mismo ticket", () => {
+  const asado: TicketLine = { key: "asado", kind: "product", productId: "a", name: "Asado", unit: "kg", quantity: 2, unitPrice: 18000 };
+  const vacio: TicketLine = { ...asado, key: "vacio", productId: "v", name: "Vacío" };
+  const bolsa: TicketLine = { key: "m", kind: "manual", name: "Bolsa", unit: "unit", quantity: 1, unitPrice: 100 };
+
+  it("al pasar a Mayorista, lo que ya estaba sigue a Minorista y lo nuevo va a Mayorista", () => {
+    const lists = keepCurrentLists({}, [asado, bolsa], null);
+    assert.deepEqual(lists, { asado: null });
+    assert.equal(lineListFor("asado", lists, "may"), null);
+    assert.equal(lineListFor("vacio", lists, "may"), "may");
+  });
+  it("volver a Minorista no le cambia el precio a lo que se cargó como Mayorista", () => {
+    let lists = keepCurrentLists({}, [asado], null);
+    lists = keepCurrentLists(lists, [asado, vacio], "may");
+    assert.deepEqual(lists, { asado: null, vacio: "may" });
+    assert.equal(lineListFor("vacio", lists, null), "may");
+  });
+  it("un renglón que no se tocó sigue al botón de arriba", () => {
+    assert.equal(lineListFor("asado", {}, "may"), "may");
+    assert.equal(lineListFor("asado", {}, null), null);
   });
 });

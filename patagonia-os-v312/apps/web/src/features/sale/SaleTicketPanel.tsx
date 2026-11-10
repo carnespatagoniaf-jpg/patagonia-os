@@ -11,7 +11,7 @@ import type { SaleTicket } from "./useSaleTicket";
 // medios de pago y barra de cobro. Es solo vista: el estado vive en
 // useSaleTicket y el cobro (checkout) en Sale.tsx.
 
-export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlot, priceSlot }: {
+export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlot, priceSlot, priceLists = [] }: {
   ticket: SaleTicket;
   accounts: TreasuryAccount[];
   busy: boolean;
@@ -20,6 +20,8 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
   invoiceSlot?: ReactNode;
   /** Botón Minorista / Mayorista (solo si la empresa tiene listas de precios). */
   priceSlot?: ReactNode;
+  /** Listas que se eligen en Mostrador (sin zonas): cada renglón dice la suya y se puede cambiar. */
+  priceLists?: Array<{ id: string; name: string }>;
 }) {
   // Lo que se está tipeando en la cantidad de cada renglón. Sin esto, al borrar
   // la cantidad para escribir los kilos el campo volvía a mostrar "0" y se
@@ -217,6 +219,26 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
               <small>
                 {line.kind === "manual" ? "Manual · " : ""}{line.scalePending ? "Esperando el TOTAL del ticket · " : line.scaleTicket ? "Ticket de la balanza · " : ""}{line.priceListId && line.retailPrice !== undefined && line.retailPrice !== line.unitPrice && <s style={{ marginRight: 4 }}>{formatMoney(line.retailPrice)}</s>}{formatMoney(line.unitPrice)}{line.unit === "kg" ? " /kg" : ` /${UNIT_LABELS[line.unit]}`}
               </small>
+              {line.kind === "product" && !line.scalePending && priceLists.length > 0 && (() => {
+                // Minorista y mayorista en el mismo ticket: cada renglón dice a qué precio va y se cambia acá.
+                const own = priceLists.find((p) => p.id === line.priceListId);
+                const top = priceLists.find((p) => p.id === ticket.priceListId);
+                if (own) {
+                  return (
+                    <small className="pos-line-list">
+                      <span className="badge">{own.name}</span>{" "}
+                      <button type="button" className="link-button" disabled={busy} onClick={() => ticket.setLinePriceList(line.key, null)}>Pasar a Minorista</button>
+                    </small>
+                  );
+                }
+                if (!top) return null;
+                return (
+                  <small className="pos-line-list">
+                    <span className="badge">Minorista</span>{" "}
+                    <button type="button" className="link-button" disabled={busy} onClick={() => ticket.setLinePriceList(line.key, top.id)}>Pasar a {top.name}</button>
+                  </small>
+                );
+              })()}
               {line.kind === "manual" && line.source === "scale_total" && (
                 ticket.detailing === line.key ? (
                   <small className="pos-detail-hint">

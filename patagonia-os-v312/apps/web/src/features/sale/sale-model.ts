@@ -67,6 +67,21 @@ export function withPriceList(l: TicketLine, product: Product | undefined, listI
   return { ...l, priceListId: listId, retailPrice: retail, unitPrice: productPrice(product, listId) };
 }
 
+/**
+ * Minorista y mayorista en el mismo ticket (2026-11-10). `lineLists` = la lista propia de cada renglón
+ * (null = minorista); un renglón sin entrada sigue al botón de arriba (`ticketList`).
+ */
+export function lineListFor(key: string, lineLists: Record<string, string | null>, ticketList: string | null): string | null {
+  return key in lineLists ? lineLists[key] : ticketList;
+}
+
+/** Al tocar el botón de arriba, lo que ya está en el ticket se queda con la lista que tenía. */
+export function keepCurrentLists(lineLists: Record<string, string | null>, lines: Pick<TicketLine, "key" | "kind">[], ticketList: string | null): Record<string, string | null> {
+  const next = { ...lineLists };
+  for (const l of lines) if (l.kind === "product" && !(l.key in next)) next[l.key] = ticketList;
+  return next;
+}
+
 export interface PaymentRow {
   accountId: string;
   amount: string;
