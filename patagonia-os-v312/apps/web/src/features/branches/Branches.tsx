@@ -59,7 +59,30 @@ function ProductPicker({ products, placeholder, onPick }: { products: Product[];
   );
 }
 
+/** Precios por zona es de todos los planes desde Estándar (migración 197); el resto de Sucursales sigue en Full/Empresa.
+ * En Estándar la pantalla muestra solo las zonas y no llama al tablero (get_branches_overview pide plan Full). */
 export function Branches() {
+  const { profile } = useAuth();
+  return planAllows(profile, "full") ? <BranchesFull /> : <BranchesZonesOnly />;
+}
+
+function BranchesZonesOnly() {
+  const { branchId: activeBranchId } = useActiveBranch();
+  return (
+    <>
+      <header className="page-header">
+        <div>
+          <p className="eyebrow">SUCURSALES</p>
+          <h1>Precios por zona</h1>
+          <p className="muted">Cada local puede tener sus propios precios. Los locales sin zona venden al precio general, el de Stock.</p>
+        </div>
+      </header>
+      {activeBranchId && <ZonesTab activeBranchId={activeBranchId} />}
+    </>
+  );
+}
+
+function BranchesFull() {
   const { branches, loading, error, transfer, reload: reloadOverview } = useBranchesOverview();
   const { profile } = useAuth();
   // Plan Empresa (migración 189): pedidos entre locales con remito y recepción (migración 190).
@@ -221,7 +244,7 @@ export function Branches() {
         <button className={tab === "tablero" ? "page-tab active" : "page-tab"} onClick={() => setTab("tablero")}>Tablero</button>
         <button className={tab === "mercaderia" ? "page-tab active" : "page-tab"} onClick={() => setTab("mercaderia")}>{empresa ? "Mercadería entre locales" : "Pasar mercadería"}</button>
         <button className={tab === "caja" ? "page-tab active" : "page-tab"} onClick={() => setTab("caja")}>Caja de cada local</button>
-        {empresa && <button className={tab === "zonas" ? "page-tab active" : "page-tab"} onClick={() => setTab("zonas")}>Precios por zona</button>}
+        <button className={tab === "zonas" ? "page-tab active" : "page-tab"} onClick={() => setTab("zonas")}>Precios por zona</button>
         {empresa && <button className={tab === "local" ? "page-tab active" : "page-tab"} onClick={() => setTab("local")}>Abrir un local</button>}
       </div>
 
@@ -231,7 +254,7 @@ export function Branches() {
 
       {tab === "tablero" && branches.length > 0 && <BranchDashboard branches={branches} onTab={setTab} />}
       {tab === "caja" && branches.length > 0 && <BranchCashTab branches={branches} />}
-      {tab === "zonas" && empresa && activeBranchId && <ZonesTab activeBranchId={activeBranchId} />}
+      {tab === "zonas" && activeBranchId && <ZonesTab activeBranchId={activeBranchId} />}
       {tab === "local" && empresa && (
         <NewBranchCopy
           branches={branches.map((b) => ({ id: b.branchId, name: b.branchName }))}
