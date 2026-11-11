@@ -1277,9 +1277,20 @@ Cancelar = es el mismo papel: no cobrar.`)) {
             accounts={accounts}
             busy={busy}
             onCheckout={checkout}
+            priceLists={priceLists}
             priceSlot={
               priceLists.length > 0 ? (
-                <PriceListToggle lists={priceLists} value={ticket.priceListId} onChange={ticket.setPriceListId} disabled={busy} />
+                <>
+                  <PriceListToggle lists={priceLists} value={ticket.priceListId} onChange={ticket.setPriceListId} disabled={busy} />
+                  {ticket.mixedPrices && (
+                    <p className="muted" style={{ fontSize: 13, margin: "-4px 0 10px" }}>
+                      Este ticket tiene productos a distinto precio (cada renglón dice el suyo).{" "}
+                      <button type="button" className="link-button" disabled={busy} onClick={ticket.applyPriceListToAll}>
+                        Cobrar todo a {priceLists.find((l) => l.id === ticket.priceListId)?.name ?? "Minorista"}
+                      </button>
+                    </p>
+                  )}
+                </>
               ) : null
             }
             invoiceSlot={
