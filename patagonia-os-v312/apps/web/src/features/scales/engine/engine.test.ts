@@ -176,6 +176,16 @@ describe("[SIMULADO, registros REALES] Mi balanza con una Systel Cuora Max: Pata
     assert.equal(prep.blocker, undefined);
   });
 
+  it("balanza vacía con la sucursal ya activa: no dice 'ya tiene los mismos productos', pide cargar uno a mano (real Pollo Pampa 04/11)", async () => {
+    const f = new FakeCuora("max60", { address: 20, protocol: "0060", typeByteAccepted: "ascii", loteNulOnWrite: true });
+    const setup = { profile: { scaleKey: "systel-x", brand: "systel", weighedFormat: null, unitFormat: null, totalFormat: null, amountDecimals: 0, genericCodes: [], catalog: [] }, links: [], readAt: null, repeatWindowMinutes: 3, active: true };
+    const { deps } = fakeDb(setup);
+    const prep = await new SystelSession(f, 20, ctx(PRODUCTS), deps).prepare(noop);
+    assert.equal(prep.upToDate, false);
+    assert.equal(prep.canWrite, false);
+    assert.match(prep.blocker!, /no tiene ningún producto cargado/);
+  });
+
   it("Systel con otra firma: nunca escribe, aunque sea el build de laboratorio", async () => {
     const f = cuora("0040");
     const { deps } = fakeDb();

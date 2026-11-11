@@ -341,7 +341,10 @@ export class SystelSession implements ScaleSession {
     const allowed = canWrite(this.model, "sendProducts") || (this.deps.forceWritable === true && this.model === "systel-cuora-max");
     const writable = allowed && !!layout && backup.complete;
     const linked = !!setup?.active && plan.every((x) => x.action !== "sin_cambios" || setup.links.some((l) => l.code === x.number && l.kind === "product" && l.productId === x.product.id));
-    const upToDate = writes === 0 && linked;
+    // Sin formato reconocido o sin nada que comparar no está "todo igual": real Pollo Pampa 04/11, la balanza quedó vacía,
+    // el plan salía vacío y la pantalla decía "ya tiene los mismos productos" con 0 productos en la balanza.
+    const upToDate = !!layout && plan.length > 0 && writes === 0 && linked;
+    const emptyScale = !layout && backup.complete && backup.list.length === 0;
     return {
       model: this.model,
       label: this.label,
@@ -360,7 +363,10 @@ export class SystelSession implements ScaleSession {
         ? {
             // Antes decía "falta habilitarla: lo hace soporte en unos minutos", pero no hay nada que soporte pueda tocar:
             // un modelo se habilita solo después de una prueba con la balanza real (capabilities.ts). Real Giuseppe, 27/10.
-            blocker: allowed
+            // Vacía, el modelo no se puede reconocer (sale de cómo guarda los productos): primero que cargue uno.
+            blocker: emptyScale
+              ? "Tu balanza no tiene ningún producto cargado, y Patagonia necesita uno para reconocer cómo los guarda. Cargá a mano en la balanza un producto cualquiera (por ejemplo el 1, con su nombre y precio) y tocá \"Conectar balanza\" otra vez: después Patagonia manda el resto."
+              : allowed
               ? "No se pudo leer toda la balanza. Tocá \"Conectar balanza\" otra vez."
               : `Tu balanza está conectada y Patagonia pudo leerla, pero este modelo de Systel todavía no está comprobado para recibir productos. Para no arriesgar los productos y precios de tu balanza, no se le mandó nada. Soporte de Patagonia tiene que hacer una prueba con vos antes de habilitarla: escribinos por WhatsApp al 11 2787-1634.`
           }
