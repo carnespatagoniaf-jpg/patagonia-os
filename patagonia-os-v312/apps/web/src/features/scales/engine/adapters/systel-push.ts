@@ -246,3 +246,30 @@ export async function proveSystelWrite(client: SystelClient, layout: SystelLayou
   }
   return { ...out, detail: `la balanza rechazó el producto de prueba de las dos formas (${out.tries.map((t) => t.detail).join(" / ")})` };
 }
+
+/** Nombre del sector que crea Patagonia cuando falta (la balanza no lo imprime en la etiqueta). */
+export const SECTOR_NAME = "GENERAL";
+
+/**
+ * Balanza VACÍA: los productos nuevos se arman con el sector de los modelos (systel-empty-template.ts). Si alguien borró
+ * los sectores en la balanza, cada producto da E7 (real Los gringos 13/11). Lee los sectores (11), crea solo los que faltan
+ * (10, nunca uno que ya está: la 10 también le cambia el nombre) y relee. Si la 11 no se puede leer, no escribe nada y
+ * sigue como antes (si falta el sector, el primer producto dará E7 y se frena sin tocar nada).
+ */
+export async function ensureSystelSectors(client: SystelClient, needed: number[]): Promise<{ ok: boolean; created: number[]; detail: string }> {
+  const want = [...new Set(needed)].filter((n) => Number.isInteger(n) && n >= 1 && n <= 99);
+  if (want.length === 0) return { ok: true, created: [], detail: "sin sectores para revisar" };
+  const before = await client.sectors();
+  if (!before) return { ok: true, created: [], detail: "no se pudo leer la lista de sectores: no se creó ninguno" };
+  const missing = want.filter((n) => !before.some((s) => s.number === n));
+  if (missing.length === 0) return { ok: true, created: [], detail: `la balanza ya tiene el sector ${want.join(", ")}` };
+  for (const n of missing) {
+    const r = await client.writeSector(n, SECTOR_NAME);
+    if (r === "bloqueado") return { ok: false, created: [], detail: "crear sectores está bloqueado en esta conexión" };
+    if (!r || r.kind !== "ack") return { ok: false, created: [], detail: `la balanza no aceptó crear el sector ${n} (${!r ? "sin respuesta" : r.data})` };
+  }
+  const after = await client.sectors();
+  const still = after ? missing.filter((n) => !after.some((s) => s.number === n)) : missing;
+  if (still.length > 0) return { ok: false, created: [], detail: `después de crearlo, el sector ${still.join(", ")} no aparece en la balanza` };
+  return { ok: true, created: missing, detail: `sector ${missing.join(", ")} creado y releído` };
+}

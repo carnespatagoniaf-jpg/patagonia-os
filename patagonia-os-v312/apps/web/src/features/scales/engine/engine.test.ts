@@ -214,6 +214,52 @@ describe("[SIMULADO, registros REALES] Mi balanza con una Systel Cuora Max: Pata
     assert.equal(calls.catalog?.length, 6);
   });
 
+  // Real Los gringos 13/11 15:50: balanza vacía y el primer producto (98, sector 01) contestó E7. Borraron el sector.
+  const emptyCuora = (sectors: Map<number, string>) => {
+    const f = new FakeCuora("max60", { address: 20, protocol: "0060", typeByteAccepted: "ascii", loteNulOnWrite: true });
+    f.sectors = sectors;
+    f.noSectorsReplyE7 = true;
+    return f;
+  };
+
+  it("balanza vacía y SIN el sector: lo crea (función 10), lo relee y recién ahí pasa los productos", async () => {
+    const f = emptyCuora(new Map());
+    const { deps } = fakeDb({ active: true, links: [] } as unknown as ScaleSetup);
+    const s = new SystelSession(f, 20, ctx(PRODUCTS), deps);
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, true);
+    assert.equal(f.sectors!.get(1), "GENERAL           ");
+    assert.equal(f.plus.size, 6);
+    const fns = f.received.map((r) => r.fn);
+    assert.ok(fns.indexOf(10) < fns.indexOf(61), "el sector antes que los productos");
+    assert.equal(fns.filter((x) => x === 10).length, 1);
+    assert.deepEqual(f.received.find((r) => r.fn === 10)!.data, "01GENERAL           ");
+  });
+
+  it("balanza vacía que YA tiene el sector: no lo toca (la 10 le cambiaría el nombre)", async () => {
+    const f = emptyCuora(new Map([[1, "POLLERIA          "]]));
+    const { deps } = fakeDb({ active: true, links: [] } as unknown as ScaleSetup);
+    const s = new SystelSession(f, 20, ctx(PRODUCTS), deps);
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, true);
+    assert.equal(f.received.filter((r) => r.fn === 10).length, 0);
+    assert.equal(f.sectors!.get(1), "POLLERIA          ");
+    assert.equal(f.plus.size, 6);
+  });
+
+  it("balanza vacía que no acepta crear el sector: frena sin mandar ningún producto", async () => {
+    const f = emptyCuora(new Map());
+    const orig = f.exchange.bind(f);
+    f.exchange = async (frame: Uint8Array) => (frame[1] === 10 ? Uint8Array.from([20, 10, 0x45, 0x38, 20 ^ 10 ^ 0x45 ^ 0x38]) : orig(frame));
+    const { deps, calls } = fakeDb({ active: true, links: [] } as unknown as ScaleSetup);
+    const s = new SystelSession(f, 20, ctx(PRODUCTS), deps);
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, false);
+    assert.equal(f.received.filter((r) => r.fn === 61).length, 0);
+    assert.equal(f.plus.size, 0);
+    assert.equal(calls.catalog, undefined);
+  });
+
   it("balanza vacía de otra firma: no inventa nada y pide cargar un producto a mano (nunca 'ya está al día')", async () => {
     const f = new FakeCuora("max60", { address: 20, protocol: "0040", typeByteAccepted: "ascii", loteNulOnWrite: true });
     const { deps } = fakeDb({ active: true, links: [] } as unknown as ScaleSetup);

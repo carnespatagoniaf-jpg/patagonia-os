@@ -12,7 +12,7 @@ import { canWrite, SCALE_CAPABILITIES, systelLimits, type ScaleModelId } from ".
 import { preflightProducts, type PreflightResult } from "../preflight";
 import { FRIENDLY_MESSAGES, FriendlyError, SENT_AND_CHECKED } from "../friendly";
 import type { EngineContext, PendingItem, PreparedSync, ProgressFn, ScaleAdapter, ScaleCatalogEntry, ScaleSession, SyncOutcome } from "../types";
-import { planSystelPush, PROOF_NAME, proveSystelWrite, runSystelPush, scaleOnly, type PushItem, type PushProduct, type WriteProofResult } from "./systel-push";
+import { ensureSystelSectors, planSystelPush, PROOF_NAME, proveSystelWrite, runSystelPush, scaleOnly, type PushItem, type PushProduct, type WriteProofResult } from "./systel-push";
 import type { TypeByteMode } from "../../../inventory/systel/systel-product-barcode";
 import type { SystelPlu } from "../../../inventory/systel/systel-plu";
 import { EMPTY_SCALE_MESSAGE, emptyScaleTemplates } from "./systel-empty-template";
@@ -408,6 +408,12 @@ export class SystelSession implements ScaleSession {
         saveWriteProof(st.backup, this.number, mode);
       }
       const modePlan = mode === "ascii" ? plan : planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: !!opts.allowReplace, mode, templates: st.templates });
+      // Balanza vacía: el sector de los modelos tiene que existir (si lo borraron, cada producto da E7).
+      if (st.templates.length > 0) {
+        onProgress("sincronizar", "Revisando los sectores de tu balanza…");
+        const sectors = await ensureSystelSectors(writer, st.templates.map((t) => t.sector));
+        if (!sectors.ok) return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, support: { etapa: "sector", detail: sectors.detail } };
+      }
       const existing = toWrite.filter((x) => x.current).map((x) => x.number!);
       if (existing.length) {
         const { backup, missing } = await takeProductBackup(writer, layout, existing);

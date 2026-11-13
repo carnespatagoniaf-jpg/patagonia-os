@@ -1,4 +1,4 @@
-import { buildSystelFrame, describeSystelError, findSystelReplies, parseSystelReply, toHex, type SystelReply } from "./systel-frame";
+import { buildSystelFrame, describeSystelError, findSystelReplies, parseSystelReply, toCuoraText, toHex, type SystelReply } from "./systel-frame";
 import {
   buildNewPluData,
   buildPriceChangeData,
@@ -58,13 +58,19 @@ export function replyIsComplete(rx: Uint8Array): boolean {
 const TRANSIENT_ERRORS = new Set(["E1", "E2", "E3"]);
 
 /** 72 = "Reporte de ventas" (V6.0/V6.2/V7): solo consulta, no cambia nada en la balanza. */
-export const SYSTEL_READ_FUNCTIONS = [1, 2, 3, 23, 28, 31, 39, 62, 72] as const;
+export const SYSTEL_READ_FUNCTIONS = [1, 2, 3, 11, 23, 28, 31, 39, 62, 72] as const;
 /**
  * Escrituras posibles, cada una solo a través de su método (que relee y compara):
  * 33 cambio de precio, 61/4 alta, 7 SOLO para "imprimir el código de barras en los tickets"
  * (setTicketBarcodes: el otro parámetro de la 7 va con "X" = "el parámetro permanece sin cambio").
  */
-export const SYSTEL_WRITE_FUNCTIONS = [4, 7, 25, 33, 35, 61] as const;
+export const SYSTEL_WRITE_FUNCTIONS = [4, 7, 10, 25, 33, 35, 61] as const;
+/*
+ * 11 (lista de sectores, solo lectura) y 10 (alta de sector) desde el 13/11/2026 (protocolo Cuora Max V6.0 págs. 10-11,
+ * V6.2 y V7 iguales): sector = 2 números (01-99) + nombre (18). Real Los gringos: borraron todos los productos a mano y
+ * la balanza contestó E7 ("el dato pedido no existe") al primer producto que usaba el sector 01. La 10 solo se manda
+ * con la balanza VACÍA y para un sector que la 11 dice que no está (nunca para renombrar uno), y se relee la 11.
+ */
 /**
  * 25 y 35 salieron de la lista prohibida el 19/10/2026 (protocolo Cuora Max V6.0 págs. 7 y 16-17, V7 igual):
  * - 25 "Indicación de finalización de sincronización. Solicitud de liberar el equipo": IP + 25 + CRC, responde ACK.
@@ -73,7 +79,7 @@ export const SYSTEL_WRITE_FUNCTIONS = [4, 7, 25, 33, 35, 61] as const;
  * - 35 "Esperar sincronización de datos al inicio": IP + 35 + "S"/"N". Patagonia solo manda "N" (que NO espere), y solo
  *   si la configuración (39) dice ";Sinc=1"; después relee la 39 para comprobarlo.
  */
-export const SYSTEL_FORBIDDEN_FUNCTIONS = [5, 6, 8, 9, 10, 12, 13, 15, 16, 17, 18, 22, 24, 26, 32, 34, 38, 40, 41, 42, 45, 46, 47, 64, 65, 68, 69, 70, 71, 74, 87];
+export const SYSTEL_FORBIDDEN_FUNCTIONS = [5, 6, 8, 9, 12, 13, 15, 16, 17, 18, 22, 24, 26, 32, 34, 38, 40, 41, 42, 45, 46, 47, 64, 65, 68, 69, 70, 71, 74, 87];
 
 const WRITE_TOKEN = Symbol("systel-write");
 
@@ -252,6 +258,33 @@ export class SystelClient {
   async clock(): Promise<string | null> {
     const r = await this.call("fecha y hora", 28, "");
     return r && r.kind === "data" ? r.data : null;
+  }
+
+  /**
+   * Sectores de la balanza (función 11, solo lectura): "NN" + nombre, separados por ";". E7 = no tiene ninguno.
+   * null si no contestó o si algún tramo no tiene esa forma (no se adivina: quien llama no escribe nada).
+   */
+  async sectors(): Promise<{ number: number; name: string }[] | null> {
+    const r = await this.call("lista de sectores", 11, "");
+    if (!r) return null;
+    if (r.kind === "error") return r.errorCode === "E7" ? [] : null;
+    if (r.kind !== "data") return null;
+    const out: { number: number; name: string }[] = [];
+    for (const part of r.data.split(";")) {
+      if (part === "" || part === "F") continue;
+      const m = /^(\d{2})([\s\S]*)$/.exec(part);
+      if (!m) return null;
+      out.push({ number: Number(m[1]), name: m[2].trim() });
+    }
+    return out;
+  }
+
+  /** Alta de un sector (función 10): número 01-99 + nombre (18). Bloqueado salvo `writes.products`. No relee: lo hace quien llama. */
+  async writeSector(number: number, name: string): Promise<SystelReply | null | "bloqueado"> {
+    if (!this.writes.products) return "bloqueado";
+    if (!Number.isInteger(number) || number < 1 || number > 99) throw new Error(`sector fuera de rango: ${number}`);
+    const data = String(number).padStart(2, "0") + toCuoraText(name, 18);
+    return this.call(`crear sector ${number} (función 10)`, 10, data, { token: WRITE_TOKEN });
   }
 
   async list(): Promise<{ entries: PluListEntry[]; digits: 4 | 6 | null } | null> {

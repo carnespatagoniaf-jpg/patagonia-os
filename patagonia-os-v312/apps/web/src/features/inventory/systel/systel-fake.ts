@@ -41,6 +41,13 @@ export class FakeCuora implements SystelLink {
   clock = "12:00:00 13/10/26";
   /** Solo pruebas (HIPÓTESIS Los gringos 19/10): contesta E3 a todo hasta recibir la función 25 (liberar el equipo). */
   e3UntilRelease = false;
+  /**
+   * Sectores (funciones 10/11, V6.0 págs. 10-11). null = no se controlan (como antes). Con un mapa, escribir un producto
+   * de un sector que no está da E7 (real Los gringos 13/11: borraron los productos y la balanza contestó E7 al primero).
+   */
+  sectors: Map<number, string> | null = null;
+  /** Lista de sectores vacía: contesta E7 ("el dato pedido no existe") en vez de una lista vacía. */
+  noSectorsReplyE7 = false;
 
   constructor(
     readonly layout: SystelLayout,
@@ -181,12 +188,32 @@ export class FakeCuora implements SystelLink {
         const tail = rec.slice(fixed);
         const flag = tail[info.tailFixed - 1];
         if (tail.length !== info.tailFixed + (flag === "S" ? 100 : 0)) return this.reply(fn, "E5");
+        if (this.sectors && this.layout !== "cuora2") {
+          const sectorAt = info.pluDigits + 1 + 18 + info.priceLists * (this.layout === "max7" ? 12 : 6) + info.codeDigits;
+          if (!this.sectors.has(Number(rec.slice(sectorAt, sectorAt + 2)))) return this.reply(fn, "E7");
+        }
         this.plus.set(n, rec);
         if (this.corruptAfterWrite === n) {
           this.plus.set(n, rec.slice(0, pd + 1) + "X" + rec.slice(pd + 2));
           if (this.corruptOnce) this.corruptAfterWrite = null;
         }
         return this.reply(fn, "ACK");
+      }
+      case 10: {
+        // DOCUMENTADO (V6.0 pág. 10-11): número de sector (2, 01-99) + nombre (18). Alta o cambio de nombre. ACK.
+        if (!this.sectors) return this.reply(fn, "E4");
+        if (data.length !== 20 || !/^\d{2}$/.test(data.slice(0, 2))) return this.reply(fn, "E5");
+        const n = Number(data.slice(0, 2));
+        if (n < 1 || n > 99) return this.reply(fn, "E6");
+        this.sectors.set(n, data.slice(2));
+        return this.reply(fn, "ACK");
+      }
+      case 11: {
+        // DOCUMENTADO (V6.0 pág. 11): todos los sectores separados por ";", cada uno número (2) + nombre (19).
+        if (!this.sectors) return this.reply(fn, "E4");
+        if (this.sectors.size === 0 && this.noSectorsReplyE7) return this.reply(fn, "E7");
+        const list = [...this.sectors.entries()].sort((a, b) => a[0] - b[0]);
+        return this.reply(fn, list.map(([n, name]) => String(n).padStart(2, "0") + name.padEnd(19, " ").slice(0, 19)).join(";"));
       }
       case 72: {
         // DOCUMENTADO (V6.0 pág. 33, V7 págs. 30-31): pedido ddmmaa inicio + ddmmaa fin; respuesta con los
