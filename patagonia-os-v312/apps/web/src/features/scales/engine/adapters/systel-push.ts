@@ -111,9 +111,11 @@ export function sameRecord(layout: SystelLayout, expected: string, actual: strin
 
 const withGestion = (layout: SystelLayout, data: string, g = "1") => data.slice(0, LAYOUT_INFO[layout].pluDigits) + g + data.slice(LAYOUT_INFO[layout].pluDigits);
 
-export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDecimals: number, products: PushProduct[], opts: { replace?: boolean; mode?: TypeByteMode } = {}): PushItem[] {
+/** `templates`: modelos para armar productos nuevos cuando la balanza no tiene ninguno (systel-empty-template.ts). */
+export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDecimals: number, products: PushProduct[], opts: { replace?: boolean; mode?: TypeByteMode; templates?: SystelPlu[] } = {}): PushItem[] {
   const info = LAYOUT_INFO[layout];
   const byNumber = new Map(plus.map((p) => [p.number, p]));
+  const models = plus.length > 0 ? plus : (opts.templates ?? []);
   const seen = new Map<number, string>();
   return products.map((product): PushItem => {
     const base = { product, current: null as string | null, data: null as string | null };
@@ -134,7 +136,7 @@ export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDec
     }
     const cur = byNumber.get(number) ?? null;
     const target = targetCodeFor(product.byWeight ? "P" : "U")!;
-    const template = cur ? null : (plus.find((p) => (p.saleType === "P" || p.saleType === "C") === product.byWeight) ?? plus[0])?.raw ?? null;
+    const template = cur ? null : (models.find((p) => (p.saleType === "P" || p.saleType === "C") === product.byWeight) ?? models[0])?.raw ?? null;
     const read = desiredRead(layout, number, product, priceRaw, cur?.raw ?? null, template);
     const data = read ? buildBarcodeRewrite(read, layout, target, opts.mode ?? "ascii") : null;
     if (!data) return { ...base, number, current: cur?.raw ?? null, action: "omitir", reason: "el registro de la balanza no tiene la forma esperada" };

@@ -14,6 +14,8 @@ import { FRIENDLY_MESSAGES, FriendlyError, SENT_AND_CHECKED } from "../friendly"
 import type { EngineContext, PendingItem, PreparedSync, ProgressFn, ScaleAdapter, ScaleCatalogEntry, ScaleSession, SyncOutcome } from "../types";
 import { planSystelPush, PROOF_NAME, proveSystelWrite, runSystelPush, scaleOnly, type PushItem, type PushProduct, type WriteProofResult } from "./systel-push";
 import type { TypeByteMode } from "../../../inventory/systel/systel-product-barcode";
+import type { SystelPlu } from "../../../inventory/systel/systel-plu";
+import { EMPTY_SCALE_MESSAGE, emptyScaleTemplates } from "./systel-empty-template";
 
 /**
  * Systel (Cuora Max y familia), Patagonia → balanza. Reutiliza, sin cambiarlos:
@@ -101,6 +103,8 @@ interface State {
   products: PushProduct[];
   plan: PushItem[];
   setup: ScaleSetup | null;
+  /** Balanza sin productos: modelos para armar los nuevos (si no, vacío). */
+  templates: SystelPlu[];
 }
 
 export class SystelSession implements ScaleSession {
@@ -286,6 +290,12 @@ export class SystelSession implements ScaleSession {
     this.deps.onConnectionHints?.(this.connectionHints());
     const backup = await takeSystelBackup(this.client(), () => onProgress("leer", "Leyendo tu balanza…"));
     this.lastBackup = backup;
+    // Balanza vacía (real Los gringos 13/11: borraron todo a mano): sin un producto no se reconoce el formato ni hay
+    // de dónde copiar los nuevos. Con la firma comprobada se usan registros reales de ese modelo.
+    const empty = backup.complete && backup.list.length === 0 && !!backup.signature;
+    const fallback = empty ? emptyScaleTemplates(backup.signature?.protocolVersion) : null;
+    if (fallback) backup.layout = fallback.layout;
+    const templates = fallback?.plus ?? [];
     // La 35 cambia la configuración: se manda recién al sincronizar (la persona confirma), no al leer.
     this.startupWaitOn = backup.config?.values.Sinc === "1";
     if (!backup.signature && !backup.ping) {
@@ -319,8 +329,8 @@ export class SystelSession implements ScaleSession {
       : null;
     const readyIds = new Set((check?.ready ?? []).map((p) => p.id));
     const products = this.pushProducts().filter((p) => readyIds.has(p.id));
-    const plan = layout ? planSystelPush(backup.plus, layout, backup.signature?.priceDecimals ?? 0, products) : [];
-    this.state = { backup, products, plan, setup };
+    const plan = layout ? planSystelPush(backup.plus, layout, backup.signature?.priceDecimals ?? 0, products, { templates }) : [];
+    this.state = { backup, products, plan, setup, templates };
 
     const count = (a: string) => plan.filter((x) => x.action === a).length;
     const writes = count("crear") + count("actualizar");
@@ -341,7 +351,8 @@ export class SystelSession implements ScaleSession {
     const allowed = canWrite(this.model, "sendProducts") || (this.deps.forceWritable === true && this.model === "systel-cuora-max");
     const writable = allowed && !!layout && backup.complete;
     const linked = !!setup?.active && plan.every((x) => x.action !== "sin_cambios" || setup.links.some((l) => l.code === x.number && l.kind === "product" && l.productId === x.product.id));
-    const upToDate = writes === 0 && linked;
+    // Una balanza vacía nunca está "al día" (antes decía "ya tiene los mismos productos" con 0 productos).
+    const upToDate = writes === 0 && linked && !(empty && !fallback);
     return {
       model: this.model,
       label: this.label,
@@ -360,7 +371,9 @@ export class SystelSession implements ScaleSession {
         ? {
             // Antes decía "falta habilitarla: lo hace soporte en unos minutos", pero no hay nada que soporte pueda tocar:
             // un modelo se habilita solo después de una prueba con la balanza real (capabilities.ts). Real Giuseppe, 27/10.
-            blocker: allowed
+            blocker: empty && !fallback
+              ? EMPTY_SCALE_MESSAGE
+              : allowed
               ? "No se pudo leer toda la balanza. Tocá \"Conectar balanza\" otra vez."
               : `Tu balanza está conectada y Patagonia pudo leerla, pero este modelo de Systel todavía no está comprobado para recibir productos. Para no arriesgar los productos y precios de tu balanza, no se le mandó nada. Soporte de Patagonia tiene que hacer una prueba con vos antes de habilitarla: escribinos por WhatsApp al 11 2787-1634.`
           }
@@ -376,7 +389,7 @@ export class SystelSession implements ScaleSession {
     // Avisado en las notas antes de confirmar "Sincronizar productos".
     if (this.startupWaitOn) await this.ensureNoStartupWait(st.backup.config);
     const layout = st.backup.layout;
-    const plan = opts.allowReplace ? planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: true }) : st.plan;
+    const plan = opts.allowReplace ? planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: true, templates: st.templates }) : st.plan;
     const toWrite = plan.filter((x) => x.action === "crear" || x.action === "actualizar" || x.action === "reemplazar");
 
     let written: { number: number }[] = [];
@@ -394,7 +407,7 @@ export class SystelSession implements ScaleSession {
         mode = this.proof.mode;
         saveWriteProof(st.backup, this.number, mode);
       }
-      const modePlan = mode === "ascii" ? plan : planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: !!opts.allowReplace, mode });
+      const modePlan = mode === "ascii" ? plan : planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: !!opts.allowReplace, mode, templates: st.templates });
       const existing = toWrite.filter((x) => x.current).map((x) => x.number!);
       if (existing.length) {
         const { backup, missing } = await takeProductBackup(writer, layout, existing);
