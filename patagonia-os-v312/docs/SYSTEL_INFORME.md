@@ -48,6 +48,8 @@ Nada de esto está programado ni publicado. Kretz Report LT y Kretz Aura no se t
 | 62 Leer PLU completo | **Respaldo** de cada producto | Solo lectura |
 | 33 Cambio de precio | "Cambia los precios manteniendo todos los demás datos intactos. Se mantienen los totalizadores de ventas" | Escribe solo el precio |
 | 61 Escribir PLU completo | Productos nuevos | Escribe un producto |
+| 11 Lista de sectores (desde 13/11/2026) | Saber si existe el sector de los productos: "NN" + nombre (19), separados por ";" (V6.0 pág. 11) | Solo lectura |
+| 10 Envío de sector (desde 13/11/2026) | Solo con la balanza VACÍA y solo un sector que la 11 dice que falta: "NN" + nombre (18), se relee con la 11 (V6.0 págs. 10-11). Real Los gringos 13/11: borraron los productos y el sector, y la balanza contestaba E7 a cada producto | Crea un sector (nunca se usa para renombrar uno existente) |
 
 **Nunca:** 5 (borrar PLU), 9 (borrar sector: **borra todos sus PLU**), 26 (apagar), 32 (cierre de ventas, pone totales a cero), 42 (cambia decimales), 35/7/8/12/15/17/22/40/41 (configuración), 69/70/71/68 (borrados).
 
