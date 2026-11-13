@@ -17,7 +17,7 @@
     "lint": "npm run lint -w @patagonia/web"
   },
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "devDependencies": {
     "playwright": "^1.61.1"

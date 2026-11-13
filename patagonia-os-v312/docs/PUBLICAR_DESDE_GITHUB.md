@@ -6,14 +6,16 @@ GitHub es el único lugar central. Desde cualquier computadora (o desde Claude e
 2. Hacer el cambio y subirlo a `main` (`git push origin main`).
 3. GitHub hace el resto, solo:
    - **CI** (`.github/workflows/ci.yml`): pruebas, tipos, compilación, y todas las migraciones desde cero en una base vacía + `tests/sql`. Si algo falla, **no se publica**.
-   - **Publicar** (`.github/workflows/publicar.yml`), solo si el CI de `main` quedó en verde:
-     1. migraciones pendientes en la base de pruebas (staging);
+   - **Publicar** (`.github/workflows/publicar.yml`), **una vez por noche a las 00:00 de Argentina** (o a mano con *Run workflow*), solo si el CI de lo último de `main` quedó en verde y no es lo que ya está publicado (se lee el commit de `/version.json`). Los cambios del día se juntan en una sola publicación: cada una cuesta créditos de Netlify.
+     1. migraciones pendientes en la base de pruebas (staging); si el entorno `staging` no tiene `SUPABASE_DB_URL`, se saltea con un aviso;
      2. compila con los valores de producción, sube un **borrador** a Netlify (los clientes no lo ven) y le corre las pruebas de humo (solo lectura);
      3. base de producción: guarda la estructura (sin datos de clientes) como respaldo de 90 días y aplica las migraciones pendientes. **Frena** si una migración borra o cambia datos, o si falta una migración vieja: eso se revisa y se aplica a mano con el flujo *Supabase*;
      4. despliega la función help-chat (staging y producción);
      5. publica el borrador y vuelve a probar la página real; **si falla, vuelve sola a la versión anterior**.
 
 Ya no se publica desde la PC (ni `netlify deploy` ni `supabase functions deploy`): hacerlo saltearía las pruebas.
+
+Netlify **no** compila producción solo (`netlify.toml`: `[context.production] ignore = "exit 0"`): antes publicaba en cada push a `main`, sin pruebas, y gastaba créditos (91 publicaciones en tres semanas de octubre de 2026). Las vistas previas de los pull requests siguen andando. Los archivos de `/assets/` se guardan un año en el navegador (tienen huella en el nombre); `index.html` y `version.json` no, así que cada publicación llega igual.
 
 ## Volver atrás
 
@@ -47,3 +49,9 @@ GitHub → repositorio → **Settings**. Las claves se cargan ahí, nunca en el 
 ## Primera vez
 
 La primera corrida de *Publicar* conviene lanzarla a mano (Actions → Publicar → Run workflow) en un horario sin ventas y mirar cada paso. Si el borrador o las pruebas fallan, nada llega a los clientes.
+
+## Protecciones y controles (desde el 30/10/2026)
+
+- **`main` protegida**: solo entra por pull request y con las dos pruebas obligatorias en verde (*Pruebas, tipos y compilación* y *Migraciones desde cero + pruebas SQL*). Sin force push y sin borrar la rama; vale también para administradores.
+- **Respaldos** (`.github/workflows/respaldos.yml`, todos los días a las 09:00, solo lectura): falla y avisa por mail si la última copia de la base tiene más de 30 horas o si no hay una versión anterior de la página para "Volver atrás". Anota si la copia continua (PITR) está apagada.
+- **Seguridad de GitHub**: escaneo de claves subidas por error (con bloqueo al subir), alertas de Dependabot y pull requests automáticos de arreglos de seguridad.
