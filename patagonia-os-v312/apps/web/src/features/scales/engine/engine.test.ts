@@ -193,6 +193,36 @@ describe("[SIMULADO, registros REALES] Mi balanza con una Systel Cuora Max: Pata
     const prep = await new SystelSession(cuora(), 20, { ...ctx(PRODUCTS), canManageLinks: false }, lab(deps)).prepare(noop);
     assert.match(prep.blocker!, /dueño o un administrador/);
   });
+
+  // Real Los gringos 13/11: borraron a mano todos los productos de la balanza. Antes el plan quedaba vacío y la pantalla
+  // decía "ya tiene los mismos productos que Patagonia".
+  it("balanza vacía (Cuora Max comprobada): igual crea todos los productos y los relee", async () => {
+    const f = new FakeCuora("max60", { address: 20, protocol: "0060", typeByteAccepted: "ascii", loteNulOnWrite: true });
+    const { deps, calls } = fakeDb({ active: true, links: [] } as unknown as ScaleSetup);
+    const s = new SystelSession(f, 20, ctx(PRODUCTS), deps);
+    const prep = await s.prepare(noop);
+    assert.equal(prep.canWrite, true);
+    assert.equal(prep.upToDate, false);
+    assert.equal(prep.blocker, undefined);
+    assert.equal(prep.writes, 6); // 1, 4, 13, 86, 97, 78 (sin precio y código raro, no)
+    const out = await s.sync(prep, noop);
+    assert.equal(out.ok, true);
+    assert.deepEqual([...f.plus.keys()].sort((a, b) => a - b), [1, 4, 13, 78, 86, 97]);
+    assert.match(f.plus.get(78)!, /^00781ARABES {12}/);
+    assert.equal(f.plus.get(78)![46], "U");
+    assert.equal(f.plus.get(97)![46], "P");
+    assert.equal(calls.catalog?.length, 6);
+  });
+
+  it("balanza vacía de otra firma: no inventa nada y pide cargar un producto a mano (nunca 'ya está al día')", async () => {
+    const f = new FakeCuora("max60", { address: 20, protocol: "0040", typeByteAccepted: "ascii", loteNulOnWrite: true });
+    const { deps } = fakeDb({ active: true, links: [] } as unknown as ScaleSetup);
+    const prep = await new SystelSession(f, 20, ctx(PRODUCTS), lab(deps)).prepare(noop);
+    assert.equal(prep.canWrite, false);
+    assert.equal(prep.upToDate, false);
+    assert.match(prep.blocker!, /no tiene ningún producto/);
+    assert.equal(f.plus.size, 0);
+  });
 });
 
 // ── Kretz: dobles de las funciones de scale-serial (las mismas que usa la pantalla de hoy) ───────────────────
