@@ -4,3 +4,9 @@
 # Supabase CLI temporal
 supabase/.temp
 patagonia-os-v312/supabase/.temp
+
+# Configuración local de Claude (cada PC la suya)
+.claude/settings.local.json
+.claude/launch.json
+.claude/worktrees/
+.vite/
