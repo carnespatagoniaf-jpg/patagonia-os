@@ -2,6 +2,7 @@ import type { Customer, CustomerBalance, CustomerCharge, CustomerPayment } from 
 import { fetchProductNames } from "../products/product-names";
 import { supabase } from "../../lib/supabase";
 import { fetchAllPages } from "../../lib/paginate";
+import { toError } from "../../lib/supabase-error";
 
 interface CustomerRow {
   id: string;
@@ -47,7 +48,7 @@ export async function listCustomers(includeInactive = false): Promise<Customer[]
   let { data, error } = await run(`${BASE},price_list_id`);
   // Antes de la migración 167 la columna no existe: se lee como siempre.
   if (error && (error.code === "42703" || error.code === "PGRST204")) ({ data, error } = await run(BASE));
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as unknown as CustomerRow[]).map(mapCustomer);
 }
 
@@ -72,7 +73,7 @@ export async function createCustomer(input: CreateCustomerInput): Promise<{ id: 
     p_province: input.province ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id };
 }
 
@@ -101,7 +102,7 @@ export async function updateCustomer(input: UpdateCustomerInput): Promise<void> 
     p_province: input.province ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 interface CustomerChargeRow {
@@ -126,7 +127,7 @@ export async function listCustomerCharges(customerId: string): Promise<CustomerC
     .eq("customer_id", customerId)
     .order("charge_date", { ascending: false });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map(mapCharge);
 }
 
@@ -148,7 +149,7 @@ export async function listCustomerChargesInRange(branchId: string, fromDate: str
     .gte("charge_date", fromDate)
     .lte("charge_date", toDate);
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as unknown as { charge_date: string; amount: number }[]).map((row) => ({
     date: row.charge_date,
     amount: Number(row.amount)
@@ -172,7 +173,7 @@ export async function createCustomerCharge(input: CreateCustomerChargeInput): Pr
     p_reason: input.reason
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id };
 }
 
@@ -192,14 +193,14 @@ export async function updateCustomerCharge(input: UpdateCustomerChargeInput): Pr
     p_amount: input.amount,
     p_reason: input.reason
   });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function deleteCustomerCharge(id: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("delete_customer_charge", { p_charge_id: id });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export interface CreateCustomerChargeItemInput {
@@ -240,7 +241,7 @@ export async function createCustomerChargeWithItems(input: CreateCustomerChargeW
     ...(input.adjustment ? { p_adjustment: input.adjustment } : {})
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id, amount: Number(data.amount) };
 }
 
@@ -264,7 +265,7 @@ export async function getCustomerChargeItems(chargeId: string): Promise<Customer
   if (!supabase) return [];
 
   const { data, error } = await supabase.rpc("get_customer_charge_items", { p_charge_id: chargeId });
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as CustomerChargeItemRow[]).map((row) => ({
     id: row.id,
     productName: row.product_name,
@@ -296,7 +297,7 @@ export async function listChargeItemsForCharges(chargeIds: string[]): Promise<Ch
       .select("charge_id,product_id,description,quantity,unit_price,line_total,created_at")
       .in("charge_id", chargeIds.slice(i, i + 100))
       .order("created_at");
-    if (error) throw error;
+    if (error) throw toError(error);
     // Los nombres van aparte (ver product-names.ts: embeber products(name,unit) da 403).
     type Row = { charge_id: string; product_id: string | null; description: string | null; quantity: number; unit_price: number; line_total: number };
     const rows = (data ?? []) as unknown as Row[];
@@ -349,7 +350,7 @@ export async function listCustomerPayments(customerId: string): Promise<Customer
     .eq("customer_id", customerId)
     .order("payment_date", { ascending: false });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as unknown as CustomerPaymentRow[]).map(mapPayment);
 }
 
@@ -374,7 +375,7 @@ export async function registerCustomerPayment(input: RegisterCustomerPaymentInpu
     p_notes: input.notes ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id, balance: Number(data.balance) };
 }
 
@@ -396,14 +397,14 @@ export async function updateCustomerPayment(input: UpdateCustomerPaymentInput): 
     p_account_id: input.accountId,
     p_notes: input.notes ?? null
   });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function deleteCustomerPayment(id: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("delete_customer_payment", { p_payment_id: id });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function getCustomerBalance(customerId: string): Promise<CustomerBalance | null> {
@@ -415,7 +416,7 @@ export async function getCustomerBalance(customerId: string): Promise<CustomerBa
     .eq("customer_id", customerId)
     .maybeSingle();
 
-  if (error) throw error;
+  if (error) throw toError(error);
   if (!data) return null;
   return {
     customerId: data.customer_id,
@@ -435,7 +436,7 @@ export async function listCustomersWithBalance(includeInactive = false): Promise
       supabase!.from("customer_balance").select("customer_id,balance,last_activity_date").order("customer_id").range(from, to)
     )
   ]);
-  if (error) throw error;
+  if (error) throw toError(error);
 
   const balanceByCustomer = new Map((balanceRows ?? []).map((row) => [row.customer_id, { balance: Number(row.balance), lastActivityDate: row.last_activity_date ?? undefined }]));
   return customers.map((customer) => ({ ...customer, ...(balanceByCustomer.get(customer.id) ?? { balance: 0, lastActivityDate: undefined }) }));
@@ -445,6 +446,6 @@ export async function listCustomersWithBalance(includeInactive = false): Promise
 export async function deleteCustomer(customerId: string): Promise<"deleted" | "deactivated"> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("delete_customer", { p_customer_id: customerId });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as "deleted" | "deactivated";
 }

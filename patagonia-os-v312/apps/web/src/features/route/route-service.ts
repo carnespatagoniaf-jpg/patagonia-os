@@ -5,6 +5,7 @@ import { listTreasuryAccounts } from "../shifts/treasury-service";
 import { listPriceLists } from "../pricing/price-lists-service";
 import { sellingLists } from "../pricing/price-lists";
 import type { QueuedRouteSale, RouteCustomer, RouteProduct } from "./route-logic";
+import { toError } from "../../lib/supabase-error";
 
 /** Venta en ruta (migración 161). Cada camión es una sucursal con is_vehicle. */
 
@@ -42,7 +43,7 @@ function db() {
 
 export async function listBranchesSplit(): Promise<{ vehicles: Vehicle[]; depots: Depot[] }> {
   const { data, error } = await db().from("branches").select("id,name,is_vehicle").eq("active", true).order("name");
-  if (error) throw error;
+  if (error) throw toError(error);
   const rows = (data ?? []) as { id: string; name: string; is_vehicle: boolean }[];
   return {
     vehicles: rows.filter((r) => r.is_vehicle).map((r) => ({ id: r.id, name: r.name })),
@@ -84,14 +85,14 @@ export async function sendRouteSale(sale: QueuedRouteSale): Promise<{ chargeId: 
     p_items: sale.lines.map((l) => ({ product_id: l.productId, quantity: l.quantity })),
     p_payments: sale.payments.filter((p) => p.amount > 0).map((p) => ({ account_id: p.accountId, amount: p.amount }))
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   const r = data as { charge_id: string; total: number; balance: number | null };
   return { chargeId: r.charge_id, total: Number(r.total), balance: Number(r.balance ?? 0) };
 }
 
 export async function createVehicle(name: string): Promise<string> {
   const { data, error } = await db().rpc("route_create_vehicle", { p_name: name });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as string;
 }
 
@@ -101,7 +102,7 @@ export async function loadVehicle(vehicleId: string, depotId: string, items: { p
     p_depot: depotId,
     p_items: items.map((i) => ({ product_id: i.productId, quantity: i.quantity }))
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return Number(data);
 }
 
@@ -114,7 +115,7 @@ export interface VehicleStatus {
 
 export async function getVehicleStatus(vehicleId: string): Promise<VehicleStatus> {
   const { data, error } = await db().rpc("route_vehicle_status", { p_vehicle: vehicleId });
-  if (error) throw error;
+  if (error) throw toError(error);
   const r = data as VehicleStatus;
   return {
     since: r.since,
@@ -151,7 +152,7 @@ export async function settleVehicle(input: {
     p_dest_account: input.destAccountId,
     p_notes: input.notes || null
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as SettleResult;
 }
 
@@ -175,7 +176,7 @@ export async function listSettlements(vehicleId: string, limit = 20): Promise<Se
     .eq("vehicle_branch_id", vehicleId)
     .order("created_at", { ascending: false })
     .limit(limit);
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map((r) => ({
     id: r.id,
     createdAt: r.created_at,

@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 
 export interface CreatePosSaleItemInput {
   productId?: string;
@@ -85,7 +86,7 @@ export async function createPosSale(input: CreatePosSaleInput): Promise<CreatePo
         }
       : {})
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return { saleId: data.sale_id, total: Number(data.total) };
 }
 

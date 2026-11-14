@@ -1,5 +1,6 @@
 import type { FixedCost, ProfitabilityPeriod, StockCount } from "@patagonia/domain";
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 
 interface FixedCostRow {
   id: string;
@@ -20,7 +21,7 @@ export async function listFixedCosts(includeInactive = false): Promise<FixedCost
   if (!includeInactive) query = query.eq("active", true);
 
   const { data, error } = await query;
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map(mapFixedCost);
 }
 
@@ -39,7 +40,7 @@ export async function createFixedCost(input: CreateFixedCostInput): Promise<{ id
     p_monthly_amount: input.monthlyAmount
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id };
 }
 
@@ -60,7 +61,7 @@ export async function updateFixedCost(input: UpdateFixedCostInput): Promise<void
     p_active: input.active
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function getPurchasesTotalInRange(branchId: string, fromDate: string, toDate: string): Promise<number> {
@@ -74,7 +75,7 @@ export async function getPurchasesTotalInRange(branchId: string, fromDate: strin
     .gte("purchase_date", fromDate)
     .lte("purchase_date", toDate);
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).reduce((sum, row) => sum + Number(row.total), 0);
 }
 
@@ -105,7 +106,7 @@ export async function listPurchasedProductsInRange(branchId: string, fromDate: s
     .gte("purchases.purchase_date", fromDate)
     .lte("purchases.purchase_date", toDate);
 
-  if (error) throw error;
+  if (error) throw toError(error);
 
   // Los nombres se leen de products_with_stock: desde la migración 051 (ocultar el costo a los cajeros)
   // la tabla products no se puede leer directo, y pedir products(name) hacía fallar toda la consulta.
@@ -118,7 +119,7 @@ export async function listPurchasedProductsInRange(branchId: string, fromDate: s
       .select("id,name")
       .eq("branch_id", branchId)
       .in("id", ids.slice(i, i + 200));
-    if (prodError) throw prodError;
+    if (prodError) throw toError(prodError);
     for (const p of prods ?? []) names.set(p.id as string, p.name as string);
   }
 
@@ -172,7 +173,7 @@ export async function listProfitabilityPeriods(branchId: string): Promise<Profit
     .eq("branch_id", branchId)
     .order("period_start", { ascending: false });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map(mapProfitabilityPeriod);
 }
 
@@ -199,7 +200,7 @@ export async function listStockCounts(branchId: string, fromDate: string, toDate
     .lte("count_date", toDate)
     .order("count_date", { ascending: false });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map(mapStockCount);
 }
 
@@ -220,14 +221,14 @@ export async function saveStockCount(input: SaveStockCountInput): Promise<void> 
     p_value: input.value
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function deleteStockCount(stockCountId: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("delete_stock_count", { p_stock_count_id: stockCountId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function getStockTotalNearDate(branchId: string, date: string): Promise<{ date: string; total: number } | null> {
@@ -240,7 +241,7 @@ export async function getStockTotalNearDate(branchId: string, date: string): Pro
     .lte("count_date", date)
     .order("count_date", { ascending: false });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   if (!data || data.length === 0) return null;
 
   const latestDate = data[0].count_date;
@@ -267,7 +268,7 @@ export async function closeProfitabilityPeriod(input: ClosePeriodInput): Promise
     p_stock_end: input.stockEnd
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return {
     id: data.id,
     branchId: input.branchId,

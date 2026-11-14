@@ -1,5 +1,6 @@
 import { supabase } from "../../../lib/supabase";
 import type { ScaleCatalogItem, ScaleLink, ScaleSaleProfile, ScaleSaleType } from "./profile";
+import { toError } from "../../../lib/supabase-error";
 
 /**
  * Perfil, catálogo y vínculos de la balanza de una sucursal (migración 119).
@@ -51,7 +52,7 @@ export async function loadScaleSetups(branchId: string): Promise<ScaleSetup[]> {
   if (!supabase) return [];
   try {
     const { data: profiles, error } = await supabase.from("scale_profiles").select("scale_key, brand, weighed_format, unit_format, total_format, amount_decimals, generic_codes, read_at, repeat_window_minutes, active").eq("branch_id", branchId);
-    if (error) throw error;
+    if (error) throw toError(error);
     const usable = ((profiles ?? []) as ProfileRow[]).filter((p) => hasCodes(p) && p.active !== false);
     const setups: ScaleSetup[] = [];
     for (const p of usable) setups.push(await setupOf(branchId, p));
@@ -74,7 +75,7 @@ export async function loadScaleSetup(branchId: string, opts: { includeInactive?:
     let q = supabase.from("scale_profiles").select("scale_key, brand, weighed_format, unit_format, total_format, amount_decimals, generic_codes, read_at, repeat_window_minutes, active").eq("branch_id", branchId);
     if (opts.scaleKey) q = q.eq("scale_key", opts.scaleKey);
     const { data: profiles, error } = await q;
-    if (error) throw error;
+    if (error) throw toError(error);
     const list = ((profiles ?? []) as ProfileRow[]).filter((p) => opts.scaleKey || hasCodes(p));
     // Sin clave y con varias: no se adivina cuál es.
     if (list.length !== 1) return null;
@@ -143,14 +144,14 @@ export async function saveScaleCatalog(branchId: string, profile: Omit<ScaleSale
     p_profile: { brand: profile.brand, model: profile.model ?? null, weighed_format: profile.weighedFormat, unit_format: profile.unitFormat, total_format: profile.totalFormat, amount_decimals: profile.amountDecimals, generic_codes: profile.genericCodes },
     p_items: catalog.map((i) => ({ code: i.code, name: i.name, sale_type: i.saleType, prices: i.prices, ean_type: i.eanType, ean_config: i.eanConfig }))
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as { items: number; removed: number };
 }
 
 export async function setScaleProfileActive(branchId: string, scaleKey: string, active: boolean): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("set_scale_profile_active", { p_branch_id: branchId, p_scale_key: scaleKey, p_active: active });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function setScaleLinks(branchId: string, scaleKey: string, links: ScaleLink[]): Promise<void> {
@@ -160,7 +161,7 @@ export async function setScaleLinks(branchId: string, scaleKey: string, links: S
     p_scale_key: scaleKey,
     p_links: links.map((l) => ({ code: l.code, kind: l.kind, product_id: l.kind === "product" ? l.productId : null }))
   });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** El servidor avisa que ese papel ya se cobró (create_pos_scale_sale). */

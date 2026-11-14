@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 
 /** PIN de 4 dígitos para revelar "Ver movimientos" y "Ver movimientos de
  * caja" en Mostrador -- ver 078_mostrador_pin.sql. No es una barrera dura
@@ -18,5 +19,5 @@ export async function setMostradorPin(pin: string | null): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("set_mostrador_pin", { p_pin: pin });
-  if (error) throw error;
+  if (error) throw toError(error);
 }

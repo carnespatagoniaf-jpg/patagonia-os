@@ -70,7 +70,7 @@ export function PriceListToggle({ lists, value, onChange, disabled }: { lists: P
           <input
             type="password"
             inputMode="numeric"
-            autoComplete="off"
+            autoComplete="new-password"
             autoFocus
             placeholder={`PIN para ${askingList.name}`}
             value={pin}

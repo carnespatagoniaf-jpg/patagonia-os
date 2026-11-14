@@ -3,6 +3,7 @@ import type { Plan } from "../auth/permissions";
 import type { CompanyUsage, Lead, LeadStage } from "./sales-pipeline";
 import type { MpSubscription } from "./mercadopago";
 import type { Currency, FinKind, FinOverview, FinPartner } from "./finance";
+import { toError } from "../../lib/supabase-error";
 
 export interface CreateClientInput {
   companyName: string;
@@ -83,21 +84,21 @@ export async function setCompanyTrial(companyId: string, trialEndsAt: string | n
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("set_company_trial", { p_company_id: companyId, p_trial_ends_at: trialEndsAt });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function setCompanyLocation(companyId: string, province: string, city: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("set_company_location", { p_company_id: companyId, p_province: province, p_city: city });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function listCompanies(): Promise<CompanySummary[]> {
   if (!supabase) return [];
 
   const { data, error } = await supabase.rpc("list_companies_for_admin");
-  if (error) throw error;
+  if (error) throw toError(error);
 
   interface Row {
     id: string; name: string; active: boolean; created_at: string; branch_count: number; user_count: number;
@@ -146,7 +147,7 @@ export async function registerCompanyPayment(input: { companyId: string; months:
     p_payment_date: input.paymentDate ?? null,
     p_note: input.note ?? null
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as string;
 }
 
@@ -154,14 +155,14 @@ export async function setCompanyPaidUntil(companyId: string, paidUntil: string |
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("set_company_paid_until", { p_company_id: companyId, p_paid_until: paidUntil });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function listCompanyPayments(companyId: string): Promise<CompanyPayment[]> {
   if (!supabase) return [];
 
   const { data, error } = await supabase.rpc("list_company_payments", { p_company_id: companyId });
-  if (error) throw error;
+  if (error) throw toError(error);
   interface Row { id: string; payment_date: string; amount: number | null; months: number; paid_until: string; note: string | null }
   return ((data ?? []) as Row[]).map((row) => ({
     id: row.id,
@@ -177,7 +178,7 @@ export async function deleteCompanyPayment(paymentId: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("delete_company_payment", { p_payment_id: paymentId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** Plan de cada cliente + sucursales y usuarios activos (migración 101). */
@@ -191,7 +192,7 @@ export async function listCompanyPlans(): Promise<Record<string, CompanyPlanInfo
   if (!supabase) return {};
 
   const { data, error } = await supabase.rpc("list_company_plans");
-  if (error) throw error;
+  if (error) throw toError(error);
 
   const result: Record<string, CompanyPlanInfo> = {};
   for (const row of (data ?? []) as { company_id: string; plan: Plan; active_branches: number; active_users: number }[]) {
@@ -219,7 +220,7 @@ export const COMPANY_FEATURES: { key: string; label: string; short: string }[] =
 export async function listCompanyFeatures(): Promise<Record<string, string[]>> {
   if (!supabase) return {};
   const { data, error } = await supabase.rpc("list_company_features");
-  if (error) throw error;
+  if (error) throw toError(error);
   const result: Record<string, string[]> = {};
   for (const row of (data ?? []) as { company_id: string; features: string[] | null }[]) result[row.company_id] = row.features ?? [];
   return result;
@@ -228,7 +229,7 @@ export async function listCompanyFeatures(): Promise<Record<string, string[]>> {
 export async function setCompanyFeature(companyId: string, feature: string, enabled: boolean): Promise<string[]> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("set_company_feature", { p_company_id: companyId, p_feature: feature, p_enabled: enabled });
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []) as string[];
 }
 
@@ -236,14 +237,14 @@ export async function setCompanyPlan(companyId: string, plan: Plan): Promise<voi
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("set_company_plan", { p_company_id: companyId, p_plan: plan });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function setCompanyActive(companyId: string, active: boolean): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("set_company_active", { p_company_id: companyId, p_active: active });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** Borra de verdad un cliente (no solo lo desactiva) -- solo funciona si la
@@ -293,7 +294,7 @@ export async function listScaleSupportReports(): Promise<ScaleSupportReport[]> {
   if (!supabase) return [];
 
   const { data, error } = await supabase.rpc("list_scale_support_reports");
-  if (error) throw error;
+  if (error) throw toError(error);
 
   interface Row {
     id: string; company_id: string; company_name: string; branch_name: string | null; user_name: string | null;
@@ -318,7 +319,7 @@ export async function setScaleSupportReportResolved(id: string, resolved: boolea
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("set_scale_support_report_resolved", { p_id: id, p_resolved: resolved });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** Embudo de ventas (migración 116): uso real de cada cliente, interesados y seguimiento. */
@@ -326,7 +327,7 @@ export async function listSalesPipeline(): Promise<Record<string, CompanyUsage>>
   if (!supabase) return {};
 
   const { data, error } = await supabase.rpc("list_sales_pipeline_for_admin");
-  if (error) throw error;
+  if (error) throw toError(error);
 
   interface Row {
     company_id: string; product_count: number; sale_count: number; sales_last_7d: number; first_sale_at: string | null; last_sale_at: string | null;
@@ -360,14 +361,14 @@ export async function setCompanySalesFollowup(input: { companyId: string; note: 
     p_lost_reason: input.lostReason,
     p_mark_contacted: input.markContacted
   });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function listLeads(): Promise<Lead[]> {
   if (!supabase) return [];
 
   const { data, error } = await supabase.rpc("list_platform_leads");
-  if (error) throw error;
+  if (error) throw toError(error);
 
   interface Row {
     id: string; business_name: string; contact_name: string | null; phone: string | null; province: string | null; city: string | null;
@@ -413,7 +414,7 @@ export async function saveLead(lead: LeadInput): Promise<string> {
     p_lost_reason: lead.lostReason,
     p_company_id: lead.companyId
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as string;
 }
 
@@ -421,7 +422,7 @@ export async function deleteLead(id: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("delete_platform_lead", { p_id: id });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 // --- Suscripciones de Mercado Pago (migración 129, Edge Function mp-sync) ---
@@ -459,7 +460,7 @@ export async function listMpSubscriptions(): Promise<MpSubscription[]> {
   if (!supabase) return [];
 
   const { data, error } = await supabase.rpc("list_mp_subscriptions_for_admin");
-  if (error) throw error;
+  if (error) throw toError(error);
   interface Row {
     id: string; company_id: string | null; company_name: string | null; status: string | null; reason: string | null;
     payer_name: string | null; payer_email: string | null; amount: number | null; date_created: string | null; next_payment_date: string | null;
@@ -492,7 +493,7 @@ export async function assignMpSubscription(subscriptionId: string, companyId: st
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { data, error } = await supabase.rpc("assign_mp_subscription", { p_subscription_id: subscriptionId, p_company_id: companyId });
-  if (error) throw error;
+  if (error) throw toError(error);
   return Number(data ?? 0);
 }
 
@@ -537,7 +538,7 @@ export async function getPlatformSummary(): Promise<PlatformSummary> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { data, error } = await supabase.rpc("get_platform_summary");
-  if (error) throw error;
+  if (error) throw toError(error);
   const d = (data ?? {}) as Record<string, unknown>;
   const arr = <T,>(v: unknown) => (Array.isArray(v) ? (v as T[]) : []);
   return {
@@ -566,7 +567,7 @@ export async function listPaymentsForAdmin(from: string, to: string): Promise<Ad
   if (!supabase) return [];
 
   const { data, error } = await supabase.rpc("list_payments_for_admin", { p_from: from, p_to: to });
-  if (error) throw error;
+  if (error) throw toError(error);
   interface Row { client_number: number | null; company_name: string; payment_date: string; amount: number | null; months: number; paid_until: string; note: string | null }
   return ((data ?? []) as Row[]).map((r) => ({
     clientNumber: r.client_number,
@@ -584,7 +585,7 @@ export async function importLeads(rows: { name: string | null; phone: string; at
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { data, error } = await supabase.rpc("import_platform_leads", { p_rows: rows, p_source: source, p_per_day: perDay });
-  if (error) throw error;
+  if (error) throw toError(error);
   const r = (data ?? {}) as { inserted?: number; skipped?: number };
   return { inserted: Number(r.inserted ?? 0), skipped: Number(r.skipped ?? 0) };
 }
@@ -594,7 +595,7 @@ export async function markLeadContacted(id: string): Promise<"agendado" | "perdi
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { data, error } = await supabase.rpc("mark_lead_contacted", { p_id: id });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data === "perdido" ? "perdido" : "agendado";
 }
 
@@ -602,7 +603,7 @@ export async function markLeadReplied(id: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("mark_lead_replied", { p_id: id });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** Vuelve a poner a estos interesados en "Para escribir hoy", de a perDay por día (migración 133). */
@@ -610,7 +611,7 @@ export async function scheduleLeads(ids: string[], perDay: number): Promise<numb
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { data, error } = await supabase.rpc("schedule_leads", { p_ids: ids, p_per_day: perDay });
-  if (error) throw error;
+  if (error) throw toError(error);
   return Number(data ?? 0);
 }
 
@@ -619,7 +620,7 @@ export async function scheduleLeads(ids: string[], perDay: number): Promise<numb
 async function finRpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc(fn, args);
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as T;
 }
 
@@ -757,7 +758,7 @@ export interface DailyCheck {
 export async function listDailyChecks(): Promise<DailyCheck[]> {
   if (!supabase) return [];
   const { data, error } = await supabase.rpc("platform_daily_checks");
-  if (error) throw error;
+  if (error) throw toError(error);
   type Row = { id: string; name: string; plan: Plan; in_trial: boolean; products: number; last_sale_at: string | null; open_shifts_old: number; oldest_open_shift: string | null; negative_stock: number; below_cost: number; stuck_invoices: number; problems: number };
   return ((data ?? []) as Row[]).map((r) => ({
     id: r.id,

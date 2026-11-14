@@ -1,6 +1,7 @@
 import { supabase } from "../../lib/supabase";
 import { fetchProductNames } from "../products/product-names";
 import type { Transfer, TransferStatus, TransferUnit } from "./transfer-logic";
+import { toError } from "../../lib/supabase-error";
 
 // Mercadería entre locales (migración 190, plan Empresa). Se lee directo de las tablas (RLS: empresa + plan)
 // y se escribe solo por RPC (migración 175). Sin la migración, la web sigue andando: listas vacías.
@@ -51,7 +52,7 @@ export interface TransferBranch {
 export async function listTransferBranches(): Promise<TransferBranch[]> {
   if (!supabase) return [];
   const { data, error } = await supabase.from("branches").select("id,name,is_vehicle").eq("active", true).order("name");
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as Array<{ id: string; name: string; is_vehicle: boolean | null }>).filter((b) => !b.is_vehicle).map((b) => ({ id: b.id, name: b.name }));
 }
 
@@ -68,7 +69,7 @@ export async function listTransfers(): Promise<Transfer[]> {
     .order("created_at", { ascending: false })
     .limit(400);
   if (missingTable(error)) return [];
-  if (error) throw error;
+  if (error) throw toError(error);
   const rows = (data ?? []) as TransferRow[];
   const names = await fetchProductNames(rows.flatMap((r) => (r.branch_transfer_items ?? []).map((i) => i.product_id)));
   const codes = await fetchProductCodes(rows.flatMap((r) => (r.branch_transfer_items ?? []).map((i) => i.product_id)));
@@ -115,7 +116,7 @@ async function fetchProductCodes(ids: string[]): Promise<Map<string, string>> {
   if (!supabase || unique.length === 0) return out;
   for (let i = 0; i < unique.length; i += 80) {
     const { data, error } = await supabase.from("products_price_list").select("id,code").in("id", unique.slice(i, i + 80));
-    if (error) throw error;
+    if (error) throw toError(error);
     for (const p of (data ?? []) as Array<{ id: string; code: string | null }>) if (p.code) out.set(p.id, p.code);
   }
   return out;
@@ -137,7 +138,7 @@ export async function requestTransfer(input: { fromBranchId: string; toBranchId:
     p_notes: input.notes,
     p_items: items(input.lines)
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as string;
 }
 
@@ -163,7 +164,7 @@ export async function prepareTransfer(input: PrepareInput): Promise<string> {
     p_vehicle: input.vehicle,
     p_notes: input.notes
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as string;
 }
 
@@ -183,7 +184,7 @@ export async function dispatchTransfer(
     p_show_cost: input.showCost,
     p_delivery_address: input.deliveryAddress
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   const r = data as { id: string; number: number; remito_id: string | null };
   return { id: r.id, number: Number(r.number), remitoId: r.remito_id };
 }
@@ -196,7 +197,7 @@ export async function receiveTransfer(input: { id: string; received: Array<{ ite
     p_received_by_name: input.receivedByName,
     p_notes: input.notes
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   const r = data as { missing: number | string; extra: number | string };
   return { missing: Number(r.missing), extra: Number(r.extra) };
 }
@@ -204,13 +205,13 @@ export async function receiveTransfer(input: { id: string; received: Array<{ ite
 export async function cancelTransfer(id: string, reason: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("cancel_branch_transfer", { p_id: id, p_reason: reason });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function voidTransfer(id: string, reason: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("void_branch_transfer", { p_id: id, p_reason: reason });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** Mínimo de cada local: branchId → (productId → mínimo). */
@@ -221,7 +222,7 @@ export async function listBranchMinStock(): Promise<Map<string, Map<string, numb
   for (let from = 0; ; from += PAGE) {
     const { data, error } = await supabase.from("branch_min_stock").select("branch_id,product_id,min_stock").order("branch_id").order("product_id").range(from, from + PAGE - 1);
     if (missingTable(error)) return out;
-    if (error) throw error;
+    if (error) throw toError(error);
     const rows = (data ?? []) as Array<{ branch_id: string; product_id: string; min_stock: number | string }>;
     for (const r of rows) {
       const m = out.get(r.branch_id) ?? new Map<string, number>();
@@ -240,5 +241,5 @@ export async function setBranchMinStock(branchId: string, lines: Array<{ product
     p_branch_id: branchId,
     p_items: lines.map((l) => ({ product_id: l.productId, min_stock: l.minStock }))
   });
-  if (error) throw error;
+  if (error) throw toError(error);
 }

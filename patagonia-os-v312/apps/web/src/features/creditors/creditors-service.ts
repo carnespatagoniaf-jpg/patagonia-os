@@ -1,5 +1,6 @@
 import type { Creditor, CreditorBalance, CreditorDebt, CreditorPayment } from "@patagonia/domain";
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 
 interface CreditorRow {
   id: string;
@@ -30,7 +31,7 @@ export async function listCreditors(includeInactive = false): Promise<Creditor[]
   if (!includeInactive) query = query.eq("active", true);
 
   const { data, error } = await query;
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map(mapCreditor);
 }
 
@@ -41,7 +42,7 @@ export async function listCreditorsWithBalance(includeInactive = false): Promise
     listCreditors(includeInactive),
     supabase.from("creditor_balance").select("creditor_id,balance,last_activity_date")
   ]);
-  if (error) throw error;
+  if (error) throw toError(error);
 
   const balanceByCreditor = new Map((balanceRows ?? []).map((row) => [row.creditor_id, { balance: Number(row.balance), lastActivityDate: row.last_activity_date ?? undefined }]));
   return creditors.map((creditor) => ({ ...creditor, ...(balanceByCreditor.get(creditor.id) ?? { balance: 0, lastActivityDate: undefined }) }));
@@ -64,7 +65,7 @@ export async function createCreditor(input: CreateCreditorInput): Promise<{ id: 
     p_notes: input.notes ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id };
 }
 
@@ -89,7 +90,7 @@ export async function updateCreditor(input: UpdateCreditorInput): Promise<void> 
     p_active: input.active
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 interface CreditorDebtRow {
@@ -125,7 +126,7 @@ export async function listCreditorDebts(creditorId: string): Promise<CreditorDeb
     .eq("creditor_id", creditorId)
     .order("debt_date", { ascending: false });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as unknown as CreditorDebtRow[]).map(mapDebt);
 }
 
@@ -148,7 +149,7 @@ export async function createCreditorDebt(input: CreateCreditorDebtInput): Promis
     p_account_id: input.accountId ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id };
 }
 
@@ -170,14 +171,14 @@ export async function updateCreditorDebt(input: UpdateCreditorDebtInput): Promis
     p_reason: input.reason,
     p_account_id: input.accountId ?? null
   });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function deleteCreditorDebt(id: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("delete_creditor_debt", { p_debt_id: id });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 interface CreditorPaymentRow {
@@ -213,7 +214,7 @@ export async function listCreditorPayments(creditorId: string): Promise<Creditor
     .eq("creditor_id", creditorId)
     .order("payment_date", { ascending: false });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as unknown as CreditorPaymentRow[]).map(mapPayment);
 }
 
@@ -238,7 +239,7 @@ export async function registerCreditorPayment(input: RegisterCreditorPaymentInpu
     p_notes: input.notes ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id, balance: Number(data.balance) };
 }
 
@@ -260,14 +261,14 @@ export async function updateCreditorPayment(input: UpdateCreditorPaymentInput): 
     p_account_id: input.accountId,
     p_notes: input.notes ?? null
   });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function deleteCreditorPayment(id: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("delete_creditor_payment", { p_payment_id: id });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function getCreditorBalance(creditorId: string): Promise<CreditorBalance | null> {
@@ -279,7 +280,7 @@ export async function getCreditorBalance(creditorId: string): Promise<CreditorBa
     .eq("creditor_id", creditorId)
     .maybeSingle();
 
-  if (error) throw error;
+  if (error) throw toError(error);
   if (!data) return null;
   return {
     creditorId: data.creditor_id,

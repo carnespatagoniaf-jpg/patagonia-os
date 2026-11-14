@@ -83,7 +83,14 @@ export function BlindCloseForm(p: BlindCloseFormProps) {
       }
       setResult(checked);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "No se pudo controlar la caja.");
+      const message = err instanceof Error ? err.message : "No se pudo controlar la caja.";
+      if (/PIN incorrecto/i.test(message)) {
+        // Vaciar el PIN: si Chrome lo había autocompletado con otra clave, la cajera lo vuelve a tipear limpio.
+        setPin("");
+        setError("PIN incorrecto. Borralo y escribilo de nuevo. Si no se acuerda, el dueño lo cambia en Empleados → PIN de caja.");
+      } else {
+        setError(message);
+      }
     } finally {
       setChecking(false);
     }
@@ -144,7 +151,7 @@ export function BlindCloseForm(p: BlindCloseFormProps) {
                 <option key={c.employeeId} value={c.employeeId}>{c.fullName}</option>
               ))}
             </select>
-            <input type="password" inputMode="numeric" maxLength={6} placeholder="PIN" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} style={{ width: 90 }} />
+            <input type="password" name="pin-cierre-caja" autoComplete="new-password" inputMode="numeric" maxLength={6} placeholder="PIN" value={pin} onChange={(e) => setPin(e.target.value.replace(/\D/g, ""))} style={{ width: 90 }} />
           </div>
         )}
         <label className="muted" style={{ fontSize: 13 }}>

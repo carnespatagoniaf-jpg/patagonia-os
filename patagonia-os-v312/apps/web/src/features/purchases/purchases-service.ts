@@ -1,5 +1,6 @@
 import type { Purchase, PurchaseItem, SupplierPayment, PaymentMethod } from "@patagonia/domain";
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 
 export interface PurchaseLineInput {
   productId?: string;
@@ -47,7 +48,7 @@ export async function createPurchase(input: CreatePurchaseInput): Promise<{ id: 
     p_items: payload
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   const carcass = ((data.carcass ?? []) as Array<{ batch_id: string; animal_type: string; cuts: number }>).map((c) => ({
     batchId: c.batch_id,
     animalType: c.animal_type,
@@ -91,7 +92,7 @@ export async function listPurchasesForSupplier(supplierId: string): Promise<Purc
     .eq("supplier_id", supplierId)
     .order("purchase_date", { ascending: false });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map(mapPurchase);
 }
 
@@ -99,14 +100,14 @@ export async function voidPurchase(purchaseId: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("void_purchase", { p_purchase_id: purchaseId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function updatePurchaseDate(purchaseId: string, purchaseDate: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("update_purchase_date", { p_purchase_id: purchaseId, p_purchase_date: purchaseDate });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 interface PurchaseItemRow {
@@ -145,7 +146,7 @@ export async function listPurchaseItems(purchaseId: string): Promise<PurchaseIte
     .select("id,purchase_id,product_id,description,quantity,unit,unit_price,line_total,carcass_animal_type,carcass_weight")
     .eq("purchase_id", purchaseId);
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map(mapPurchaseItem);
 }
 
@@ -162,7 +163,7 @@ export async function updatePurchaseItem(
     p_unit_price: unitPrice
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { purchaseId: data.purchase_id, total: Number(data.total) };
 }
 
@@ -189,7 +190,7 @@ export async function registerSupplierPayment(
     p_notes: input.notes ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id, balance: data.balance !== null && data.balance !== undefined ? Number(data.balance) : null };
 }
 
@@ -217,7 +218,7 @@ export async function registerSupplierPaymentFromPosShift(
     p_notes: input.notes ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id, balance: data.balance !== null && data.balance !== undefined ? Number(data.balance) : null };
 }
 
@@ -239,14 +240,14 @@ export async function updateSupplierPayment(input: UpdateSupplierPaymentInput): 
     p_account_id: input.accountId,
     p_notes: input.notes ?? null
   });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function deleteSupplierPayment(id: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("delete_supplier_payment", { p_payment_id: id });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 interface SupplierPaymentRow {
@@ -287,7 +288,7 @@ export async function listSupplierPayments(supplierId: string): Promise<Supplier
     .eq("supplier_id", supplierId)
     .order("payment_date", { ascending: false });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map(mapSupplierPayment);
 }
 
@@ -319,7 +320,7 @@ export async function listSupplierAdjustments(supplierId: string): Promise<Suppl
     .select("id,supplier_id,adjustment_date,amount,notes")
     .eq("supplier_id", supplierId)
     .order("adjustment_date", { ascending: false });
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map((row) => ({
     id: row.id as string,
     supplierId: row.supplier_id as string,
@@ -337,11 +338,11 @@ export async function addSupplierAdjustment(input: { supplierId: string; adjustm
     p_amount: input.amount,
     p_notes: input.notes ?? null
   });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function deleteSupplierAdjustment(id: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("delete_supplier_adjustment", { p_adjustment_id: id });
-  if (error) throw error;
+  if (error) throw toError(error);
 }

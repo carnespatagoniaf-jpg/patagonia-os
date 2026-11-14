@@ -526,6 +526,8 @@ export function Employees() {
                   <div className="row-actions">
                     <input
                       type="password"
+                      name="pin-caja-empleado"
+                      autoComplete="new-password"
                       inputMode="numeric"
                       maxLength={6}
                       placeholder={pinHolders.has(selectedEmployee.id) ? "PIN nuevo" : "PIN"}

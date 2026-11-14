@@ -2,6 +2,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState, type R
 import type { Session, User } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "../../lib/supabase";
 import { clearStoredPosReceipt } from "../../lib/pos-receipt-storage";
+import { toError } from "../../lib/supabase-error";
 
 export interface UserProfile {
   id: string;
@@ -104,7 +105,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         .maybeSingle());
     }
 
-    if (error) throw error;
+    if (error) throw toError(error);
 
     if (!data) {
       // Sin fila en profiles: puede ser un platform admin (da de alta
@@ -113,7 +114,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const { data: isAdmin, error: adminError } = await supabase.rpc("am_i_platform_admin");
       // Si la consulta falló, no se sabe si es admin -- no es lo mismo que
       // "no es admin", y no tiene que terminar en cerrar la sesión.
-      if (adminError) throw adminError;
+      if (adminError) throw toError(adminError);
       setIsPlatformAdmin(Boolean(isAdmin));
       setProfile(null);
       if (!isAdmin) {
@@ -223,7 +224,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     signingInRef.current = true;
     try {
       const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) throw error;
+      if (error) throw toError(error);
       if (!data.user) throw new Error("No se pudo iniciar sesión.");
       try {
         await loadProfile(data.user.id);
@@ -251,13 +252,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const { error } = await supabase.auth.resetPasswordForEmail(email, {
       redirectTo: window.location.origin
     });
-    if (error) throw error;
+    if (error) throw toError(error);
   }
 
   async function updatePassword(newPassword: string) {
     if (!supabase) throw new Error("Supabase todavía no está configurado.");
     const { error } = await supabase.auth.updateUser({ password: newPassword });
-    if (error) throw error;
+    if (error) throw toError(error);
     setPasswordRecovery(false);
   }
 

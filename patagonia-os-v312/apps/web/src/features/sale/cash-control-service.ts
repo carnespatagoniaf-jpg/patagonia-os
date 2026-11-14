@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 import { listPosCashiers } from "./pos-shift-service";
 
 // Control de caja para el dueño (migración 117): caja fuerte (saldo,
@@ -62,7 +63,7 @@ export async function listSafeAccounts(): Promise<SafeAccount[]> {
   const { data, error } = await supabase.from("treasury_accounts").select("id,name").eq("is_safe", true).eq("active", true).order("name");
   if (error) {
     if (error.code === "42703") return []; // base sin la migración 117
-    throw error;
+    throw toError(error);
   }
   const accounts = (data ?? []) as { id: string; name: string }[];
   if (accounts.length === 0) return [];
@@ -70,7 +71,7 @@ export async function listSafeAccounts(): Promise<SafeAccount[]> {
     .from("treasury_balance")
     .select("account_id,balance")
     .in("account_id", accounts.map((a) => a.id));
-  if (balanceError) throw balanceError;
+  if (balanceError) throw toError(balanceError);
   const byId = new Map(((balances ?? []) as { account_id: string; balance: number }[]).map((b) => [b.account_id, Number(b.balance)]));
   return accounts.map((a) => ({ id: a.id, name: a.name, balance: byId.get(a.id) ?? 0 }));
 }
@@ -83,7 +84,7 @@ export async function listSafeCounts(safeAccountId: string, limit = 10): Promise
     .eq("safe_account_id", safeAccountId)
     .order("created_at", { ascending: false })
     .limit(limit);
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     id: String(r.id),
     counted: Number(r.counted),
@@ -105,7 +106,7 @@ export async function listSafeDeposits(safeAccountId: string, sinceIso: string |
     .limit(300);
   if (sinceIso) query = query.gt("created_at", sinceIso);
   const { data, error } = await query;
-  if (error) throw error;
+  if (error) throw toError(error);
   const rows = (data ?? []) as Record<string, unknown>[];
 
   const cashiers = await listPosCashiers(null).catch(() => []);
@@ -141,7 +142,7 @@ export async function listSafeWithdrawals(safeAccountId: string, sinceIso: strin
     .limit(200);
   if (sinceIso) query = query.gt("created_at", sinceIso);
   const { data, error } = await query;
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as Record<string, unknown>[])
     .filter((r) => r.reference_type !== "safe_count")
     .map((r) => ({ id: String(r.id), amount: Number(r.amount), notes: (r.notes as string | null) ?? null, createdAt: String(r.created_at) }));
@@ -150,14 +151,14 @@ export async function listSafeWithdrawals(safeAccountId: string, sinceIso: strin
 export async function countSafe(safeAccountId: string, counted: number, notes?: string): Promise<{ expected: number; difference: number }> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("count_safe", { p_safe_account_id: safeAccountId, p_counted: counted, p_notes: notes ?? null });
-  if (error) throw error;
+  if (error) throw toError(error);
   return { expected: Number(data.expected), difference: Number(data.difference) };
 }
 
 export async function listPosShiftCloses(branchId: string, days = 30): Promise<ShiftCloseRow[]> {
   if (!supabase) return [];
   const { data, error } = await supabase.rpc("list_pos_shift_closes", { p_branch_id: branchId, p_days: days });
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     id: String(r.id),
     openedAt: String(r.opened_at),
@@ -187,7 +188,7 @@ export async function listPosShiftCloses(branchId: string, days = 30): Promise<S
 export async function setEmployeePosPin(employeeId: string, pin: string | null): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("set_employee_pos_pin", { p_employee_id: employeeId, p_pin: pin });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 // Retiros de dinero (migración 164): la plata sigue en Efectivo; el dueño cuenta los papelitos.
@@ -211,7 +212,7 @@ export async function listPendingWithdrawals(branchId: string): Promise<PendingW
     .is("voided_at", null)
     .is("count_id", null)
     .order("number");
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as unknown as Array<{ id: string; number: number; amount: number; created_at: string; employees: { full_name: string } | null }>).map((r) => ({
     id: r.id,
     number: Number(r.number),
@@ -252,7 +253,7 @@ export async function listWithdrawalCounts(branchId: string, limit = 5): Promise
 export async function countCashWithdrawals(branchId: string, counted: number, notes?: string): Promise<{ numbers: number[]; expected: number; difference: number }> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("count_cash_withdrawals", { p_branch_id: branchId, p_counted: counted, p_notes: notes ?? null });
-  if (error) throw error;
+  if (error) throw toError(error);
   return { numbers: (data.numbers ?? []).map(Number), expected: Number(data.expected), difference: Number(data.difference) };
 }
 
@@ -260,5 +261,5 @@ export async function countCashWithdrawals(branchId: string, counted: number, no
 export async function setScaleCloseControl(enabled: boolean): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("set_scale_close_control", { p_enabled: enabled });
-  if (error) throw error;
+  if (error) throw toError(error);
 }

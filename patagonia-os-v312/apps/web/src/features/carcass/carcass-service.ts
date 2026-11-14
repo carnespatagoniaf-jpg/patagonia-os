@@ -1,5 +1,6 @@
 import type { CarcassBatch, CarcassCut, CarcassFillSource } from "@patagonia/domain";
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 
 interface CarcassBatchRow {
   id: string;
@@ -46,7 +47,7 @@ export async function listCarcassBatches(branchId: string): Promise<CarcassBatch
     .eq("branch_id", branchId)
     .order("batch_date", { ascending: false });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map(mapBatch);
 }
 
@@ -75,7 +76,7 @@ export async function saveCarcassBatch(input: SaveCarcassBatchInput): Promise<{ 
     p_notes: input.notes ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id };
 }
 
@@ -83,7 +84,7 @@ export async function deleteCarcassBatch(batchId: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("delete_carcass_batch", { p_batch_id: batchId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 interface CarcassCutRow {
@@ -119,7 +120,7 @@ export async function listCarcassCuts(batchId: string): Promise<CarcassCut[]> {
     .eq("batch_id", batchId)
     .order("line_total", { ascending: false });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map(mapCut);
 }
 
@@ -144,7 +145,7 @@ export async function saveCarcassCut(input: SaveCarcassCutInput): Promise<{ id: 
     p_unit_price: input.unitPrice
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id, lineTotal: Number(data.line_total) };
 }
 
@@ -152,7 +153,7 @@ export async function deleteCarcassCut(cutId: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("delete_carcass_cut", { p_cut_id: cutId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 
@@ -177,7 +178,7 @@ export async function listCarcassBatchTotals(batchIds: string[]): Promise<Map<st
     .select("batch_id,weight,unit_price,line_total,from_template")
     .in("batch_id", batchIds);
 
-  if (error) throw error;
+  if (error) throw toError(error);
   for (const row of (data ?? []) as Array<{ batch_id: string; weight: number; unit_price: number; line_total: number; from_template: boolean }>) {
     const prev = totals.get(row.batch_id) ?? { value: 0, weight: 0, cuts: 0, unpriced: 0, estimated: 0 };
     const weight = Number(row.weight);
@@ -197,7 +198,7 @@ export async function fillCarcassBatch(batchId: string, useDefaults: boolean): P
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { data, error } = await supabase.rpc("fill_carcass_batch", { p_batch_id: batchId, p_use_defaults: useDefaults });
-  if (error) throw error;
+  if (error) throw toError(error);
   return { cuts: Number(data?.cuts ?? 0), source: mapFillSource(data?.source ?? null) };
 }
 
@@ -206,7 +207,7 @@ export async function markCarcassBatchWeighed(batchId: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("mark_carcass_batch_weighed", { p_batch_id: batchId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** "Actualizar costos en Stock": escribe el costo por kilo de esta res en sus productos (migración 170). */
@@ -214,7 +215,7 @@ export async function applyCarcassCosts(batchId: string): Promise<{ updated: num
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { data, error } = await supabase.rpc("apply_carcass_costs", { p_batch_id: batchId });
-  if (error) throw error;
+  if (error) throw toError(error);
   // 176: si la res vale vendida mucho menos de lo que se pagó (faltan precios), no se escribe ningún costo.
   return { updated: Array.isArray(data?.updated) ? data.updated.length : 0, blocked: typeof data?.blocked === "string" ? data.blocked : null };
 }

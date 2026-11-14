@@ -1239,6 +1239,8 @@ Cancelar = es el mismo papel: no cobrar.`)) {
                 </select>
                 <input
                   type="password"
+                  name="pin-apertura-caja"
+                  autoComplete="new-password"
                   inputMode="numeric"
                   maxLength={6}
                   placeholder="PIN"

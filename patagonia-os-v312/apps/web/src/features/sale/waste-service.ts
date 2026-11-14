@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 import { fetchProductNames } from "../products/product-names";
 
 // Decomisos (migraciones 151 y 152, todos los planes): lo que se tira (vencido, en mal estado,
@@ -38,14 +39,14 @@ export async function registerStockWaste(input: {
     p_pos_shift_id: input.posShiftId,
     p_barcode: input.barcode
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return String(data);
 }
 
 export async function voidStockWaste(id: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("void_stock_waste", { p_waste_id: id });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** Los decomisos de una caja (turno de Mostrador), del más nuevo al más viejo. */
@@ -56,7 +57,7 @@ export async function listShiftWastes(posShiftId: string): Promise<StockWaste[]>
     .select("id,product_id,quantity,unit_cost,reason,notes,created_at,voided_at")
     .eq("pos_shift_id", posShiftId)
     .order("created_at", { ascending: false });
-  if (error) throw error;
+  if (error) throw toError(error);
   // Los nombres van aparte (ver product-names.ts: embeber products(name,unit) da 403).
   const rows = (data ?? []) as unknown as Array<Record<string, unknown>>;
   const names = await fetchProductNames(rows.map((r) => r.product_id as string | null));

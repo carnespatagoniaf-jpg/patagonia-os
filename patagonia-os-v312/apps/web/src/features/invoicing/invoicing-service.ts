@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import { arcaQrUrl, invoiceLabel, parseInvoiceVatLines, type InvoiceVatLine, type CustomerCondition, type InvoiceDraft, type InvoiceLetter, type InvoicePrint, type IssuerCondition } from "./invoicing-view";
+import { toError } from "../../lib/supabase-error";
 
 // Factura electrónica ARCA (migración 113). Lectura directa de las tablas (la
 // política de seguridad deja ver solo las de la empresa, y solo en plan Full);
@@ -61,14 +62,14 @@ export async function saveFiscalSettings(input: Omit<FiscalSettings, "enabled" |
     p_activity_start: input.activityStart || null,
     p_default_vat_rate: input.defaultVatRate
   });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** Nombre de fantasía de la factura (vacío = sale solo la razón social). */
 export async function setFiscalTradeName(tradeName: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("set_fiscal_trade_name", { p_trade_name: tradeName });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export type InvoiceStatus = "pendiente" | "autorizada" | "rechazada";
@@ -149,7 +150,7 @@ export async function listInvoices(limit = 200): Promise<Invoice[]> {
   if (!supabase) return [];
   const db = supabase;
   const { data, error } = await selectInvoices((columns) => db.from("invoices").select(columns).order("created_at", { ascending: false }).limit(limit));
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map(mapInvoice);
 }
 
@@ -179,7 +180,7 @@ export async function listUninvoicedSales(branchId: string, days = 7): Promise<U
     .gte("created_at", since)
     .order("created_at", { ascending: false })
     .limit(200);
-  if (error) throw error;
+  if (error) throw toError(error);
   const ids = (sales ?? []).map((s) => s.id);
   if (ids.length === 0) return [];
   const { data: invoiced, error: invError } = await supabase
@@ -188,7 +189,7 @@ export async function listUninvoicedSales(branchId: string, days = 7): Promise<U
     .in("pos_sale_id", ids)
     .eq("kind", "factura")
     .neq("status", "rechazada");
-  if (invError) throw invError;
+  if (invError) throw toError(invError);
   const taken = new Set((invoiced ?? []).map((i) => i.pos_sale_id));
   return (sales ?? []).filter((s) => !taken.has(s.id)).map((s) => ({ id: s.id, total: Number(s.total), createdAt: s.created_at }));
 }
@@ -201,7 +202,7 @@ export async function requestInvoice(saleId: string, draft: InvoiceDraft): Promi
     p_customer_doc: draft.doc,
     p_customer_name: draft.name
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return { invoiceId: data.invoice_id, letter: data.letter };
 }
 
@@ -264,7 +265,7 @@ export async function listBranchFiscal(): Promise<BranchFiscal[]> {
 export async function saveBranchFiscal(branchId: string, pointOfSale: number | null, address: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("save_branch_fiscal_settings", { p_branch_id: branchId, p_point_of_sale: pointOfSale, p_address: address });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export interface AuthorizeOutcome {
@@ -300,7 +301,7 @@ export async function requestChargeInvoice(chargeId: string, draft: InvoiceDraft
     p_customer_doc: draft.doc,
     p_customer_name: draft.name
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return { invoiceId: data.invoice_id, letter: data.letter };
 }
 
@@ -308,7 +309,7 @@ export async function requestChargeInvoice(chargeId: string, draft: InvoiceDraft
 export async function requestCreditNote(invoiceId: string): Promise<string> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("request_credit_note", { p_invoice_id: invoiceId });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as string;
 }
 
@@ -316,7 +317,7 @@ export async function getInvoice(invoiceId: string): Promise<Invoice | null> {
   if (!supabase) return null;
   const db = supabase;
   const { data, error } = await selectInvoices((columns) => db.from("invoices").select(columns).eq("id", invoiceId).maybeSingle());
-  if (error) throw error;
+  if (error) throw toError(error);
   return data ? mapInvoice(data) : null;
 }
 
@@ -325,7 +326,7 @@ export async function listChargeInvoices(chargeIds: string[]): Promise<Invoice[]
   if (!supabase || chargeIds.length === 0) return [];
   const db = supabase;
   const { data, error } = await selectInvoices((columns) => db.from("invoices").select(columns).in("customer_charge_id", chargeIds));
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map(mapInvoice);
 }
 
@@ -385,7 +386,7 @@ export async function loadInvoiceItems(inv: Invoice): Promise<InvoiceItemLine[]>
   if (!supabase) return [];
   if (inv.customerChargeId) {
     const { data, error } = await supabase.rpc("get_customer_charge_items", { p_charge_id: inv.customerChargeId });
-    if (error) throw error;
+    if (error) throw toError(error);
     return ((data ?? []) as { product_name: string; quantity: number; unit_price: number; line_total: number }[]).map((r) => ({
       name: r.product_name,
       quantity: Number(r.quantity),
@@ -396,14 +397,14 @@ export async function loadInvoiceItems(inv: Invoice): Promise<InvoiceItemLine[]>
   }
   if (!inv.posSaleId) return [];
   const { data, error } = await supabase.from("pos_sale_items").select("quantity,unit_price,line_total,description,product_id").eq("sale_id", inv.posSaleId);
-  if (error) throw error;
+  if (error) throw toError(error);
   const rows = (data ?? []) as { quantity: number; unit_price: number; line_total: number; description: string | null; product_id: string | null }[];
   const ids = [...new Set(rows.map((r) => r.product_id).filter((id): id is string => !!id))];
   const products = new Map<string, { name: string; unit: "kg" | "unit" | "box" }>();
   if (ids.length > 0) {
     // products_price_list: los cajeros no leen products (051), esta vista sí y no trae costo.
     const { data: list, error: listError } = await supabase.from("products_price_list").select("id,name,unit").in("id", ids);
-    if (listError) throw listError;
+    if (listError) throw toError(listError);
     for (const p of (list ?? []) as { id: string; name: string; unit: "kg" | "unit" | "box" }[]) products.set(p.id, { name: p.name, unit: p.unit });
   }
   return rows.map((r) => ({

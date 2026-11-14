@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import { normalizePackageCode, type PackageStatus, type PlantaPackage } from "./planta-logic";
+import { toError } from "../../lib/supabase-error";
 
 // Planta (migración 194, plan Planta). Los paquetes se leen directo de la tabla (RLS: empresa + plan Planta) y se
 // escriben solo por RPC (migración 175). Sin la migración, la web sigue andando: listas vacías.
@@ -60,7 +61,7 @@ export async function listBranchPackages(branchId: string): Promise<PlantaPackag
     .order("number", { ascending: false })
     .limit(5000);
   if (missingTable(error)) return [];
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as PackageRow[]).map(mapPackage);
 }
 
@@ -69,7 +70,7 @@ export async function findPackage(code: string): Promise<PlantaPackage | undefin
   if (!supabase) return undefined;
   const { data, error } = await supabase.from("planta_packages").select(COLUMNS).eq("code", normalizePackageCode(code)).maybeSingle();
   if (missingTable(error)) return undefined;
-  if (error) throw error;
+  if (error) throw toError(error);
   return data ? mapPackage(data as PackageRow) : undefined;
 }
 
@@ -95,14 +96,14 @@ export async function packProduct(input: {
     p_carcass_batch_id: input.carcassBatchId,
     p_expires_on: input.expiresOn
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as Array<{ id: string; number: number; code: string; quantity: number | string }>).map((p) => ({ ...p, quantity: Number(p.quantity) }));
 }
 
 export async function voidPackage(id: string, reason: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("planta_void_package", { p_id: id, p_reason: reason });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function shipPackages(input: {
@@ -122,7 +123,7 @@ export async function shipPackages(input: {
     p_vehicle: input.vehicle.trim() || null,
     p_notes: input.notes.trim() || null
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   const r = data as { id: string; number: number; packages: number };
   return { id: r.id, number: Number(r.number), packages: Number(r.packages) };
 }

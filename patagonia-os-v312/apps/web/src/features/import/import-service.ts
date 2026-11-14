@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import type { CustomerPayload, ProductPayload, SupplierPayload } from "./import-parse";
+import { toError } from "../../lib/supabase-error";
 
 export interface ImportCounts {
   created: number;
@@ -16,20 +17,20 @@ function counts(data: unknown): ImportCounts {
 export async function importProducts(branchId: string, rows: ProductPayload[], updateExisting: boolean): Promise<ImportCounts> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("import_products", { p_branch_id: branchId, p_rows: rows, p_update_existing: updateExisting });
-  if (error) throw error;
+  if (error) throw toError(error);
   return counts(data);
 }
 
 export async function importSuppliers(rows: SupplierPayload[]): Promise<ImportCounts> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("import_suppliers", { p_rows: rows });
-  if (error) throw error;
+  if (error) throw toError(error);
   return counts(data);
 }
 
 export async function importCustomers(branchId: string, rows: CustomerPayload[]): Promise<ImportCounts> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("import_customers", { p_branch_id: branchId, p_rows: rows });
-  if (error) throw error;
+  if (error) throw toError(error);
   return counts(data);
 }
