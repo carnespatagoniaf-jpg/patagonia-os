@@ -392,7 +392,7 @@ export async function listPosShiftSupplierPayments(posShiftId: string): Promise<
       .from("supplier_payments")
       .select("id,suppliers(name)")
       .in("id", paymentIds);
-    if (paymentsError) throw paymentsError;
+    if (paymentsError) throw toError(paymentsError);
     for (const p of (payments ?? []) as unknown as { id: string; suppliers: { name: string } | null }[]) {
       if (p.suppliers?.name) supplierByPayment.set(p.id, p.suppliers.name);
     }
@@ -613,7 +613,7 @@ export async function listPosShiftSales(shiftId: string): Promise<PosShiftSale[]
       .from("products_price_list")
       .select("id,name,unit")
       .in("id", productIds.slice(i, i + 80));
-    if (productsError) throw productsError;
+    if (productsError) throw toError(productsError);
     for (const p of (products ?? []) as { id: string; name: string; unit: "kg" | "unit" | "box" }[]) {
       productById.set(p.id, { name: p.name, unit: p.unit });
     }

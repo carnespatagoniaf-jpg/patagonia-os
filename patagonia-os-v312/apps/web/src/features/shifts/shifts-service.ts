@@ -1,5 +1,6 @@
 import type { ShiftOutflow, ShiftOutflowType, ShiftPeriod, ShiftRegister, ShiftSale } from "@patagonia/domain";
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 
 interface ShiftRegisterRow {
   id: string;
@@ -36,7 +37,7 @@ export async function fetchShift(branchId: string, shiftDate: string, shift: Shi
     .eq("shift", shift)
     .maybeSingle();
 
-  if (error) throw error;
+  if (error) throw toError(error);
   if (!data) return null;
   return mapShift(data as ShiftRegisterRow);
 }
@@ -60,7 +61,7 @@ export async function saveShift(input: SaveShiftInput): Promise<{ id: string }> 
     p_closing_counted_cash: input.closingCountedCash ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id };
 }
 
@@ -83,7 +84,7 @@ export async function listShiftSales(shiftId: string): Promise<ShiftSale[]> {
     .select("id,shift_id,account_id,amount")
     .eq("shift_id", shiftId);
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map(mapSale);
 }
 
@@ -104,7 +105,7 @@ export async function saveShiftSale(input: SaveShiftSaleInput): Promise<{ id: st
     p_amount: input.amount
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id };
 }
 
@@ -112,7 +113,7 @@ export async function deleteShiftSale(saleId: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("delete_shift_sale", { p_sale_id: saleId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 interface ShiftOutflowRow {
@@ -150,7 +151,7 @@ export async function listShiftOutflows(shiftId: string): Promise<ShiftOutflow[]
     .eq("shift_id", shiftId)
     .order("created_at");
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map(mapOutflow);
 }
 
@@ -179,7 +180,7 @@ export async function saveShiftOutflow(input: SaveShiftOutflowInput): Promise<{ 
     p_supplier_id: input.supplierId ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id };
 }
 
@@ -187,7 +188,7 @@ export async function deleteShiftOutflow(outflowId: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("delete_shift_outflow", { p_shift_outflow_id: outflowId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export interface ShiftRangeRow {
@@ -207,7 +208,7 @@ export async function listShiftsInRange(branchId: string, fromDate: string, toDa
     .lte("shift_date", toDate)
     .order("shift_date");
 
-  if (shiftError) throw shiftError;
+  if (shiftError) throw toError(shiftError);
   const shifts = (shiftRows ?? []).map((row) => mapShift(row as ShiftRegisterRow));
   if (shifts.length === 0) return [];
 
@@ -221,8 +222,8 @@ export async function listShiftsInRange(branchId: string, fromDate: string, toDa
       .in("shift_id", shiftIds)
   ]);
 
-  if (saleError) throw saleError;
-  if (outflowError) throw outflowError;
+  if (saleError) throw toError(saleError);
+  if (outflowError) throw toError(outflowError);
 
   const sales = (saleRows ?? []).map((row) => mapSale(row as ShiftSaleRow));
   const outflows = (outflowRows ?? []).map((row) => mapOutflow(row as ShiftOutflowRow));

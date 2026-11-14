@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import type { ReportPayment } from "./sales-report";
+import { toError } from "../../lib/supabase-error";
 
 /** Reporte de cuentas y Gastos (migración 143, pantallas a pedido de Martínez).
  * Solo lee views/tablas que ya filtran por empresa (customer_balance,
@@ -83,7 +84,7 @@ export async function listExpenses(from: string, to: string): Promise<ExpenseRow
     .order("occurred_on", { ascending: false })
     .order("created_at", { ascending: false })
     .limit(2000);
-  if (error) throw error;
+  if (error) throw toError(error);
   type Row = { id: string; amount: number; category: string | null; occurred_on: string; notes: string | null; treasury_accounts: { name: string } | { name: string }[] | null };
   return ((data ?? []) as unknown as Row[]).map((row) => {
     const account = Array.isArray(row.treasury_accounts) ? row.treasury_accounts[0] : row.treasury_accounts;
@@ -112,7 +113,7 @@ export async function listSalesInRange(from: string, to: string): Promise<{ id: 
       .order("charge_date")
       .order("created_at")
       .range(start, start + PAGE - 1);
-    if (error) throw error;
+    if (error) throw toError(error);
     type Row = { id: string; customer_id: string; charge_date: string; amount: number; reason: string | null; customers: { name: string; number: number | null } | { name: string; number: number | null }[] | null };
     for (const row of (data ?? []) as unknown as Row[]) {
       const c = Array.isArray(row.customers) ? row.customers[0] : row.customers;
@@ -144,7 +145,7 @@ export async function listPaymentsInRange(from: string, to: string): Promise<Rep
       .order("payment_date")
       .order("created_at")
       .range(start, start + PAGE - 1);
-    if (error) throw error;
+    if (error) throw toError(error);
     type One<T> = T | T[] | null;
     type Row = { id: string; customer_id: string; payment_date: string; amount: number; notes: string | null; customers: One<{ name: string; number: number | null }>; treasury_accounts: One<{ name: string }> };
     const first = <T,>(v: One<T>) => (Array.isArray(v) ? v[0] : v) ?? null;

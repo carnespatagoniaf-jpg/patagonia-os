@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 
 export interface ProductNameUnit {
   name: string;
@@ -20,7 +21,7 @@ export async function fetchProductNames(ids: Iterable<string | null | undefined>
   // De a 80 ids, para no pasarse del largo de la URL.
   for (let i = 0; i < unique.length; i += 80) {
     const { data, error } = await supabase.from("products_price_list").select("id,name,unit").in("id", unique.slice(i, i + 80));
-    if (error) throw error;
+    if (error) throw toError(error);
     for (const p of (data ?? []) as { id: string; name: string; unit: ProductNameUnit["unit"] }[]) {
       byId.set(p.id, { name: p.name, unit: p.unit });
     }

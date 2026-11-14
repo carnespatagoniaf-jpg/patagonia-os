@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import { parseRemito, parseRemitoCai, type Remito, type RemitoCai } from "./remito-r";
+import { toError } from "../../lib/supabase-error";
 
 // Remito R con CAI (migración 147, plan Full). Las tablas se leen directo (RLS
 // por empresa); emitir, anular y cargar CAI van por sus funciones.
@@ -7,14 +8,14 @@ import { parseRemito, parseRemitoCai, type Remito, type RemitoCai } from "./remi
 export async function listRemitoCais(): Promise<RemitoCai[]> {
   if (!supabase) return [];
   const { data, error } = await supabase.from("remito_cai").select("*").order("created_at", { ascending: false });
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as Array<Record<string, unknown>>).map(parseRemitoCai);
 }
 
 export async function listRemitos(limit = 200): Promise<Remito[]> {
   if (!supabase) return [];
   const { data, error } = await supabase.from("remitos").select("*").order("created_at", { ascending: false }).limit(limit);
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as Array<Record<string, unknown>>).map(parseRemito);
 }
 
@@ -22,14 +23,14 @@ export async function listRemitos(limit = 200): Promise<Remito[]> {
 export async function listRemitoNumbers(): Promise<Array<{ pointOfSale: number; number: number }>> {
   if (!supabase) return [];
   const { data, error } = await supabase.from("remitos").select("point_of_sale,number").order("number", { ascending: false }).limit(500);
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as Array<{ point_of_sale: number; number: number }>).map((r) => ({ pointOfSale: Number(r.point_of_sale), number: Number(r.number) }));
 }
 
 export async function getRemito(id: string): Promise<Remito | null> {
   if (!supabase) return null;
   const { data, error } = await supabase.from("remitos").select("*").eq("id", id).maybeSingle();
-  if (error) throw error;
+  if (error) throw toError(error);
   return data ? parseRemito(data as Record<string, unknown>) : null;
 }
 
@@ -37,7 +38,7 @@ export async function getRemito(id: string): Promise<Remito | null> {
 export async function getChargeRemito(chargeId: string): Promise<Remito | null> {
   if (!supabase) return null;
   const { data, error } = await supabase.from("remitos").select("*").eq("customer_charge_id", chargeId).eq("status", "emitido").maybeSingle();
-  if (error) throw error;
+  if (error) throw toError(error);
   return data ? parseRemito(data as Record<string, unknown>) : null;
 }
 
@@ -50,13 +51,13 @@ export async function saveRemitoCai(input: { pointOfSale: number; cai: string; c
     p_number_from: input.numberFrom,
     p_number_to: input.numberTo
   });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function setRemitoCaiActive(caiId: string, active: boolean): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("set_remito_cai_active", { p_cai_id: caiId, p_active: active });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export interface IssueRemitoInput {
@@ -84,7 +85,7 @@ export async function issueRemito(input: IssueRemitoInput): Promise<Remito> {
     p_notes: input.notes,
     p_show_values: input.showValues
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   const remito = await getRemito(String(data));
   if (!remito) throw new Error("El remito se emitió pero no se pudo leer. Buscalo en Facturas → Remito R.");
   return remito;
@@ -94,12 +95,12 @@ export async function issueRemito(input: IssueRemitoInput): Promise<Remito> {
 export async function getLastCustomerRemito(customerId: string): Promise<Remito | null> {
   if (!supabase) return null;
   const { data, error } = await supabase.from("remitos").select("*").eq("customer_id", customerId).order("created_at", { ascending: false }).limit(1).maybeSingle();
-  if (error) throw error;
+  if (error) throw toError(error);
   return data ? parseRemito(data as Record<string, unknown>) : null;
 }
 
 export async function voidRemito(id: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("void_remito", { p_remito_id: id });
-  if (error) throw error;
+  if (error) throw toError(error);
 }

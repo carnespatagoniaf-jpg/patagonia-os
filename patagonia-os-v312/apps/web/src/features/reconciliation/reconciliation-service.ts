@@ -1,6 +1,7 @@
 import { supabase } from "../../lib/supabase";
 import type { BankLine, BankMapping } from "./bank-statement";
 import type { BankRule, RuleAction } from "./reconcile-match";
+import { toError } from "../../lib/supabase-error";
 
 /** Conciliación bancaria (migración 103). Lecturas por RLS (dueño/admin), escrituras por RPC. */
 
@@ -62,7 +63,7 @@ export async function listReconAccounts(): Promise<ReconAccount[]> {
     .from("bank_reconciliation_accounts")
     .select("id,name,treasury_account_ids,card_account_ids,main_treasury_account_id,mapping,alerts_enabled,alert_days,reminder_days")
     .order("name");
-  if (error) throw error;
+  if (error) throw toError(error);
   type Row = {
     id: string; name: string; treasury_account_ids: string[]; card_account_ids: string[]; main_treasury_account_id: string; mapping: BankMapping | null;
     alerts_enabled: boolean | null; alert_days: number | null; reminder_days: number | null;
@@ -144,7 +145,7 @@ export async function listBankLines(reconAccountId: string, from: string, to: st
       .order("line_date")
       .order("id")
       .range(start, start + PAGE_SIZE - 1);
-    if (error) throw error;
+    if (error) throw toError(error);
     data.push(...(page ?? []));
     if (!page || page.length < PAGE_SIZE) break;
   }
@@ -237,7 +238,7 @@ export async function listReconRules(reconAccountId: string): Promise<BankRule[]
     .select("id,match_text,direction,action,category,customer_id")
     .eq("recon_account_id", reconAccountId)
     .order("created_at");
-  if (error) throw error;
+  if (error) throw toError(error);
   type Row = { id: string; match_text: string; direction: "in" | "out"; action: RuleAction; category: string | null; customer_id: string | null };
   return ((data ?? []) as Row[]).map((r) => ({ id: r.id, matchText: r.match_text, direction: r.direction, action: r.action, category: r.category, customerId: r.customer_id }));
 }
@@ -327,7 +328,7 @@ export async function listReconCloses(reconAccountId: string): Promise<ReconClos
     .select("id,period_from,period_end,bank_balance,system_balance,detail,closed_at")
     .eq("recon_account_id", reconAccountId)
     .order("period_end", { ascending: false });
-  if (error) throw error;
+  if (error) throw toError(error);
   type Row = { id: string; period_from: string; period_end: string; bank_balance: number; system_balance: number; detail: Record<string, unknown> | null; closed_at: string };
   return ((data ?? []) as Row[]).map((r) => ({
     id: r.id,

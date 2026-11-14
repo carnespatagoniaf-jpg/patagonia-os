@@ -1,6 +1,7 @@
 import { supabase } from "../../lib/supabase";
 import { fetchProductNames } from "../products/product-names";
 import type { FrigoCamara, FrigoDt, FrigoMedia, FrigoSalida, SalidaKind } from "./frigo-logic";
+import { toError } from "../../lib/supabase-error";
 
 // Frigorífico (migración 169): las tablas se leen directo (RLS por empresa y
 // pantalla 'frigorifico') y todo cambio pasa por las funciones de la base.
@@ -18,7 +19,7 @@ async function allRows<T>(table: string, columns: string, order: string): Promis
   const rows: T[] = [];
   for (let from = 0; ; from += PAGE_SIZE) {
     const { data, error } = await client.from(table).select(columns).order(order).order("id").range(from, from + PAGE_SIZE - 1);
-    if (error) throw error;
+    if (error) throw toError(error);
     rows.push(...((data ?? []) as unknown as T[]));
     if (!data || data.length < PAGE_SIZE) return rows;
   }
@@ -76,7 +77,7 @@ export async function listSalidas(): Promise<FrigoSalida[]> {
 /** Clientes activos para elegir en una venta (la deuda se ve en Clientes). */
 export async function listActiveCustomers(): Promise<{ id: string; name: string }[]> {
   const { data, error } = await requireClient().from("customers").select("id,name").eq("active", true).order("name").limit(2000);
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []) as { id: string; name: string }[];
 }
 
@@ -84,7 +85,7 @@ export async function saveCamara(input: { id: string | null; number: number; nam
   const { error } = await requireClient().rpc("frigo_save_camara", {
     p_id: input.id, p_number: input.number, p_name: input.name, p_capacity: input.capacity, p_active: input.active
   });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function createDt(input: {
@@ -94,12 +95,12 @@ export async function createDt(input: {
     p_branch_id: input.branchId, p_dt_number: input.dtNumber, p_dt_date: input.dtDate, p_producer: input.producer, p_renspa: input.renspa,
     p_origin: input.origin, p_category: input.category, p_heads: input.heads, p_notes: input.notes
   });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function deleteDt(dtId: string) {
   const { error } = await requireClient().rpc("frigo_delete_dt", { p_dt_id: dtId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function slaughter(input: { dtId: string; tropa: number; date: string; medias: { kg: number; camaraId: string }[] }) {
@@ -107,13 +108,13 @@ export async function slaughter(input: { dtId: string; tropa: number; date: stri
     p_dt_id: input.dtId, p_tropa: input.tropa, p_slaughter_date: input.date,
     p_medias: input.medias.map((m) => ({ kg: m.kg, camara_id: m.camaraId }))
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as { tropa: number; first_garron: number; last_garron: number; total_kg: number };
 }
 
 export async function moveMedias(mediaIds: string[], camaraId: string) {
   const { error } = await requireClient().rpc("frigo_move_medias", { p_media_ids: mediaIds, p_camara_id: camaraId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function createSalida(input: {
@@ -125,11 +126,11 @@ export async function createSalida(input: {
     p_dest_branch_id: input.destBranchId, p_product_id: input.productId, p_price_per_kg: input.pricePerKg,
     p_media_ids: input.mediaIds, p_notes: input.notes
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as { id: string; number: number; medias: number; total_kg: number; total: number };
 }
 
 export async function voidSalida(salidaId: string, reason: string) {
   const { error } = await requireClient().rpc("frigo_void_salida", { p_salida_id: salidaId, p_reason: reason });
-  if (error) throw error;
+  if (error) throw toError(error);
 }

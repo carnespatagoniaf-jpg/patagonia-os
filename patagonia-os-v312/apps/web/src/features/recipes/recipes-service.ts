@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 
 // Recetas (fichas técnicas): ver migración 097_recipes.sql. Lectura directa de
 // las tablas (solo dueño y administrador pasan la política de seguridad) y todo
@@ -61,7 +62,7 @@ export async function listRecipes(): Promise<Recipe[]> {
   // Base sin la migración 168 todavía: se lee como antes (nadie descuenta al vender).
   const { data: rows, error } =
     first.error?.code === "42703" ? await supabase.from("recipes").select(columns).order("updated_at", { ascending: false }) : first;
-  if (error) throw error;
+  if (error) throw toError(error);
 
   // Los insumos se traen paginados: PostgREST corta en 1000 filas.
   const itemRows: RecipeItemRow[] = [];
@@ -72,7 +73,7 @@ export async function listRecipes(): Promise<Recipe[]> {
       .order("recipe_id")
       .order("position")
       .range(from, from + PAGE - 1);
-    if (itemsError) throw itemsError;
+    if (itemsError) throw toError(itemsError);
     itemRows.push(...((data ?? []) as RecipeItemRow[]));
     if (!data || data.length < PAGE) break;
   }
@@ -122,7 +123,7 @@ export async function saveRecipe(input: SaveRecipeInput): Promise<string> {
       waste_pct: item.wastePct
     }))
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as string;
 }
 
@@ -130,20 +131,20 @@ export async function saveRecipe(input: SaveRecipeInput): Promise<string> {
 export async function setRecipeKind(recipeId: string, kind: RecipeKind): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("set_recipe_kind", { p_recipe_id: recipeId, p_kind: kind });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** Prende o apaga "al venderlo, descontar los insumos del stock". Se llama después de saveRecipe. */
 export async function setRecipeDeductOnSale(recipeId: string, enabled: boolean): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("set_recipe_deduct_on_sale", { p_recipe_id: recipeId, p_enabled: enabled });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function deleteRecipe(recipeId: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("delete_recipe", { p_recipe_id: recipeId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export interface AppliedRecipe {
@@ -157,7 +158,7 @@ export interface AppliedRecipe {
 export async function applyRecipeToProduct(recipeId: string, price: number | null): Promise<AppliedRecipe> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("apply_recipe_to_product", { p_recipe_id: recipeId, p_price: price });
-  if (error) throw error;
+  if (error) throw toError(error);
   const row = data as { cost: number; price: number; batch_cost: number };
   return { cost: Number(row.cost), price: Number(row.price), batchCost: Number(row.batch_cost) };
 }

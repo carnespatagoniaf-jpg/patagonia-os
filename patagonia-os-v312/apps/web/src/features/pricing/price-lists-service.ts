@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import type { PriceList } from "./price-lists";
+import { toError } from "../../lib/supabase-error";
 
 /** La tabla/vista no existe todavía (migración 167 sin aplicar): se sigue como si no hubiera listas. */
 function missingRelation(error: { code?: string } | null): boolean {
@@ -19,7 +20,7 @@ export async function listPriceLists(): Promise<PriceList[]> {
   }
   if (error) {
     if (missingRelation(error)) return [];
-    throw error;
+    throw toError(error);
   }
   return (data ?? []).map((r) => ({ id: String(r.id), name: String(r.name), base: r.base as PriceList["base"], pct: Number(r.pct), active: Boolean(r.active), isZone: r.is_zone === true }));
 }
@@ -63,7 +64,7 @@ export async function listZoneBranches(): Promise<Map<string, string[]>> {
 export async function savePriceZone(input: { id: string | null; name: string; pct: number; branchIds: string[] }): Promise<string> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("save_price_zone", { p_id: input.id, p_name: input.name, p_pct: input.pct, p_branch_ids: input.branchIds });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as string;
 }
 
@@ -81,7 +82,7 @@ export async function listProductListPrices(): Promise<Map<string, Record<string
       .range(from, from + PAGE_SIZE - 1);
     if (error) {
       if (missingRelation(error)) return result;
-      throw error;
+      throw toError(error);
     }
     for (const r of data ?? []) {
       const entry = result.get(r.product_id) ?? {};
@@ -102,14 +103,14 @@ export async function savePriceList(input: { id?: string; name: string; base: Pr
     p_pct: input.pct,
     p_active: input.active
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as string;
 }
 
 export async function deletePriceList(id: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("delete_price_list", { p_id: id });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** price null = vuelve a la regla de la lista. */
@@ -119,19 +120,19 @@ export async function setProductListPrices(items: { productId: string; listId: s
   const { error } = await supabase.rpc("set_product_list_prices", {
     p_items: items.map((i) => ({ product_id: i.productId, list_id: i.listId, price: i.price }))
   });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function setCustomerPriceList(customerId: string, listId: string | null): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("set_customer_price_list", { p_customer_id: customerId, p_list_id: listId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** Botón "Mayorista" tocado a mano en Mostrador: pide el PIN de anular si la empresa tiene uno. */
 export async function checkPriceListPin(pin: string | null): Promise<{ ok: boolean; error?: string }> {
   if (!supabase) return { ok: true };
   const { data, error } = await supabase.rpc("check_price_list_pin", { p_pin: pin });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as { ok: boolean; error?: string };
 }

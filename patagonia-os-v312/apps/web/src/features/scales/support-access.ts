@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 
 /**
  * Acceso a las herramientas técnicas de balanza (migración 120). Lo decide la base, no la pantalla:
@@ -20,14 +21,14 @@ export async function fetchScaleSupportEnabled(): Promise<boolean> {
 export async function grantScaleSupportAccess(companyId: string, hours = 2, reason: string | null = null): Promise<string> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("grant_scale_support_access", { p_company_id: companyId, p_hours: hours, p_reason: reason });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as string;
 }
 
 export async function revokeScaleSupportAccess(companyId: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("revoke_scale_support_access", { p_company_id: companyId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** Empresas con el acceso abierto ahora: { company_id: vence }. Vacío si la base no tiene la migración. */

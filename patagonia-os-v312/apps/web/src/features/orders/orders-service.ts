@@ -2,6 +2,7 @@ import { supabase } from "../../lib/supabase";
 import type { CustomerOrder, OrderDraftItem, OrderStatus, OrderUnit } from "./orders-logic";
 import { demoSeedOrders } from "./orders-demo";
 import { fetchProductNames, type ProductNameUnit } from "../products/product-names";
+import { toError } from "../../lib/supabase-error";
 
 // Pedidos de clientes (migración 187). Se lee directo de las tablas (RLS: empresa + sucursal + pantalla 'pedidos')
 // y se escribe solo por RPC (migración 175). Sin Supabase (modo demostración) se guarda en este navegador.
@@ -76,7 +77,7 @@ export async function listOrders(branchId: string | null, from: string, to: stri
   if (branchId) query = query.eq("branch_id", branchId);
   const { data, error } = await query;
   if (missingTable(error)) return [];
-  if (error) throw error;
+  if (error) throw toError(error);
   return withNames((data ?? []) as unknown as OrderRow[]);
 }
 
@@ -87,7 +88,7 @@ export async function listOverdueBefore(branchId: string | null, before: string)
   if (branchId) query = query.eq("branch_id", branchId);
   const { data, error } = await query;
   if (missingTable(error)) return [];
-  if (error) throw error;
+  if (error) throw toError(error);
   return withNames((data ?? []) as unknown as OrderRow[]);
 }
 
@@ -121,7 +122,7 @@ export async function saveOrder(input: OrderInput): Promise<string> {
     p_deposit: input.deposit,
     p_items: items.map((i) => ({ product_id: i.productId, quantity: i.quantity, notes: i.notes.trim() || null }))
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return String(data);
 }
 
@@ -131,7 +132,7 @@ export async function setOrderStatus(id: string, status: OrderStatus): Promise<v
     return;
   }
   const { error } = await supabase.rpc("set_customer_order_status", { p_id: id, p_status: status });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** Cobrado en Mostrador (196): entregado + qué venta fue (null si la venta quedó en la cola sin conexión). */
@@ -141,7 +142,7 @@ export async function deliverOrder(id: string, posSaleId: string | null): Promis
     return;
   }
   const { error } = await supabase.rpc("deliver_customer_order", { p_id: id, p_pos_sale_id: posSaleId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 // Modo demostración ---------------------------------------------------------

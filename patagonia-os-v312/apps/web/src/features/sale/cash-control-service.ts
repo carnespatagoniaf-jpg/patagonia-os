@@ -71,7 +71,7 @@ export async function listSafeAccounts(): Promise<SafeAccount[]> {
     .from("treasury_balance")
     .select("account_id,balance")
     .in("account_id", accounts.map((a) => a.id));
-  if (balanceError) throw balanceError;
+  if (balanceError) throw toError(balanceError);
   const byId = new Map(((balances ?? []) as { account_id: string; balance: number }[]).map((b) => [b.account_id, Number(b.balance)]));
   return accounts.map((a) => ({ id: a.id, name: a.name, balance: byId.get(a.id) ?? 0 }));
 }

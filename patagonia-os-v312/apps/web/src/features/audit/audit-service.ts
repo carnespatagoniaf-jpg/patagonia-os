@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 
 export interface AuditLogEntry {
   id: number;
@@ -32,7 +33,7 @@ export async function listAuditLog(input: ListAuditLogInput): Promise<AuditLogEn
   if (input.userId) query = query.eq("user_id", input.userId);
 
   const { data, error } = await query;
-  if (error) throw error;
+  if (error) throw toError(error);
 
   return (data ?? []).map((row) => ({
     id: row.id,

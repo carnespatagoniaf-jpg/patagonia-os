@@ -1,5 +1,6 @@
 import type { Supplier } from "@patagonia/domain";
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 
 interface SupplierRow {
   id: string;
@@ -31,7 +32,7 @@ export async function listSuppliers(includeInactive = false): Promise<Supplier[]
   if (!includeInactive) query = query.eq("active", true);
 
   const { data, error } = await query;
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map(mapSupplier);
 }
 
@@ -52,7 +53,7 @@ export async function createSupplier(input: CreateSupplierInput): Promise<Suppli
     p_notes: input.notes ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id, name: data.name, category: data.category, active: true };
 }
 
@@ -77,7 +78,7 @@ export async function updateSupplier(input: UpdateSupplierInput): Promise<void> 
     p_active: input.active
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** "Borrar" (migración 141): sin compras ni pagos se borra; con historia queda dado de baja. */
@@ -85,7 +86,7 @@ export async function deleteSupplier(id: string): Promise<"deleted" | "deactivat
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { data, error } = await supabase.rpc("remove_supplier", { p_supplier_id: id });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as "deleted" | "deactivated";
 }
 
@@ -100,7 +101,7 @@ export interface SupplierBalance {
 export async function listSupplierBalances(): Promise<Record<string, number>> {
   if (!supabase) return {};
   const { data, error } = await supabase.from("supplier_balance").select("supplier_id,balance");
-  if (error) throw error;
+  if (error) throw toError(error);
   return Object.fromEntries((data ?? []).map((row) => [row.supplier_id as string, Number(row.balance)]));
 }
 
@@ -113,7 +114,7 @@ export async function fetchSupplierBalance(supplierId: string): Promise<Supplier
     .eq("supplier_id", supplierId)
     .maybeSingle();
 
-  if (error) throw error;
+  if (error) throw toError(error);
   if (!data) return null;
 
   return {

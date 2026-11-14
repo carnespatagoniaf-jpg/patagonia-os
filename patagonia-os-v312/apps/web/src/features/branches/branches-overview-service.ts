@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 
 // Resumen por sucursal (Sucursales) y transferencia de stock entre
 // sucursales. Ver migración 098_branches_overview.sql. Solo dueño/admin
@@ -30,7 +31,7 @@ export async function getBranchesOverview(): Promise<BranchOverview[]> {
   if (!supabase) return [];
 
   const { data, error } = await supabase.rpc("get_branches_overview");
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as BranchOverviewRow[]).map((row) => ({
     branchId: row.branch_id,
     branchName: row.branch_name,
@@ -61,6 +62,6 @@ export async function transferBranchStock(input: TransferBranchStockInput): Prom
     p_quantity: input.quantity,
     p_notes: input.notes ?? null
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return { transferId: data as string };
 }

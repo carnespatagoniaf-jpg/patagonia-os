@@ -1,5 +1,6 @@
 import type { PaymentMethod, TreasuryAccount } from "@patagonia/domain";
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 
 interface TreasuryAccountRow {
   id: string;
@@ -45,7 +46,7 @@ export async function listTreasuryAccounts(branchId?: string): Promise<TreasuryA
 
   const { data, error } = await query;
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as unknown as TreasuryAccountRow[]).map(mapAccount);
 }
 
@@ -58,7 +59,7 @@ export async function listAllTreasuryAccounts(): Promise<TreasuryAccount[]> {
     .select("id,name,payment_method,initial_balance,active,branch_id,is_safe,cheque_role,branches(name)")
     .order("name");
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as unknown as TreasuryAccountRow[]).map(mapAccount);
 }
 
@@ -80,7 +81,7 @@ export async function createTreasuryAccount(input: CreateTreasuryAccountInput): 
     p_branch_id: input.branchId ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return {
     id: data.id,
     name: data.name,
@@ -95,7 +96,7 @@ export async function setTreasuryAccountBranch(accountId: string, branchId: stri
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("set_treasury_account_branch", { p_account_id: accountId, p_branch_id: branchId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export interface TreasuryAccountBalance {
@@ -113,7 +114,7 @@ export async function listTreasuryBalances(): Promise<TreasuryAccountBalance[]> 
     .select("account_id,name,initial_balance,balance")
     .order("name");
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map((row) => ({
     accountId: row.account_id,
     name: row.name,
@@ -126,7 +127,7 @@ export async function setTreasuryAccountActive(accountId: string, active: boolea
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("set_treasury_account_active", { p_account_id: accountId, p_active: active });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export interface AdjustTreasuryAccountInput {
@@ -150,7 +151,7 @@ export async function adjustTreasuryAccount(input: AdjustTreasuryAccountInput): 
     p_pos_shift_id: input.posShiftId ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id, balance: Number(data.balance) };
 }
 
@@ -173,7 +174,7 @@ export async function transferTreasuryFunds(input: TransferTreasuryFundsInput): 
     p_reason: input.reason ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { transferId: data.transfer_id };
 }
 
@@ -222,7 +223,7 @@ export async function listTreasuryMovements(options: ListTreasuryMovementsOption
 
   const { data, error } = await query;
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as unknown as TreasuryMovementQueryRow[]).map((row) => ({
     id: row.id,
     accountName: row.treasury_accounts?.name ?? "-",
@@ -258,7 +259,7 @@ export async function registerTreasuryExpense(input: RegisterTreasuryExpenseInpu
     p_expense_date: input.expenseDate
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id, balance: Number(data.balance) };
 }
 
@@ -266,5 +267,5 @@ export async function deleteTreasuryExpense(movementId: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("delete_treasury_expense", { p_movement_id: movementId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }

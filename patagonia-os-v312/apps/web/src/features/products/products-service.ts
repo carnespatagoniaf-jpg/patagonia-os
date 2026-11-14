@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 
 export interface ProductPriceRow {
   id: string;
@@ -27,7 +28,7 @@ export async function listProductPrices(): Promise<ProductPriceRow[]> {
     .select("id,code,name,unit,price_retail")
     .eq("active", true);
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? [])
     .map((row) => ({
       id: row.id,

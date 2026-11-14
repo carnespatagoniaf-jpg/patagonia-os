@@ -1,5 +1,6 @@
 import type { CarcassCutTemplate } from "@patagonia/domain";
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 
 interface CarcassCutTemplateRow {
   id: string;
@@ -30,7 +31,7 @@ export async function listCarcassCutTemplates(): Promise<CarcassCutTemplate[]> {
     .order("animal_type")
     .order("sort_order");
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map(mapTemplate);
 }
 
@@ -55,7 +56,7 @@ export async function saveCarcassCutTemplate(input: SaveCarcassCutTemplateInput)
     p_sort_order: input.sortOrder
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id };
 }
 
@@ -63,7 +64,7 @@ export async function deleteCarcassCutTemplate(id: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("delete_carcass_cut_template", { p_template_id: id });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export interface DefaultCarcassCut {
@@ -95,6 +96,6 @@ export async function applyDefaultCarcassCuts(animalType: string): Promise<numbe
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { data, error } = await supabase.rpc("use_default_carcass_cuts", { p_animal_type: animalType });
-  if (error) throw error;
+  if (error) throw toError(error);
   return Number(data ?? 0);
 }

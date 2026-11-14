@@ -1,6 +1,7 @@
 import { supabase } from "../../../lib/supabase";
 import type { InstallRecord } from "../install-status";
 import { rowToScale, type BranchScale, type ScaleFamily, type ScaleRow as Row } from "./scale-identity";
+import { toError } from "../../../lib/supabase-error";
 
 export * from "./scale-identity";
 
@@ -47,7 +48,7 @@ export async function registerBranchScale(
     p_model: s.model,
     p_identity: s.identity
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return data as string;
 }
 
@@ -55,24 +56,24 @@ export async function registerBranchScale(
 export async function saveScaleInstall(branchId: string, key: string, patch: InstallRecord): Promise<void> {
   if (!supabase) return;
   const { error } = await supabase.rpc("set_branch_scale_install", { p_branch_id: branchId, p_scale_key: key, p_patch: patch });
-  if (error && error.code !== "PGRST202") throw error;
+  if (error && error.code !== "PGRST202") throw toError(error);
 }
 
 /** Mostrador leyó bien una etiqueta de balanza (como mucho una escritura cada 10 minutos por balanza, en la base). */
 export async function markScalesSaleTested(branchId: string, detail: string): Promise<void> {
   if (!supabase) return;
   const { error } = await supabase.rpc("mark_branch_scales_sale_tested", { p_branch_id: branchId, p_detail: detail });
-  if (error && error.code !== "PGRST202") throw error;
+  if (error && error.code !== "PGRST202") throw toError(error);
 }
 
 export async function renameBranchScale(branchId: string, key: string, name: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("rename_branch_scale", { p_branch_id: branchId, p_scale_key: key, p_name: name });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function removeBranchScale(branchId: string, key: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("remove_branch_scale", { p_branch_id: branchId, p_scale_key: key });
-  if (error) throw error;
+  if (error) throw toError(error);
 }

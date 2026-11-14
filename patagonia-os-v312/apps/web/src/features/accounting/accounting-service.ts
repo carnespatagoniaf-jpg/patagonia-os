@@ -5,6 +5,7 @@ import type { MonotributoCategory, PurchaseVoucher, SaleVoucher, VatLine } from 
 import type { ImportedVoucher } from "./mis-comprobantes";
 import type { IibbCredit, IibbSettings } from "./iibb";
 import type { Obligation, OfficialDue, TaxReminder } from "./tax-calendar";
+import { toError } from "../../lib/supabase-error";
 
 export interface AccountingMonth {
   period: string;
@@ -78,7 +79,7 @@ export function mapPurchaseVoucher(row: any): PurchaseVoucher & { supplierName: 
 export async function getAccountingMonth(month: string): Promise<AccountingMonth> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("accounting_month", { p_month: `${month}-01` });
-  if (error) throw error;
+  if (error) throw toError(error);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const d = data as any;
   return {
@@ -215,14 +216,14 @@ export async function savePurchaseVoucher(input: PurchaseVoucherInput): Promise<
       notes: input.notes ?? null
     }
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return String(data);
 }
 
 export async function deletePurchaseVoucher(id: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("delete_purchase_voucher", { p_voucher_id: id });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export interface ImportVouchersResult {
@@ -234,7 +235,7 @@ export interface ImportVouchersResult {
 export async function importPurchaseVouchers(rows: ImportedVoucher[]): Promise<ImportVouchersResult> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("import_purchase_vouchers", { p_rows: rows });
-  if (error) throw error;
+  if (error) throw toError(error);
   const d = (data ?? {}) as Partial<ImportVouchersResult>;
   return { created: Number(d.created ?? 0), skipped: Number(d.skipped ?? 0), errors: d.errors ?? [] };
 }
@@ -245,7 +246,7 @@ export async function listSupplierTaxInfo(): Promise<Record<string, { taxId: str
   const { data, error } = await supabase.from("suppliers").select("id,tax_id,tax_condition");
   if (error) {
     if ((error as { code?: string }).code === "42703") return {};
-    throw error;
+    throw toError(error);
   }
   return Object.fromEntries((data ?? []).map((r) => [r.id, { taxId: r.tax_id ?? null, taxCondition: r.tax_condition ?? null }]));
 }
@@ -253,7 +254,7 @@ export async function listSupplierTaxInfo(): Promise<Record<string, { taxId: str
 export async function setSupplierTax(supplierId: string, taxId: string | null, taxCondition: string | null): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("set_supplier_tax", { p_supplier_id: supplierId, p_tax_id: taxId, p_tax_condition: taxCondition });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** El comprobante cargado para una compra (si tiene). */
@@ -262,7 +263,7 @@ export async function getVoucherForPurchase(purchaseId: string): Promise<(Purcha
   const { data, error } = await supabase.from("purchase_vouchers").select("*").eq("purchase_id", purchaseId).maybeSingle();
   if (error) {
     if ((error as { code?: string }).code === "42P01") return null;
-    throw error;
+    throw toError(error);
   }
   return data ? mapPurchaseVoucher(data) : null;
 }
@@ -273,7 +274,7 @@ export async function listVouchersForPurchases(purchaseIds: string[]): Promise<R
   const { data, error } = await supabase.from("purchase_vouchers").select("*").in("purchase_id", purchaseIds);
   if (error) {
     if ((error as { code?: string }).code === "42P01") return {};
-    throw error;
+    throw toError(error);
   }
   return Object.fromEntries((data ?? []).map((row) => [row.purchase_id as string, mapPurchaseVoucher(row)]));
 }
@@ -303,19 +304,19 @@ export async function saveTaxSettings(input: IibbSettings & { obligations?: Obli
   };
   if (input.obligations !== undefined) payload.obligations = input.obligations;
   const { error } = await supabase.rpc("save_company_tax_settings", { p_settings: payload });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function addIibbCredit(input: { period: string; kind: IibbCredit["kind"]; jurisdiction: string | null; amount: number; notes: string | null }): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("add_iibb_credit", { p_period: input.period, p_kind: input.kind, p_jurisdiction: input.jurisdiction, p_amount: input.amount, p_notes: input.notes });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function deleteIibbCredit(id: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("delete_iibb_credit", { p_id: id });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function listTaxReminders(): Promise<TaxReminder[]> {
@@ -323,7 +324,7 @@ export async function listTaxReminders(): Promise<TaxReminder[]> {
   const { data, error } = await supabase.from("tax_reminders").select("id,title,day_of_month,active").order("day_of_month");
   if (error) {
     if ((error as { code?: string }).code === "42P01") return [];
-    throw error;
+    throw toError(error);
   }
   return (data ?? []).map((r) => ({ id: r.id, title: r.title, dayOfMonth: Number(r.day_of_month), active: Boolean(r.active) }));
 }
@@ -331,13 +332,13 @@ export async function listTaxReminders(): Promise<TaxReminder[]> {
 export async function saveTaxReminder(input: { id?: string | null; title: string; dayOfMonth: number; active: boolean }): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("save_tax_reminder", { p_id: input.id ?? null, p_title: input.title, p_day: input.dayOfMonth, p_active: input.active });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function deleteTaxReminder(id: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("delete_tax_reminder", { p_id: id });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** Calendario oficial de ARCA desde un mes (AAAA-MM-01). */
@@ -346,7 +347,7 @@ export async function listOfficialDues(fromMonth: string): Promise<OfficialDue[]
   const { data, error } = await supabase.from("official_due_dates").select("month,obligation,digits,due_date").gte("month", fromMonth);
   if (error) {
     if ((error as { code?: string }).code === "42P01") return [];
-    throw error;
+    throw toError(error);
   }
   return (data ?? []).map((r) => ({ month: r.month, obligation: r.obligation, digits: r.digits, dueDate: r.due_date }));
 }
@@ -387,7 +388,7 @@ export interface AgingRow {
 export async function getAging(): Promise<{ asOf: string; receivables: AgingRow[]; payables: AgingRow[] }> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("accounting_aging", { p_as_of: null });
-  if (error) throw error;
+  if (error) throw toError(error);
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const d = data as any;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -432,7 +433,7 @@ export async function listInventorySnapshots(): Promise<InventorySnapshot[]> {
   const { data, error } = await supabase.from("inventory_snapshots").select("id,taken_on,label,total_value,items_count,created_at").order("taken_on", { ascending: false });
   if (error) {
     if ((error as { code?: string }).code === "42P01") return [];
-    throw error;
+    throw toError(error);
   }
   return (data ?? []).map((r) => ({ id: r.id, takenOn: r.taken_on, label: r.label ?? null, totalValue: num(r.total_value), itemsCount: Number(r.items_count), createdAt: r.created_at }));
 }
@@ -449,7 +450,7 @@ export async function listInventorySnapshotItems(snapshotId: string): Promise<In
       .order("branch_name")
       .order("name")
       .range(from, from + PAGE - 1);
-    if (error) throw error;
+    if (error) throw toError(error);
     for (const r of data ?? []) {
       out.push({ branchName: r.branch_name, code: r.code ?? null, name: r.name, category: r.category ?? null, unit: r.unit ?? null, quantity: num(r.quantity), unitCost: num(r.unit_cost), value: num(r.value) });
     }
@@ -461,14 +462,14 @@ export async function listInventorySnapshotItems(snapshotId: string): Promise<In
 export async function takeInventorySnapshot(date: string, label: string | null): Promise<string> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("take_inventory_snapshot", { p_date: date, p_label: label });
-  if (error) throw error;
+  if (error) throw toError(error);
   return String(data);
 }
 
 export async function deleteInventorySnapshot(id: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("delete_inventory_snapshot", { p_id: id });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /* ---------------------------------------------- foto o PDF de la factura */
@@ -484,11 +485,11 @@ export async function attachVoucherFile(companyId: string, voucher: { id: string
   const ext = fromName || (file.type === "application/pdf" ? "pdf" : "jpg");
   const path = `${companyId}/${voucher.id}/${Date.now()}.${ext}`;
   const { error } = await supabase.storage.from(DOCS_BUCKET).upload(path, file, { contentType: file.type, upsert: false });
-  if (error) throw error;
+  if (error) throw toError(error);
   const { error: linkError } = await supabase.rpc("set_purchase_voucher_attachment", { p_voucher_id: voucher.id, p_path: path });
   if (linkError) {
     await supabase.storage.from(DOCS_BUCKET).remove([path]);
-    throw linkError;
+    throw toError(linkError);
   }
   if (voucher.attachmentPath) await supabase.storage.from(DOCS_BUCKET).remove([voucher.attachmentPath]);
   return path;
@@ -497,7 +498,7 @@ export async function attachVoucherFile(companyId: string, voucher: { id: string
 export async function removeVoucherFile(voucher: { id: string; attachmentPath?: string | null }): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("set_purchase_voucher_attachment", { p_voucher_id: voucher.id, p_path: null });
-  if (error) throw error;
+  if (error) throw toError(error);
   if (voucher.attachmentPath) await supabase.storage.from(DOCS_BUCKET).remove([voucher.attachmentPath]);
 }
 

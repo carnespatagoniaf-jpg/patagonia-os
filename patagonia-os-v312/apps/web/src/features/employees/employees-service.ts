@@ -1,5 +1,6 @@
 import type { Employee, PayrollAdjustment, PayrollAdjustmentType, PayrollLiquidation, PayrollLiquidationPayment, SalaryPeriod, ShiftOutflow } from "@patagonia/domain";
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 
 interface EmployeeRow {
   id: string;
@@ -35,7 +36,7 @@ export async function listEmployees(includeInactive = false): Promise<Employee[]
   if (!includeInactive) query = query.eq("active", true);
 
   const { data, error } = await query;
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map(mapEmployee);
 }
 
@@ -60,7 +61,7 @@ export async function createEmployee(input: CreateEmployeeInput): Promise<{ id: 
     p_recurring_bonus_reason: input.recurringBonusReason ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id };
 }
 
@@ -87,7 +88,7 @@ export async function updateEmployee(input: UpdateEmployeeInput): Promise<void> 
     p_salary_period: input.salaryPeriod
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 interface PayrollAdjustmentRow {
@@ -121,7 +122,7 @@ export async function listPayrollAdjustments(employeeId: string): Promise<Payrol
     .eq("employee_id", employeeId)
     .order("adjustment_date", { ascending: false });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return (data ?? []).map(mapAdjustment);
 }
 
@@ -144,7 +145,7 @@ export async function createPayrollAdjustment(input: CreatePayrollAdjustmentInpu
     p_reason: input.reason
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id };
 }
 
@@ -152,7 +153,7 @@ export async function deletePayrollAdjustment(adjustmentId: string): Promise<voi
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("delete_payroll_adjustment", { p_adjustment_id: adjustmentId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 interface VoucherQueryRow {
@@ -255,7 +256,7 @@ export async function registerEmployeeValeFromPosShift(input: RegisterEmployeeVa
     p_detail: input.detail ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id };
 }
 
@@ -288,7 +289,7 @@ export async function listPosShiftVales(posShiftId: string): Promise<PosShiftVal
     .eq("pos_shift_id", posShiftId)
     .order("created_at");
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as unknown as PosShiftOutflowRowWithEmployee[]).map((row) => ({
     id: row.id,
     employeeName: row.employees?.full_name ?? "-",
@@ -304,7 +305,7 @@ export async function deletePosShiftOutflow(id: string, authPin: string | null =
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { data, error } = await supabase.rpc("delete_pos_shift_outflow", { p_id: id, p_auth_pin: authPin });
-  if (error) throw error;
+  if (error) throw toError(error);
   const result = (data ?? {}) as { ok?: boolean; error?: string };
   if (result.ok === false) throw new Error(result.error ?? "No se pudo borrar.");
 }
@@ -372,7 +373,7 @@ export async function listPayrollLiquidations(employeeId: string): Promise<Payro
     .eq("employee_id", employeeId)
     .order("period_start", { ascending: false });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as unknown as PayrollLiquidationRow[]).map(mapLiquidation);
 }
 
@@ -400,7 +401,7 @@ export async function closePayrollLiquidation(input: ClosePayrollLiquidationInpu
     p_payments: input.payments.map((p) => ({ account_id: p.accountId, amount: p.amount }))
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return {
     id: data.id,
     employeeId: input.employeeId,
@@ -420,7 +421,7 @@ export async function deletePayrollLiquidation(liquidationId: string): Promise<v
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("delete_payroll_liquidation", { p_liquidation_id: liquidationId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export interface PayrollLiquidationLineItem {

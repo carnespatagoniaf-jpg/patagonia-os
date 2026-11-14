@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 
 export type StaffRole = "owner" | "admin" | "manager" | "cashier" | "production" | "readonly" | "accountant";
 
@@ -22,7 +23,7 @@ export async function listCompanyUsers(): Promise<CompanyUser[]> {
     // de Usuarios quedaba vacía para todos (arreglado 09/11).
     .select("id,full_name,role,active,branch_id,denied_permissions,branches!profiles_branch_id_fkey(name)")
     .order("full_name");
-  if (error) throw error;
+  if (error) throw toError(error);
 
   return (data ?? []).map((row) => {
     const branch = row.branches as unknown as { name: string } | { name: string }[] | null;
@@ -95,7 +96,7 @@ export async function updateStaffUser(input: UpdateStaffUserInput): Promise<void
     p_active: input.active,
     p_denied_permissions: input.deniedPermissions
   });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** Borra el usuario de verdad (login + perfil) en vez de solo marcarlo
@@ -139,5 +140,5 @@ export async function listProfileBranches(): Promise<Map<string, string[]>> {
 export async function setProfileBranches(profileId: string, branchIds: string[]): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("set_profile_branches", { p_profile_id: profileId, p_branch_ids: branchIds });
-  if (error) throw error;
+  if (error) throw toError(error);
 }

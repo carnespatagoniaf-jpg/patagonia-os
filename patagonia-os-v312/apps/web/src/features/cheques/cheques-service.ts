@@ -1,5 +1,6 @@
 import { supabase } from "../../lib/supabase";
 import type { Cheque, ChequeKind, ChequeStatus } from "./cheque-logic";
+import { toError } from "../../lib/supabase-error";
 
 // Cheques (migración 150, plan Full): la tabla se lee directo (RLS por
 // empresa + plan) y todo cambio pasa por las funciones de la base.
@@ -35,7 +36,7 @@ export async function listCheques(): Promise<Cheque[]> {
     .select("id,kind,echeq,number,bank,drawer_name,drawer_cuit,amount,pay_date,status,step_date,notes,created_at,customers(name),suppliers(name),treasury_accounts(name)")
     .order("pay_date")
     .limit(1000);
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as unknown as ChequeRow[]).map((r) => ({
     id: r.id,
     kind: r.kind,
@@ -90,7 +91,7 @@ export async function receiveCustomerCheque(input: ChequeData & {
     p_echeq: input.echeq,
     p_notes: input.notes ?? null
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   const r = data as { id: string; balance: number | null };
   return { id: r.id, balance: r.balance === null ? null : Number(r.balance) };
 }
@@ -112,30 +113,30 @@ export async function issueCheque(input: ChequeData & {
     p_echeq: input.echeq,
     p_notes: input.notes ?? null
   });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function depositCheque(chequeId: string, accountId: string, date: string): Promise<void> {
   const { error } = await requireClient().rpc("deposit_cheque", { p_cheque_id: chequeId, p_account_id: accountId, p_date: date });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function endorseCheque(chequeId: string, supplierId: string, branchId: string, date: string): Promise<void> {
   const { error } = await requireClient().rpc("endorse_cheque", { p_cheque_id: chequeId, p_supplier_id: supplierId, p_branch_id: branchId, p_date: date });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function rejectCheque(chequeId: string, date: string, notes: string): Promise<void> {
   const { error } = await requireClient().rpc("reject_cheque", { p_cheque_id: chequeId, p_date: date, p_notes: notes || null });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function markChequeDebited(chequeId: string, date: string): Promise<void> {
   const { error } = await requireClient().rpc("mark_cheque_debited", { p_cheque_id: chequeId, p_date: date });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function undoChequeStep(chequeId: string): Promise<void> {
   const { error } = await requireClient().rpc("undo_cheque_step", { p_cheque_id: chequeId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }

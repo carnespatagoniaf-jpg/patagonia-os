@@ -1,6 +1,7 @@
 import type { Product } from "@patagonia/domain";
 import { supabase } from "../../lib/supabase";
 import { listProductListPrices } from "../pricing/price-lists-service";
+import { toError } from "../../lib/supabase-error";
 
 export async function listProductsForBranch(branchId: string, includeInactive = false): Promise<Product[]> {
   if (!supabase) return [];
@@ -26,7 +27,7 @@ export async function listProductsForBranch(branchId: string, includeInactive = 
     if (!includeInactive) query = query.eq("active", true);
 
     const { data, error } = await query;
-    if (error) throw error;
+    if (error) throw toError(error);
     rows.push(...(data ?? []));
     if (!data || data.length < PAGE_SIZE) break;
   }
@@ -68,7 +69,7 @@ export async function setProductStockSource(input: {
     p_factor: input.factor,
     p_move_stock: input.moveStock
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return { cleared: Number(data?.cleared ?? 0), moved: Number(data?.moved ?? 0) };
 }
 
@@ -97,7 +98,7 @@ export async function createProduct(input: CreateProductInput): Promise<{ id: st
     p_category_id: input.categoryId ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id };
 }
 
@@ -130,7 +131,7 @@ export async function updateProduct(input: UpdateProductInput): Promise<void> {
     p_category_id: input.categoryId ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export interface AdjustProductStockInput {
@@ -156,7 +157,7 @@ export async function adjustProductStock(input: AdjustProductStockInput): Promis
     p_reason: input.reason
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return { previous: Number(data.previous), counted: Number(data.counted), delta: Number(data.delta) };
 }
 
@@ -172,7 +173,7 @@ export async function bulkUpdateProductPrices(changes: BulkPriceChange[]): Promi
   const { data, error } = await supabase.rpc("bulk_update_product_prices", {
     p_items: changes.map((c) => ({ product_id: c.id, price_retail: c.priceRetail, cost: c.cost }))
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return { updated: Number((data as { updated?: number } | null)?.updated ?? 0) };
 }
 
@@ -180,14 +181,14 @@ export async function bulkUpdateProductPrices(changes: BulkPriceChange[]): Promi
 export async function deleteProduct(productId: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("delete_product", { p_product_id: productId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** Dar de baja (no aparece para vender) o reactivar un producto, sin pasar por Editar. */
 export async function setProductActive(productId: string, active: boolean): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("set_product_active", { p_product_id: productId, p_active: active });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 /** IVA de cada producto (migración 154): id → alícuota, o null = el IVA general de Facturas. */
@@ -201,7 +202,7 @@ export async function listProductVatRates(): Promise<Record<string, number | nul
     if (error) {
       // Base sin la migración 154 todavía: sin IVA por producto, nada se rompe.
       if ((error as { code?: string }).code === "42703") return {};
-      throw error;
+      throw toError(error);
     }
     for (const row of data ?? []) out[row.id] = row.vat_rate === null ? null : Number(row.vat_rate);
     if (!data || data.length < PAGE_SIZE) break;
@@ -217,7 +218,7 @@ export async function setProductsVatRate(input: { productIds?: string[]; codes?:
     p_codes: input.codes ?? null,
     p_rate: input.rate
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return Number(data ?? 0);
 }
 
@@ -225,7 +226,7 @@ export async function setProductsVatRate(input: { productIds?: string[]; codes?:
 export async function listProductPackages(branchId: string): Promise<Record<string, number>> {
   if (!supabase) return {};
   const { data, error } = await supabase.rpc("list_product_packages", { p_branch_id: branchId });
-  if (error) throw error;
+  if (error) throw toError(error);
   return Object.fromEntries(((data ?? []) as { product_id: string; packages: number }[]).map((r) => [r.product_id, Number(r.packages)]));
 }
 
@@ -238,7 +239,7 @@ export async function registerProductPackages(input: { branchId: string; product
     p_kind: input.kind,
     p_count: input.count
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return Number(data);
 }
 
@@ -246,5 +247,5 @@ export async function registerProductPackages(input: { branchId: string; product
 export async function clearProductPackages(branchId: string, productId: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("clear_product_packages", { p_branch_id: branchId, p_product_id: productId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
