@@ -161,7 +161,8 @@ insert into invoices (id, company_id, branch_id, kind, letter, voucher_type, poi
   ('00000000-0000-0000-0000-0000000c9113', '00000000-0000-0000-0000-0000000c9101', '00000000-0000-0000-0000-0000000c910b', 'factura', 'B', 6, 1, 99, 'consumidor_final', 1000, 826.45);
 do $$
 begin
-  if (select point_of_sale from invoices where id = '00000000-0000-0000-0000-0000000c9113') <> 1 then raise exception 'con Full usó el punto del local'; end if;
+  -- Desde la 198 el punto de venta por local es de todos los planes: con Full lo sigue usando.
+  if (select point_of_sale from invoices where id = '00000000-0000-0000-0000-0000000c9113') <> 5 then raise exception 'con Full dejó de usar el punto del local'; end if;
 end $$;
 
 rollback;
