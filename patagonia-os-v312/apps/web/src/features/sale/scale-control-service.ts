@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 import type { ScaleControlTotals, ScaleReading } from "./scale-control";
 
 /** Control de balanza en el cierre y tickets anulados (migración 104). */
@@ -51,7 +52,7 @@ export async function listScaleVoids(posShiftId: string): Promise<ScaleVoid[]> {
     .select("id,created_at,barcode,plu,product_id,weight_kg,amount,reason")
     .eq("pos_shift_id", posShiftId)
     .order("created_at");
-  if (error) throw error;
+  if (error) throw toError(error);
   type Row = {
     id: string; created_at: string; barcode: string; plu: string | null; weight_kg: number | null; amount: number;
     reason: string | null; product_id: string | null;

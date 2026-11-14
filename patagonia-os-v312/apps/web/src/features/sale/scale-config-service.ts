@@ -1,4 +1,5 @@
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 import { DEFAULT_SCALE_CONFIG, type ScaleConfig, type ScalePayloadType } from "./scale-barcode";
 
 export * from "./scale-barcode";
@@ -32,7 +33,7 @@ export async function getBranchScaleConfig(branchId: string): Promise<ScaleConfi
     .eq("branch_id", branchId)
     .maybeSingle();
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return data ? mapConfig(data) : null;
 }
 
@@ -49,12 +50,12 @@ export async function saveBranchScaleConfig(branchId: string, config: ScaleConfi
     p_payload_type: config.payloadType
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export async function deleteBranchScaleConfig(branchId: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { error } = await supabase.rpc("delete_branch_scale_config", { p_branch_id: branchId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }

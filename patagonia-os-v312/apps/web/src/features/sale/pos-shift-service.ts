@@ -2,6 +2,7 @@ import type { ProductSalesRow } from "../shifts/sales-by-category";
 import { parsePeriodResult, type PeriodResultData } from "../shifts/period-result";
 import { parseActivityReport, type CashierActivity, type HourActivity } from "../shifts/sales-activity";
 import { supabase } from "../../lib/supabase";
+import { toError } from "../../lib/supabase-error";
 import { localDateIso } from "../shifts/format";
 import { parseCountResult, type CountResult, type DeclaredPayload } from "./cash-close";
 
@@ -30,7 +31,7 @@ export async function getOpenPosShift(branchId: string): Promise<PosShift | null
   }
 
   const { data, error } = result;
-  if (error) throw error;
+  if (error) throw toError(error);
   if (!data) return null;
   const row = data as { id: string; opened_at: string; opening_cash: number | null; cashier_employee_id?: string | null; cashier_name?: string | null };
   const cashierEmployeeId = row.cashier_employee_id ?? null;
@@ -56,7 +57,7 @@ export async function listPosCashiers(branchId: string | null): Promise<PosCashi
   if (error) {
     // Base sin la migración 117: sin cajeras, como antes.
     if (error.code === "PGRST202" || error.code === "42883") return [];
-    throw error;
+    throw toError(error);
   }
   return ((data ?? []) as { employee_id: string; full_name: string }[]).map((r) => ({ employeeId: r.employee_id, fullName: r.full_name }));
 }
@@ -83,7 +84,7 @@ export async function openPosShift(
     delete params.p_cashier_name;
     ({ data, error } = await supabase.rpc("open_pos_shift", params));
   }
-  if (error) throw error;
+  if (error) throw toError(error);
   return {
     id: data.id,
     openedAt: new Date().toISOString(),
@@ -112,7 +113,7 @@ export async function registerPosSafeDeposit(posShiftId: string, amount: number,
     p_amount: amount,
     p_from_account_id: fromAccountId ?? null
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return {
     id: data.id,
     number: Number(data.number),
@@ -136,14 +137,14 @@ export async function checkPosShiftCount(
     p_employee_id: cashier?.employeeId ?? null,
     p_pin: cashier?.pin ?? null
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return parseCountResult(data as Record<string, unknown>);
 }
 
 export async function changePosSalePaymentAccount(paymentId: string, accountId: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("change_pos_sale_payment_account", { p_payment_id: paymentId, p_account_id: accountId });
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export interface CloseShiftAccountSummary {
@@ -182,7 +183,7 @@ export async function closePosShift(shiftId: string, closingCountedCash?: number
     p_pos_shift_id: shiftId,
     p_closing_counted_cash: closingCountedCash ?? null
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return {
     total: Number(data.total),
     byAccount: (data.by_account ?? []).map((row: { account_id: string; amount: number; sales_count: number }) => ({
@@ -216,7 +217,7 @@ export async function voidPosSale(saleId: string, reason: string, authPin: strin
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { data, error } = await supabase.rpc("void_pos_sale", { p_sale_id: saleId, p_reason: reason, p_auth_pin: authPin });
-  if (error) throw error;
+  if (error) throw toError(error);
   const result = (data ?? {}) as { ok?: boolean; error?: string };
   return { ok: result.ok === true, error: result.error };
 }
@@ -224,14 +225,14 @@ export async function voidPosSale(saleId: string, reason: string, authPin: strin
 export async function hasPosVoidPin(): Promise<boolean> {
   if (!supabase) return false;
   const { data, error } = await supabase.rpc("has_pos_void_pin");
-  if (error) throw error;
+  if (error) throw toError(error);
   return data === true;
 }
 
 export async function setPosVoidPin(currentPin: string | null, newPin: string | null): Promise<{ ok: boolean; error?: string }> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("set_pos_void_pin", { p_current_pin: currentPin, p_new_pin: newPin });
-  if (error) throw error;
+  if (error) throw toError(error);
   const result = (data ?? {}) as { ok?: boolean; error?: string };
   return { ok: result.ok === true, error: result.error };
 }
@@ -251,7 +252,7 @@ export interface VoidedSale {
 export async function listPosVoidedSales(branchId: string | null, days = 14): Promise<VoidedSale[]> {
   if (!supabase) return [];
   const { data, error } = await supabase.rpc("list_pos_voided_sales", { p_branch_id: branchId, p_days: days });
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
     id: String(r.id),
     soldAt: String(r.sold_at),
@@ -287,7 +288,7 @@ export async function listOfflineSaleMoves(branchId: string, days = 30): Promise
   const { data, error } = await supabase.rpc("list_offline_sale_moves", { p_days: days });
   if (error) {
     if (error.code === "PGRST202" || error.code === "42883") return [];
-    throw error;
+    throw toError(error);
   }
   return ((data ?? []) as Record<string, unknown>[])
     .filter((r) => r.branch_id === branchId)
@@ -340,7 +341,7 @@ export async function listPosShiftAdjustments(posShiftId: string): Promise<PosSh
     .in("movement_type", ["ajuste", "transferencia", "gasto"])
     .order("created_at");
 
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as unknown as PosShiftAdjustmentRow[]).map((row) => ({
     id: row.id,
     direction: row.direction,
@@ -372,7 +373,7 @@ export async function listPosShiftSupplierPayments(posShiftId: string): Promise<
     .eq("pos_shift_id", posShiftId)
     .eq("movement_type", "pago_proveedor")
     .order("created_at");
-  if (error) throw error;
+  if (error) throw toError(error);
 
   const rows = (data ?? []) as unknown as {
     id: string;
@@ -412,7 +413,7 @@ export async function deletePosShiftAdjustment(movementId: string, authPin: stri
   if (!supabase) throw new Error("Supabase no está configurado.");
 
   const { data, error } = await supabase.rpc("delete_pos_shift_adjustment", { p_movement_id: movementId, p_auth_pin: authPin });
-  if (error) throw error;
+  if (error) throw toError(error);
   const result = (data ?? {}) as { ok?: boolean; error?: string };
   if (result.ok === false) throw new Error(result.error ?? "No se pudo borrar.");
 }
@@ -439,7 +440,7 @@ export async function registerPosShiftTransfer(input: RegisterPosShiftTransferIn
     p_reason: input.reason ?? null
   });
 
-  if (error) throw error;
+  if (error) throw toError(error);
 }
 
 export interface PosShiftSaleItem {
@@ -523,7 +524,7 @@ export async function sumPosSalesTotalInRange(branchId: string, fromDate: string
       .lte("created_at", toIso)
       .order("id")
       .range(start, start + PAGE_SIZE - 1);
-    if (error) throw error;
+    if (error) throw toError(error);
     for (const row of data ?? []) total += Number(row.total);
     if (!data || data.length < PAGE_SIZE) break;
   }
@@ -553,7 +554,7 @@ export async function listPosSalesInRange(branchId: string, fromDate: string, to
       .order("id")
       .range(start, start + PAGE_SIZE - 1);
 
-    if (error) throw error;
+    if (error) throw toError(error);
     const page = (data ?? []) as unknown as PosSaleRangeRow[];
     rows.push(...page);
     if (page.length < PAGE_SIZE) break;
@@ -575,7 +576,7 @@ export async function listPosSalesByDay(branchId: string, fromDate: string, toDa
   const { data, error } = await supabase.rpc("pos_sales_by_day_account", { p_branch_id: branchId, p_from: fromDate, p_to: toDate });
   if (error) {
     if (error.code === "PGRST202" || error.code === "42883") return listPosSalesInRange(branchId, fromDate, toDate);
-    throw error;
+    throw toError(error);
   }
   return ((data ?? []) as { sale_date: string; account_id: string; amount: number | string }[]).map((r) => ({
     date: r.sale_date,
@@ -597,7 +598,7 @@ export async function listPosShiftSales(shiftId: string): Promise<PosShiftSale[]
     .eq("pos_shift_id", shiftId)
     .order("created_at");
 
-  if (error) throw error;
+  if (error) throw toError(error);
   const rows = (data ?? []) as unknown as PosShiftSaleRow[];
 
   // El nombre/unidad del producto NO se embebe (products(name,unit)): desde
@@ -646,7 +647,7 @@ export async function listSalesByProduct(branchId: string, fromDate: string, toD
     p_from: new Date(`${fromDate}T00:00:00`).toISOString(),
     p_to: new Date(`${toDate}T23:59:59.999`).toISOString()
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
     productId: (r.product_id as string | null) ?? null,
     productName: String(r.product_name ?? ""),
@@ -672,7 +673,7 @@ export async function getSalesActivity(branchId: string, fromDate: string, toDat
     p_from: new Date(`${fromDate}T00:00:00`).toISOString(),
     p_to: new Date(`${toDate}T23:59:59.999`).toISOString()
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return parseActivityReport(data);
 }
 
@@ -680,7 +681,7 @@ export async function getSalesActivity(branchId: string, fromDate: string, toDat
 export async function getPeriodResult(branchId: string, fromDate: string, toDate: string): Promise<PeriodResultData> {
   if (!supabase) return parsePeriodResult(null);
   const { data, error } = await supabase.rpc("period_result_report", { p_branch_id: branchId, p_from: fromDate, p_to: toDate });
-  if (error) throw error;
+  if (error) throw toError(error);
   return parsePeriodResult(data);
 }
 
@@ -693,7 +694,7 @@ export async function registerPosShiftExpense(posShiftId: string, amount: number
     p_category: category,
     p_description: description
   });
-  if (error) throw error;
+  if (error) throw toError(error);
   return { id: data.id, accountName: data.account_name ?? "Efectivo" };
 }
 
@@ -733,7 +734,7 @@ export async function listPosShiftWithdrawals(posShiftId: string, branchId: stri
 export async function voidPosCashWithdrawal(id: string, authPin: string | null): Promise<{ ok: boolean; error?: string }> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { data, error } = await supabase.rpc("void_pos_cash_withdrawal", { p_id: id, p_auth_pin: authPin });
-  if (error) throw error;
+  if (error) throw toError(error);
   const result = (data ?? {}) as { ok?: boolean; error?: string };
   return { ok: result.ok === true, error: result.error };
 }

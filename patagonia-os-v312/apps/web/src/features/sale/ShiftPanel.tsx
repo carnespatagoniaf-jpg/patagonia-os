@@ -79,7 +79,7 @@ function VoidSaleForm({ total, pinRequired, busy, onSubmit, onDone }: {
         <input
           type="password"
           inputMode="numeric"
-          autoComplete="off"
+          autoComplete="new-password"
           placeholder="PIN de autorización"
           value={pin}
           maxLength={6}
@@ -116,6 +116,7 @@ function PinPrompt({ pin, onSuccess, onCancel }: { pin: string | null; onSuccess
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <input
           type="password"
+          autoComplete="new-password"
           inputMode="numeric"
           maxLength={4}
           placeholder="PIN"
@@ -165,7 +166,7 @@ function ConfirmDelete({ label, pinRequired, busy, onConfirm }: {
         <input
           type="password"
           inputMode="numeric"
-          autoComplete="off"
+          autoComplete="new-password"
           value={pin}
           onChange={(e) => setPin(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); void confirm(); } }}
