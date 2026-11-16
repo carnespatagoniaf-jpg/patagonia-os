@@ -1,10 +1,24 @@
--- 198: Etiquetas de cajas envasadas al vacío (todas las empresas, todos los planes).
+-- 198: Etiquetas de cajas envasadas al vacío. Pantalla a pedido 'etiquetas_caja' (companies.features), cualquier plan:
+-- por ahora solo Carplat (decisión del dueño 16/11/2026). Se prende desde el panel de plataforma.
 --
 -- Pedido real (Carplat S.A., 16/11/2026): sus cajas traen una etiqueta EAN-13 con el producto y el peso neto
 -- ("0 711012 717328" = Roast beef 17,320 kg) y Mostrador no la leía: no empieza con 2 como las de balanza.
--- Cada empresa guarda los formatos de las cajas que recibe o arma (uno por frigorífico). El formato se aprende en la
+-- Cada empresa con la clave guarda los formatos de las cajas que recibe o arma (uno por frigorífico). El formato se aprende en la
 -- web escaneando dos cajas (box-label.ts); acá solo se guarda. Mostrador lee la caja como producto + kilos, por el
 -- camino de siempre (create_pos_sale no cambia).
+
+-- ¿La empresa de quien llama tiene la pantalla? Solo habla de la empresa propia: se puede exponer.
+create or replace function public.box_labels_enabled()
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (select 1 from public.companies where id = public.current_company_id() and 'etiquetas_caja' = any(features));
+$$;
+revoke all on function public.box_labels_enabled() from public, anon;
+grant execute on function public.box_labels_enabled() to authenticated;
 
 create table if not exists public.box_label_formats (
   id uuid primary key default gen_random_uuid(),
@@ -33,6 +47,11 @@ drop policy if exists box_label_formats_company_read on public.box_label_formats
 create policy box_label_formats_company_read on public.box_label_formats for select to authenticated
   using (company_id = public.current_company_id());
 
+-- Sin la clave, la tabla se lee vacía.
+drop policy if exists etiquetas_caja on public.box_label_formats;
+create policy etiquetas_caja on public.box_label_formats as restrictive for all to authenticated
+  using (public.box_labels_enabled()) with check (public.box_labels_enabled());
+
 -- El Contador no escribe nada (migración 155).
 drop trigger if exists zz_accountant_readonly on public.box_label_formats;
 create trigger zz_accountant_readonly before insert or update or delete on public.box_label_formats
@@ -56,6 +75,7 @@ begin
   perform public.require_role(array['owner', 'admin', 'manager']);
   select company_id into v_company from public.profiles where id = v_user and active = true;
   if v_company is null then raise exception 'Perfil inválido'; end if;
+  if not public.box_labels_enabled() then raise exception 'Las etiquetas de cajas no están habilitadas para este negocio. Pedíselo a soporte de Patagonia.'; end if;
 
   if p_id is null then
     if (select count(*) from public.box_label_formats where company_id = v_company) >= 20 then
@@ -97,6 +117,7 @@ begin
   perform public.require_role(array['owner', 'admin', 'manager']);
   select company_id into v_company from public.profiles where id = v_user and active = true;
   if v_company is null then raise exception 'Perfil inválido'; end if;
+  if not public.box_labels_enabled() then raise exception 'Las etiquetas de cajas no están habilitadas para este negocio. Pedíselo a soporte de Patagonia.'; end if;
   delete from public.box_label_formats where id = p_id and company_id = v_company returning name into v_name;
   if v_name is null then raise exception 'Formato no encontrado'; end if;
   insert into public.audit_log (company_id, user_id, action, entity_type, entity_id, new_data)
@@ -108,5 +129,17 @@ revoke all on function public.save_box_label_format(uuid, text, int, int, int, i
 revoke all on function public.delete_box_label_format(uuid) from public, anon;
 grant execute on function public.save_box_label_format(uuid, text, int, int, int, int, text, int, int, int) to authenticated;
 grant execute on function public.delete_box_label_format(uuid) to authenticated;
+
+-- La clave en la lista de pantallas a pedido del panel de plataforma: se agrega a la definición VIVA (como 193/197),
+-- así no se pisa una clave que se haya sumado después.
+do $mig$
+declare
+  v_def text := pg_get_functiondef('public.set_company_feature(uuid,text,boolean)'::regprocedure);
+begin
+  if position('''etiquetas_caja''' in v_def) > 0 then return; end if;
+  if position('''pedidos_tienda'')' in v_def) = 0 then raise exception 'set_company_feature no tiene la lista esperada'; end if;
+  execute replace(v_def, '''pedidos_tienda'')', '''pedidos_tienda'', ''etiquetas_caja'')');
+end
+$mig$;
 
 insert into public.schema_migrations (version) values ('198_box_label_formats') on conflict do nothing;

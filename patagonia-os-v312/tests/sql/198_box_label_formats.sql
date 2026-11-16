@@ -2,9 +2,10 @@
 \set ON_ERROR_STOP 1
 begin;
 
-insert into companies (id, name, client_number, plan) values
-  ('00000000-0000-0000-0000-0000000c9801', 'Frigorifico', 9981, 'basico'),
-  ('00000000-0000-0000-0000-0000000c9811', 'Otra', 9982, 'full');
+-- Solo la empresa con la pantalla a pedido 'etiquetas_caja' (Carplat). 'Otra' no la tiene.
+insert into companies (id, name, client_number, plan, features) values
+  ('00000000-0000-0000-0000-0000000c9801', 'Frigorifico', 9981, 'basico', '{etiquetas_caja}'),
+  ('00000000-0000-0000-0000-0000000c9811', 'Otra', 9982, 'full', '{}');
 insert into branches (id, company_id, name) values
   ('00000000-0000-0000-0000-0000000c9802', '00000000-0000-0000-0000-0000000c9801', 'Planta'),
   ('00000000-0000-0000-0000-0000000c9812', '00000000-0000-0000-0000-0000000c9811', 'Local');
@@ -57,10 +58,17 @@ begin
   end;
 end $$;
 
--- Otra empresa: no lo ve, no lo edita ni lo borra.
+-- Otra empresa (sin la pantalla): no lo ve, no lo edita ni lo borra, y no puede guardar uno propio.
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000c9813', true);
 do $$
 begin
+  if public.box_labels_enabled() then raise exception 'otra empresa figura habilitada'; end if;
+  begin
+    perform public.save_box_label_format(null, 'Sin clave', 13, 0, 2, 2, '', 8, 4, 100);
+    raise exception 'guardó sin la pantalla a pedido';
+  exception when raise_exception then
+    if sqlerrm = 'guardó sin la pantalla a pedido' then raise; end if;
+  end;
   if (select count(*) from public.box_label_formats) <> 0 then raise exception 'otra empresa ve el formato'; end if;
   begin
     perform public.delete_box_label_format(current_setting('test.fmt')::uuid);
@@ -76,6 +84,25 @@ do $$
 begin
   perform public.delete_box_label_format(current_setting('test.fmt')::uuid);
   if (select count(*) from public.box_label_formats) <> 0 then raise exception 'no lo borró'; end if;
+end $$;
+
+-- Sacarle la pantalla a la empresa: deja de ver sus formatos (vuelve a verlos si se la prenden de nuevo).
+reset role;
+update companies set features = '{}' where id = '00000000-0000-0000-0000-0000000c9801';
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000c9803', true);
+do $$
+begin
+  if public.box_labels_enabled() then raise exception 'sigue habilitada sin la clave'; end if;
+end $$;
+
+-- La clave está en la lista del panel de plataforma.
+reset role;
+do $$
+begin
+  if position('etiquetas_caja' in pg_get_functiondef('public.set_company_feature(uuid,text,boolean)'::regprocedure)) = 0 then
+    raise exception 'set_company_feature no acepta etiquetas_caja';
+  end if;
 end $$;
 
 rollback;

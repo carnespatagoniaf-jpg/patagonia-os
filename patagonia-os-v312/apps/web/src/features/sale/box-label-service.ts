@@ -87,16 +87,21 @@ export async function deleteBoxLabelFormat(id: string): Promise<void> {
   if (error) throw toError(error);
 }
 
-/** Los formatos de la empresa: primero los guardados en esta PC, después los de la base. */
-export function useBoxLabelFormats() {
-  const [formats, setFormats] = useState<BoxLabelFormat[]>(cached);
+/** Los formatos de la empresa: primero los guardados en esta PC, después los de la base. Sin la pantalla a pedido
+ * 'etiquetas_caja' (enabled false) no hay ninguno: Mostrador sigue como siempre. */
+export function useBoxLabelFormats(enabled = true) {
+  const [formats, setFormats] = useState<BoxLabelFormat[]>(() => (enabled ? cached() : []));
   const reload = useCallback(async () => {
+    if (!enabled) {
+      setFormats([]);
+      return;
+    }
     try {
       setFormats(await listBoxLabelFormats());
     } catch {
       // sin conexión: quedan los guardados en esta PC
     }
-  }, []);
+  }, [enabled]);
   useEffect(() => {
     void reload();
     const onChange = () => void reload();

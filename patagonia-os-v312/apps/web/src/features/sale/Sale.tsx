@@ -186,7 +186,7 @@ export function Sale() {
       cancelled = true;
     };
   }, [branchId]);
-  const ticket = useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot: SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? ""), scaleBranchId: branchId ?? null, zoneListId });
+  const ticket = useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot: SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? ""), scaleBranchId: branchId ?? null, zoneListId, boxLabels: Boolean(profile?.features?.includes("etiquetas_caja")) });
 
   // Pedido que se cobra (Pedidos → "Cobrar en Mostrador", migración 196): se cargan sus productos una sola vez, con la
   // lista de productos ya cargada, y al cobrar queda entregado.
@@ -1168,6 +1168,7 @@ Cancelar = es el mismo papel: no cobrar.`)) {
         onPinChange={setMostradorPinValue}
         onMessage={setMessage}
         products={products}
+        boxLabelsEnabled={Boolean(profile?.features?.includes("etiquetas_caja"))}
         canEditBoxFormats={["owner", "admin", "manager"].includes(profile?.role ?? "")}
       />
 

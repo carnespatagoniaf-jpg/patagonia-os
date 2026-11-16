@@ -31,13 +31,15 @@ export interface SaleConfigPanelProps {
   onMessage: (message: string) => void;
   /** Para probar etiquetas de cajas (migración 198). */
   products: Product[];
+  /** Pantalla a pedido 'etiquetas_caja' (solo los negocios que la tienen ven la sección). */
+  boxLabelsEnabled: boolean;
   /** Dueño, administrador o encargado: puede agregar o borrar formatos de cajas. */
   canEditBoxFormats: boolean;
 }
 
 export function SaleConfigPanel({
   visible, branchId, canSeeShiftTotals, autoPrintEnabled, onAutoPrintChange, thermalPaired, thermalConnectBusy, onConnectThermal,
-  scaleConfigCalibrated, onScaleConfigChange, mostradorPin, onPinChange, onMessage, products, canEditBoxFormats
+  scaleConfigCalibrated, onScaleConfigChange, mostradorPin, onPinChange, onMessage, products, boxLabelsEnabled, canEditBoxFormats
 }: SaleConfigPanelProps) {
   const [scaleWizardCode, setScaleWizardCode] = useState("");
   const [scaleWizardWeight, setScaleWizardWeight] = useState("");
@@ -203,7 +205,7 @@ export function SaleConfigPanel({
         </div>
       </SettingSection>
 
-      <BoxLabelSettings products={products} canEdit={canEditBoxFormats} />
+      {boxLabelsEnabled && <BoxLabelSettings products={products} canEdit={canEditBoxFormats} />}
 
       {canSeeShiftTotals && (
         <SettingSection

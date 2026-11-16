@@ -51,9 +51,11 @@ export interface SaleTicketDeps {
   /** Zona de precios del local (plan Empresa, migración 192): el precio de cada renglón si no se eligió otra lista.
    * Las etiquetas de la balanza con importe se cobran por lo que dicen (la balanza ya tiene los precios de la zona). */
   zoneListId?: string | null;
+  /** Pantalla a pedido 'etiquetas_caja' (migración 198): leer etiquetas de cajas del frigorífico. */
+  boxLabels?: boolean;
 }
 
-export function useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false, scaleBranchId = null, zoneListId = null }: SaleTicketDeps) {
+export function useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false, scaleBranchId = null, zoneListId = null, boxLabels = false }: SaleTicketDeps) {
   const [search, setSearch] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -116,7 +118,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
   const [detailing, setDetailing] = useState<string | null>(null);
   /** Etiquetas de balanza escaneadas en ESTA venta (para avisar si se escanea dos veces la misma). */
   const scannedLabels = useRef<Set<string>>(new Set());
-  const { formats: boxFormats } = useBoxLabelFormats();
+  const { formats: boxFormats } = useBoxLabelFormats(boxLabels);
   const [itemDiscounts, setItemDiscounts] = useState<Record<string, string>>({});
   const [saleDiscount, setSaleDiscount] = useState("");
   const [saleDiscountMode, setSaleDiscountMode] = useState<"amount" | "percent" | "final">("amount");
