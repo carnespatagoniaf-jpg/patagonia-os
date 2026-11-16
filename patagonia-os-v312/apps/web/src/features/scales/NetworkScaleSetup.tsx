@@ -40,7 +40,8 @@ export function NetworkScaleSetup({ onConnect, onBack }: { onConnect: (a: NetAdd
   }, []);
 
   async function connect(target: string) {
-    const h = target.trim();
+    const h = normalizeIp(target);
+    if (h !== target) setHost(h);
     const p = Number(port);
     if (!isLocalNetworkHost(h)) {
       setMessage("Escribí la dirección (IP) de la balanza, por ejemplo 192.168.1.50. Está en el menú de la balanza: Configuración de Red → IP.");
@@ -131,6 +132,14 @@ export function NetworkScaleSetup({ onConnect, onBack }: { onConnect: (a: NetAdd
       {message && <p className="my-scale-warning">{message}</p>}
     </div>
   );
+}
+
+/**
+ * La IP como la escribe la gente: en el teclado español el punto del teclado numérico escribe coma
+ * ("192,168,1,50", Oliem 16/11/2026), y a veces quedan espacios. Se pasa a "192.168.1.50".
+ */
+export function normalizeIp(text: string): string {
+  return text.trim().replace(/\s*[,;]\s*|\s*\.\s*|\s+/g, ".");
 }
 
 /** Por qué la PC no llega a la balanza, en palabras. Si no están en la misma red, qué dirección ponerle. */
