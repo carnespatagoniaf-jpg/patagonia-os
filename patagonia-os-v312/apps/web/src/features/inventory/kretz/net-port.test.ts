@@ -206,3 +206,14 @@ describe("[SIMULADO] Kretz Report por cable de red: conectar, pasar productos y 
     assert.equal(prep.writes, 0, "nada para mandar: ya está igual");
   });
 });
+
+describe("IP escrita con el teclado español", () => {
+  it("toma coma, punto y coma y espacios como puntos", async () => {
+    const { normalizeIp } = await import("../../scales/NetworkScaleSetup");
+    assert.equal(normalizeIp("192,168,1,50"), "192.168.1.50");
+    assert.equal(normalizeIp(" 192.168.1.50 "), "192.168.1.50");
+    assert.equal(normalizeIp("192 168 1 50"), "192.168.1.50");
+    assert.equal(normalizeIp("192, 168 .1;50"), "192.168.1.50");
+    assert.equal(isLocalNetworkHost(normalizeIp("192,168,0,20")), true);
+  });
+});

@@ -40,7 +40,13 @@ export function NetworkScaleSetup({ onConnect, onBack }: { onConnect: (a: NetAdd
   }, []);
 
   async function connect(target: string) {
-    const h = target.trim();
+    const h = normalizeIp(target);
+    if (h !== target) setHost(h);
+    // El botón no se apaga con el cuadro vacío: el ejemplo gris parecía escrito y "no dejaba" conectar (Oliem 16/11/2026).
+    if (!h) {
+      setMessage("Todavía no escribiste la IP: lo gris es solo un ejemplo. Escribí la de tu balanza (menú de la balanza: Configuración de Red → IP) y tocá CONECTAR.");
+      return;
+    }
     const p = Number(port);
     if (!isLocalNetworkHost(h)) {
       setMessage("Escribí la dirección (IP) de la balanza, por ejemplo 192.168.1.50. Está en el menú de la balanza: Configuración de Red → IP.");
@@ -111,7 +117,7 @@ export function NetworkScaleSetup({ onConnect, onBack }: { onConnect: (a: NetAdd
           <div className="form-grid">
             <label>
               Dirección (IP) de la balanza
-              <input value={host} onChange={(e) => setHost(e.target.value)} placeholder="192.168.1.50" inputMode="decimal" />
+              <input value={host} onChange={(e) => setHost(e.target.value)} placeholder="Escribila acá (por ejemplo 192.168.1.50)" inputMode="decimal" />
             </label>
             <label>
               Puerto
@@ -119,7 +125,7 @@ export function NetworkScaleSetup({ onConnect, onBack }: { onConnect: (a: NetAdd
             </label>
           </div>
           <div className="my-scale-actions">
-            <button className={found && found.length > 0 ? "secondary" : "my-scale-primary"} disabled={busy || !host.trim()} onClick={() => void connect(host)}>
+            <button className={found && found.length > 0 ? "secondary" : "my-scale-primary"} disabled={busy} onClick={() => void connect(host)}>
               {busy ? "Probando…" : "CONECTAR"}
             </button>
             <button className="secondary" disabled={busy} onClick={() => void checkAgent()}>Buscar de nuevo</button>
@@ -131,6 +137,14 @@ export function NetworkScaleSetup({ onConnect, onBack }: { onConnect: (a: NetAdd
       {message && <p className="my-scale-warning">{message}</p>}
     </div>
   );
+}
+
+/**
+ * La IP como la escribe la gente: en el teclado español el punto del teclado numérico escribe coma
+ * ("192,168,1,50", Oliem 16/11/2026), y a veces quedan espacios. Se pasa a "192.168.1.50".
+ */
+export function normalizeIp(text: string): string {
+  return text.trim().replace(/\s*[,;]\s*|\s*\.\s*|\s+/g, ".");
 }
 
 /** Por qué la PC no llega a la balanza, en palabras. Si no están en la misma red, qué dirección ponerle. */

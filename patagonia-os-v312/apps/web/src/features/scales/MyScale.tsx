@@ -411,24 +411,35 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       {phase.kind === "elegir_marca" && (
         <div className="my-scale-body">
           <p className="my-scale-status">¿Qué balanza vas a agregar?</p>
-          <p className="muted">La marca está adelante o en la etiqueta de atrás de la balanza. Enchufala a esta computadora por el cable USB y prendela.</p>
+          <p className="muted">La marca está adelante o en la etiqueta de atrás de la balanza. Prendela y fijate cómo está conectada a esta computadora: cable USB, Bluetooth o cable de red.</p>
           <div className="my-scale-choices">
-            {SCALE_CHOICES.map((c) => (
-              <button
-                key={c.id}
-                className="my-scale-choice"
-                // La lista de cables de Chrome se abre con este mismo click.
-                onClick={() => {
-                  netRef.current = null;
-                  handleConnectNew(c.id);
-                }}
-              >
-                <strong>{c.label}</strong>
-                <span>{c.hint}</span>
-              </button>
-            ))}
+            {SCALE_CHOICES.flatMap((c) => {
+              const card = (
+                <button
+                  key={c.id}
+                  className="my-scale-choice"
+                  // La lista de cables de Chrome se abre con este mismo click.
+                  onClick={() => {
+                    netRef.current = null;
+                    handleConnectNew(c.id);
+                  }}
+                >
+                  <strong>{c.label}</strong>
+                  <span>{c.hint}</span>
+                </button>
+              );
+              // La Report por red es un camino aparte (programa de la PC): va como tarjeta propia al lado de la Report,
+              // no como un renglón chico abajo. Oliem (16/11/2026) tocó 18 veces la tarjeta "Kretz Report" sin ver el renglón.
+              if (c.id !== "kretz-report") return [card];
+              return [
+                card,
+                <button key="kretz-report-red" className="my-scale-choice" onClick={() => setPhase({ kind: "red" })}>
+                  <strong>Kretz Report por cable de red</strong>
+                  <span>Va con cable de red (Ethernet) al módem o a la computadora</span>
+                </button>
+              ];
+            })}
           </div>
-          <button className="my-scale-link" onClick={() => setPhase({ kind: "red" })}>Mi Kretz Report está conectada por cable de red (sin Bluetooth ni USB)</button>
           <button className="secondary" onClick={backToList}>Volver</button>
         </div>
       )}
@@ -552,6 +563,9 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
             ) : (
               newChoice && <button className="my-scale-primary" onClick={() => void handleConnectNew(newChoice)}>PROBAR DE NUEVO</button>
             )}
+            {!active && newChoice === "kretz-report" && !netRef.current && (
+              <button className="my-scale-primary" onClick={() => setPhase({ kind: "red" })}>VA CON CABLE DE RED</button>
+            )}
             <button className="secondary" onClick={backToList}>Volver a mis balanzas</button>
           </div>
           <p className="muted">
@@ -615,7 +629,7 @@ function connectErrorMessage(err: unknown, choice: ScaleChoice | null): string {
   const label = choiceLabel(choice);
   if (choice === "kretz-report") {
     // Manual Kretz Report NX/LT: la LT va por Bluetooth o USB (sin adaptador), la NX por red. No usa adaptador USB a serie (DB9).
-    return `Tu ${label} no contestó. La Report LT se conecta por Bluetooth (emparejala en Windows y elegí "Puerto serie estándar a través de vínculo Bluetooth") o con su cable USB directo, no con un adaptador USB a serie DB9. Si tu balanza va con cable de red, volvé a "Agregar balanza" y tocá "Mi Kretz Report está conectada por cable de red". Revisá también que no esté abierto iTegra.`;
+    return `Tu ${label} no contestó. La Report LT se conecta por Bluetooth (emparejala en Windows y elegí "Puerto serie estándar a través de vínculo Bluetooth") o con su cable USB directo, no con un adaptador USB a serie DB9. Si tu balanza va con cable de red, tocá "VA CON CABLE DE RED" acá abajo. Revisá también que no esté abierto iTegra.`;
   }
   const check = choice === "kretz-aura" ? "el cable enchufado y, en el menú de la balanza, COMUNI → MODO \"Datos\"" : "el cable USB enchufado y que no esté abierto el programa de la balanza";
   return `Tu ${label} no contestó. Revisá que esté prendida, ${check}, y probá de nuevo.`;

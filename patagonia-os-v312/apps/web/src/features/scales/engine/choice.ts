@@ -16,7 +16,7 @@ export interface ScaleChoiceOption {
 
 export const SCALE_CHOICES: ScaleChoiceOption[] = [
   { id: "kretz-aura", label: "Kretz Aura", hint: "Kretz chica, la Aura o Aura Eco" },
-  { id: "kretz-report", label: "Kretz Report", hint: "Kretz Report LT o NX, con impresora de tickets" },
+  { id: "kretz-report", label: "Kretz Report", hint: "Kretz Report LT, por USB o Bluetooth" },
   { id: "systel", label: "Systel", hint: "Systel Cuora (Max, Neo)" },
   { id: "auto", label: "No sé cuál es", hint: "Patagonia la busca sola (tarda un poco más)" }
 ];
