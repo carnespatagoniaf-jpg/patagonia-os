@@ -457,6 +457,25 @@ export async function syncMercadoPago(): Promise<MpSyncResult> {
   return data as MpSyncResult;
 }
 
+export interface MpScheduleStatus {
+  scheduled: boolean;
+  lastRunAt: string | null;
+  lastError: string | null;
+}
+
+/** Si la búsqueda de cobros corre sola cada hora (migración 199) y cómo le fue. Null si la base no la tiene. */
+export async function getMpScheduleStatus(): Promise<MpScheduleStatus | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.rpc("mp_sync_status");
+  if (error) return null;
+  const row = data as { scheduled?: boolean; last_run_at?: string | null; last_result?: { error?: string } | null } | null;
+  return {
+    scheduled: Boolean(row?.scheduled),
+    lastRunAt: row?.last_run_at ?? null,
+    lastError: row?.last_result?.error ?? null
+  };
+}
+
 export async function listMpSubscriptions(): Promise<MpSubscription[]> {
   if (!supabase) return [];
 

@@ -9,7 +9,15 @@
 // "Tus integraciones". El panel de administrador llama a esta función al abrirse
 // y con el botón "Actualizar".
 //
-// Solo platform admins. Secreto: MP_ACCESS_TOKEN (Access Token de producción de
+// Además corre sola cada hora (migración 199, pg_cron + pg_net): la base la
+// llama con el encabezado x-mp-sync-token, que se compara con
+// mp_sync_schedule.token. La dirección de esta función la guarda la propia
+// función la primera vez que la llama un platform admin (ver rememberUrl), así
+// la migración no necesita saber en qué proyecto corre. Por eso se despliega
+// sin control de sesión (--no-verify-jwt, publicar.yml): sin token válido y sin
+// sesión de platform admin no hace nada.
+//
+// Solo platform admins o la tarea programada. Secreto: MP_ACCESS_TOKEN (Access Token de producción de
 // la cuenta de Mercado Pago del dueño; lo carga él en Supabase → Edge Functions
 // → Secrets). Nunca llega al navegador.
 //
@@ -77,22 +85,39 @@ Deno.serve(async (req) => {
   if (req.method === "OPTIONS") return new Response("ok", { headers: corsHeaders });
   if (req.method !== "POST") return jsonResponse({ error: "Método no permitido" }, 405);
 
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
+  const cronToken = req.headers.get("x-mp-sync-token");
+  const fromCron = cronToken !== null;
+
   try {
-    const authHeader = req.headers.get("Authorization");
-    if (!authHeader) throw new Error("Falta autenticación");
-    const callerClient = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: authHeader } } });
-    const { data: callerAuth, error: callerAuthErr } = await callerClient.auth.getUser();
-    if (callerAuthErr || !callerAuth.user) throw new Error("Usuario no autenticado");
+    if (fromCron) {
+      // Llamada de la tarea programada: el token tiene que ser el de la tabla.
+      const { data: schedule } = await admin.from("mp_sync_schedule").select("token").eq("id", 1).maybeSingle();
+      if (!schedule?.token || schedule.token !== cronToken) return jsonResponse({ error: "No autorizado" }, 401);
+    } else {
+      const authHeader = req.headers.get("Authorization");
+      if (!authHeader) throw new Error("Falta autenticación");
+      const callerClient = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: authHeader } } });
+      const { data: callerAuth, error: callerAuthErr } = await callerClient.auth.getUser();
+      if (callerAuthErr || !callerAuth.user) throw new Error("Usuario no autenticado");
 
-    const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY);
-    const { data: isPlatformAdmin, error: adminCheckErr } = await admin
-      .from("platform_admins")
-      .select("user_id")
-      .eq("user_id", callerAuth.user.id)
-      .maybeSingle();
-    if (adminCheckErr || !isPlatformAdmin) throw new Error("No autorizado");
+      const { data: isPlatformAdmin, error: adminCheckErr } = await admin
+        .from("platform_admins")
+        .select("user_id")
+        .eq("user_id", callerAuth.user.id)
+        .maybeSingle();
+      if (adminCheckErr || !isPlatformAdmin) throw new Error("No autorizado");
 
-    if (!MP_TOKEN) return jsonResponse({ connected: false });
+      // Deja anotada la dirección de esta función para la tarea de cada hora.
+      // Si la migración 199 todavía no está, la tabla no existe y no pasa nada.
+      await admin
+        .from("mp_sync_schedule")
+        .update({ url: `${SUPABASE_URL}/functions/v1/mp-sync` })
+        .eq("id", 1)
+        .is("url", null);
+    }
+
+    if (!MP_TOKEN) return await finish(admin, fromCron, { connected: false });
 
     const { data: known } = await admin.from("mp_subscriptions").select("id, payer_email");
     const knownEmail = new Map<string, string | null>((known ?? []).map((r: Json) => [r.id, r.payer_email]));
@@ -176,8 +201,20 @@ Deno.serve(async (req) => {
       applied += Number(data ?? 0);
     }
 
-    return jsonResponse({ connected: true, subscriptions: subscriptions.length, charges: chargeCount, applied });
+    return await finish(admin, fromCron, { connected: true, subscriptions: subscriptions.length, charges: chargeCount, applied });
   } catch (error) {
-    return jsonResponse({ error: error instanceof Error ? error.message : "Error inesperado" }, 400);
+    return await finish(admin, fromCron, { error: error instanceof Error ? error.message : "Error inesperado" }, 400);
   }
 });
+
+/** Responde y, si vino de la tarea programada, anota cómo le fue (para ver en el panel). */
+// deno-lint-ignore no-explicit-any
+async function finish(admin: any, fromCron: boolean, body: Record<string, unknown>, status = 200) {
+  if (fromCron) {
+    await admin
+      .from("mp_sync_schedule")
+      .update({ last_run_at: new Date().toISOString(), last_result: body })
+      .eq("id", 1);
+  }
+  return jsonResponse(body, status);
+}

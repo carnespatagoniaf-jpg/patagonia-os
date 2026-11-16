@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CreditCard, MessageCircle, RefreshCw } from "lucide-react";
-import { assignMpSubscription, listMpSubscriptions, syncMercadoPago, type CompanySummary } from "./admin-service";
+import { assignMpSubscription, getMpScheduleStatus, listMpSubscriptions, syncMercadoPago, type CompanySummary, type MpScheduleStatus } from "./admin-service";
 import { mpFailedChargeMessage, mpProblem, mpStatusLabel, suggestCompany, toArDate, type MpSubscription } from "./mercadopago";
 import { formatDayMonth } from "./company-billing";
 import { whatsappLink } from "./sales-pipeline";
@@ -29,6 +29,7 @@ export function AdminMercadoPago({
   const [choice, setChoice] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<Date | null>(null);
+  const [schedule, setSchedule] = useState<MpScheduleStatus | null>(null);
   const onChangedRef = useRef(onPaymentsChanged);
   const onSubsRef = useRef(onSubscriptions);
   onChangedRef.current = onPaymentsChanged;
@@ -62,6 +63,7 @@ export function AdminMercadoPago({
       } catch {
         // Base sin la migración 129: el panel sigue andando.
       }
+      setSchedule(await getMpScheduleStatus());
       setSyncing(false);
     }
   }, [reloadList]);
@@ -136,6 +138,15 @@ export function AdminMercadoPago({
           <RefreshCw size={14} style={{ verticalAlign: "-2px" }} /> Actualizar
         </button>
       </div>
+      {schedule?.scheduled && (
+        <p className="muted">
+          Los cobros se buscan solos cada hora
+          {schedule.lastRunAt
+            ? ` · última vez ${new Date(schedule.lastRunAt).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
+            : ""}
+          {schedule.lastError ? ` · falló: ${schedule.lastError}` : ""}
+        </p>
+      )}
       {message && <p className="admin-mp-ok">{message}</p>}
       {error && <p className="message warning">{error}</p>}
 
