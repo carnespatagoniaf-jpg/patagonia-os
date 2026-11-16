@@ -214,7 +214,8 @@ export const COMPANY_FEATURES: { key: string; label: string; short: string }[] =
   { key: "traer_balanza", label: "Mis balanzas: traer a Patagonia los productos de la balanza", short: "Traer de balanza" },
   { key: "pedidos", label: "Pedidos de clientes (anotar, avisar el día del retiro y planificar)", short: "Pedidos" },
   { key: "pedidos_tienda", label: "Pedidos para venta online: el dueño también los carga y se cobran en Mostrador (junto con Pedidos)", short: "Pedidos del dueño" },
-  { key: "sin_carniceria", label: "No es carnicería: sin Despiece ni balanzas, productos por unidad y con variantes", short: "No es carnicería" }
+  { key: "sin_carniceria", label: "No es carnicería: sin Despiece ni balanzas, productos por unidad y con variantes", short: "No es carnicería" },
+  { key: "etiquetas_caja", label: "Etiquetas de cajas del frigorífico: Mostrador lee producto y kilos de la caja", short: "Etiquetas de cajas" }
 ];
 
 export async function listCompanyFeatures(): Promise<Record<string, string[]>> {

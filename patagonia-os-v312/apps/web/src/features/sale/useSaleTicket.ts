@@ -6,6 +6,8 @@ import type { ProductCategory } from "../inventory/product-categories-service";
 import { parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, type ScaleConfig } from "./scale-config-service";
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
 import { labelWeightProblem, MAX_COUNTER_SCALE_KG, resolveScan } from "./scan-resolve";
+import { resolveBoxScan } from "./box-label";
+import { useBoxLabelFormats } from "./box-label-service";
 import { noteLabelRead } from "../scales/label-read";
 import { closeSystelTicketSession, readSystelTicketFromScale, refreshSystelLabelFormat, systelTicketReadConfigured } from "../inventory/systel/systel-ticket-from-scale";
 import { loadSystelLabelTemplates, mergedPerPlu, systelConfigForCodeAcross, templatesFromSetups, type SystelLabelTemplates } from "./systel-label-format";
@@ -49,9 +51,11 @@ export interface SaleTicketDeps {
   /** Zona de precios del local (plan Empresa, migración 192): el precio de cada renglón si no se eligió otra lista.
    * Las etiquetas de la balanza con importe se cobran por lo que dicen (la balanza ya tiene los precios de la zona). */
   zoneListId?: string | null;
+  /** Pantalla a pedido 'etiquetas_caja' (migración 198): leer etiquetas de cajas del frigorífico. */
+  boxLabels?: boolean;
 }
 
-export function useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false, scaleBranchId = null, zoneListId = null }: SaleTicketDeps) {
+export function useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false, scaleBranchId = null, zoneListId = null, boxLabels = false }: SaleTicketDeps) {
   const [search, setSearch] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -114,6 +118,7 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
   const [detailing, setDetailing] = useState<string | null>(null);
   /** Etiquetas de balanza escaneadas en ESTA venta (para avisar si se escanea dos veces la misma). */
   const scannedLabels = useRef<Set<string>>(new Set());
+  const { formats: boxFormats } = useBoxLabelFormats(boxLabels);
   const [itemDiscounts, setItemDiscounts] = useState<Record<string, string>>({});
   const [saleDiscount, setSaleDiscount] = useState("");
   const [saleDiscountMode, setSaleDiscountMode] = useState<"amount" | "percent" | "final">("amount");
@@ -366,6 +371,29 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       setSearch("");
       setHighlightedIndex(-1);
       void addPackage(normalizePackageCode(raw));
+      return;
+    }
+
+    // Caja envasada al vacío con etiqueta del frigorífico (migración 198): su producto con los kilos de la caja, en su
+    // propia línea (cada caja pesa distinto). Solo si la empresa cargó el formato y el código no es un producto.
+    const box = boxFormats.length > 0 && !products.some((p) => (p.active ?? true) && p.code === raw) ? resolveBoxScan(raw, boxFormats, products) : null;
+    if (box) {
+      setSearch("");
+      setHighlightedIndex(-1);
+      if (box.type === "error") {
+        setMessage(box.message);
+        return;
+      }
+      const key = `${box.product.id}|caja:${box.code}`;
+      if (cart.some((l) => l.key === key)) {
+        setMessage("Esa caja ya está en esta venta.");
+        return;
+      }
+      setCart((current) => current.some((l) => l.key === key)
+        ? current
+        : [...current, { key, kind: "product", productId: box.product.id, name: box.product.name, unit: box.product.unit, quantity: box.quantity, unitPrice: box.product.priceRetail }]);
+      setMessage(`Agregado: ${box.detail}.`);
+      searchInputRef.current?.focus();
       return;
     }
 
