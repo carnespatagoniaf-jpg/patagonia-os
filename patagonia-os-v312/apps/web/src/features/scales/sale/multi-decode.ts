@@ -39,9 +39,15 @@ export function decodeAcross(raw: string, setups: ScaleSetup[], preferKey: strin
     if (pref) return { kind: "match", ...pref };
   }
   if (hits.length === 1) return { kind: "match", ...hits[0] };
-  const good = hits.filter((h) => h.decoded.kind !== "error");
+  let good = hits.filter((h) => h.decoded.kind !== "error");
   if (good.length === 1) return { kind: "match", ...good[0] };
   if (good.length === 0) return { kind: "match", ...hits[0] };
+  // Una balanza que no tiene ese producto en su catálogo no pudo imprimir la etiqueta: se usan las que sí lo tienen.
+  // Real Los gringos 16/11: PATA MUSLO (8) cargado en una sola de sus 3 Systel; las otras dos lo leían como
+  // "producto desconocido, sin cantidad" y Mostrador frenaba con "dos balanzas imprimen ese mismo código".
+  const known = good.filter((h) => h.decoded.kind !== "item" || h.decoded.item !== null || h.decoded.generic);
+  if (known.length > 0 && known.length < good.length) good = known;
+  if (good.length === 1) return { kind: "match", ...good[0] };
   // Dos balanzas con el mismo formato que dicen EXACTAMENTE lo mismo (mismo producto y cantidad, o el mismo TOTAL):
   // para cobrar da igual cuál fue. Se usa siempre la primera, así un papel repetido se detecta igual. Real: Los gringos
   // agregó una segunda Systel (19/10) que imprime como la primera.

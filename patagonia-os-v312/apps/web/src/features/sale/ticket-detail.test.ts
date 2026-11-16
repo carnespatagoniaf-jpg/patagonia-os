@@ -118,6 +118,21 @@ describe("[SIMULADO] Mostrador lee con todas las balanzas de la sucursal", () =>
     assert.equal(pref.kind === "match" && pref.setup.profile.scaleKey, "systel-c");
   });
 
+  it("[REAL Los gringos 16/11] producto cargado en UNA sola balanza: es de esa, no se frena", () => {
+    // Las 3 Systel imprimen con el mismo formato, pero PATA MUSLO (8) solo está en el catálogo de una.
+    const con8 = setup(profile("systel-928ade51", "20PPPPCCCCCC", "22BBIIIIIIII", [8, 13]));
+    const sin8a = setup(profile("systel-d559ecc5", "20PPPPCCCCCC", "22BBIIIIIIII", [13]));
+    const sin8b = setup(profile("systel-5e20794d", "20PPPPCCCCII", "22AAIIIIIIII", [13]));
+    for (const s of [con8, sin8a, sin8b]) s.profile.catalog = s.profile.catalog.map((i) => ({ ...i, eanType: 1, eanConfig: "20PPPPCCCCCC" }));
+    // Etiqueta real de la balanza 3: "(8) PATA MUSLO X5X10 0.155kg 3400$/kg = 527$".
+    const r = decodeAcross("2000080001551", [sin8b, sin8a, con8], null);
+    assert.equal(r.kind === "match" && r.setup.profile.scaleKey, "systel-928ade51");
+    assert.ok(r.kind === "match" && r.decoded.kind === "item" && r.decoded.code === 8 && r.decoded.quantity === 0.155);
+    // Un producto que no está en NINGUNA balanza sigue como antes: producto desconocido, sin cantidad.
+    const nadie = decodeAcross(code("20PPPPCCCCCC", { P: 50, C: 3595 }), [sin8b, sin8a, con8], null);
+    assert.ok(nadie.kind === "match" && nadie.decoded.kind === "item" && nadie.decoded.item === null && nadie.decoded.quantity === null);
+  });
+
   it("con una sola balanza funciona igual que antes", () => {
     const r = decodeAcross(code("22AAIIIIIIII", { A: 2, I: 780 }), [a], null);
     assert.ok(r.kind === "match" && r.decoded.kind === "total" && r.decoded.amount === 780);
