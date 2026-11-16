@@ -1167,6 +1167,8 @@ Cancelar = es el mismo papel: no cobrar.`)) {
         mostradorPin={mostradorPin}
         onPinChange={setMostradorPinValue}
         onMessage={setMessage}
+        products={products}
+        canEditBoxFormats={["owner", "admin", "manager"].includes(profile?.role ?? "")}
       />
 
       {message && <div className="message">{message}</div>}

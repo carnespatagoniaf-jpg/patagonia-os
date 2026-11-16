@@ -6,6 +6,8 @@ import { setMostradorPin } from "./company-settings-service";
 import { isThermalPrintSupported } from "./thermal-printer";
 import { PrinterAgentSettings } from "./PrinterAgentSettings";
 import { SettingSection } from "../../components/SettingSection";
+import type { Product } from "@patagonia/domain";
+import { BoxLabelSettings } from "./BoxLabelSettings";
 
 // Panel de configuración de Mostrador (engranaje): impresora, balanza (peso
 // directo y calibración de etiquetas) y PIN. El asistente de calibración y el
@@ -27,11 +29,15 @@ export interface SaleConfigPanelProps {
   mostradorPin: string | null;
   onPinChange: (pin: string | null) => void;
   onMessage: (message: string) => void;
+  /** Para probar etiquetas de cajas (migración 198). */
+  products: Product[];
+  /** Dueño, administrador o encargado: puede agregar o borrar formatos de cajas. */
+  canEditBoxFormats: boolean;
 }
 
 export function SaleConfigPanel({
   visible, branchId, canSeeShiftTotals, autoPrintEnabled, onAutoPrintChange, thermalPaired, thermalConnectBusy, onConnectThermal,
-  scaleConfigCalibrated, onScaleConfigChange, mostradorPin, onPinChange, onMessage
+  scaleConfigCalibrated, onScaleConfigChange, mostradorPin, onPinChange, onMessage, products, canEditBoxFormats
 }: SaleConfigPanelProps) {
   const [scaleWizardCode, setScaleWizardCode] = useState("");
   const [scaleWizardWeight, setScaleWizardWeight] = useState("");
@@ -196,6 +202,8 @@ export function SaleConfigPanel({
           )}
         </div>
       </SettingSection>
+
+      <BoxLabelSettings products={products} canEdit={canEditBoxFormats} />
 
       {canSeeShiftTotals && (
         <SettingSection
