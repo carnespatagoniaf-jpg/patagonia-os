@@ -7,8 +7,9 @@ import { connectBranchScale, type BranchConnectResult } from "./engine/connect-b
 import { isPhoneOrTablet, PHONE_OR_TABLET_MESSAGE } from "./engine/device";
 import { markSynced, pickNetworkScaleNext } from "./engine/engine";
 import { netAgentVersion, parseNetKey, rememberNetAddress, type NetAddress } from "../inventory/kretz/net-port";
-import { NetworkScaleWizard } from "./network/NetworkScaleWizard";
-import { fixedIpTip, brandForPort, type NetBrandId } from "./network/net-wizard";
+import { NetQuickConnect } from "./network/NetQuickConnect";
+import { netWatchText, useNetScaleWatch } from "./network/net-watch";
+import { choiceForPort } from "./network/net-wizard";
 import { LabelTestBox } from "./LabelTestBox";
 import type { Product } from "@patagonia/domain";
 import { adaptersForChoice } from "./engine/live";
@@ -38,7 +39,7 @@ import { importProducts } from "../import/import-service";
 type Phase =
   | { kind: "inicio" }
   | { kind: "elegir_marca" }
-  | { kind: "red"; startAt?: { brand: NetBrandId } }
+  | { kind: "red" }
   | { kind: "trabajando"; stage: "conectar" | "sincronizar"; step: EngineStep; text: string; done?: number; total?: number }
   | { kind: "listo_para_sincronizar"; prepared: PreparedSync }
   | { kind: "listo"; message: string; pending: PendingItem[]; model: string; skipped?: ProductProblem[] }
@@ -73,9 +74,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
   const ctxRef = useRef<BranchConnectResult | null>(null);
   /** Al agregar una Report por cable de red: su dirección (para "Probar de nuevo"). */
   const netRef = useRef<NetAddress | null>(null);
-  /** Nombre que eligió la persona en el asistente de red para la balanza nueva ("Mostrador 1"). */
-  const pendingNameRef = useRef<string | null>(null);
-  /** La balanza conectada va por cable de red: su dirección (para recomendar dejarla fija). */
+  /** La balanza conectada va por cable de red: su dirección. */
   const [netConnected, setNetConnected] = useState<NetAddress | null>(null);
 
   const reload = useCallback(async () => {
@@ -111,6 +110,12 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     return { key: LOCAL_KEY, name: r.label, family: r.family, brand: r.family, model: r.label, identity: {}, active: true, lastSeenAt: r.connectedAt, sellsWithCodes: false };
   }, [scales, loaded]);
   const list = legacy ? [...scales, legacy] : scales;
+  // Las balanzas por red se revisan solas con la lista a la vista (y se reconectan si cambiaron de dirección).
+  const netWatch = useNetScaleWatch(
+    () => (branchId ? list.map((s) => ({ key: s.key, usb: s.key === LOCAL_KEY ? (loadRememberedScale()?.usb ?? null) : (bindingFor(s.key, branchId)?.usb ?? null) })) : []),
+    phase.kind === "inicio",
+    [branchId, list.map((s) => s.key).join(",")]
+  );
   const active = list.find((s) => s.key === activeKey) ?? null;
 
   // Los errores llegan a soporte con cualquier usuario: en el local suele estar abierta la sesión del cajero.
@@ -274,7 +279,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       try {
         key = await registerBranchScale(branchId, {
           key,
-          name: key ? null : pendingNameRef.current ?? defaultScaleName(label, scales),
+          name: key ? null : defaultScaleName(label, scales),
           family: result.family,
           brand: result.family,
           model: label,
@@ -358,7 +363,6 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     setActiveKey(null);
     setNewChoice(null);
     netRef.current = null;
-    pendingNameRef.current = null;
     setNetConnected(null);
     setPhase({ kind: "inicio" });
   }
@@ -396,6 +400,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
                       <strong>{s.name}</strong>
                       <span className="muted"> · {s.model ?? (s.family === "kretz" ? "Kretz" : "Systel")}</span>
                       <p className={`my-scale-item-status ${st.tone}`}>{st.text}</p>
+                      {netWatch[s.key] && <p className={`my-scale-item-status ${netWatchText(netWatch[s.key]).tone}`}>{netWatchText(netWatch[s.key]).text}</p>}
                     </div>
                     <div className="my-scale-actions">
                       <button className="my-scale-primary" onClick={() => void handleConnect(s, false)}>PASAR PRODUCTOS</button>
@@ -451,23 +456,16 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       )}
 
       {phase.kind === "red" && (
-        <NetworkScaleWizard
-          startAt={phase.startAt}
-          existingNames={list.map((s) => s.name)}
-          onBack={() => (phase.startAt ? backToList() : setPhase({ kind: "elegir_marca" }))}
-          onUsb={(choice) => {
-            netRef.current = null;
-            handleConnectNew(choice);
-          }}
-          onReport={(data) => report("red (asistente)", "diagnóstico pedido desde el asistente de red", null, data)}
-          onConnect={(t) => {
-            // La balanza por red es "un cable más": se recuerda en esta computadora y se conecta con lo de siempre
-            // (lee la balanza, pasa productos comprobando cada uno, prueba la etiqueta).
-            const a = { host: t.host, port: t.port };
+        <NetQuickConnect
+          onBack={() => setPhase({ kind: "elegir_marca" })}
+          onReport={(data) => report("red (no aparece)", "no apareció ninguna balanza en la red", null, data)}
+          onConnect={(found) => {
+            // Una sola balanza en la red: se conecta sola. La balanza por red es "un cable más": se recuerda en esta
+            // computadora y se conecta con lo de siempre (lee la balanza, pasa productos comprobando cada uno).
+            const a = { host: found.ip, port: found.port };
             netRef.current = a;
-            pendingNameRef.current = t.name;
             rememberNetAddress(a);
-            handleConnectNew(t.choice);
+            handleConnectNew(choiceForPort(found.port));
           }}
         />
       )}
@@ -488,9 +486,12 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
 
       {phase.kind === "listo_para_sincronizar" && (
         <div className="my-scale-body">
-          <p className="my-scale-status">Tu balanza está lista para sincronizar</p>
-          <p className="muted">{phase.prepared.label} conectada.</p>
-          {netConnected && <p className="my-scale-tip">{fixedIpTip(brandForPort(netConnected.port) ?? "auto", netConnected.host)}</p>}
+          {netConnected ? (
+            <p className="my-scale-status ok"><CheckCircle2 size={22} /> Listo, balanza conectada</p>
+          ) : (
+            <p className="my-scale-status">Tu balanza está lista para sincronizar</p>
+          )}
+          <p className="muted">{phase.prepared.label} conectada{netConnected ? ` por cable de red (${netConnected.host})` : ""}. Patagonia ya leyó lo que tiene la balanza.</p>
           <div className="my-scale-facts">
             <Fact value={phase.prepared.ready} label="productos listos" />
             {phase.prepared.writes > 0 && <Fact value={phase.prepared.writes} label="para actualizar en la balanza" />}
@@ -540,7 +541,6 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       {phase.kind === "listo" && (
         <div className="my-scale-body">
           <p className="my-scale-status ok"><CheckCircle2 size={22} /> {phase.message}</p>
-          {netConnected && <p className="my-scale-tip">{fixedIpTip(brandForPort(netConnected.port) ?? "auto", netConnected.host)}</p>}
           {/* La etiqueta se prueba apenas termina de enlazarse, arriba de los pasos (antes quedaba al final y no se veía). */}
           {active && branchId && needsLabelTestFor(active) && <LabelTestBox products={products as unknown as Product[]} branchId={branchId} onDone={() => void reload()} />}
           <InstallChecklist record={installOf(active)} onRefresh={() => void reload()} products={products} branchId={branchId} />
@@ -586,7 +586,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
             )}
             {/* Balanza por red que no contesta: puede que le haya cambiado la dirección. Se busca de nuevo en la red. */}
             {phase.net && (
-              <button className="my-scale-primary" onClick={() => setPhase({ kind: "red", startAt: { brand: brandForPort(phase.net!.port) ?? "auto" } })}>
+              <button className="my-scale-primary" onClick={() => setPhase({ kind: "red" })}>
                 BUSCAR DE NUEVO EN LA RED
               </button>
             )}

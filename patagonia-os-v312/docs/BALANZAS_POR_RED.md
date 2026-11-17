@@ -1,50 +1,30 @@
 # Balanzas por cable de red (UTP / Ethernet)
 
-Asistente "Conectar balanza por cable de red" (Mis balanzas → Agregar balanza). Código: `apps/web/src/features/scales/network/` (lógica en `net-wizard.ts`, probada en `net-wizard.test.ts`), programa de la PC `apps/web/public/patagonia-print-agent.ps1` versión 6.
+"Mis balanzas → Agregar balanza → Conectar balanza por cable de red". El código está en `apps/web/src/features/scales/network/` y el programa de la PC es `apps/web/public/patagonia-print-agent.ps1`, versión 6.
 
-## Cómo funciona
+## Camino corto (18/11/2026)
 
-1. Chrome no puede abrir una conexión de red con un aparato. Lo hace el programa de Patagonia en la PC (127.0.0.1:9101), el mismo de la impresora.
-2. **Versión 6 del programa** (17/11/2026):
-   - `/scale/find?ports=1001,10001` busca en la red de cada placa de la PC (las 254 direcciones de su red) y devuelve `scales: [{ip, port}]`. 1001 = Kretz Report, 10001 = Systel Cuora Max (módulo Lantronix). Así reconoce la marca.
-   - También devuelve `wired`: las placas con cable, prendidas o no (`up: false` = luz del cable apagada) y sus direcciones.
-   - Sigue contestando `found` (lista de IP del primer puerto) para la web de antes.
-   - Solo abre puertos de balanza: 1000-1099 y 10001.
-3. La web decide qué le pasa al local (`analyzeSearch`). Las situaciones son: encontradas, luz apagada, PC sin entrada de cable, cable directo sin router (la PC tiene una dirección 169.254.x.x), PC sin red, o no apareció. Para cada una muestra los pasos en palabras del local.
-4. Al tocar CONECTAR sigue el camino de siempre de Mis balanzas: lee la balanza, pasa los productos comprobando cada uno, prueba la etiqueta. La balanza queda recordada por su dirección (`red:IP:puerto`).
-5. Por red, la búsqueda de Kretz y Systel ya no prueba velocidades ni bits de stop. Esas pruebas son del cable serie, y por red solo hacían que una balanza que no contesta tardara minutos.
+1. **Revisa el programa de la PC** antes de buscar. Si falta, está viejo o Chrome lo bloquea, muestra un solo botón: INSTALAR, ACTUALIZAR o RECARGAR. Después revisa cada 6 s y, apenas el programa contesta, busca solo.
+2. **Busca sola** en los puertos 1001 (Kretz Report) y 10001 (Systel Cuora Max). La marca se reconoce por el puerto.
+3. **UNA balanza: se conecta sola**, sin tocar nada. Sigue el camino de siempre: lee la balanza (prueba real), muestra "Listo, balanza conectada" y deja sincronizar productos.
+4. **Varias:** cada una con su modelo y CONECTAR.
+5. **Ninguna:** pasos de a uno, en este orden: luz del cable → balanza prendida → la IP y máscara exactas para poner en la balanza (`addressAdvice`; si el cable va directo a la PC, la red de emergencia 169.254.x.x de la PC). Busca sola cada 6 s y al tocar "YA ESTÁ". Después del último paso se puede escribir la IP a mano, y el diagnóstico va solo a soporte.
+6. **Se acuerda de la balanza.** "Mis balanzas" revisa sola las balanzas por red al abrirse y cada 30 s mientras la lista está a la vista (`net-watch.ts`): muestra "Conectada por cable de red" o "No contesta".
+7. **Reconexión sola** (`NetScalePort.open`). Si no contesta, reintenta 3 veces, porque la balanza puede estar prendiéndose o el cable recién puesto. Si sigue sin contestar, busca en la red en el puerto de su marca. Si aparece UNA sola balanza nueva de esa marca, es ella con otra dirección: la recuerda con la nueva (`moveNetAddress`: lista de direcciones, cable de cada balanza y balanza de "Mi balanza") y sigue. Con dos o más no adivina.
 
-## Qué se comprobó
+## Lo honesto
 
-- El programa versión 6 en una PC real con Windows: busca en dos puertos a la vez, encuentra dos balanzas de prueba (TCP en 1001 y 10001), ve la placa de cable desenchufada (`up: false`), rechaza un puerto que no es de balanza, y la llamada vieja (`port=1001`) sigue andando.
-- El asistente en el navegador (modo demo) recorriendo todas las pantallas, contra ese programa real.
-- 28 pruebas de la lógica (respuestas reales del programa, reconocer la marca, sugerir IP, textos sin palabras técnicas).
+- **Ninguna balanza real se conectó todavía por red.** Ni la Kretz Report NX2 (RPF NP30P2CAR) de El Shopping de la Carne, ni ninguna otra. Todo se probó con el programa de la PC real contra balanzas simuladas.
+- **La Kretz Report no lee el peso por la PC.** No hay un comando comprobado ni documentado para pedirle el peso a una Report (`models.ts`: `weight: "desconocido"`). No se inventa uno. La prueba real al conectar es leer la balanza (modelo y productos).
+- **"Conectada" quiere decir que la balanza contesta en la red.** Para vender no hace falta una conexión abierta, porque Mostrador lee la etiqueta impresa. La revisión de fondo es para que "PASAR PRODUCTOS" la encuentre sin preguntar.
+- **Systel Cuora Max por red:** la ruta del menú de la IP no está en los documentos que tenemos.
 
-## FALTA PROBAR CON LA BALANZA
+## 5 pruebas en el local (con la balanza real)
 
-Nada de esto se probó con una balanza real por red:
+1. **Enchufar:** cable de la balanza al router (o a la PC), balanza prendida. Mis balanzas → Agregar balanza → "Conectar balanza por cable de red". Tiene que decir "Listo, balanza conectada" sin tocar nada más (si pide INSTALAR, instalar y esperar).
+2. **Desenchufar el cable:** sacarlo 10 s y volver a ponerlo. En Mis balanzas, en menos de 1 minuto tiene que volver a decir "Conectada por cable de red".
+3. **Apagar y prender la balanza:** después tocar "PASAR PRODUCTOS". Tiene que conectar sola.
+4. **Reiniciar la PC:** abrir Patagonia → Mis balanzas. Tiene que decir "Conectada por cable de red" sin instalar nada de nuevo.
+5. **Cambio de dirección:** cambiarle la IP a la balanza en su menú, dentro de la misma red (por ejemplo terminada en 201), y tocar "PASAR PRODUCTOS". Tiene que encontrarla sola.
 
-1. **Kretz Report NX2 (El Shopping de la Carne, 192.168.19.170):**
-   - Que conteste por la red igual que la LT por USB: 0001, 5005 y 2005 con relectura.
-   - Si el cable va directo a la PC: que con la IP que sugiere el asistente (169.254.x.200, máscara 255.255.0.0) la encuentre.
-2. **La ruta del menú de la IP en la Report NX:** el manual dice "Configuración de Red: NRO BALANZA, IP, PUERTO". No sabemos si tiene opción de máscara o de DHCP.
-3. **Systel Cuora Max por red:**
-   - Que el módulo Lantronix pase las tramas igual que el USB (fin de trama por silencio).
-   - La ruta del menú de la IP: el asistente dice "Menú 11 (Comunicaciones) → Red → IP", sin confirmar.
-4. **Firewall de Windows:** que no frene al programa al salir hacia la balanza (es una conexión de salida; no debería).
-5. **Chrome en la PC del cliente:** qué nombre de permiso de "red local" informa. Se consultan `loopback-network`, `local-network-access` y `local-network`.
-
-### Pruebas para hacer en el local (El Shopping de la Carne)
-
-1. Instalar el programa nuevo (Agregar balanza → Conectar balanza por cable de red → DESCARGAR) y abrir http://127.0.0.1:9101/ping. Tiene que decir `"version":6`.
-2. Dónde va el cable: si va directo a la PC, seguir lo que dice el asistente (IP y máscara en la balanza) y BUSCAR.
-3. Que aparezca "Encontramos tu balanza" con Kretz Report, ponerle nombre y CONECTAR.
-4. Que lea la balanza (productos), SINCRONIZAR un producto de prueba, imprimir una etiqueta y escanearla en Mostrador.
-5. Apagar y prender la balanza: "PASAR PRODUCTOS" tiene que encontrarla sola.
-6. Si algo falla: "Mandar diagnóstico a soporte" y revisar el reporte en el panel (scale_support_reports).
-
-## Marcas sin red desde el sistema
-
-- **Kretz Aura:** no tiene conector de red. Va por USB/serie (anda: Pollo y mar).
-- **Systel Cuora Neo:** no tiene protocolo directo. Importa un CSV desde un servidor FTP/SFTP (docs/SYSTEL_INFORME.md). Alternativa hoy: Stock → "Descargar lista para balanza" y cargarla con el programa de Systel. Para que Patagonia mande precios solo haría falta publicar ese CSV en un FTP/SFTP. No lo tenemos.
-- **Otras marcas:** el asistente pide una foto de la etiqueta de atrás por WhatsApp y ofrece "Buscarla sola en la red".
+Si algo falla, el diagnóstico llega solo a soporte (panel → Reportes de balanzas).
