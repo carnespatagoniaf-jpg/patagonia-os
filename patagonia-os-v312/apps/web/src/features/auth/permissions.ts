@@ -19,6 +19,7 @@ export type Permission =
   | "recipes.manage"
   | "creditors.manage"
   | "customers.manage"
+  | "customers.payments"
   | "reports.view"
   | "users.manage"
   | "branches.manage"
@@ -84,6 +85,9 @@ export const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> 
     "recipes.manage",
     "creditors.manage",
     "customers.manage",
+    // Aparte de Clientes (2026-11-17, Punto milanesa): destildado en Usuarios, la persona carga ventas a cuenta
+    // pero no registra, edita ni borra pagos.
+    "customers.payments",
     "reports.view",
     "branches.manage",
     "users.manage",
@@ -131,6 +135,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   "recipes.manage": "Recetas (costos de productos elaborados)",
   "creditors.manage": "Deudas (deudores)",
   "customers.manage": "Clientes",
+  "customers.payments": "Clientes: registrar, editar y borrar pagos",
   "reports.view": "Reportes",
   "users.manage": "Usuarios",
   "branches.manage": "Sucursales",
@@ -169,6 +174,7 @@ const PLAN_RANK: Record<Plan, number> = { basico: 1, estandar: 2, full: 3, empre
 /** Permisos que solo existen desde cierto plan. Lo que no está acá va en todos. */
 const PERMISSION_MIN_PLAN: Partial<Record<Permission, Plan>> = {
   "customers.manage": "estandar",
+  "customers.payments": "estandar",
   "employees.manage": "estandar",
   "carcass.manage": "estandar",
   "recipes.manage": "estandar",

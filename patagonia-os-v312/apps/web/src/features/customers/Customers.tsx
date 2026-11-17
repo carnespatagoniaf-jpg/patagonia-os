@@ -28,7 +28,7 @@ import { emptyInvoiceDraft, invoiceDraftError, invoiceLabel, type InvoiceDraft, 
 import { InvoiceRequestFields } from "../invoicing/InvoiceRequestFields";
 import { InvoicePaperFooter, InvoicePaperHeader } from "../invoicing/InvoicePaper";
 import { RemitoRButton, useRemitoREnabled } from "../invoicing/RemitoRButton";
-import { canAccessPage, planAllows } from "../auth/permissions";
+import { can, canAccessPage, planAllows } from "../auth/permissions";
 import { ChequeFields, EMPTY_CHEQUE, readChequeForm, type ChequeForm } from "../cheques/ChequeFields";
 import { receiveCustomerCheque } from "../cheques/cheques-service";
 import { cleanCuit } from "../cheques/cheque-logic";
@@ -235,6 +235,8 @@ export function Customers() {
   const remitoR = useRemitoREnabled(planAllows(profile, "full"));
   const salesDetail = Boolean(profile?.features?.includes("ventas_detalle"));
   const canCheques = isSupabaseConfigured && canAccessPage(profile, "cheques");
+  // Sin "customers.payments" (ej. la cajera): carga ventas a cuenta, pero no registra, edita ni borra pagos.
+  const canPayments = can(profile, "customers.payments");
   const chargeAdjustment = salesDetail ? Math.round((chargeAdjKind === "descuento" ? -1 : 1) * (parseAmount(chargeAdjAmount || "0") || 0)) : 0;
   const finalChargeTotal = Math.round(chargeTotal) + chargeAdjustment;
   const [busy, setBusy] = useState(false);
@@ -964,7 +966,7 @@ export function Customers() {
 
               <div className="ws-seg no-print">
                 <button className={action === "charge" ? "active" : ""} onClick={() => setAction("charge")}>+ Venta a cuenta</button>
-                <button className={action === "payment" ? "active" : ""} onClick={() => setAction("payment")}>Registrar pago</button>
+                {canPayments && <button className={action === "payment" ? "active" : ""} onClick={() => setAction("payment")}>Registrar pago</button>}
                 <button className={action === "opening" ? "active" : ""} onClick={() => setAction("opening")}>Saldo anterior</button>
               </div>
 
@@ -1061,7 +1063,7 @@ export function Customers() {
                 </div>
               )}
 
-              {action === "payment" && (
+              {action === "payment" && canPayments && (
                 <div className="ws-form no-print">
                   <div className="ws-form-row">
                     <label className="ws-field">Monto<input type="text" inputMode="decimal" value={paymentAmount} onChange={(e) => setPaymentAmount(e.target.value)} style={{ width: 150 }} /></label>
@@ -1196,8 +1198,12 @@ export function Customers() {
                                       })()}
                                     </>
                                   )}
-                                  <button className="secondary" disabled={busy} onClick={() => startEditRow(row)}>Editar</button>
-                                  <button className="secondary" disabled={busy} onClick={() => handleDeleteRow(row)}>Borrar</button>
+                                  {(row.type !== "payment" || canPayments) && (
+                                    <>
+                                      <button className="secondary" disabled={busy} onClick={() => startEditRow(row)}>Editar</button>
+                                      <button className="secondary" disabled={busy} onClick={() => handleDeleteRow(row)}>Borrar</button>
+                                    </>
+                                  )}
                                 </div>
                               </td>
                             </tr>
