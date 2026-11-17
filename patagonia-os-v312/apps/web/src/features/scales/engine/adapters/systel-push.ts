@@ -91,6 +91,8 @@ export function desiredRead(layout: SystelLayout, number: number, product: PushP
 /** ¿Lo releído es lo esperado? Ignora la gestión, compara el tipo de código por su valor, y el relleno del lote. */
 export function sameRecord(layout: SystelLayout, expected: string, actual: string): boolean {
   if (expected.length !== actual.length) return false;
+  // Cuora 2: sin código de barras por producto ni lote; todo igual salvo la versión (quién lo gestionó).
+  if (layout === "cuora2") return [...expected].every((c, i) => i === LAYOUT_INFO.cuora2.pluDigits || c === actual[i]);
   const pd = LAYOUT_INFO[layout].pluDigits;
   const end = expected[expected.length - 1] === "N" ? expected.length - 1 : expected.length - 101;
   const typeAt = end - 13;
@@ -111,6 +113,32 @@ export function sameRecord(layout: SystelLayout, expected: string, actual: strin
 
 const withGestion = (layout: SystelLayout, data: string, g = "1") => data.slice(0, LAYOUT_INFO[layout].pluDigits) + g + data.slice(LAYOUT_INFO[layout].pluDigits);
 
+/**
+ * Cuora 2 (protocolo oficial V4.0, Rev 03/Dic/2010, págs. 7-8). Lectura (función 3) y escritura (función 4) tienen los
+ * mismos campos hasta la tara: PLU 4 + versión 1 + nombre 18 + 2 precios de 6 + código 5 + sección 2 + vencimiento 4 +
+ * tipo 1 + tara 6 = 53. La escritura agrega ahí "Mantener totales": "N" pone en cero los totales de venta de ese PLU,
+ * "M" los conserva (N solo para un PLU nuevo, o si cambia unitario/pesable, el número o el código). Después, en las
+ * dos, "Ingredientes S/N" y, con S, 100 letras. La versión va "1" = gestionado desde la PC (función 31, pág. 13).
+ * A diferencia de la Cuora Max, la escritura LLEVA la versión.
+ */
+export const CUORA2_FIXED = 53;
+
+export function cuora2WriteData(read: string, keepTotals: boolean): string {
+  return read.slice(0, 4) + "1" + read.slice(5, CUORA2_FIXED) + (keepTotals ? "M" : "N") + read.slice(CUORA2_FIXED);
+}
+
+/** Cómo se relee lo que se mandó; `version`: la letra que devuelve la balanza (no se compara). */
+function expectedRead(layout: SystelLayout, data: string, version: string): string {
+  if (layout !== "cuora2") return withGestion(layout, data, version);
+  const read = data.slice(0, CUORA2_FIXED) + data.slice(CUORA2_FIXED + 1);
+  return read.slice(0, 4) + version + read.slice(5);
+}
+
+/** Datos para volver a escribir tal cual un registro leído (restauración, sin borrar totales en la Cuora 2). */
+function restoreData(layout: SystelLayout, read: string, mode: TypeByteMode): string {
+  return layout === "cuora2" ? cuora2WriteData(read, true) : writeDataFromRead(read, layout, mode);
+}
+
 /** `templates`: modelos para armar productos nuevos cuando la balanza no tiene ninguno (systel-empty-template.ts). */
 export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDecimals: number, products: PushProduct[], opts: { replace?: boolean; mode?: TypeByteMode; templates?: SystelPlu[] } = {}): PushItem[] {
   const info = LAYOUT_INFO[layout];
@@ -121,7 +149,6 @@ export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDec
     const base = { product, current: null as string | null, data: null as string | null };
     const code = product.code.trim();
     const number = /^\d+$/.test(code) ? Number(code) : NaN;
-    if (layout === "cuora2") return { ...base, number: null, action: "omitir", reason: "este modelo de Systel todavía no recibe productos" };
     if (!Number.isInteger(number) || number < 1 || number > Math.min(info.maxPlu, info.maxCode)) return { ...base, number: null, action: "omitir", reason: "su código no sirve como número de balanza" };
     if (seen.has(number)) return { ...base, number, action: "omitir", reason: `el código ${number} está repetido en Patagonia` };
     seen.set(number, product.id);
@@ -138,10 +165,18 @@ export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDec
     const target = targetCodeFor(product.byWeight ? "P" : "U")!;
     const template = cur ? null : (models.find((p) => (p.saleType === "P" || p.saleType === "C") === product.byWeight) ?? models[0])?.raw ?? null;
     const read = desiredRead(layout, number, product, priceRaw, cur?.raw ?? null, template);
-    const data = read ? buildBarcodeRewrite(read, layout, target, opts.mode ?? "ascii") : null;
+    let data: string | null;
+    if (layout === "cuora2") {
+      // Sin código de barras por producto: la etiqueta sale con el formato general de la balanza (el código es el número).
+      // Un producto nuevo o reemplazado no se queda con los ingredientes del registro que se usó de base.
+      const same = !!cur && namesEquivalent(cur.name, product.name);
+      const r = read && read.length > CUORA2_FIXED ? (same ? read : read.slice(0, CUORA2_FIXED) + "N") : null;
+      const keepTotals = same && cur!.saleType === (product.byWeight ? "P" : "U") && cur!.code === number;
+      data = r ? cuora2WriteData(r, keepTotals) : null;
+    } else data = read ? buildBarcodeRewrite(read, layout, target, opts.mode ?? "ascii") : null;
     if (!data) return { ...base, number, current: cur?.raw ?? null, action: "omitir", reason: "el registro de la balanza no tiene la forma esperada" };
     if (!cur) return { ...base, number, data, action: "crear", reason: "nuevo en la balanza" };
-    if (sameRecord(layout, withGestion(layout, data, cur.raw[info.pluDigits]), cur.raw)) return { ...base, number, current: cur.raw, action: "sin_cambios", reason: "ya está igual" };
+    if (sameRecord(layout, expectedRead(layout, data, cur.raw[info.pluDigits]), cur.raw)) return { ...base, number, current: cur.raw, action: "sin_cambios", reason: "ya está igual" };
     if (!namesEquivalent(cur.name, product.name)) {
       return opts.replace
         ? { ...base, number, current: cur.raw, data, action: "reemplazar", reason: `en la balanza era "${cur.name.trim()}"` }
@@ -182,7 +217,7 @@ export async function runSystelPush(client: SystelClient, layout: SystelLayout, 
     if (reply === "bloqueado") return { done, stoppedAt: n, detail: "escritura bloqueada", restored: null };
     if (reply && reply.kind === "error") return { done, stoppedAt: n, detail: `la balanza rechazó el producto ${n} (${reply.errorCode}); no cambió nada`, restored: null, rejected: reply.errorCode ?? "error" };
     const back = await client.readPlu(layout, n);
-    const ok = !!back && sameRecord(layout, withGestion(layout, item.data!, back.raw[LAYOUT_INFO[layout].pluDigits]), back.raw);
+    const ok = !!back && sameRecord(layout, expectedRead(layout, item.data!, back.raw[LAYOUT_INFO[layout].pluDigits]), back.raw);
     if (ok && reply && reply.kind === "ack") {
       done.push({ number: n, action: item.action });
       continue;
@@ -190,7 +225,7 @@ export async function runSystelPush(client: SystelClient, layout: SystelLayout, 
     // Diferencia o sin confirmación: si había algo, se vuelve a escribir tal cual estaba y se comprueba.
     let restored: boolean | null = null;
     if (item.current) {
-      await client.writeProductRecord(layout, n, writeDataFromRead(item.current, layout, mode));
+      await client.writeProductRecord(layout, n, restoreData(layout, item.current, mode));
       const again = await client.readPlu(layout, n);
       restored = !!again && sameRecord(layout, item.current, again.raw);
     }
@@ -234,7 +269,8 @@ export async function proveSystelWrite(client: SystelClient, layout: SystelLayou
   // Siempre un cambio real (si la prueba anterior quedó en $1, ahora $2), para que haya una escritura que comprobar.
   const pesos = previous && previous.prices[0] === priceToRaw(1, priceDecimals) ? 2 : 1;
   const product: PushProduct = { id: "prueba-patagonia", code: String(number), name: PROOF_NAME, byWeight: true, price: pesos };
-  for (const mode of ["ascii", "binario"] as TypeByteMode[]) {
+  // La Cuora 2 no tiene byte de tipo de código: una sola forma.
+  for (const mode of (layout === "cuora2" ? ["ascii"] : ["ascii", "binario"]) as TypeByteMode[]) {
     const plan = planSystelPush(plus, layout, priceDecimals, [product], { replace: true, mode });
     const item = plan[0];
     if (!item?.data) return { ...out, detail: `no se pudo armar el producto de prueba (${item?.reason ?? "sin plan"})` };

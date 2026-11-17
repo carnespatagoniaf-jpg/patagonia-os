@@ -29,6 +29,12 @@ import { EMPTY_SCALE_MESSAGE, emptyScaleTemplates } from "./systel-empty-templat
 /** Firma y formato de la Cuora Max comprobada en una balanza real (Los gringos, 14/10/2026). */
 export const SYSTEL_VERIFIED = [{ protocolVersion: "0060", layout: "max60" as SystelLayout }];
 
+/** Límites de número de producto: en la Cuora 2, además, los que informa la balanza (V4.0: "0001 a 4000 por ejemplo"). */
+function layoutLimits(layout: SystelLayout, pluCapacity: number): { maxPlu: number; maxCode: number } {
+  const info = LAYOUT_INFO[layout];
+  return layout === "cuora2" && pluCapacity > 0 ? { maxPlu: Math.min(info.maxPlu, pluCapacity), maxCode: info.maxCode } : info;
+}
+
 export const PRODUCT_BACKUP_KEY = "patagonia-systel-product-backup";
 
 /**
@@ -37,7 +43,12 @@ export const PRODUCT_BACKUP_KEY = "patagonia-systel-product-backup";
  * ESCRITURA no está comprobada en una real. Se habilitan con una prueba en esa misma balanza antes de tocar un producto
  * del cliente (proveSystelWrite): si la prueba no queda idéntica, se frena sin tocar nada del cliente.
  */
-export const SYSTEL_PROOF_LAYOUTS: SystelLayout[] = ["max62", "max7"];
+export const SYSTEL_PROOF_LAYOUTS: SystelLayout[] = ["max62", "max7", "cuora2"];
+/*
+ * Cuora 2 (firma 0040, formato cuora2) desde el 17/11/2026: se lee bien en una real (La cosa es con carne, 266
+ * productos) y se escribe con la función 4 del protocolo oficial V4.0 (systel-push.ts, cuora2WriteData). Igual que la
+ * 6.2/7.0: primero el producto de prueba en un número libre; si no queda idéntico, no se toca nada del cliente.
+ */
 
 export function systelVerified(b: Pick<SystelBackup, "signature" | "layout">): boolean {
   return SYSTEL_VERIFIED.some((v) => v.protocolVersion === b.signature?.protocolVersion && v.layout === b.layout);
@@ -317,7 +328,7 @@ export class SystelSession implements ScaleSession {
         true
       );
     }
-    this.label = SCALE_CAPABILITIES[this.model].label;
+    this.label = backup.layout === "cuora2" ? "Systel Cuora 2" : SCALE_CAPABILITIES[this.model].label;
 
     onProgress("comparar", "Comparando con los productos de Patagonia…");
     const setup = this.ctx.online && this.ctx.branchId ? await this.deps.loadSetup(this.ctx.branchId, this.scaleKey) : null;
@@ -325,7 +336,7 @@ export class SystelSession implements ScaleSession {
     // Etapa 1: revisión previa con los límites que informó ESTA balanza (layout, decimales y formato de etiqueta).
     const values = backup.config?.values ?? {};
     const check: PreflightResult | null = layout
-      ? preflightProducts(this.ctx.products, systelLimits(LAYOUT_INFO[layout], backup.signature?.priceDecimals ?? 0, [values.E_P, values.E_U]))
+      ? preflightProducts(this.ctx.products, systelLimits(layoutLimits(layout, backup.signature?.pluCapacity ?? 0), backup.signature?.priceDecimals ?? 0, [values.E_P, values.E_U]))
       : null;
     const readyIds = new Set((check?.ready ?? []).map((p) => p.id));
     const products = this.pushProducts().filter((p) => readyIds.has(p.id));
@@ -434,7 +445,8 @@ export class SystelSession implements ScaleSession {
     onProgress("verificar", "Dejando Mostrador listo…");
     const sent = plan.filter((x) => x.number !== null && (x.action === "sin_cambios" || written.some((w) => w.number === x.number)));
     const catalog: ScaleCatalogItem[] = sent.map((x) => {
-      const ean = { type: 1, config: x.product.byWeight ? "20PPPPCCCCCC" : "21PPPPCCCCCC" };
+      // La Cuora 2 no tiene código por producto: imprime con el formato general de la balanza (tipo 0).
+      const ean = layout === "cuora2" ? { type: 0, config: null } : { type: 1, config: x.product.byWeight ? "20PPPPCCCCCC" : "21PPPPCCCCCC" };
       return { code: x.number!, name: x.product.name.slice(0, 18), saleType: x.product.byWeight ? "P" : "U", prices: [x.product.price, 0], eanType: ean.type, eanConfig: ean.config };
     });
     const values = st.backup.config?.values ?? {};

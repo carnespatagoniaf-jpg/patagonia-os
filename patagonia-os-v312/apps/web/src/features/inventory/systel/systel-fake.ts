@@ -155,6 +155,8 @@ export class FakeCuora implements SystelLink {
         if (this.layout === "cuora2") {
           // Escritura: …tara(6) + N/M + ingredientes. Lectura: lo mismo sin la letra N/M.
           const tareEnd = 4 + 1 + 18 + 12 + 5 + 2 + 4 + 1 + 6;
+          // V4.0 pág. 8: "Mantener totales", letra N o M. Otra cosa = dato no válido.
+          if (data[tareEnd] !== "N" && data[tareEnd] !== "M") return this.reply(fn, "E8");
           rec = data.slice(0, tareEnd) + data.slice(tareEnd + 1);
         } else {
           rec = data.slice(0, pd) + "1" + data.slice(pd);
