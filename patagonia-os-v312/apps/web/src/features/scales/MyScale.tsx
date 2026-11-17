@@ -215,7 +215,10 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       setLookalike(result.lookalike);
       const key = await remember(result, target);
       if (key) setActiveKey(key);
-      const prepared = await result.session.prepare(progress);
+      const raw = await result.session.prepare(progress);
+      // Números de la balanza con otro producto: nunca "ya está igual". Si no, "Reemplazarlos por los de Patagonia" no
+      // aparecía y esos productos no llegaban nunca (real La cosa es con carne, Systel, 17/11: del 1 al 29).
+      const prepared = raw.upToDate && raw.pending.some((p) => p.reason === "ocupado_en_balanza") ? { ...raw, upToDate: false } : raw;
       const at = new Date().toISOString();
       recordInstall(key, {
         model: prepared.label,
