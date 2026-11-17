@@ -188,6 +188,18 @@ describe("[SIMULADO, registros REALES] Mi balanza con una Systel Cuora Max: Pata
     assert.doesNotMatch(prep.blocker!, /unos minutos/);
   });
 
+  it("Systel con otra firma y nada para mandar: no dice \"ya está igual\" con 0 productos (real La cosa es con carne 17/11)", async () => {
+    const f = cuora("0040");
+    // Ya conectada antes (como la del cliente): sin esto el "al día" fallaba por otra razón.
+    const { deps } = fakeDb({ active: true, links: [] } as unknown as ScaleSetup);
+    const lejos = [{ ...PRODUCTS[0], id: "z", code: "999999" }];
+    const prep = await new SystelSession(f, 20, ctx(lejos), lab(deps)).prepare(noop);
+    assert.equal(prep.model, "systel-otra");
+    assert.equal(prep.writes, 0);
+    assert.equal(prep.upToDate, false);
+    assert.match(prep.blocker!, /todavía no está comprobado/);
+  });
+
   it("un cajero no puede mandar productos (tiene que ser el dueño o un administrador)", async () => {
     const { deps } = fakeDb();
     const prep = await new SystelSession(cuora(), 20, { ...ctx(PRODUCTS), canManageLinks: false }, lab(deps)).prepare(noop);

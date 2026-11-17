@@ -352,7 +352,10 @@ export class SystelSession implements ScaleSession {
     const writable = allowed && !!layout && backup.complete;
     const linked = !!setup?.active && plan.every((x) => x.action !== "sin_cambios" || setup.links.some((l) => l.code === x.number && l.kind === "product" && l.productId === x.product.id));
     // Una balanza vacía nunca está "al día" (antes decía "ya tiene los mismos productos" con 0 productos).
-    const upToDate = writes === 0 && linked && !(empty && !fallback);
+    // Un modelo que no se puede escribir solo está "al día" si la balanza ya tiene cada producto igual. Antes, sin plan
+    // (o todo "omitir"), decía "ya está igual" con 0 productos y nunca avisaba que el modelo no recibe productos
+    // (real La cosa es con carne, Systel no comprobada, 17/11).
+    const upToDate = writes === 0 && linked && !(empty && !fallback) && (writable || (plan.length > 0 && plan.every((x) => x.action === "sin_cambios")));
     return {
       model: this.model,
       label: this.label,
