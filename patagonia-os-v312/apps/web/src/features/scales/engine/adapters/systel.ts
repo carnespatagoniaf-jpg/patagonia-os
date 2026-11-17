@@ -451,7 +451,7 @@ export class SystelSession implements ScaleSession {
     return {
       ok: true,
       verified: written.length,
-      message: pending.length ? `${SENT_AND_CHECKED} ${pending.length} productos no se mandaron porque en la balanza ese número es de otro producto.` : SENT_AND_CHECKED,
+      message: pending.length ? `${SENT_AND_CHECKED} ${pending.length === 1 ? "1 producto no se mandó porque en la balanza ese número es" : `${pending.length} productos no se mandaron porque en la balanza esos números son`} de otro producto. Para poner los de Patagonia, tocá "Volver a sincronizar" y marcá "Reemplazarlos por los de Patagonia".` : SENT_AND_CHECKED,
       pending
     };
   }
