@@ -16,6 +16,11 @@ export interface SerialApi {
 let pendingNetPick: NetAddress | null = null;
 
 /** "Por cable de red": la próxima elección de cable es esa balanza por red (sin la lista de Chrome). */
+/** ¿La próxima elección es una balanza por red? (entonces no hay lista de Chrome que elegir). */
+export function networkPickPending(): boolean {
+  return pendingNetPick !== null;
+}
+
 export function pickNetworkScaleNext(a: NetAddress | null): void {
   pendingNetPick = a;
 }
@@ -57,7 +62,7 @@ export async function connectScale(ctx: EngineContext, onProgress: ProgressFn, d
     port = granted.find((p) => usbKeyOf(p) === remembered.usb) ?? null;
   }
   if (!port) {
-    onProgress("permiso", "Elegí tu balanza en la lista y tocá \"Conectar\".");
+    onProgress("permiso", networkPickPending() ? "Conectando por la red…" : "Elegí tu balanza en la lista y tocá \"Conectar\".");
     try {
       port = await serial.requestPort();
     } catch (err) {

@@ -134,7 +134,15 @@ export class NetScalePort {
   private buffered: number[] = [];
   private generation = 0;
 
-  constructor(readonly net: NetAddress) {}
+  /** Cuándo se buscó por última vez una dirección nueva (una vez por minuto como mucho). */
+  private relocatedAt = 0;
+
+  /** La dirección cambia si la balanza se encontró en otra (le cambió la IP el router). */
+  /** recover = false: solo probar esa dirección (la que escribió la persona), sin reintentos ni búsqueda. */
+  constructor(
+    public net: NetAddress,
+    private readonly recover = true
+  ) {}
 
   getInfo(): SerialPortInfo {
     return {};
@@ -144,12 +152,55 @@ export class NetScalePort {
     // no aplica a la red
   }
 
+  /**
+   * Abre la conexión. Si la balanza no contesta: reintenta (puede estar prendiéndose o con el cable recién puesto) y,
+   * si sigue sin contestar, la busca en la red por su puerto (el de la marca): si aparece UNA sola balanza nueva de esa
+   * marca, es ella con otra dirección. La recuerda con la dirección nueva y sigue, sin que nadie toque nada.
+   */
   async open(_options?: SerialOptions): Promise<void> {
     if (this.readable) {
       const err = new Error("La conexión con la balanza ya estaba abierta.");
       err.name = "InvalidStateError";
       throw err;
     }
+    if (!this.recover) return this.openOnce();
+    let last: unknown = null;
+    for (let attempt = 0; attempt < NET_OPEN_RETRIES; attempt++) {
+      try {
+        return await this.openOnce();
+      } catch (err) {
+        last = err;
+        if (netErrorInfo(err)?.kind === "sin_programa") throw err;
+        if (attempt < NET_OPEN_RETRIES - 1) await sleep(netTiming.retryMs);
+      }
+    }
+    if (Date.now() - this.relocatedAt > netTiming.relocateEveryMs) {
+      this.relocatedAt = Date.now();
+      const moved = await this.relocate();
+      if (moved) return this.openOnce();
+    }
+    throw last;
+  }
+
+  /** Busca la balanza con otra dirección. true si la encontró (y ya quedó recordada con la nueva). */
+  private async relocate(): Promise<boolean> {
+    let body: unknown;
+    try {
+      body = await findNetScalesRaw([this.net.port]);
+    } catch {
+      return false;
+    }
+    const found = asFound(body);
+    const next = relocationCandidate(this.net, found, knownNetAddresses());
+    if (!next) return false;
+    const old = this.net;
+    moveNetAddress(old, next);
+    this.net = next;
+    ports.set(netKey(next), this);
+    return true;
+  }
+
+  private async openOnce(): Promise<void> {
     let r: { status: number; body: { ok?: boolean; error?: string; local?: LocalAddress[] } };
     try {
       r = await agentCall(`/scale/open?host=${encodeURIComponent(this.net.host)}&port=${this.net.port}`, { method: "POST" });
@@ -304,6 +355,79 @@ export function netErrorInfo(err: unknown): { kind: NetErrorKind; local: LocalAd
 
 const ports = new Map<string, NetScalePort>();
 
+// ── Reconexión sola ─────────────────────────────────────────────────────────────────────────────────────────
+
+/** Intentos antes de buscarla con otra dirección (cada uno espera a que la balanza conteste hasta 3 s). */
+const NET_OPEN_RETRIES = 3;
+/** Tiempos de la reconexión (las pruebas los achican). */
+export const netTiming = { retryMs: 2000, relocateEveryMs: 60000 };
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/** Las balanzas que devolvió /scale/find (versión 6: ip + puerto; antes: solo IP del puerto pedido). */
+function asFound(body: unknown): NetAddress[] {
+  const b = (body ?? {}) as { scales?: unknown; found?: unknown; port?: unknown };
+  const list = (x: unknown): unknown[] => (Array.isArray(x) ? x : x && typeof x === "object" ? [x] : []);
+  const scales = list(b.scales)
+    .map((s) => s as { ip?: unknown; port?: unknown })
+    .filter((s) => typeof s.ip === "string" && Number.isInteger(Number(s.port)))
+    .map((s) => ({ host: String(s.ip), port: Number(s.port) }));
+  if (scales.length) return scales;
+  const port = Number(b.port);
+  return list(b.found).filter((ip): ip is string => typeof ip === "string").map((host) => ({ host, port }));
+}
+
+/**
+ * ¿Es la misma balanza con otra dirección? Sí solo si en la red hay UNA sola balanza en ese puerto (misma marca) que
+ * esta computadora no conoce todavía. Con dos o más no se adivina: podría ser la balanza de otro mostrador.
+ */
+export function relocationCandidate(current: NetAddress, found: NetAddress[], known: NetAddress[]): NetAddress | null {
+  const knownKeys = new Set(known.map(netKey));
+  const fresh = found.filter((f) => f.port === current.port && f.host !== current.host && !knownKeys.has(netKey(f)));
+  const stillThere = found.some((f) => netKey(f) === netKey(current));
+  if (stillThere || fresh.length !== 1) return null;
+  return fresh[0];
+}
+
+/**
+ * La balanza cambió de dirección: todo lo que esta computadora recordaba con la vieja pasa a la nueva (la lista de
+ * balanzas por red, el cable de cada balanza de "Mis balanzas" y la balanza recordada de "Mi balanza").
+ */
+export function moveNetAddress(old: NetAddress, next: NetAddress, s: Pick<Storage, "getItem" | "setItem"> | null = typeof localStorage === "undefined" ? null : localStorage): void {
+  if (!s) return;
+  const from = netKey(old);
+  const to = netKey(next);
+  try {
+    const list = knownNetAddressesFrom(s).filter((a) => netKey(a) !== from && netKey(a) !== to);
+    s.setItem(ADDRESSES_KEY, JSON.stringify([next, ...list].slice(0, 8)));
+    const raw = s.getItem("patagonia-scale-bindings");
+    if (raw) {
+      const all = JSON.parse(raw) as Record<string, { usb?: string | null }>;
+      for (const b of Object.values(all)) if (b.usb === from) b.usb = to;
+      s.setItem("patagonia-scale-bindings", JSON.stringify(all));
+    }
+    const mine = s.getItem("patagonia-my-scale");
+    if (mine) {
+      const m = JSON.parse(mine) as { usb?: string | null };
+      if (m.usb === from) s.setItem("patagonia-my-scale", JSON.stringify({ ...m, usb: to }));
+    }
+  } catch {
+    // sin localStorage: la próxima vez se busca de nuevo
+  }
+}
+
+function knownNetAddressesFrom(s: Pick<Storage, "getItem">): NetAddress[] {
+  try {
+    const raw = s.getItem(ADDRESSES_KEY);
+    const list = raw ? (JSON.parse(raw) as NetAddress[]) : [];
+    return list.filter((a) => isLocalNetworkHost(a.host) && Number.isInteger(a.port));
+  } catch {
+    return [];
+  }
+}
+
 /** Siempre el mismo objeto para la misma dirección (la búsqueda y el envío lo reconocen por identidad). */
 export function netPortFor(a: NetAddress): NetScalePort {
   const key = netKey(a);
@@ -367,7 +491,7 @@ export async function localNetworkPermission(): Promise<PermissionState | null> 
 
 /** ¿La PC llega a la balanza en esa dirección? Abre y cierra (no le manda nada). */
 export async function testNetScale(a: NetAddress): Promise<{ ok: true } | { ok: false; message: string; local: LocalAddress[] | null; kind: NetErrorKind }> {
-  const port = new NetScalePort(a);
+  const port = new NetScalePort(a, false);
   try {
     await port.open();
     await port.close();

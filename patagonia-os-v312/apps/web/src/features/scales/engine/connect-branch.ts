@@ -1,6 +1,6 @@
 import { bindingFor, restoreBinding, type ScaleBinding } from "../registry/local-bindings";
 import { findRegistered, legacyCandidate, sameIdentity, type BranchScale, type ScaleFamily } from "../registry/scale-identity";
-import { serialApi, type SerialApi } from "./engine";
+import { networkPickPending, serialApi, type SerialApi } from "./engine";
 import { FriendlyError, friendlyKind, isPortOpenError } from "./friendly";
 import { usbKeyOf } from "./memory";
 import { emptyDiag, type ConnectDiag, type EngineContext, type ProgressFn, type ScaleAdapter, type ScaleSession } from "./types";
@@ -82,7 +82,7 @@ export async function connectBranchScale(
   // 1. El cable. Lo primero (Chrome solo muestra la lista enseguida de un click).
   let ports: SerialPort[];
   if (opts.pick || !target) {
-    onProgress("permiso", "Elegí tu balanza en la lista y tocá \"Conectar\".");
+    onProgress("permiso", networkPickPending() ? "Conectando por la red…" : "Elegí tu balanza en la lista y tocá \"Conectar\".");
     try {
       ports = [await serial.requestPort()];
     } catch (err) {
@@ -146,7 +146,11 @@ export async function connectBranchScale(
       const matched = target;
       const lookalike = target ? null : findRegistered(opts.known, family, identity) ?? legacyCandidate(opts.known, family);
       diag.steps.push(`conectada: ${family} ${JSON.stringify(identity)}${matched ? ` = ${matched.key}` : " (nueva)"}${lookalike ? `, parecida a ${lookalike.key}` : ""}`);
-      return { session, family, usb, identity, matched, lookalike, diag, ctx };
+      // Por red la balanza pudo cambiar de dirección y encontrarse sola al abrir (net-port): se guarda la nueva.
+      const now = usbKeyOf(port);
+      if (now !== usb) diag.steps.push(`la balanza cambió de dirección: ${usb ?? "?"} → ${now ?? "?"}`);
+      diag.usb = now;
+      return { session, family, usb: now, identity, matched, lookalike, diag, ctx };
     }
   }
   if (busyErr) {
