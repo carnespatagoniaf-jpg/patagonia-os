@@ -19,6 +19,7 @@ interface Row {
   weight_start: number;
   weight_length: number;
   weight_divisor: number;
+  product_map?: Record<string, string> | null;
 }
 
 const fromRow = (r: Row): BoxLabelFormat => ({
@@ -31,7 +32,8 @@ const fromRow = (r: Row): BoxLabelFormat => ({
   fixedText: r.fixed_text ?? "",
   weightStart: r.weight_start,
   weightLength: r.weight_length,
-  weightDivisor: Number(r.weight_divisor)
+  weightDivisor: Number(r.weight_divisor),
+  productMap: r.product_map ?? {}
 });
 
 function cached(): BoxLabelFormat[] {
@@ -45,10 +47,15 @@ function cached(): BoxLabelFormat[] {
 
 export async function listBoxLabelFormats(): Promise<BoxLabelFormat[]> {
   if (!supabase) return cached();
-  const { data, error } = await supabase
+  const COLUMNS = "id,name,total_length,product_start,product_length,fixed_start,fixed_text,weight_start,weight_length,weight_divisor";
+  let { data, error }: { data: unknown[] | null; error: { code?: string; message: string } | null } = await supabase
     .from("box_label_formats")
-    .select("id,name,total_length,product_start,product_length,fixed_start,fixed_text,weight_start,weight_length,weight_divisor")
+    .select(`${COLUMNS},product_map`)
     .order("created_at");
+  // Sin la migración 200 todavía: sin productos asociados (las cajas se buscan por código, como en 198).
+  if (error && (error.code === "42703" || error.code === "PGRST204")) {
+    ({ data, error } = await supabase.from("box_label_formats").select(COLUMNS).order("created_at"));
+  }
   if (error) {
     // Sin la migración todavía: ninguna caja (Mostrador sigue como siempre).
     if (error.code === "42P01" || error.code === "PGRST205") return [];
@@ -79,6 +86,13 @@ export async function saveBoxLabelFormat(format: Omit<BoxLabelFormat, "id"> & { 
   });
   if (error) throw toError(error);
   return data as string;
+}
+
+/** Asociar un número de caja a un producto (productId null = soltarlo). Migración 200. */
+export async function setBoxLabelProduct(formatId: string, digits: string, productId: string | null): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("set_box_label_product", { p_format_id: formatId, p_digits: digits, p_product_id: productId });
+  if (error) throw toError(error);
 }
 
 export async function deleteBoxLabelFormat(id: string): Promise<void> {

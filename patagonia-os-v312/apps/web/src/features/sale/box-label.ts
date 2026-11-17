@@ -1,10 +1,14 @@
 // Etiquetas de cajas envasadas al vacío (las imprime el frigorífico o la planta, no la balanza del local).
 // Lógica pura, sin Supabase ni navegador (ver box-label.test.ts).
 //
-// REAL (Carplat S.A., 16/11/2026): EAN-13 = producto (2) + fijo "110127" + peso en centésimas de kg (4) + verificador.
-//   0711012717328 → producto 07 (Roast beef), 17,32 kg
-//   1511012722327 → producto 15 (Tortuguita), 22,32 kg
-// La caja de roast beef empieza con 0 y el lector la manda con 12 números (como UPC-A, sin ese 0): se repone.
+// REAL (Carplat S.A., 16-17/11/2026): EAN-13 = número de caja del producto (2) + 6 números que CAMBIAN con la fecha
+// ("110127" el 12/11, "050127" el 06/11: no se usan) + peso en centésimas de kg (4) + verificador.
+//   0711012717328 → caja 07 (Roast beef), 17,32 kg
+//   1511012722327 → caja 15 (Tortuguita), 22,32 kg
+//   0105012721704 → caja 01 (Matambre), 21,70 kg
+// El lector manda con 12 números las que empiezan con 0 (como UPC-A, sin ese 0): se repone.
+// El número de caja no es el código del producto en Patagonia (Carplat usa 219, 215…): cada formato guarda a qué
+// producto corresponde cada número (productMap).
 
 import type { Product } from "@patagonia/domain";
 
@@ -15,13 +19,15 @@ export interface BoxLabelFormat {
   totalLength: number;
   productStart: number;
   productLength: number;
-  /** Números que se repiten en todas las cajas (vacío = ninguno). Sirven para no confundir otro código con una caja. */
+  /** Números que tienen que repetirse en todas las cajas (vacío = ninguno, lo normal: en Carplat cambian con la fecha). */
   fixedStart: number;
   fixedText: string;
   weightStart: number;
   weightLength: number;
   /** 100 = el peso viene en centésimas de kg (1732 = 17,32 kg); 1000 = en gramos. */
   weightDivisor: number;
+  /** Número de caja (tal como viene, ej. "07") → id del producto de Patagonia. */
+  productMap?: Record<string, string>;
 }
 
 export function validEan13(code: string): boolean {
@@ -66,43 +72,70 @@ export function readWithFormat(raw: string, format: BoxLabelFormat): BoxLabelRea
   return { format, productDigits, weightKg, code };
 }
 
-/** El producto de Patagonia con ese código: exacto ("07") o sin los ceros de adelante ("7"). Solo activos. */
-export function productForDigits(digits: string, products: Product[]): Product | undefined {
+/**
+ * El producto de esa caja: el asociado a su número en el formato ("07" o "7" es lo mismo); si no hay ninguno
+ * asociado, el que tenga ese código en Patagonia (exacto "07" o sin ceros "7"). Solo activos.
+ */
+export function productForDigits(digits: string, products: Product[], productMap: Record<string, string> = {}): Product | undefined {
   const active = products.filter((p) => p.active ?? true);
+  const mappedId = productMap[digits] ?? Object.entries(productMap).find(([k]) => parseInt(k, 10) === parseInt(digits, 10))?.[1];
+  if (mappedId) return active.find((p) => p.id === mappedId);
   const exact = active.find((p) => p.code === digits);
   if (exact) return exact;
   const trimmed = String(parseInt(digits, 10));
   return active.find((p) => p.code === trimmed);
 }
 
-export type BoxScan =
-  | { type: "box"; product: Product; quantity: number; weightKg: number; code: string; detail: string }
-  | { type: "error"; message: string };
+export interface BoxScan {
+  product: Product;
+  quantity: number;
+  weightKg: number;
+  code: string;
+  digits: string;
+  detail: string;
+}
 
 const kg = (n: number) => `${n.toLocaleString("es-AR", { minimumFractionDigits: 2, maximumFractionDigits: 3 })} kg`;
 
+/** La primera lectura que da con algún formato (aunque su número de caja no tenga producto todavía). */
+export function readAnyBox(raw: string, formats: BoxLabelFormat[]): BoxLabelRead | null {
+  for (const format of formats) {
+    const read = readWithFormat(raw, format);
+    if (read) return read;
+  }
+  return null;
+}
+
 /**
- * ¿Es la etiqueta de una caja? null = no tiene la forma de ningún formato cargado (que lo busque Mostrador como
- * siempre). Un producto por kg se carga con los kilos de la caja; uno por unidad o por caja, como 1.
+ * ¿Es la caja de un producto? Solo si su número tiene producto (asociado o por código) y el producto tiene precio: si
+ * no, null y Mostrador sigue como siempre (puede ser una etiqueta de balanza u otro código). Por kg entra con los kilos
+ * de la caja; por unidad o por caja, como 1.
  */
 export function resolveBoxScan(raw: string, formats: BoxLabelFormat[], products: Product[]): BoxScan | null {
   for (const format of formats) {
     const read = readWithFormat(raw, format);
     if (!read) continue;
-    const product = productForDigits(read.productDigits, products);
-    if (!product) {
-      const trimmed = String(parseInt(read.productDigits, 10));
-      return {
-        type: "error",
-        message: `Es una caja de "${format.name}" con el producto N.º ${read.productDigits} y ${kg(read.weightKg)}, pero en Patagonia no hay ningún producto activo con el código ${read.productDigits}${trimmed !== read.productDigits ? ` ni ${trimmed}` : ""}. No se agregó nada: en Stock, poné ese código al producto.`
-      };
-    }
-    if (!(product.priceRetail > 0)) {
-      return { type: "error", message: `${product.name} no tiene precio cargado en Patagonia, así que se cobraría $0. No se agregó nada: cargale el precio en Stock y volvé a escanear.` };
-    }
+    const product = productForDigits(read.productDigits, products, format.productMap);
+    if (!product || !(product.priceRetail > 0)) continue;
     const quantity = product.unit === "kg" ? Math.round(read.weightKg * 1000) / 1000 : 1;
     const what = product.unit === "kg" ? kg(quantity) : `1 ${product.unit === "box" ? "caja" : "u."} (${kg(read.weightKg)})`;
-    return { type: "box", product, quantity, weightKg: read.weightKg, code: read.code, detail: `${product.name}: ${what} (caja)` };
+    return { product, quantity, weightKg: read.weightKg, code: read.code, digits: read.productDigits, detail: `${product.name}: ${what} (caja)` };
+  }
+  return null;
+}
+
+/** Por qué una caja no entró (aviso de Mostrador y botón Probar). null si no tiene forma de caja. */
+export function boxProblem(raw: string, formats: BoxLabelFormat[], products: Product[]): string | null {
+  for (const format of formats) {
+    const read = readWithFormat(raw, format);
+    if (!read) continue;
+    const product = productForDigits(read.productDigits, products, format.productMap);
+    if (!product) {
+      return `Es una caja de "${format.name}" con el número ${read.productDigits} y ${kg(read.weightKg)}, pero ese número todavía no tiene un producto de Patagonia. No se agregó nada: en el engranaje de Mostrador → Etiquetas de cajas, tocá "Asociar", escaneá la caja y elegí el producto.`;
+    }
+    if (!(product.priceRetail > 0)) {
+      return `${product.name} no tiene precio cargado en Patagonia, así que se cobraría $0. No se agregó nada: cargale el precio en Stock y volvé a escanear.`;
+    }
   }
   return null;
 }
@@ -122,9 +155,9 @@ export type LearnResult =
 const DIVISORS = [100, 1000, 10];
 
 /**
- * Busca dónde está el peso (el mismo lugar en las dos etiquetas da los kilos de cada una), después los números que
- * se repiten justo antes del peso (fijos) y lo que queda adelante es el producto. Si dos productos terminan en el
- * mismo número (07 y 17) el fijo se come ese número: la pantalla deja correr el corte.
+ * Busca dónde está el peso (el mismo lugar en las dos etiquetas da los kilos de cada una). Lo de adelante: los números
+ * iguales en las dos, pegados al peso, son de la fecha o el lote (no se exigen); el resto es el número de producto. Si
+ * dos productos terminan igual (07 y 17) se come ese número: la pantalla deja correr el corte.
  */
 export function learnBoxLabelFormat(samples: BoxSample[]): LearnResult {
   if (samples.length < 2) return { ok: false, reason: "Hacen falta dos cajas." };
@@ -152,11 +185,12 @@ export function learnBoxLabelFormat(samples: BoxSample[]): LearnResult {
     return { ok: false, reason: "No se encontraron los kilos en el código. Revisá que escribiste el PESO NETO de cada caja tal como dice la etiqueta." };
   }
 
-  // Lo de adelante del peso: los números iguales en las dos (pegados al peso) son fijos; el resto, el producto.
   const before = codes.map((c) => c.slice(0, weight.start));
-  let fixedLength = 0;
-  while (fixedLength < weight.start && before.every((b) => b[weight.start - 1 - fixedLength] === before[0][weight.start - 1 - fixedLength])) fixedLength++;
-  const productLength = weight.start - fixedLength;
+  let sameLength = 0;
+  while (sameLength < weight.start && before.every((b) => b[weight.start - 1 - sameLength] === before[0][weight.start - 1 - sameLength])) sameLength++;
+  // Con cajas de días distintos los números de la fecha también difieren y el producto sale más largo: por eso la
+  // pantalla pide dos cajas del mismo día, y se corrige con "Uno menos".
+  const productLength = weight.start - sameLength;
   if (productLength < 1) return { ok: false, reason: "Las dos etiquetas tienen el mismo producto. Escaneá dos cajas de productos distintos." };
 
   return {
@@ -165,8 +199,9 @@ export function learnBoxLabelFormat(samples: BoxSample[]): LearnResult {
       totalLength: total,
       productStart: 0,
       productLength,
+      // Los números entre el producto y el peso NO se exigen: en Carplat cambian con la fecha de producción.
       fixedStart: productLength,
-      fixedText: codes[0].slice(productLength, weight.start),
+      fixedText: "",
       weightStart: weight.start,
       weightLength: weight.length,
       weightDivisor: weight.divisor
@@ -174,10 +209,9 @@ export function learnBoxLabelFormat(samples: BoxSample[]): LearnResult {
   };
 }
 
-/** Correr el corte entre producto y números fijos (+1 = un número más para el producto). */
-export function shiftProductCut(format: Omit<BoxLabelFormat, "id" | "name">, sampleCode: string, delta: number): Omit<BoxLabelFormat, "id" | "name"> | null {
+/** Correr el corte del número de producto (+1 = un número más para el producto). */
+export function shiftProductCut(format: Omit<BoxLabelFormat, "id" | "name">, delta: number): Omit<BoxLabelFormat, "id" | "name"> | null {
   const productLength = format.productLength + delta;
   if (productLength < 1 || productLength > format.weightStart) return null;
-  const code = restoreLeadingZero(sampleCode);
-  return { ...format, productLength, fixedStart: productLength, fixedText: code.slice(productLength, format.weightStart) };
+  return { ...format, productLength, fixedStart: productLength, fixedText: "" };
 }
