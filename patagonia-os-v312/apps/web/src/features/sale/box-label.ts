@@ -73,13 +73,16 @@ export function readWithFormat(raw: string, format: BoxLabelFormat): BoxLabelRea
 }
 
 /**
- * El producto de esa caja: el asociado a su número en el formato ("07" o "7" es lo mismo); si no hay ninguno
- * asociado, el que tenga ese código en Patagonia (exacto "07" o sin ceros "7"). Solo activos.
+ * El producto de esa caja: el asociado a su número en el formato ("07" o "7" es lo mismo). Si el formato tiene cajas
+ * asociadas, SOLO esas: una caja sin asociar no entra (REAL Carplat 17/11: la caja 01 de matambre caía en su producto
+ * de código "1", MATAMBRE por caja a $16.900, y se cobraba 1 caja de 21,70 kg). Sin ninguna asociada, por código
+ * (exacto "07" o sin ceros "7"). Solo activos.
  */
 export function productForDigits(digits: string, products: Product[], productMap: Record<string, string> = {}): Product | undefined {
   const active = products.filter((p) => p.active ?? true);
   const mappedId = productMap[digits] ?? Object.entries(productMap).find(([k]) => parseInt(k, 10) === parseInt(digits, 10))?.[1];
   if (mappedId) return active.find((p) => p.id === mappedId);
+  if (Object.keys(productMap).length > 0) return undefined;
   const exact = active.find((p) => p.code === digits);
   if (exact) return exact;
   const trimmed = String(parseInt(digits, 10));
