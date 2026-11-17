@@ -271,3 +271,30 @@ describe("Systel de Pollería Giuseppe: el código del artículo trae el IMPORTE
     assert.deepEqual(profileReadiness(g.profile, g.links).problems, []);
   });
 });
+
+describe("Systel de Quesar: formato general distinto del de cada producto (REAL 17/11/2026)", () => {
+  // General de pesables "20PPPPPCCCCC", pero todos los productos imprimen con el suyo "20PPPPCCCCCC".
+  // Etiqueta real: Tybo Maquina (178), 0,325 kg × $21.300 = $6923 → "2001780003258".
+  const quesar = (catalogExtra: { code: number; eanType: number | null; eanConfig: string | null }[] = []) => {
+    const catalog = [
+      { code: 178, name: "Tybo Maquina", saleType: "P" as const, prices: [21300], eanType: 1, eanConfig: "20PPPPCCCCCC" },
+      { code: 1780, name: "Otro", saleType: "P" as const, prices: [1000], eanType: 1, eanConfig: "20PPPPCCCCCC" },
+      { code: 5, name: "Unitario", saleType: "U" as const, prices: [500], eanType: 1, eanConfig: "21PPPPCCCCCC" },
+      ...catalogExtra.map((x) => ({ ...x, name: "Extra", saleType: "P" as const, prices: [100] }))
+    ];
+    return { scaleKey: "systel", brand: "systel", weighedFormat: "20PPPPPCCCCC", unitFormat: "21PPPPPCCCCC", totalFormat: "22AAIIIIIIII", amountDecimals: 0, genericCodes: [], catalog };
+  };
+
+  it("la etiqueta real se lee como el 178 con 0,325 kg (el general no se usa)", () => {
+    const d = decodeScaleCode("2001780003258", quesar());
+    assert.equal(d.kind, "item");
+    if (d.kind !== "item") return;
+    assert.equal(d.code, 178);
+    assert.equal(d.quantity, 0.325);
+  });
+
+  it("si algún pesable usa el general, sigue sin cargar la etiqueta ambigua", () => {
+    const d = decodeScaleCode("2001780003258", quesar([{ code: 9, eanType: 0, eanConfig: null }]));
+    assert.equal(d.kind, "error");
+  });
+});
