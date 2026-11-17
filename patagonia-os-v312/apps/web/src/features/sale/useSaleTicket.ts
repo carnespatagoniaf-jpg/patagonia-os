@@ -6,7 +6,7 @@ import type { ProductCategory } from "../inventory/product-categories-service";
 import { parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, type ScaleConfig } from "./scale-config-service";
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
 import { labelWeightProblem, MAX_COUNTER_SCALE_KG, resolveScan } from "./scan-resolve";
-import { resolveBoxScan } from "./box-label";
+import { boxProblem, resolveBoxScan } from "./box-label";
 import { useBoxLabelFormats } from "./box-label-service";
 import { noteLabelRead } from "../scales/label-read";
 import { closeSystelTicketSession, readSystelTicketFromScale, refreshSystelLabelFormat, systelTicketReadConfigured } from "../inventory/systel/systel-ticket-from-scale";
@@ -375,15 +375,13 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     }
 
     // Caja envasada al vacío con etiqueta del frigorífico (migración 198): su producto con los kilos de la caja, en su
-    // propia línea (cada caja pesa distinto). Solo si la empresa cargó el formato y el código no es un producto.
+    // propia línea (cada caja pesa distinto). Solo si la empresa cargó el formato, el código no es un producto, el
+    // número de caja tiene producto (si no, null y sigue como siempre) y no es una etiqueta de la balanza de un
+    // producto que existe (con los números del medio libres, una etiqueta "20…" también tiene forma de caja).
     const box = boxFormats.length > 0 && !products.some((p) => (p.active ?? true) && p.code === raw) ? resolveBoxScan(raw, boxFormats, products) : null;
-    if (box) {
+    if (box && resolveScan(raw, products, scaleConfig).type !== "label") {
       setSearch("");
       setHighlightedIndex(-1);
-      if (box.type === "error") {
-        setMessage(box.message);
-        return;
-      }
       const key = `${box.product.id}|caja:${box.code}`;
       if (cart.some((l) => l.key === key)) {
         setMessage("Esa caja ya está en esta venta.");
@@ -571,7 +569,8 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       return;
     }
 
-    setMessage("No se encontró ningún producto con ese código.");
+    // Una caja cuyo número todavía no tiene producto: se dice cómo asociarlo (en vez de "no se encontró").
+    setMessage((boxFormats.length > 0 && boxProblem(raw, boxFormats, products)) || "No se encontró ningún producto con ese código.");
   }
 
   /**
