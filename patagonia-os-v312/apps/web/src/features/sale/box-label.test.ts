@@ -63,7 +63,14 @@ describe("[REAL] cajas de Carplat", () => {
     assert.deepEqual(got, [["219", 17.32], ["215", 22.32], ["61", 21.7]]);
   });
 
-  it("sin asociar: busca por código (07 o 7); un producto por caja entra como 1", () => {
+  it("[REAL 17/11] con cajas asociadas, una caja sin asociar NO cae en el producto de código 1", () => {
+    const soloDos = { ...CARPLAT, productMap: { "07": "id-219", "15": "id-215" } };
+    assert.equal(resolveBoxScan(MATAMBRE_0611_SCANNED, [soloDos], CARPLAT_PRODUCTS), null);
+    assert.match(boxProblem(MATAMBRE_0611_SCANNED, [soloDos], CARPLAT_PRODUCTS) ?? "", /número 01.*todavía no tiene un producto/);
+    assert.equal(resolveBoxScan(ROAST_BEEF_SCANNED, [soloDos], CARPLAT_PRODUCTS)?.product.code, "219");
+  });
+
+  it("sin ninguna asociada: busca por código (07 o 7); un producto por caja entra como 1", () => {
     const products = [product("7", "Roast beef", "kg", 12000), product("01", "Matambre caja", "box", 300000)];
     const a = resolveBoxScan(ROAST_BEEF_SCANNED, [CARPLAT], products);
     assert.equal(a?.product.name, "Roast beef");
