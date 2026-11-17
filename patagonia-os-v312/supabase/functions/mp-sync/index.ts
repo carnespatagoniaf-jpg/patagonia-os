@@ -54,12 +54,32 @@ async function mpGet(path: string): Promise<Json> {
   return text ? JSON.parse(text) : {};
 }
 
+// Cada /search de Mercado Pago acepta un tamaño de página máximo distinto y no
+// lo documenta: /preapproval/search acepta 100, /authorized_payments/search no
+// (respondió 400 "Invalid value for limit" en producción, 2026-11-16). Se
+// empieza grande y, si Mercado Pago rechaza el limit, se prueba el siguiente.
+const PAGE_SIZES = [100, 50, 20, 10];
+
+function isInvalidLimit(error: unknown) {
+  return error instanceof Error && / 400 /.test(error.message) && /invalid value for limit/i.test(error.message);
+}
+
 /** Recorre todas las páginas de un /search de Mercado Pago. */
 async function mpSearchAll(path: string, max = 2000): Promise<Json[]> {
   const out: Json[] = [];
   const sep = path.includes("?") ? "&" : "?";
+  let sizeIndex = 0;
   for (let offset = 0; offset < max; ) {
-    const page = await mpGet(`${path}${sep}limit=100&offset=${offset}`);
+    let page: Json;
+    try {
+      page = await mpGet(`${path}${sep}limit=${PAGE_SIZES[sizeIndex]}&offset=${offset}`);
+    } catch (error) {
+      if (isInvalidLimit(error) && sizeIndex < PAGE_SIZES.length - 1) {
+        sizeIndex += 1;
+        continue;
+      }
+      throw error;
+    }
     const results: Json[] = Array.isArray(page?.results) ? page.results : [];
     out.push(...results);
     const total = Number(page?.paging?.total ?? 0);
