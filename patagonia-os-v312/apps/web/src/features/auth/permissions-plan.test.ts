@@ -69,3 +69,20 @@ describe("pantallas que una empresa no usa (companies.features 'no:<permiso>')",
     }
   });
 });
+
+describe("Clientes sin cobrar (customers.payments, 2026-11-17)", () => {
+  function admin(denied: string[] = []): UserProfile {
+    return { id: "u", company_id: "c", branch_id: "b", full_name: "Cajera", role: "admin", active: true, plan: "full", denied_permissions: denied };
+  }
+  it("un administrador registra pagos por defecto", () => {
+    assert.equal(can(admin(), "customers.payments"), true);
+  });
+  it("destildado: sigue viendo Clientes pero no registra pagos", () => {
+    const p = admin(["customers.payments"]);
+    assert.equal(canAccessPage(p, "customers"), true);
+    assert.equal(can(p, "customers.payments"), false);
+  });
+  it("Básico no tiene Clientes ni sus pagos", () => {
+    assert.equal(can(owner("basico"), "customers.payments"), false);
+  });
+});
