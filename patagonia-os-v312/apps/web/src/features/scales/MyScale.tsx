@@ -7,7 +7,8 @@ import { connectBranchScale, type BranchConnectResult } from "./engine/connect-b
 import { isPhoneOrTablet, PHONE_OR_TABLET_MESSAGE } from "./engine/device";
 import { markSynced, pickNetworkScaleNext } from "./engine/engine";
 import { netAgentVersion, parseNetKey, rememberNetAddress, type NetAddress } from "../inventory/kretz/net-port";
-import { NetworkScaleSetup } from "./NetworkScaleSetup";
+import { NetworkScaleWizard } from "./network/NetworkScaleWizard";
+import { fixedIpTip, brandForPort, type NetBrandId } from "./network/net-wizard";
 import { LabelTestBox } from "./LabelTestBox";
 import type { Product } from "@patagonia/domain";
 import { adaptersForChoice } from "./engine/live";
@@ -37,12 +38,12 @@ import { importProducts } from "../import/import-service";
 type Phase =
   | { kind: "inicio" }
   | { kind: "elegir_marca" }
-  | { kind: "red" }
+  | { kind: "red"; startAt?: { brand: NetBrandId } }
   | { kind: "trabajando"; stage: "conectar" | "sincronizar"; step: EngineStep; text: string; done?: number; total?: number }
   | { kind: "listo_para_sincronizar"; prepared: PreparedSync }
   | { kind: "listo"; message: string; pending: PendingItem[]; model: string; skipped?: ProductProblem[] }
   | { kind: "bloqueado"; prepared: PreparedSync }
-  | { kind: "error"; message: string; canPick: boolean; canRelease?: boolean; failures?: ProductProblem[] };
+  | { kind: "error"; message: string; canPick: boolean; canRelease?: boolean; failures?: ProductProblem[]; net?: NetAddress | null };
 
 /** Balanza que esta computadora usaba antes de "Mis balanzas" y que todavía no está registrada en la sucursal. */
 const LOCAL_KEY = "__esta-computadora";
@@ -72,6 +73,10 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
   const ctxRef = useRef<BranchConnectResult | null>(null);
   /** Al agregar una Report por cable de red: su dirección (para "Probar de nuevo"). */
   const netRef = useRef<NetAddress | null>(null);
+  /** Nombre que eligió la persona en el asistente de red para la balanza nueva ("Mostrador 1"). */
+  const pendingNameRef = useRef<string | null>(null);
+  /** La balanza conectada va por cable de red: su dirección (para recomendar dejarla fija). */
+  const [netConnected, setNetConnected] = useState<NetAddress | null>(null);
 
   const reload = useCallback(async () => {
     if (!branchId || !isSupabaseConfigured) {
@@ -206,6 +211,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       );
       session.current = result.session;
       ctxRef.current = result;
+      setNetConnected(parseNetKey(result.usb as string | null | undefined));
       setLookalike(result.lookalike);
       const key = await remember(result, target);
       if (key) setActiveKey(key);
@@ -247,7 +253,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       const kind = friendlyKind(err);
       const net = parseNetKey(diag.usb as string | null | undefined);
       const message = net ? await netConnectMessage(err, net) : connectErrorMessage(err, choice);
-      setPhase({ kind: "error", message, canPick: kind === "elegir_cable" || kind === "no_contesta" || kind === "otra_balanza", canRelease: kind === "balanza_ocupada" && !allowSystelRelease && canManage });
+      setPhase({ kind: "error", message, net, canPick: !net && (kind === "elegir_cable" || kind === "no_contesta" || kind === "otra_balanza"), canRelease: kind === "balanza_ocupada" && !allowSystelRelease && canManage });
       recordInstall(target?.key, { lastError: friendlyMessage(err).slice(0, 200), lastErrorAt: new Date().toISOString() });
       reportAndShow("conectar", err, diag);
     }
@@ -265,7 +271,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       try {
         key = await registerBranchScale(branchId, {
           key,
-          name: key ? null : defaultScaleName(label, scales),
+          name: key ? null : pendingNameRef.current ?? defaultScaleName(label, scales),
           family: result.family,
           brand: result.family,
           model: label,
@@ -349,6 +355,8 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     setActiveKey(null);
     setNewChoice(null);
     netRef.current = null;
+    pendingNameRef.current = null;
+    setNetConnected(null);
     setPhase({ kind: "inicio" });
   }
 
@@ -410,48 +418,53 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
 
       {phase.kind === "elegir_marca" && (
         <div className="my-scale-body">
-          <p className="my-scale-status">¿Qué balanza vas a agregar?</p>
-          <p className="muted">La marca está adelante o en la etiqueta de atrás de la balanza. Prendela y fijate cómo está conectada a esta computadora: cable USB, Bluetooth o cable de red.</p>
+          <p className="my-scale-status">¿Cómo está conectada la balanza?</p>
+          <p className="muted">Mirá el cable que sale de atrás de la balanza.</p>
+          {/* Una sola entrada para TODAS las balanzas por red (asistente paso a paso). Antes era una tarjeta solo para
+              la Report y la gente entraba por la de USB (Oliem 16/11, El Shopping de la Carne 17/11). */}
+          <button className="my-scale-choice net-entry" onClick={() => setPhase({ kind: "red" })}>
+            <strong>Conectar balanza por cable de red</strong>
+            <span>El cable es como el de internet (ancho, con traba) y va al router o a la computadora. Kretz Report NX, Systel Cuora Max y otras.</span>
+          </button>
+          <p className="muted">Por cable USB o Bluetooth, elegí la marca:</p>
           <div className="my-scale-choices">
-            {SCALE_CHOICES.flatMap((c) => {
-              const card = (
-                <button
-                  key={c.id}
-                  className="my-scale-choice"
-                  // La lista de cables de Chrome se abre con este mismo click.
-                  onClick={() => {
-                    netRef.current = null;
-                    handleConnectNew(c.id);
-                  }}
-                >
-                  <strong>{c.label}</strong>
-                  <span>{c.hint}</span>
-                </button>
-              );
-              // La Report por red es un camino aparte (programa de la PC): va como tarjeta propia al lado de la Report,
-              // no como un renglón chico abajo. Oliem (16/11/2026) tocó 18 veces la tarjeta "Kretz Report" sin ver el renglón.
-              if (c.id !== "kretz-report") return [card];
-              return [
-                card,
-                <button key="kretz-report-red" className="my-scale-choice" onClick={() => setPhase({ kind: "red" })}>
-                  <strong>Kretz Report por cable de red</strong>
-                  <span>Va con cable de red (Ethernet) al módem o a la computadora</span>
-                </button>
-              ];
-            })}
+            {SCALE_CHOICES.map((c) => (
+              <button
+                key={c.id}
+                className="my-scale-choice"
+                // La lista de cables de Chrome se abre con este mismo click.
+                onClick={() => {
+                  netRef.current = null;
+                  handleConnectNew(c.id);
+                }}
+              >
+                <strong>{c.label}</strong>
+                <span>{c.hint}</span>
+              </button>
+            ))}
           </div>
           <button className="secondary" onClick={backToList}>Volver</button>
         </div>
       )}
 
       {phase.kind === "red" && (
-        <NetworkScaleSetup
-          onBack={() => setPhase({ kind: "elegir_marca" })}
-          onConnect={(a) => {
-            // La balanza por red es "un cable más": se recuerda en esta computadora y se conecta como cualquier Report.
+        <NetworkScaleWizard
+          startAt={phase.startAt}
+          existingNames={list.map((s) => s.name)}
+          onBack={() => (phase.startAt ? backToList() : setPhase({ kind: "elegir_marca" }))}
+          onUsb={(choice) => {
+            netRef.current = null;
+            handleConnectNew(choice);
+          }}
+          onReport={(data) => report("red (asistente)", "diagnóstico pedido desde el asistente de red", null, data)}
+          onConnect={(t) => {
+            // La balanza por red es "un cable más": se recuerda en esta computadora y se conecta con lo de siempre
+            // (lee la balanza, pasa productos comprobando cada uno, prueba la etiqueta).
+            const a = { host: t.host, port: t.port };
             netRef.current = a;
+            pendingNameRef.current = t.name;
             rememberNetAddress(a);
-            handleConnectNew("kretz-report");
+            handleConnectNew(t.choice);
           }}
         />
       )}
@@ -474,6 +487,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
         <div className="my-scale-body">
           <p className="my-scale-status">Tu balanza está lista para sincronizar</p>
           <p className="muted">{phase.prepared.label} conectada.</p>
+          {netConnected && <p className="my-scale-tip">{fixedIpTip(brandForPort(netConnected.port) ?? "auto", netConnected.host)}</p>}
           <div className="my-scale-facts">
             <Fact value={phase.prepared.ready} label="productos listos" />
             {phase.prepared.writes > 0 && <Fact value={phase.prepared.writes} label="para actualizar en la balanza" />}
@@ -523,6 +537,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       {phase.kind === "listo" && (
         <div className="my-scale-body">
           <p className="my-scale-status ok"><CheckCircle2 size={22} /> {phase.message}</p>
+          {netConnected && <p className="my-scale-tip">{fixedIpTip(brandForPort(netConnected.port) ?? "auto", netConnected.host)}</p>}
           {/* La etiqueta se prueba apenas termina de enlazarse, arriba de los pasos (antes quedaba al final y no se veía). */}
           {active && branchId && needsLabelTestFor(active) && <LabelTestBox products={products as unknown as Product[]} branchId={branchId} onDone={() => void reload()} />}
           <InstallChecklist record={installOf(active)} onRefresh={() => void reload()} products={products} branchId={branchId} />
@@ -565,6 +580,12 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
             )}
             {!active && newChoice === "kretz-report" && !netRef.current && (
               <button className="my-scale-primary" onClick={() => setPhase({ kind: "red" })}>VA CON CABLE DE RED</button>
+            )}
+            {/* Balanza por red que no contesta: puede que le haya cambiado la dirección. Se busca de nuevo en la red. */}
+            {phase.net && (
+              <button className="my-scale-primary" onClick={() => setPhase({ kind: "red", startAt: { brand: brandForPort(phase.net!.port) ?? "auto" } })}>
+                BUSCAR DE NUEVO EN LA RED
+              </button>
             )}
             <button className="secondary" onClick={backToList}>Volver a mis balanzas</button>
           </div>
@@ -614,12 +635,12 @@ function InstallChecklist({ record, onRefresh, products, branchId }: { record: I
 async function netConnectMessage(err: unknown, net: { host: string; port: number }): Promise<string> {
   const version = await netAgentVersion();
   if (version === null) {
-    return "El programa de Patagonia no está funcionando en esta computadora (es el que habla con la balanza por la red). Volvé a abrir el instalador (Agregar balanza → Kretz por cable de red) o reiniciá la computadora, y probá de nuevo.";
+    return "El programa de Patagonia no está funcionando en esta computadora (es el que habla con la balanza por la red). Volvé a abrir el instalador (Agregar balanza → Conectar balanza por cable de red) o reiniciá la computadora, y probá de nuevo.";
   }
   if (friendlyKind(err) === "no_contesta") {
-    return `La balanza aceptó la conexión por la red (${net.host}) pero no le contestó a Patagonia. En el menú de la balanza, Configuración de Red, revisá que el puerto sea ${net.port}, que no esté abierto iTegra en otra computadora, y probá de nuevo.`;
+    return `La balanza está en la red (${net.host}) pero no le contestó a Patagonia. Cerrá iTegra o el programa de la balanza si está abierto en otra computadora, apagá y prendé la balanza, y tocá PROBAR DE NUEVO. Si sigue igual, tocá BUSCAR DE NUEVO EN LA RED.`;
   }
-  return `No se pudo hablar con la balanza por la red (${net.host}, puerto ${net.port}). Revisá que esté prendida y el cable de red enchufado (la lucecita verde al lado del cable tiene que estar prendida), y probá de nuevo.`;
+  return `No se pudo hablar con la balanza por la red (${net.host}). Revisá que esté prendida y que la luz al lado del cable esté prendida. Si ayer andaba, puede que le haya cambiado la dirección: tocá BUSCAR DE NUEVO EN LA RED.`;
 }
 
 function connectErrorMessage(err: unknown, choice: ScaleChoice | null): string {

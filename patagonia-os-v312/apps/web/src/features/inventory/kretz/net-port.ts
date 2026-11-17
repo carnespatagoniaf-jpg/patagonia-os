@@ -337,6 +337,34 @@ export async function findNetScales(port = KRETZ_NET_PORT): Promise<{ found: str
   return { found: r.body.found ?? [], local: r.body.local ?? [] };
 }
 
+/**
+ * Búsqueda del asistente de red (programa versión 6): varios puertos a la vez (1001 Kretz, 10001 Systel) y el estado
+ * de las placas con cable. Devuelve la respuesta tal cual; la interpreta scales/network/net-wizard.ts.
+ */
+export async function findNetScalesRaw(ports: number[]): Promise<unknown> {
+  const r = await agentCall<unknown>(`/scale/find?ports=${ports.join(",")}&port=${ports[0] ?? KRETZ_NET_PORT}`, undefined, 25000);
+  return r.body;
+}
+
+/**
+ * Lo que dice Chrome del permiso "red local" de esta página (Chrome 142+ lo pide la primera vez que la página le habla
+ * a la PC). null = este Chrome no lo informa. El nombre del permiso cambió entre versiones: se prueban los conocidos.
+ */
+export async function localNetworkPermission(): Promise<PermissionState | null> {
+  if (typeof navigator === "undefined" || !navigator.permissions?.query) return null;
+  let seen: PermissionState | null = null;
+  for (const name of ["loopback-network", "local-network-access", "local-network"]) {
+    try {
+      const s = await navigator.permissions.query({ name } as unknown as PermissionDescriptor);
+      if (s.state === "denied") return "denied";
+      seen = seen ?? s.state;
+    } catch {
+      // ese nombre no existe en este Chrome
+    }
+  }
+  return seen;
+}
+
 /** ¿La PC llega a la balanza en esa dirección? Abre y cierra (no le manda nada). */
 export async function testNetScale(a: NetAddress): Promise<{ ok: true } | { ok: false; message: string; local: LocalAddress[] | null; kind: NetErrorKind }> {
   const port = new NetScalePort(a);
