@@ -98,9 +98,16 @@ export function quantityFromAmount(item: ScaleCatalogItem, amount: number): numb
   return found.length === 1 ? found[0] : null;
 }
 
-/** Todos los formatos de artículo que puede imprimir esta balanza (generales y propios de cada producto). */
+/**
+ * Todos los formatos de artículo que puede imprimir esta balanza: los propios de cada producto, y cada formato
+ * general SOLO si algún producto de ese tipo lo usa (o si no se conoce el catálogo). REAL Quesar (17/11/2026): general
+ * de pesables "20PPPPPCCCCC" pero los 241 productos con su propio "20PPPPCCCCCC"; con los dos, la etiqueta del 178
+ * ("2001780003258") se leía también como el 1780 y no se cargaba ninguna, aunque la balanza nunca usa el general.
+ */
 function itemTemplates(profile: ScaleSaleProfile): ParsedTemplate[] {
-  const texts = unique([profile.weighedFormat, profile.unitFormat, ...profile.catalog.map((i) => (i.eanType === 1 ? i.eanConfig : null))].filter((t): t is string => !!t && /P/.test(t)));
+  const usesGeneral = (weighed: boolean) => profile.catalog.length === 0 || profile.catalog.some((i) => isWeighed(i.saleType) === weighed && i.eanType !== 1 && i.eanType !== 2 && i.eanType !== 3);
+  const general = [usesGeneral(true) ? profile.weighedFormat : null, usesGeneral(false) ? profile.unitFormat : null];
+  const texts = unique([...general, ...profile.catalog.map((i) => (i.eanType === 1 ? i.eanConfig : null))].filter((t): t is string => !!t && /P/.test(t)));
   return texts.map(parseTemplate).filter((t): t is ParsedTemplate => !!t && !!t.fields.P);
 }
 
