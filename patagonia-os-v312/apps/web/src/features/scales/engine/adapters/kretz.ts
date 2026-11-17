@@ -1,6 +1,7 @@
 import { parseAuraPlu } from "../../../inventory/kretz/aura-plu";
 import { planAuraSync, summarizeAuraPlan, type AuraSyncItem } from "../../../inventory/kretz/aura-sync";
 import { getStoredModelId, saveModelId } from "../../../inventory/kretz/models";
+import { isNetPort } from "../../../inventory/kretz/net-port";
 import {
   configureReportBarcode,
   diagnoseScaleLink,
@@ -324,7 +325,9 @@ export function makeKretzAdapter(io: KretzIO, storedModel: () => string | null =
       const tried: Record<string, unknown>[] = [];
       // Si el cliente eligió su modelo, se conecta solo con ese (en segundos); si no, se prueban los dos.
       for (const modelId of only ? [only] : kretzSearchOrder(storedModel())) {
-        const d = await io.diagnose(() => onProgress("buscar", "Buscando tu balanza…"), { modelId });
+        // Por red, si la balanza no contesta al número 1 se buscan los 99 números: avisar que puede tardar.
+        const text = isNetPort(port) ? "Buscando tu balanza por la red… puede tardar hasta 3 minutos. No la apagues." : "Buscando tu balanza…";
+        const d = await io.diagnose(() => onProgress("buscar", text), { modelId });
         const info = { verdict: d.verdict, puerto: d.portLabel, configuracion: d.dataSettings, buscado_como: modelId, intentos_anteriores: tried.slice() };
         if (d.verdict === "puerto") throw new FriendlyError("puerto_ocupado", d.message);
         if (d.verdict === "peso") return new KretzSession("kretz-aura", ctx, "peso", io, info);

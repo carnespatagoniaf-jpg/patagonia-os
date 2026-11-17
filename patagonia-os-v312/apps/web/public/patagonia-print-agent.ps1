@@ -18,7 +18,7 @@
 
 $ErrorActionPreference = "Stop"
 $Port = 9101
-$AgentVersion = 5
+$AgentVersion = 6
 
 Add-Type -TypeDefinition @'
 using System;
@@ -89,7 +89,8 @@ function Send-Json($ctx, [int]$status, $obj, [string]$origin) {
     $res.Headers["Access-Control-Allow-Private-Network"] = "true"
   }
   $res.ContentType = "application/json; charset=utf-8"
-  $json = ConvertTo-Json -InputObject $obj -Compress
+  # Depth 6: las placas de red traen sus direcciones adentro (con el 2 de siempre quedaban como texto).
+  $json = ConvertTo-Json -InputObject $obj -Compress -Depth 6
   $buf = [System.Text.Encoding]::UTF8.GetBytes($json)
   $res.ContentLength64 = $buf.Length
   $res.OutputStream.Write($buf, 0, $buf.Length)
@@ -218,7 +219,8 @@ function Get-RawQueueName($p) {
 }
 
 # ---------------------------------------------------------------------------
-# Balanza por cable de red (Kretz Report con Ethernet, desde la version 4).
+# Balanza por cable de red (Kretz Report con Ethernet, desde la version 4;
+# Systel Cuora Max con su modulo de red, puerto 10001, desde la version 6).
 # Chrome no puede abrir una conexion TCP: este programa la abre y le pasa los
 # bytes tal cual (el sistema arma y revisa cada trama, igual que por USB o
 # Bluetooth). Una sola conexion a la vez. Solo direcciones de la red local
@@ -240,6 +242,13 @@ function Test-LocalScaleHost([string]$h) {
   return $false
 }
 
+# Puertos de balanza: Kretz Report 1000-1099 (1001 de fabrica) y Systel Cuora
+# Max 10001 (modulo Lantronix). Ningun otro: el programa no sirve de puente a
+# otros equipos de la red.
+function Test-ScalePort([int]$p) {
+  return (($p -ge 1000 -and $p -le 1099) -or $p -eq 10001)
+}
+
 function Close-ScaleLink {
   try { if ($script:ScaleStream) { $script:ScaleStream.Close() } } catch { }
   try { if ($script:ScaleClient) { $script:ScaleClient.Close() } } catch { }
@@ -258,6 +267,31 @@ function Get-LocalIPv4 {
       if ($u.Address.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) { continue }
       $out += @{ name = [string]$nic.Name; kind = [string]$nic.NetworkInterfaceType; ip = $u.Address.ToString(); mask = [string]$u.IPv4Mask }
     }
+  }
+  return ,$out
+}
+
+# Las placas de red con cable de esta PC, prendidas o no (version 6): si la
+# placa esta "Down" el cable esta desenchufado o la balanza apagada (la luz al
+# lado del cable esta apagada). Se dejan afuera las placas virtuales.
+function Get-WiredNics {
+  $out = @()
+  $wiredTypes = @(
+    [System.Net.NetworkInformation.NetworkInterfaceType]::Ethernet,
+    [System.Net.NetworkInformation.NetworkInterfaceType]::GigabitEthernet,
+    [System.Net.NetworkInformation.NetworkInterfaceType]::FastEthernetT
+  )
+  foreach ($nic in [System.Net.NetworkInformation.NetworkInterface]::GetAllNetworkInterfaces()) {
+    if (-not ($wiredTypes -contains $nic.NetworkInterfaceType)) { continue }
+    $d = [string]$nic.Description + " " + [string]$nic.Name
+    if ($d -match "Virtual|VPN|Hyper-V|VMware|VirtualBox|TAP-|Tunnel|Bluetooth|Loopback|WAN Miniport|Npcap|ZeroTier|Tailscale|vEthernet") { continue }
+    $ips = @()
+    foreach ($u in $nic.GetIPProperties().UnicastAddresses) {
+      if ($u.Address.AddressFamily -ne [System.Net.Sockets.AddressFamily]::InterNetwork) { continue }
+      $ips += @{ ip = $u.Address.ToString(); mask = [string]$u.IPv4Mask }
+    }
+    $up = ($nic.OperationalStatus -eq [System.Net.NetworkInformation.OperationalStatus]::Up)
+    $out += @{ name = [string]$nic.Name; description = [string]$nic.Description; up = $up; ips = $ips }
   }
   return ,$out
 }
@@ -310,18 +344,26 @@ function Read-ScaleLink([int]$ms) {
 }
 
 # Busca balanzas en la red de cada placa de esta PC (las 254 direcciones de su
-# /24, en paralelo): las que aceptan conexion en ese puerto.
-function Find-ScaleHosts([int]$p) {
+# /24, en paralelo): las que aceptan conexion en alguno de esos puertos.
+# Version 6: varios puertos a la vez y devuelve ip + puerto de cada una (asi
+# se reconoce la marca: 1001 Kretz Report, 10001 Systel).
+function Find-ScaleHosts([int[]]$ports) {
   $found = @()
   $tries = @()
+  $seen = @{}
   foreach ($a in (Get-LocalIPv4)) {
     if (-not (Test-LocalScaleHost $a.ip)) { continue }
     $parts = $a.ip.Split('.')
     $prefix = $parts[0] + '.' + $parts[1] + '.' + $parts[2] + '.'
+    if ($seen.ContainsKey($prefix)) { continue }
+    $seen[$prefix] = $true
     for ($i = 1; $i -le 254; $i++) {
       $target = $prefix + $i
-      $c = New-Object System.Net.Sockets.TcpClient
-      $tries += @{ ip = $target; client = $c; ar = $c.BeginConnect($target, $p, $null, $null) }
+      if ($target -eq $a.ip) { continue }
+      foreach ($p in $ports) {
+        $c = New-Object System.Net.Sockets.TcpClient
+        $tries += @{ ip = $target; port = $p; client = $c; ar = $c.BeginConnect($target, $p, $null, $null) }
+      }
     }
   }
   $until = [DateTime]::UtcNow.AddMilliseconds(1500)
@@ -333,7 +375,7 @@ function Find-ScaleHosts([int]$p) {
     try {
       if ($t.ar.IsCompleted) {
         $t.client.EndConnect($t.ar)
-        if ($t.client.Connected) { $found += $t.ip }
+        if ($t.client.Connected) { $found += @{ ip = $t.ip; port = $t.port } }
       }
     } catch { }
     try { $t.client.Close() } catch { }
@@ -348,10 +390,22 @@ function Handle-ScaleRequest($ctx, [string]$path, [string]$origin) {
     return
   }
   if ($path -eq "/scale/find") {
-    $p = 0
-    # Solo puertos de balanza (Kretz Report: 1001 de fabrica). Auditoria 29/10/2026: antes cualquier puerto de la red.
-    if (-not [int]::TryParse([string]$req.QueryString["port"], [ref]$p) -or $p -lt 1000 -or $p -gt 1099) { $p = 1001 }
-    Send-Json $ctx 200 @{ ok = $true; port = $p; found = (Find-ScaleHosts $p); local = (Get-LocalIPv4) } $origin
+    # Solo puertos de balanza (Test-ScalePort). Auditoria 29/10/2026: antes cualquier puerto de la red.
+    # "ports=1001,10001" (version 6) o "port=1001" (lo que manda la web de antes).
+    $ports = @()
+    $raw = [string]$req.QueryString["ports"]
+    if (-not $raw) { $raw = [string]$req.QueryString["port"] }
+    foreach ($x in $raw.Split(',')) {
+      $p = 0
+      if ([int]::TryParse($x.Trim(), [ref]$p) -and (Test-ScalePort $p) -and -not ($ports -contains $p)) { $ports += $p }
+    }
+    if ($ports.Count -eq 0) { $ports = @(1001) }
+    if ($ports.Count -gt 3) { $ports = $ports[0..2] }
+    $hits = Find-ScaleHosts $ports
+    # "found" sigue siendo la lista de IP del primer puerto (lo que lee la web de antes); "scales" trae ip y puerto.
+    $first = $ports[0]
+    $legacy = @($hits | Where-Object { $_.port -eq $first } | ForEach-Object { $_.ip })
+    Send-Json $ctx 200 @{ ok = $true; port = $first; ports = $ports; found = $legacy; scales = $hits; local = (Get-LocalIPv4); wired = (Get-WiredNics) } $origin
     return
   }
   if ($req.HttpMethod -ne "POST") {
@@ -365,8 +419,8 @@ function Handle-ScaleRequest($ctx, [string]$path, [string]$origin) {
       Send-Json $ctx 400 @{ ok = $false; error = "La direccion '$h' no es de la red local."; local = (Get-LocalIPv4) } $origin
       return
     }
-    if (-not [int]::TryParse([string]$req.QueryString["port"], [ref]$p) -or $p -lt 1000 -or $p -gt 1099) {
-      Send-Json $ctx 400 @{ ok = $false; error = "Puerto invalido: el de la balanza va de 1000 a 1099 (de fabrica 1001)." } $origin
+    if (-not [int]::TryParse([string]$req.QueryString["port"], [ref]$p) -or -not (Test-ScalePort $p)) {
+      Send-Json $ctx 400 @{ ok = $false; error = "Puerto invalido: Kretz va de 1000 a 1099 (de fabrica 1001) y Systel usa el 10001." } $origin
       return
     }
     $r = Open-ScaleLink $h $p

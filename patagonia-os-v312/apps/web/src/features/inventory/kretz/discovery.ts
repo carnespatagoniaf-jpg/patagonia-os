@@ -1,6 +1,7 @@
 import { exchangeWeightFrame, WEIGHT_PORT_OPTIONS } from "../../sale/scale-weight-protocol";
 import { buildKretzFrame, describeKretzCode, parseKretzResponse, toHex, toPrintable, type KretzResponse } from "./kretz-frame";
 import type { KretzModel, SerialLink } from "./models";
+import { isNetPort } from "./net-port";
 import { claimPort, closeQuietly, errorClassification, freshPortFor, newSession, openForSession, releasePort, type OpenAttempt, type PortSession } from "./port-session";
 import { askOtherTabs, type TabAnswer } from "./serial-tabs";
 
@@ -348,10 +349,14 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
       record.responder = { link: primary, deviceType: first.kretz.deviceType || model.deviceTypes[0], equipmentId: first.kretz.equipmentId || id };
     }
 
+    // Por cable de red no hay velocidad, bits de stop ni "modo peso" (eso es del cable serie): solo se buscan la letra
+    // y el número de equipo. Antes una balanza por red que no contestaba tardaba minutos probando velocidades.
+    const net = isNetPort(port);
+
     // Si no contestó: modo peso (prueba el cable) y el resto de las combinaciones.
     if (!record.responder) {
-      progress("No contestó en modo Datos. Probando si manda el peso…");
-      try {
+      if (!net) progress("No contestó en modo Datos. Probando si manda el peso…");
+      if (!net) try {
         await openWithRetry(port, WEIGHT_PORT_OPTIONS, tries);
         const passive = await collect(port, options.listenMs ?? 1200, false);
         const exchange = await exchangeWeightFrame(port);
@@ -371,8 +376,8 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
       await closeQuietly(port);
 
       const attempts: { link: SerialLink; letter: string; id: string }[] = [];
-      for (const link of model.links.slice(1)) attempts.push({ link, letter: model.deviceTypes[0], id });
-      for (const link of model.links.slice(0, 2)) {
+      for (const link of net ? [] : model.links.slice(1)) attempts.push({ link, letter: model.deviceTypes[0], id });
+      for (const link of net ? [primary] : model.links.slice(0, 2)) {
         for (const letter of model.deviceTypes.slice(1)) attempts.push({ link, letter, id });
       }
       if (id !== "00") attempts.push({ link: primary, letter: model.deviceTypes[0], id: "00" });
@@ -412,7 +417,7 @@ export async function runKretzDiscovery(port: SerialPort, portLabel: string, mod
       // Si no apareció, se busca el número con la letra "C" en la velocidad del modelo y en 9600/1.
       // Caso real: Report NX de Don Raúl (24/10), que no contestó a 01 ni 00 en ninguna velocidad.
       if (!record.responder && model.id === "report-lt") {
-        const idLinks = [primary, ...model.links.filter((l) => l.baudRate === 9600 && l.stopBits === 1 && !(l.baudRate === primary.baudRate && l.stopBits === primary.stopBits))];
+        const idLinks = net ? [primary] : [primary, ...model.links.filter((l) => l.baudRate === 9600 && l.stopBits === 1 && !(l.baudRate === primary.baudRate && l.stopBits === primary.stopBits))];
         await closeQuietly(port);
         openKey = "";
         search: for (const link of idLinks) {

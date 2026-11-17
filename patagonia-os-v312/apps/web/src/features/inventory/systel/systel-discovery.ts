@@ -1,6 +1,7 @@
 import { SystelClient, type SystelExchangeLog } from "./systel-client";
 import { SerialSystelLink, type SystelLinkEvent, type SystelSerialSettings } from "./systel-serial";
 import { parseSystelReply } from "./systel-frame";
+import { isNetPort } from "../kretz/net-port";
 
 /**
  * Buscar cómo habla la balanza (2026-10-09, primer intento real en Los gringos: Cuora Max
@@ -83,6 +84,13 @@ export async function discoverSystelLink(
   linkEvents: SystelLinkEvent[] = []
 ): Promise<SystelFoundLink | null> {
   const plan: { settings: SystelSerialSettings; addresses: number[] }[] = [];
+  // Por cable de red (módulo Lantronix, puerto 10001) no hay velocidad ni paridad: se prueba una sola vez cada número.
+  // FALTA PROBAR CON LA BALANZA: ninguna Cuora Max por red se conectó todavía.
+  if (isNetPort(port)) {
+    const order = [...new Set([...(preferred ? [1, 0, preferred.address] : []), 1, 0, 20, ...Array.from({ length: 99 }, (_, i) => i + 1)])];
+    plan.push({ settings: SYSTEL_SERIAL_CANDIDATES[0], addresses: order });
+    return runPlan(plan, port, log, onProgress, preferred, pingTimeoutMs, linkEvents);
+  }
   // Con lo guardado se repite la secuencia que anduvo en la balanza real (1, 0 y recién su número):
   // las 3 veces que se le habló directo a su número contestó E3 a todo.
   if (preferred) plan.push({ settings: preferred.settings, addresses: [...new Set([1, 0, preferred.address])] });
@@ -91,9 +99,20 @@ export async function discoverSystelLink(
   const firstAddresses = [1, 0, 20, 2, 3, 4, 5, 6, 7, 8, 9, 10];
   for (const settings of SYSTEL_SERIAL_CANDIDATES) plan.push({ settings, addresses: firstAddresses });
   plan.push({ settings: SYSTEL_SERIAL_CANDIDATES[0], addresses: Array.from({ length: 89 }, (_, i) => i + 11) });
+  return runPlan(plan, port, log, onProgress, preferred, pingTimeoutMs, linkEvents);
+}
 
+async function runPlan(
+  plan: { settings: SystelSerialSettings; addresses: number[] }[],
+  port: SerialPort,
+  log: SystelExchangeLog[],
+  onProgress: (text: string) => void,
+  preferred: SavedSystelLink | null,
+  pingTimeoutMs: number,
+  linkEvents: SystelLinkEvent[]
+): Promise<SystelFoundLink | null> {
   for (const [i, step] of plan.entries()) {
-    onProgress(`Buscando la balanza (${i + 1} de ${plan.length}: ${label(step.settings)})… no desenchufes el cable.`);
+    onProgress(isNetPort(port) ? "Buscando la balanza por la red… no desenchufes el cable." : `Buscando la balanza (${i + 1} de ${plan.length}: ${label(step.settings)})… no desenchufes el cable.`);
     const link = new SerialSystelLink(port, step.settings, linkEvents);
     try {
       await link.connect();
