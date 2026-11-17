@@ -178,6 +178,12 @@ export function Inventory() {
   const [generalVatRate, setGeneralVatRate] = useState<number | null>(null);
   /** Paquetes por producto (a pedido: companies.features 'paquetes', migración 157). Solo los que ya se contaron. */
   const showPackages = Boolean(profile?.features?.includes("paquetes"));
+  /** Con etiquetas de cajas (Carplat, migración 201) los paquetes son las cajas cerradas: se dice "cajas". */
+  const boxWords = Boolean(profile?.features?.includes("etiquetas_caja"));
+  const pkWord = (n: number) => (boxWords ? (n === 1 ? "caja" : "cajas") : n === 1 ? "paquete" : "paquetes");
+  const pkWords = pkWord(2);
+  const pkLas = boxWords ? "las" : "los";
+  const pkCuantas = boxWords ? "Cuántas" : "Cuántos";
   const [packages, setPackages] = useState<Record<string, number>>({});
   // Listas de precios (Mayorista, migración 167). Sin listas, la pantalla queda como siempre.
   const [priceLists, setPriceLists] = useState<PriceList[]>([]);
@@ -217,7 +223,7 @@ export function Inventory() {
   /** Borrar los paquetes de un producto para empezar de nuevo (los kilos no cambian). */
   async function handleClearPackages(product: Product) {
     if (!branchId) return;
-    if (!window.confirm(`¿Borrar los paquetes de "${product.name}"? Vuelve a "Contar paquetes" y los cuentan de nuevo. Los kilos no cambian.`)) return;
+    if (!window.confirm(`¿Borrar ${pkLas} ${pkWords} de "${product.name}"? Vuelve a "Contar ${pkWords}" y ${pkLas} cuentan de nuevo. Los kilos no cambian.`)) return;
     try {
       await clearProductPackages(branchId, product.id);
       setPackages((p) => {
@@ -225,29 +231,29 @@ export function Inventory() {
         delete next[product.id];
         return next;
       });
-      setMessage(`${product.name}: paquetes borrados.`);
+      setMessage(`${product.name}: ${pkWords} ${boxWords ? "borradas" : "borrados"}.`);
     } catch (err) {
-      setMessage(errorText(err) || "No se pudieron borrar los paquetes.");
+      setMessage(errorText(err) || `No se pudieron borrar ${pkLas} ${pkWords}.`);
     }
   }
 
   /** "Envasé" suma paquetes; "Contar" deja el número que contaron (cada paquete pesa distinto, se cuentan de a uno). */
   async function handlePackages(product: Product, kind: "envasado" | "conteo") {
     if (!branchId) return;
-    const text = window.prompt(kind === "envasado" ? `¿Cuántos paquetes de "${product.name}" envasaste?` : `¿Cuántos paquetes de "${product.name}" hay ahora?`);
+    const text = window.prompt(kind === "envasado" ? (boxWords ? `¿Cuántas cajas de "${product.name}" entraron?` : `¿Cuántos paquetes de "${product.name}" envasaste?`) : `¿${pkCuantas} ${pkWords} de "${product.name}" hay ahora?`);
     if (text === null) return;
     const count = Number(text.trim());
     if (!Number.isInteger(count) || count < 0 || (kind === "envasado" && count === 0)) {
-      setMessage("Escribí una cantidad entera de paquetes (por ejemplo 20).");
+      setMessage(`Escribí una cantidad entera de ${pkWords} (por ejemplo 20).`);
       return;
     }
     setMessage("");
     try {
       const left = await registerProductPackages({ branchId, productId: product.id, kind, count });
       setPackages((p) => ({ ...p, [product.id]: left }));
-      setMessage(`${product.name}: ${left} ${left === 1 ? "paquete" : "paquetes"}.`);
+      setMessage(`${product.name}: ${left} ${pkWord(left)}.`);
     } catch (err) {
-      setMessage(errorText(err) || "No se pudieron guardar los paquetes.");
+      setMessage(errorText(err) || `No se pudieron guardar ${pkLas} ${pkWords}.`);
     }
   }
 
@@ -1372,13 +1378,13 @@ export function Inventory() {
                     <div style={{ fontSize: 12, fontWeight: 500 }}>
                       {packages[product.id] !== undefined ? (
                         <>
-                          <strong>{packages[product.id]}</strong> {packages[product.id] === 1 ? "paquete" : "paquetes"}{" "}
-                          <button className="link-button" onClick={() => void handlePackages(product, "envasado")}>Envasé</button>{" · "}
+                          <strong>{packages[product.id]}</strong> {pkWord(packages[product.id])}{" "}
+                          <button className="link-button" onClick={() => void handlePackages(product, "envasado")}>{boxWords ? "Entraron" : "Envasé"}</button>{" · "}
                           <button className="link-button" onClick={() => void handlePackages(product, "conteo")}>Contar</button>{" · "}
                           <button className="link-button" onClick={() => void handleClearPackages(product)}>Borrar</button>
                         </>
                       ) : (
-                        <button className="link-button" onClick={() => void handlePackages(product, "conteo")}>Contar paquetes</button>
+                        <button className="link-button" onClick={() => void handlePackages(product, "conteo")}>Contar {pkWords}</button>
                       )}
                     </div>
                   )}

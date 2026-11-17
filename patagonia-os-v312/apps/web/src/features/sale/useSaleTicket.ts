@@ -6,7 +6,7 @@ import type { ProductCategory } from "../inventory/product-categories-service";
 import { parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, type ScaleConfig } from "./scale-config-service";
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
 import { labelWeightProblem, MAX_COUNTER_SCALE_KG, resolveScan } from "./scan-resolve";
-import { boxProblem, resolveBoxScan } from "./box-label";
+import { boxProblem, boxTicket, resolveBoxScan } from "./box-label";
 import { useBoxLabelFormats } from "./box-label-service";
 import { noteLabelRead } from "../scales/label-read";
 import { closeSystelTicketSession, readSystelTicketFromScale, refreshSystelLabelFormat, systelTicketReadConfigured } from "../inventory/systel/systel-ticket-from-scale";
@@ -389,7 +389,9 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       }
       setCart((current) => current.some((l) => l.key === key)
         ? current
-        : [...current, { key, kind: "product", productId: box.product.id, name: box.product.name, unit: box.product.unit, quantity: box.quantity, unitPrice: box.product.priceRetail }]);
+        // packageCode viaja como pos_sale_items.scale_ticket (como los paquetes de Planta, sin importe): con eso la base
+        // sabe que es una caja y le resta 1 a las cajas del producto (migración 201).
+        : [...current, { key, kind: "product", productId: box.product.id, name: box.product.name, unit: box.product.unit, quantity: box.quantity, unitPrice: box.product.priceRetail, packageCode: boxTicket(box.code) }]);
       setMessage(`Agregado: ${box.detail}.`);
       searchInputRef.current?.focus();
       return;

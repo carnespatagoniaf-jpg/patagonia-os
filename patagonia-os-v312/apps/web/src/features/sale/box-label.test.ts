@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Product } from "@patagonia/domain";
-import { boxProblem, learnBoxLabelFormat, readWithFormat, resolveBoxScan, restoreLeadingZero, shiftProductCut, type BoxLabelFormat } from "./box-label";
+import { boxProblem, boxTicket, learnBoxLabelFormat, readWithFormat, resolveBoxScan, restoreLeadingZero, shiftProductCut, type BoxLabelFormat } from "./box-label";
 
 const product = (code: string, name: string, unit: "kg" | "unit" | "box", priceRetail: number, active = true) =>
   ({ id: `id-${code}`, code, name, unit, priceRetail, active }) as unknown as Product;
@@ -85,6 +85,12 @@ describe("[REAL] cajas de Carplat", () => {
     assert.equal(resolveBoxScan(TORTUGUITA, [sinPrecio], [product("215", "TORTUGUITA (KG)", "kg", 0)]), null);
     assert.match(boxProblem(TORTUGUITA, [sinPrecio], [product("215", "TORTUGUITA (KG)", "kg", 0)]) ?? "", /no tiene precio/);
     assert.equal(resolveBoxScan(TORTUGUITA, [sinPrecio], [product("215", "TORTUGUITA (KG)", "kg", 100, false)]), null);
+  });
+
+  it("la marca del renglón de caja: CAJA- + el código completo (con el 0), nunca PQ (Planta)", () => {
+    const r = resolveBoxScan(ROAST_BEEF_SCANNED, [CARPLAT_MAPPED], CARPLAT_PRODUCTS);
+    assert.equal(r && boxTicket(r.code), "CAJA-0711012717328");
+    assert.ok(!boxTicket(ROAST_BEEF).startsWith("PQ"));
   });
 
   it("otros códigos no son cajas: verificador mal, largos distintos", () => {

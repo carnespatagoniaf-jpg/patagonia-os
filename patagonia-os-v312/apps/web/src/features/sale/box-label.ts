@@ -89,6 +89,13 @@ export function productForDigits(digits: string, products: Product[], productMap
   return active.find((p) => p.code === trimmed);
 }
 
+/**
+ * Marca del renglón de una caja en la venta (pos_sale_items.scale_ticket, sin importe). Con "Paquetes" prendido, la
+ * base resta 1 caja solo por estos renglones (migración 201). Nunca empieza con "PQ" (eso es Planta, migración 194).
+ */
+export const BOX_TICKET_PREFIX = "CAJA-";
+export const boxTicket = (code: string) => `${BOX_TICKET_PREFIX}${code}`;
+
 export interface BoxScan {
   product: Product;
   quantity: number;
