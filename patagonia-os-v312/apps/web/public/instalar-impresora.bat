@@ -24,7 +24,7 @@ set "AGENT_NEW=%DIR%\patagonia-print-agent.ps1.descarga"
 
 echo 1/4 Descargando el programa...
 if exist "%AGENT_NEW%" del "%AGENT_NEW%"
-powershell -NoProfile -Command "try { Invoke-WebRequest -Uri 'https://app.patagoniasystem.com.ar/patagonia-print-agent.ps1' -OutFile $env:AGENT_NEW -UseBasicParsing } catch { exit 1 }"
+powershell -NoProfile -Command "try { [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12 } catch { }; try { Invoke-WebRequest -Uri 'https://app.patagoniasystem.com.ar/patagonia-print-agent.ps1' -OutFile $env:AGENT_NEW -UseBasicParsing } catch { exit 1 }"
 set "DL_OK=1"
 if %ERRORLEVEL% NEQ 0 set "DL_OK=0"
 if not exist "%AGENT_NEW%" set "DL_OK=0"
