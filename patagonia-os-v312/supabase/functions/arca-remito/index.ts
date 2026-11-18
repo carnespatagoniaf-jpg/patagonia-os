@@ -443,7 +443,8 @@ async function send(admin: SupabaseClient, companyId: string, remitoId: string):
       cuitDepositario: null,
       tipoReceptor: rem.tipo_receptor,
       categoriaReceptor: rem.categoria_receptor,
-      cuitReceptor: rem.cuit_receptor,
+      // A un depósito propio (EM) no va el CUIT: ARCA responde 1312. Cubre borradores guardados antes de la 203.
+      cuitReceptor: rem.tipo_receptor === "EM" ? null : rem.cuit_receptor,
       codDomOrigen: null,
       codDomDestino: rem.cod_dom_destino,
       viaje: {

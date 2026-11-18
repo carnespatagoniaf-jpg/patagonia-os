@@ -404,9 +404,12 @@ export function problemasDelRemito(r: RecRemitoInput, hoy: string): string[] {
   }
   if (r.tipoMovimiento === "ENV" || r.tipoMovimiento === "RED") {
     if (r.codDomDestino === null) p.push("Falta el domicilio de destino.");
-    if (!r.cuitReceptor) p.push("Falta el CUIT del destinatario.");
+    if (r.tipoReceptor === "MI" && !r.cuitReceptor) p.push("Falta el CUIT del destinatario.");
     if (r.tipoReceptor === "MI" && r.categoriaReceptor === null) p.push("Falta la categoría del destinatario.");
   }
+  // A un depósito propio (EM) ARCA rechaza el CUIT del receptor: error 1312 "No se debe informar la CUIT del
+  // receptor" (respuesta real de producción, 2026-11-18). El destino es el emisor mismo.
+  if (r.tipoReceptor === "EM" && r.cuitReceptor) p.push("A un depósito propio no se informa el CUIT del destinatario.");
   if (r.tipoMovimiento === "REP" && (r.tipoReceptor || r.cuitReceptor || r.codDomDestino !== null || r.categoriaReceptor !== null)) {
     p.push("En un reparto no se informa destinatario ni domicilio de destino.");
   }

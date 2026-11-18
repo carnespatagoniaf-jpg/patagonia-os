@@ -80,6 +80,15 @@ tests `rec-logic.test.ts` y `arca-remcarne.test.ts`). `arca-invoice` no se tocó
 - La actividad del punto es "venta al por menor de carnes rojas" y "Carnicero" solo existe como
   categoría de receptor: el contador tiene que confirmar en qué categoría de emisor está registrada.
 
+## Diagnóstico con pedidos rechazados a propósito (2026-11-18, OK del dueño)
+
+`generarRemito` en producción con fecha de viaje de ayer (error 140 seguro: no puede emitirse). Resultado R, nada emitido:
+- 1º intento, depósito propio (EM) con CUIT del receptor: **1312** "No se debe informar la CUIT del receptor".
+  Era un error de Patagonia: corregido en la migración 203 + `rec-logic.ts` + `arca-remito`.
+- 2º intento sin ese CUIT: **2502** "El punto de emisión indicado no existe para el sistema que quiere utilizar,
+  o no tiene asociado un domicilio comercial declarado en el Sistema Registral", y 140 (la fecha, esperado).
+- Conclusión: el punto 00020 con domicilio fiscal no sirve para wsremcarne. Certificado y autorización, bien.
+
 ## Falta (en orden)
 
 1. **Homologación de ARCA**: autorizar el certificado de prueba de Patagonia (CUIT 27-18244890-2,
