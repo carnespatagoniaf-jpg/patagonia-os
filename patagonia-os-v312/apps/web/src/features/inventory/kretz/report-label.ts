@@ -25,13 +25,26 @@ const isFactoryName = (name: string) => {
   return n === "" || /^NOMBRE *\d*$/.test(n);
 };
 
-export function chooseReportLabel(samples: ReportLabelSample[], patagoniaCodes: Iterable<number>): string {
+/**
+ * `preferOther` (Report por cable de red, la NX/NX2): el "01" está comprobado que sale SIN código en la NX2 de Lauda
+ * (18/11), así que si algún producto real usa otro formato se toma ese aunque también haya productos con "01".
+ */
+export function chooseReportLabel(samples: ReportLabelSample[], patagoniaCodes: Iterable<number>, opts: { preferOther?: boolean } = {}): string {
   const own = new Set(patagoniaCodes);
   const counts = new Map<string, number>();
   for (const s of samples) {
     if (own.has(s.plu) || isFactoryName(s.name) || !/^\d{2}$/.test(s.label) || s.label === "00") continue;
     counts.set(s.label, (counts.get(s.label) ?? 0) + 1);
   }
+  if (opts.preferOther) counts.delete(DEFAULT_REPORT_LABEL);
   if (counts.size === 0 || counts.has(DEFAULT_REPORT_LABEL)) return DEFAULT_REPORT_LABEL;
   return [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0][0];
+}
+
+/** Resumen para la pantalla: "37 BONDIOLA/ENTERA: 03 · 40 PALETA: 01" (los primeros 8 que no son de Patagonia). */
+export function describeLabelSamples(samples: ReportLabelSample[], patagoniaCodes: Iterable<number>): string {
+  const own = new Set(patagoniaCodes);
+  const other = samples.filter((s) => !own.has(s.plu) && !isFactoryName(s.name));
+  if (other.length === 0) return "la balanza no tiene otros productos además de los de Patagonia";
+  return other.slice(0, 8).map((s) => `${s.plu} ${s.name.trim()}: ${s.label}`).join(" · ") + (other.length > 8 ? ` · y ${other.length - 8} más` : "");
 }
