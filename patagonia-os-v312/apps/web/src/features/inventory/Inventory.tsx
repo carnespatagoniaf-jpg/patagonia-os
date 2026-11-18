@@ -184,9 +184,9 @@ export function Inventory() {
   const [generalVatRate, setGeneralVatRate] = useState<number | null>(null);
   /** Paquetes por producto (a pedido: companies.features 'paquetes', migración 157). Solo los que ya se contaron. */
   const showPackages = Boolean(profile?.features?.includes("paquetes"));
-  /** Con etiquetas de cajas (Carplat, migración 201) los paquetes son las cajas cerradas: se dice "cajas". */
+  /** Con etiquetas de cajas (Carplat, migración 201) se dice "unidades": el título del producto ya dice si es caja o envasado (pedido 18/11). */
   const boxWords = Boolean(profile?.features?.includes("etiquetas_caja"));
-  const pkWord = (n: number) => (boxWords ? (n === 1 ? "caja" : "cajas") : n === 1 ? "paquete" : "paquetes");
+  const pkWord = (n: number) => (boxWords ? (n === 1 ? "unidad" : "unidades") : n === 1 ? "paquete" : "paquetes");
   const pkWords = pkWord(2);
   const pkLas = boxWords ? "las" : "los";
   const pkCuantas = boxWords ? "Cuántas" : "Cuántos";
@@ -246,7 +246,7 @@ export function Inventory() {
   /** "Envasé" suma paquetes; "Contar" deja el número que contaron (cada paquete pesa distinto, se cuentan de a uno). */
   async function handlePackages(product: Product, kind: "envasado" | "conteo") {
     if (!branchId) return;
-    const text = window.prompt(kind === "envasado" ? (boxWords ? `¿Cuántas cajas de "${product.name}" entraron?` : `¿Cuántos paquetes de "${product.name}" envasaste?`) : `¿${pkCuantas} ${pkWords} de "${product.name}" hay ahora?`);
+    const text = window.prompt(kind === "envasado" ? (boxWords ? `¿Cuántas unidades de "${product.name}" entraron?` : `¿Cuántos paquetes de "${product.name}" envasaste?`) : `¿${pkCuantas} ${pkWords} de "${product.name}" hay ahora?`);
     if (text === null) return;
     const count = Number(text.trim());
     if (!Number.isInteger(count) || count < 0 || (kind === "envasado" && count === 0)) {
@@ -1044,7 +1044,7 @@ export function Inventory() {
           branchId={entryBranch}
           boxLabels={boxWords}
           packages={showPackages}
-          boxWord={boxWords ? "caja" : "paquete"}
+          boxWord={boxWords ? "unidad" : "paquete"}
           canUndo={profile?.role === "owner" || profile?.role === "admin"}
           onClose={() => setShowEntry(false)}
           onDone={() => void reload()}

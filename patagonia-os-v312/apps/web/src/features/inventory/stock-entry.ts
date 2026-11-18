@@ -58,14 +58,14 @@ export function resolveEntryScan(rawInput: string, products: Product[], formats:
     if (!product) {
       return {
         type: "error",
-        message: `Es una caja con el número ${box.productDigits} y ${fmtKg(box.weightKg)}, pero ese número todavía no tiene un producto. No se agregó: en Mostrador → engranaje → Etiquetas de cajas, tocá "Asociar", escaneá la caja y elegí el producto.`
+        message: `Es una etiqueta con el número ${box.productDigits} y ${fmtKg(box.weightKg)}, pero ese número todavía no tiene un producto. No se agregó: en Mostrador → engranaje → Etiquetas de cajas, tocá "Asociar", escaneá la caja y elegí el producto.`
       };
     }
     const quantity = product.unit === "kg" ? Math.round(box.weightKg * 1000) / 1000 : 1;
     return {
       type: "line",
       line: { productId: product.id, name: product.name, unit: product.unit, quantity, code: box.code, box: packages },
-      detail: `${product.name}: ${fmtQty(quantity, product.unit)} (caja)`
+      detail: `${product.name}: ${fmtQty(quantity, product.unit)} (etiqueta)`
     };
   }
 
