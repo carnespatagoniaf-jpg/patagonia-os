@@ -2,7 +2,7 @@ import { parseAuraPlu } from "../../../inventory/kretz/aura-plu";
 import { planAuraSync, summarizeAuraPlan, type AuraSyncItem } from "../../../inventory/kretz/aura-sync";
 import { getStoredModelId, saveModelId } from "../../../inventory/kretz/models";
 import { isNetPort } from "../../../inventory/kretz/net-port";
-import { chooseReportLabel, type ReportLabelSample } from "../../../inventory/kretz/report-label";
+import { chooseReportLabel, describeLabelSamples, type ReportLabelSample } from "../../../inventory/kretz/report-label";
 import {
   configureReportBarcode,
   diagnoseScaleLink,
@@ -144,15 +144,19 @@ export class KretzSession implements ScaleSession {
     const plan = planScaleSync(active.map(toSyncable));
     // Formato de etiqueta: el que ya usan los productos reales de ESTA balanza (en la NX2 de Lauda el "01" sale sin
     // código de barras, real 18/11). Se elige antes de comparar, así un producto grabado con otro formato se corrige.
+    let labelNote: string | null = null;
     if (this.io.readLabelSample && this.io.setLabelCode) {
       onProgress("leer", "Revisando cómo imprime las etiquetas tu balanza…");
       try {
         const samples = await this.io.readLabelSample();
-        const label = chooseReportLabel(samples, plan.toSend.map((p) => Number(p.code)));
+        const codes = plan.toSend.map((p) => Number(p.code));
+        const label = chooseReportLabel(samples, codes, { preferOther: this.diagnostic.red === true });
         this.io.setLabelCode(label);
         this.diagnostic.formato_etiqueta = { elegido: label, muestras: samples.slice(0, 40) };
+        labelNote = `Formato de etiqueta: ${label}. En la balanza: ${describeLabelSamples(samples, codes)}.`;
       } catch (err) {
         this.diagnostic.formato_etiqueta = { error: err instanceof Error ? err.message : String(err) };
+        labelNote = `No se pudo revisar el formato de etiqueta de la balanza (${err instanceof Error ? err.message : String(err)}).`;
       }
     }
     const create: ScaleSyncableProduct[] = [];
@@ -178,7 +182,10 @@ export class KretzSession implements ScaleSession {
     // Nunca "ya está todo listo" sin el código de barras configurado en ESTA balanza.
     const barcodeReady = !this.io.configureReportBarcode || isBarcodeConfigured(this.barcodeKey());
     const notes = barcodeReady ? [] : ["Falta configurar el código de barras de las etiquetas: se hace al sincronizar."];
-    return { ...this.base(), scaleProducts: plan.toSend.length, ready: same, writes, pending, upToDate: writes === 0 && barcodeReady, skipped, warnings: check.warnings, notes };
+    // Por red (Report NX/NX2) se muestra siempre qué formato de etiqueta encontró: así soporte lo ve en la pantalla.
+    const showLabel = labelNote !== null && this.diagnostic.red === true;
+    if (showLabel) notes.push(labelNote!);
+    return { ...this.base(), scaleProducts: plan.toSend.length, ready: same, writes, pending, upToDate: writes === 0 && barcodeReady && !showLabel, skipped, warnings: check.warnings, notes };
   }
 
   async sync(prepared: PreparedSync, onProgress: ProgressFn, opts: { allowReplace?: boolean } = {}): Promise<SyncOutcome> {
@@ -357,7 +364,7 @@ export function makeKretzAdapter(io: KretzIO, storedModel: () => string | null =
         // Por red, si la balanza no contesta al número 1 se buscan los 99 números: avisar que puede tardar.
         const text = isNetPort(port) ? "Buscando tu balanza por la red… puede tardar hasta 3 minutos. No la apagues." : "Buscando tu balanza…";
         const d = await io.diagnose(() => onProgress("buscar", text), { modelId });
-        const info = { verdict: d.verdict, puerto: d.portLabel, configuracion: d.dataSettings, buscado_como: modelId, intentos_anteriores: tried.slice() };
+        const info = { verdict: d.verdict, red: isNetPort(port), puerto: d.portLabel, configuracion: d.dataSettings, buscado_como: modelId, intentos_anteriores: tried.slice() };
         if (d.verdict === "puerto") throw new FriendlyError("puerto_ocupado", d.message);
         if (d.verdict === "peso") return new KretzSession("kretz-aura", ctx, "peso", io, info);
         if (d.verdict === "datos" && d.dataSettings) {

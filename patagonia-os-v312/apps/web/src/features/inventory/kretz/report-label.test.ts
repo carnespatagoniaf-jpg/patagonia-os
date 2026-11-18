@@ -42,3 +42,18 @@ describe("chooseReportLabel (formato de etiqueta de la Report)", () => {
     assert.equal(chooseReportLabel(samples.slice(0, 2), []), "03");
   });
 });
+
+describe("chooseReportLabel por red (Report NX/NX2)", () => {
+  it("Lauda 18/11 segunda vuelta: aunque haya productos viejos con 01, se toma el otro formato", () => {
+    const samples = [
+      { plu: 20, name: "PALETA", label: "01" },
+      { plu: 37, name: "BONDIOLA/ENTERA", label: "03" }
+    ];
+    assert.equal(chooseReportLabel(samples, [], { preferOther: true }), "03");
+    assert.equal(chooseReportLabel(samples, []), "01");
+  });
+
+  it("por red, si todos usan 01 queda 01", () => {
+    assert.equal(chooseReportLabel([{ plu: 20, name: "PALETA", label: "01" }], [], { preferOther: true }), "01");
+  });
+});
