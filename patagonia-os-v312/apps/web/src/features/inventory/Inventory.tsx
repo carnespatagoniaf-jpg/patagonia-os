@@ -30,6 +30,7 @@ import { SYSTEL_PILOT_COMPANIES } from "./systel/systel-pilot";
 import { MyScale } from "../scales/MyScale";
 import { ScaleSupportTools } from "../scales/ScaleSupportTools";
 import { ScaleButton } from "../scales/ScaleButton";
+import { StockEntry } from "./StockEntry";
 
 /** Balanzas Systel: módulo nuevo, oculto hasta que el dueño autorice publicarlo. */
 const SHOW_SYSTEL_PANEL = false;
@@ -140,6 +141,11 @@ export function Inventory() {
   // Rediseño 2026-11-02: filtros rápidos (reemplazan "Ver dados de baja") y lo que se usa poco en "Más opciones".
   const [quickFilter, setQuickFilter] = useState<"" | "low" | "nocost" | "lowmargin" | "inactive">("");
   const [showPriceTools, setShowPriceTools] = useState(false);
+  // Ingreso de stock por escaneo (migración 204): mismos roles que Ajustar stock.
+  const [showEntry, setShowEntry] = useState(false);
+  const canEnterStock = ["owner", "admin", "manager", "production"].includes(profile?.role ?? "");
+  /** En la demo (sin base) no hay sucursales: la lista se puede probar, ingresar no. */
+  const entryBranch = branchId ?? (isSupabaseConfigured ? null : "demo-branch");
   const moreMenuRef = useRef<HTMLDetailsElement | null>(null);
 
   const [showNewForm, setShowNewForm] = useState(false);
@@ -1025,11 +1031,25 @@ export function Inventory() {
             </div>
           </details>
         )}
+        {canEnterStock && entryBranch && <button className="secondary" onClick={() => setShowEntry((v) => !v)}>📥 Ingreso de stock</button>}
         {!showNewForm && canEdit && <button onClick={() => setShowNewForm(true)}>+ Producto</button>}
         </div>
       </header>
 
       {message && <div className="message">{message}</div>}
+
+      {showEntry && entryBranch && (
+        <StockEntry
+          products={products}
+          branchId={entryBranch}
+          boxLabels={boxWords}
+          packages={showPackages}
+          boxWord={boxWords ? "caja" : "paquete"}
+          canUndo={profile?.role === "owner" || profile?.role === "admin"}
+          onClose={() => setShowEntry(false)}
+          onDone={() => void reload()}
+        />
+      )}
 
       <div className="ws-cards ws-cards-4">
         <div className="ws-card">

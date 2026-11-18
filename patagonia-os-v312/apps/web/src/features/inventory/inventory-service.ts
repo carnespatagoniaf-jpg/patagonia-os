@@ -249,3 +249,83 @@ export async function clearProductPackages(branchId: string, productId: string):
   const { error } = await supabase.rpc("clear_product_packages", { p_branch_id: branchId, p_product_id: productId });
   if (error) throw toError(error);
 }
+
+// ---------------------------------------------------------------------------------------------------------------
+// Ingreso de stock por escaneo (migración 204).
+
+export interface StockEntryItemInput {
+  productId: string;
+  quantity: number;
+  code: string;
+  box: boolean;
+}
+
+export async function registerStockEntry(branchId: string, items: StockEntryItemInput[], note: string): Promise<{ id: string; lines: number; kg: number; boxes: number }> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { data, error } = await supabase.rpc("register_stock_entry", {
+    p_branch_id: branchId,
+    p_items: items.map((i) => ({ product_id: i.productId, quantity: i.quantity, code: i.code || null, box: i.box })),
+    p_note: note.trim() || null
+  });
+  if (error) {
+    if (error.code === "PGRST202" || error.code === "42883") throw new Error("Falta actualizar el sistema para el Ingreso de stock. Avisá a soporte.");
+    throw toError(error);
+  }
+  const d = data as { id: string; lines: number; kg: number; boxes: number };
+  return { id: d.id, lines: Number(d.lines), kg: Number(d.kg), boxes: Number(d.boxes) };
+}
+
+export async function undoStockEntry(entryId: string): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("undo_stock_entry", { p_entry_id: entryId });
+  if (error) throw toError(error);
+}
+
+export interface StockEntrySummary {
+  id: string;
+  createdAt: string;
+  note: string | null;
+  lines: number;
+  kg: number;
+  boxes: number;
+  undone: boolean;
+}
+
+/** Los últimos ingresos del local. Sin la migración, ninguno. */
+export async function listStockEntries(branchId: string, limit = 8): Promise<StockEntrySummary[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase
+    .from("stock_entries")
+    .select("id,created_at,note,lines,total_kg,boxes,undone_at")
+    .eq("branch_id", branchId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+  if (error) return [];
+  return (data ?? []).map((r) => ({
+    id: r.id as string,
+    createdAt: r.created_at as string,
+    note: (r.note as string | null) ?? null,
+    lines: Number(r.lines),
+    kg: Number(r.total_kg),
+    boxes: Number(r.boxes),
+    undone: r.undone_at != null
+  }));
+}
+
+/** De estos códigos, los que ya entraron en un ingreso que no se deshizo (código → fecha). */
+export async function findEnteredCodes(codes: string[]): Promise<Record<string, string>> {
+  const list = [...new Set(codes.filter(Boolean))];
+  if (!supabase || list.length === 0) return {};
+  const { data, error } = await supabase
+    .from("stock_entry_items")
+    .select("code,stock_entries!inner(created_at,undone_at)")
+    .in("code", list)
+    .is("stock_entries.undone_at", null);
+  if (error) return {};
+  const out: Record<string, string> = {};
+  for (const r of (data ?? []) as unknown as { code: string; stock_entries: { created_at: string } | { created_at: string }[] }[]) {
+    const e = Array.isArray(r.stock_entries) ? r.stock_entries[0] : r.stock_entries;
+    if (e) out[r.code] = e.created_at;
+  }
+  return out;
+}
