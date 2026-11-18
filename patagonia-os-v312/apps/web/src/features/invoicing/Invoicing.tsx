@@ -41,6 +41,7 @@ import {
 import { InvoiceRequestFields } from "./InvoiceRequestFields";
 import { RemitoRPanel } from "./RemitoRPanel";
 import { BranchFiscalPanel } from "./BranchFiscalPanel";
+import { RecPanel } from "./RecPanel";
 import { ArcaSetup } from "./ArcaSetup";
 import { listInWords, missingRemitoIssuerFields } from "./remito-r";
 import { OPEN_FISCAL_KEY } from "../../lib/navigate";
@@ -487,6 +488,11 @@ export function Invoicing() {
 
       {/* Remito R con CAI (migración 147): plan Full. */}
       {planAllows(profile, "full") && <RemitoRPanel issuerCondition={settings?.taxCondition ?? null} />}
+
+      {/* Remito Electrónico Cárnico de ARCA (migración 202): plan Full, con los datos fiscales cargados. Sin la migración no se muestra. */}
+      {planAllows(profile, "full") && settings && (
+        <RecPanel canSetup={profile?.role === "owner" || profile?.role === "admin"} cuitEmisor={settings.cuit ?? null} />
+      )}
 
       <section className="panel">
         <div className="panel-title">
