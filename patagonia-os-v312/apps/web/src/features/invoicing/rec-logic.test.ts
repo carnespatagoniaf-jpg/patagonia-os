@@ -37,12 +37,12 @@ describe("formulario del remito cárnico", () => {
     assert.deepEqual(p.items, [{ product_id: "p1", product_name: "Cuadril", cod_tipo_prod: "6.21", tropa: null, kilos: 50.5, unidades: null }]);
   });
 
-  it("a un depósito propio el destinatario es el mismo CUIT del emisor (EM)", () => {
+  it("a un depósito propio (EM) no se manda el CUIT del receptor: ARCA responde 1312", () => {
     const f: RecForm = { ...base, destino: "propio", destinationBranchId: "b2", categoriaReceptor: "", codDomDestino: "4" };
     assert.deepEqual(recFormProblems(f, "30719560381", 1, "2026-11-18"), []);
     const p = formToPayload(f, "30719560381");
     assert.equal(p.tipo_receptor, "EM");
-    assert.equal(p.cuit_receptor, "30719560381");
+    assert.equal(p.cuit_receptor, null);
     assert.equal(p.categoria_receptor, null);
     assert.equal(p.destination_branch_id, "b2");
     assert.equal(p.customer_id, null);

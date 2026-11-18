@@ -281,7 +281,8 @@ export function formToRemcarne(f: RecForm, cuitEmisor: string, categoriaEmisor: 
     cuitDepositario: null,
     tipoReceptor: rep ? null : propio ? "EM" : "MI",
     categoriaReceptor: rep || propio || f.categoriaReceptor === "" ? null : Number(f.categoriaReceptor),
-    cuitReceptor: rep ? null : propio ? cuitEmisor : digits(f.cuitReceptor) || null,
+    // Depósito propio (EM): sin CUIT del receptor, ARCA lo rechaza (error 1312).
+    cuitReceptor: rep || propio ? null : digits(f.cuitReceptor) || null,
     codDomOrigen: null,
     codDomDestino: rep || f.tipoMovimiento === "PLA" || f.codDomDestino === "" ? null : Number(f.codDomDestino),
     viaje: {

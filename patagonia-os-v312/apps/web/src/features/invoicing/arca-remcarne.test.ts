@@ -204,6 +204,14 @@ describe("validaciones del manual (2.5.2.4)", () => {
     assert.ok(p.some((x) => /Renglón 3: indicá kilos o unidades/.test(x)));
   });
 
+  it("depósito propio (EM): sin CUIT del receptor (ARCA 1312, producción 2026-11-18)", () => {
+    const em = { ...base, tipoReceptor: "EM" as const, categoriaReceptor: null, cuitReceptor: null };
+    assert.deepEqual(problemasDelRemito(em, hoy), []);
+    assert.ok(problemasDelRemito({ ...em, cuitReceptor: "30719560381" }, hoy).some((x) => /depósito propio/.test(x)));
+    assert.ok(problemasDelRemito({ ...base, cuitReceptor: null }, hoy).some((x) => /CUIT del destinatario/.test(x)));
+    assert.doesNotMatch(generarRemitoInner(1, em), /cuitReceptor/);
+  });
+
   it("reparto sin destinatario; depositario con origen", () => {
     assert.ok(problemasDelRemito({ ...base, tipoMovimiento: "REP" }, hoy).some((x) => /reparto/.test(x)));
     assert.deepEqual(problemasDelRemito({ ...base, tipoMovimiento: "REP", tipoReceptor: null, categoriaReceptor: null, cuitReceptor: null, codDomDestino: null }, hoy), []);
