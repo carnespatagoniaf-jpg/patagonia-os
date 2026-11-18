@@ -103,6 +103,53 @@ describe("[SIMULADO, registros REALES] Mi balanza con una Systel Cuora Max: Pata
     assert.ok(f.received.every((r) => ![5, 9, 26, 32, 42].includes(r.fn)), "nunca borra ni cierra ventas");
   });
 
+  it("si la balanza rechaza un envío con E1 (llegó mal por el cable), lo vuelve a mandar solo y termina (real Quesar 17/11)", async () => {
+    const f = cuora();
+    const { deps } = fakeDb();
+    const s = new SystelSession(f, 20, ctx(PRODUCTS), lab(deps));
+    const prep = await s.prepare(noop);
+    f.rejectNextWrites = 2;
+    const pings = f.received.filter((r) => r.fn === 23).length;
+    const out = await s.sync(prep, noop);
+    assert.equal(out.ok, true, out.message);
+    assert.equal(f.plus.get(78)!.slice(5, 23), "ARABES            ");
+    assert.ok(f.received.filter((r) => r.fn === 23).length > pings, "antes de reintentar despierta la balanza (ping)");
+  });
+
+  it("si se pierde la confirmación pero el producto quedó guardado igual, no frena ni lo repite", async () => {
+    const f = cuora();
+    const { deps } = fakeDb();
+    const s = new SystelSession(f, 20, ctx(PRODUCTS), lab(deps));
+    const prep = await s.prepare(noop);
+    f.dropNextWriteReplies = 1;
+    const out = await s.sync(prep, noop);
+    assert.equal(out.ok, true, out.message);
+  });
+
+  it("un rechazo que no es pasajero (E8) frena enseguida, sin reintentar", async () => {
+    const f = cuora();
+    const { deps } = fakeDb();
+    const s = new SystelSession(f, 20, ctx(PRODUCTS), lab(deps));
+    const prep = await s.prepare(noop);
+    f.rejectNextWrites = 1;
+    f.rejectCode = "E8";
+    const before = f.received.filter((r) => r.fn === 61).length;
+    const out = await s.sync(prep, noop);
+    assert.equal(out.ok, false);
+    assert.equal(f.received.filter((r) => r.fn === 61).length - before, 1, "una sola escritura");
+  });
+
+  it("si el E1 se repite siempre, después de unos intentos frena sin tocar nada", async () => {
+    const f = cuora();
+    const { deps } = fakeDb();
+    const s = new SystelSession(f, 20, ctx(PRODUCTS), lab(deps));
+    const prep = await s.prepare(noop);
+    f.rejectNextWrites = 99;
+    const out = await s.sync(prep, noop);
+    assert.equal(out.ok, false);
+    for (const [n, raw] of GRINGOS) assert.equal(f.plus.get(n), raw);
+  });
+
   it("con autorización, reemplaza el número ocupado por el producto de Patagonia", async () => {
     const f = cuora();
     const { deps } = fakeDb();

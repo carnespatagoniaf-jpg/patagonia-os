@@ -206,24 +206,47 @@ export interface PushResult {
   rejected?: string;
 }
 
+/**
+ * Reintentos de una escritura que la balanza no hizo: E1 (llegó mal por el cable), E2 (buffer lleno), E3 (no atendió),
+ * o sin respuesta. Antes de cada uno se relee el producto: solo se reintenta si sigue exactamente como estaba.
+ */
+const WRITE_RETRY_ERRORS = new Set(["E1", "E2", "E3"]);
+export const WRITE_RETRY_MS = [300, 1000, 2500];
+
 export async function runSystelPush(client: SystelClient, layout: SystelLayout, plan: PushItem[], onProgress: (done: number, total: number) => void = () => {}, mode: TypeByteMode = "ascii"): Promise<PushResult> {
   const todo = plan.filter((x) => x.data && x.number !== null && (x.action === "crear" || x.action === "actualizar" || x.action === "reemplazar"));
   const done: PushResult["done"] = [];
   for (const [i, item] of todo.entries()) {
     onProgress(i + 1, todo.length);
     const n = item.number!;
-    // Justo antes de escribir: la balanza tiene que seguir como cuando se leyó (si alguien la cambió, se frena).
-    const fresh = await client.readPlu(layout, n);
-    const freshRaw = fresh?.raw ?? null;
-    if (item.current === null ? freshRaw !== null : !freshRaw || !sameRecord(layout, item.current, freshRaw)) {
-      return { done, stoppedAt: n, detail: "la balanza cambió desde que se leyó: no se escribió", restored: null };
+    const isOriginal = (raw: string | null) => (item.current === null ? raw === null : !!raw && sameRecord(layout, item.current, raw));
+    let reply: Awaited<ReturnType<SystelClient["writeProductRecord"]>> = null;
+    let back: SystelPlu | null = null;
+    let ok = false;
+    for (let attempt = 0; ; attempt++) {
+      // Justo antes de escribir (y antes de cada reintento): la balanza tiene que seguir como cuando se leyó.
+      const fresh = await client.readPlu(layout, n);
+      if (!isOriginal(fresh?.raw ?? null)) {
+        return { done, stoppedAt: n, detail: attempt === 0 ? "la balanza cambió desde que se leyó: no se escribió" : "después de un intento fallido la balanza no quedó como estaba: no se reintentó", restored: null };
+      }
+      reply = await client.writeProductRecord(layout, n, item.data!);
+      if (reply === "bloqueado") return { done, stoppedAt: n, detail: "escritura bloqueada", restored: null };
+      const transient = reply === null || (reply.kind === "error" && WRITE_RETRY_ERRORS.has(reply.errorCode ?? ""));
+      if (reply && reply.kind === "error" && (!transient || attempt >= WRITE_RETRY_MS.length)) {
+        return { done, stoppedAt: n, detail: `la balanza rechazó el producto ${n} (${reply.errorCode}); no cambió nada`, restored: null, rejected: reply.errorCode ?? "error" };
+      }
+      back = reply && reply.kind === "error" ? null : await client.readPlu(layout, n);
+      ok = !!back && sameRecord(layout, expectedRead(layout, item.data!, back.raw[LAYOUT_INFO[layout].pluDigits]), back.raw);
+      // Releído igual a lo mandado: quedó bien, aunque la confirmación (ACK) se haya perdido en el cable.
+      if (ok) break;
+      // Rechazo pasajero (E1/E2/E3: "no guardé nada") o sin respuesta y la balanza sigue como estaba: se vuelve a mandar.
+      // REAL Quesar 17/11: E1 en el producto 163 de 241; al repetir todo a mano, pasó entero.
+      const untouched = reply !== null && reply.kind === "error" ? true : isOriginal(back?.raw ?? null);
+      if (!(transient && untouched && attempt < WRITE_RETRY_MS.length)) break;
+      await new Promise((r) => setTimeout(r, WRITE_RETRY_MS[attempt]));
+      await client.wake();
     }
-    const reply = await client.writeProductRecord(layout, n, item.data!);
-    if (reply === "bloqueado") return { done, stoppedAt: n, detail: "escritura bloqueada", restored: null };
-    if (reply && reply.kind === "error") return { done, stoppedAt: n, detail: `la balanza rechazó el producto ${n} (${reply.errorCode}); no cambió nada`, restored: null, rejected: reply.errorCode ?? "error" };
-    const back = await client.readPlu(layout, n);
-    const ok = !!back && sameRecord(layout, expectedRead(layout, item.data!, back.raw[LAYOUT_INFO[layout].pluDigits]), back.raw);
-    if (ok && reply && reply.kind === "ack") {
+    if (ok) {
       done.push({ number: n, action: item.action });
       continue;
     }
@@ -234,7 +257,7 @@ export async function runSystelPush(client: SystelClient, layout: SystelLayout, 
       const again = await client.readPlu(layout, n);
       restored = !!again && sameRecord(layout, item.current, again.raw);
     }
-    return { done, stoppedAt: n, detail: !back ? "no se pudo releer el producto" : ok ? "la balanza no confirmó la escritura" : "lo releído no es lo que se mandó", restored };
+    return { done, stoppedAt: n, detail: !back ? "no se pudo releer el producto" : isOriginal(back.raw) ? "la balanza no guardó el producto después de varios intentos" : "lo releído no es lo que se mandó", restored };
   }
   return { done, stoppedAt: null, detail: "", restored: null };
 }
