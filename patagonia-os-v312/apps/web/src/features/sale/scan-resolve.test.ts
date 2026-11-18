@@ -257,3 +257,37 @@ describe("[REAL] Lauda 18/11 (Kretz Report NX2): etiqueta con producto de 5 cifr
     if (r.type === "label") assert.equal(r.amount, 1890);
   });
 });
+
+describe("[REAL] Carplat: Report con 2-3-7 y etiqueta por peso (1070 \"2112005\", 18/11/2026)", () => {
+  const CARPLAT = { prefixLength: 2, pluLength: 3, weightLength: 7, weightDivisor: 100, totalLength: 13, payloadType: "amount" as const };
+  const products = [
+    product("67", "ROAST BEEF (ENVASADO)", "kg", 14000),
+    product("2", "ENTRAÑA (CAJA)", "kg", 20000),
+    product("243", "MILANESAS DE POLLO (3KG)", "kg", 9000),
+    product("226", "HUESOS", "unit", 100)
+  ];
+
+  it("[REAL] la etiqueta vieja con importe ($88.022,50) se sigue cobrando por su importe", () => {
+    const r = resolveScan("2006788022508", products, CARPLAT);
+    assert.ok(r.type === "label" && r.product.code === "67" && r.amount === 88022.5);
+  });
+
+  it("la etiqueta nueva \"21\" trae los kilos y se cobra con el precio de Patagonia (sin importe)", () => {
+    const r = resolveScan("2106700064255", products, CARPLAT); // 6,425 kg
+    assert.ok(r.type === "label");
+    if (r.type !== "label") return;
+    assert.equal(r.product.code, "67");
+    assert.equal(r.quantity, 6.425);
+    assert.equal(r.amount, undefined);
+  });
+
+  it("\"21\" nunca se lee como importe: un código de 3 cifras (243) no cae en el producto 2", () => {
+    const r = resolveScan("2124300030005", products, CARPLAT); // 3,000 kg
+    assert.ok(r.type === "label" && r.product.code === "243" && r.quantity === 3);
+  });
+
+  it("\"21\" con más de 31 kg o de un producto que no existe: error, no se agrega", () => {
+    assert.equal(resolveScan("2106700642507", products, CARPLAT).type, "error"); // 64,25 kg
+    assert.equal(resolveScan("2199900064255", products, CARPLAT).type, "error"); // N.º 999
+  });
+});

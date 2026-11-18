@@ -39,7 +39,7 @@ export function StockEntry({ products, branchId, boxLabels, packages, boxWord, c
   boxLabels: boolean;
   /** Pantalla "Paquetes": cada renglón por kilo suma 1 caja/paquete. */
   packages: boolean;
-  boxWord: "caja" | "paquete";
+  boxWord: "unidad" | "paquete";
   canUndo: boolean;
   onClose: () => void;
   onDone: (message: string) => void;
@@ -58,7 +58,7 @@ export function StockEntry({ products, branchId, boxLabels, packages, boxWord, c
   const codeRef = useRef<HTMLInputElement>(null);
   const qtyRef = useRef<HTMLInputElement>(null);
   const keySeq = useRef(0);
-  const boxes = boxWord === "caja" ? "cajas" : "paquetes";
+  const boxes = boxWord === "unidad" ? "unidades" : "paquetes";
 
   useEffect(() => {
     void getBranchScaleConfig(branchId)

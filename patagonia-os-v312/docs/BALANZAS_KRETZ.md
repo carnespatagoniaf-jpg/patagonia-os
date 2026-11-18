@@ -334,3 +334,13 @@ productos reales que Patagonia no graba: si alguno usa "01" queda "01" (lo que y
 productos reales, "01". Mostrador (`scan-resolve.ts`) además lee "20/21" + PLU 5 + gramos 5 cuando el formato de la
 sucursal no encontró producto (solo producto por kilo, ≤ 31 kg, EAN válido). Falta confirmar con la balanza: el número
 real de formato de la Bondiola y que una etiqueta nueva de MOLIDA C. salga con código.
+
+## Report LT con etiqueta por peso (Carplat, 18/11/2026) | Hipótesis hasta la primera etiqueta
+
+Pedido de Carplat: envasan con días de anticipación y quieren que el precio lo ponga Patagonia al vender. Para las
+empresas en `REPORT_WEIGHT_BARCODE_COMPANIES` (`scales/engine/weight-barcode.ts`), "Mandar productos" manda el 1070
+"2112005": pesables "21" + peso, no pesables "20" + importe, formato 5 (2-3-7). La sucursal sigue con el 2-3-7 con
+importe y `scan-resolve` (`kretz237WeightLabel`) lee "21" + producto (3) + GRAMOS (7): kilos × precio de Patagonia.
+Las etiquetas viejas "20" + importe se siguen cobrando por su importe (no hay día de corte). Falta confirmar con la
+primera etiqueta real que los 7 números del peso son gramos (que el peso que muestra Mostrador sea el impreso).
+El precio y el importe impresos en la etiqueta dependen del formato de etiqueta de la balanza: no se tocaron.

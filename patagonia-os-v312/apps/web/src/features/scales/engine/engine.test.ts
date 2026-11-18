@@ -444,6 +444,21 @@ describe("[SIMULADO] Mi balanza con una Kretz Report", () => {
     assert.deepEqual(calls, ["1070", "mostrador:suc-1"]);
   });
 
+  it("etiqueta por peso (Carplat): manda 2112005; sin el pedido, el 2-3-7 de siempre; la balanza ya configurada lo recibe igual", async () => {
+    localStorage.clear();
+    const vacio = P("a", "10", "Vacio", "kg", 15000);
+    const { io } = reportIO({ "10": expectedReportProduct({ id: "a", code: "10", name: "Vacio", unit: "kg", priceRetail: 15000 }) });
+    const sent: (string | undefined)[] = [];
+    io.configureReportBarcode = async (config?: string) => { sent.push(config); return "ok"; };
+    const plain = new KretzSession("kretz-report-lt", { ...ctx([vacio]), scaleKey: "cp" }, "datos", io);
+    await plain.sync(await plain.prepare(noop), noop);
+    const weight = new KretzSession("kretz-report-lt", { ...ctx([vacio]), scaleKey: "cp", weightBarcode: true }, "datos", io);
+    const prep = await weight.prepare(noop);
+    assert.equal(prep.upToDate, false, "con el pedido nuevo vuelve a configurar el código");
+    await weight.sync(prep, noop);
+    assert.deepEqual(sent, [undefined, "2112005"]);
+  });
+
   it("código de barras SIEMPRE: con los productos ya iguales igual se configura, y va antes que los productos", async () => {
     localStorage.clear();
     const vacio = P("a", "10", "Vacio", "kg", 15000);

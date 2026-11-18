@@ -91,6 +91,24 @@ export function kretzWeightLabel(raw: string, config: ScaleConfig, active: Produ
   return product && product.unit === "kg" ? { label: parsed, product } : null;
 }
 
+/** El formato 2-3-7 con importe en centavos que Patagonia les configura a las Kretz (1070 "2002005" / "2112005"). */
+export function isKretz237Amount(config: ScaleConfig): boolean {
+  return config.prefixLength === 2 && config.pluLength === 3 && config.weightLength === 7 && config.weightDivisor === 100 && config.totalLength === 13 && config.payloadType === "amount";
+}
+
+/**
+ * Report con 1070 "2112005": los productos por kilo salen "21" + producto (3) + gramos (7) + verificador. Solo con el
+ * formato 2-3-7 de la sucursal, EAN válido, producto por kilo que existe y peso de balanza de mostrador.
+ */
+export function kretz237WeightLabel(raw: string, config: ScaleConfig, active: Product[]): { label: { plu: string; kind: "weight"; weightKg: number }; product: Product } | null {
+  if (!isKretz237Amount(config) || !/^21\d{11}$/.test(raw) || !validEan13(raw)) return null;
+  const plu = String(parseInt(raw.slice(2, 5), 10));
+  const weightKg = parseInt(raw.slice(5, 12), 10) / 1000;
+  if (!(weightKg > 0) || weightKg > MAX_COUNTER_SCALE_KG) return null;
+  const product = findByPlu(active, plu);
+  return product && product.unit === "kg" ? { label: { plu, kind: "weight", weightKg }, product } : null;
+}
+
 /**
  * El producto de un N.º de balanza: el código igual; si no hay, el único código de solo números con el mismo valor
  * ("0037" = 37: Patagonia graba en la balanza Number(código), así que los ceros de adelante se pierden en la etiqueta).
@@ -126,14 +144,28 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
   // en 0 (REAL Aura con 2-5-5) o todo en 9 (REAL Systel). Nunca se cobra: el importe impreso no está en el código.
   const overflow = amountOverflow(raw, config, active);
   if (overflow) return { type: "error", message: overflow };
-  let label = looksLikeScaleLabel(raw, config) ? parseWeightBarcode(raw, config) : null;
-  let labelProduct = label ? findByPlu(active, label.plu) : undefined;
+  // Kretz Report con etiqueta por peso (1070 "2112005", Carplat 18/11/2026): con el 2-3-7 con importe de la sucursal,
+  // "21" trae los GRAMOS (nunca un importe) y "20" sigue siendo importe (etiquetas viejas y productos por unidad).
+  const weight237 = kretz237WeightLabel(raw, config, active);
+  const is237Weight = weight237 !== null || (isKretz237Amount(config) && raw.startsWith("21"));
+  let label = weight237 ? weight237.label : !is237Weight && looksLikeScaleLabel(raw, config) ? parseWeightBarcode(raw, config) : null;
+  let labelProduct = weight237 ? weight237.product : label ? findByPlu(active, label.plu) : undefined;
   if (!labelProduct) {
     const alt = kretzWeightLabel(raw, config, active);
     if (alt) {
       label = alt.label;
       labelProduct = alt.product;
     }
+  }
+  if (!labelProduct && is237Weight && /^21\d{11}$/.test(raw) && validEan13(raw)) {
+    const plu = String(parseInt(raw.slice(2, 5), 10));
+    const p = findByPlu(products, plu);
+    return {
+      type: "error",
+      message: p
+        ? `La etiqueta es de ${p.name} (N.º ${plu}) con ${(parseInt(raw.slice(5, 12), 10) / 1000).toLocaleString("es-AR", { maximumFractionDigits: 3 })} kg, pero ${(p.active ?? true) ? "ese producto no se vende por kilo o el peso no es de balanza de mostrador" : "está desactivado en Patagonia"}. No se agregó nada.`
+        : `La etiqueta de la balanza es del producto N.º ${plu}, y en Patagonia no hay ningún producto con ese código. No se agregó nada.`
+    };
   }
   if (!labelProduct && systelSumWithoutAmount(raw)) {
     return {
