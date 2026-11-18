@@ -725,10 +725,10 @@ function diagnosisVerdictMessage(r: DiagnosticRecord, modelId: string, portLabel
  * el mismo que ya usa la Aura de Pollo y mar: "2002005" = pesable "20" + importe, no pesable "20" + importe,
  * formato 5 (2-3-7). Mostrador lee ese formato (producto + importe). Devuelve lo que contestó la balanza.
  */
-export async function configureReportBarcode(): Promise<"ok" | "rechazada" | "sin_respuesta"> {
+export async function configureReportBarcode(config: string = AURA_BARCODE_CONFIG): Promise<"ok" | "rechazada" | "sin_respuesta"> {
   const settings = getScaleSerialSettings();
   const port = await pickPort();
-  const frame = buildFrame(settings.deviceType, settings.equipmentId, "1070", AURA_BARCODE_CONFIG);
+  const frame = buildFrame(settings.deviceType, settings.equipmentId, "1070", config);
   const response = await writeFrameResilient(port, frame, settings.baudRate);
   const code = extractResponseCode(response);
   return !response.length ? "sin_respuesta" : code === "01" ? "ok" : "rechazada";

@@ -2,6 +2,8 @@ import { parseAuraPlu } from "../../../inventory/kretz/aura-plu";
 import { planAuraSync, summarizeAuraPlan, type AuraSyncItem } from "../../../inventory/kretz/aura-sync";
 import { getStoredModelId, saveModelId } from "../../../inventory/kretz/models";
 import { isNetPort } from "../../../inventory/kretz/net-port";
+import { KRETZ_PLU5_WEIGHT_CONFIG } from "../../../sale/scan-resolve";
+import type { ScaleConfig } from "../../../sale/scale-barcode";
 import { chooseReportLabel, describeLabelSamples, type ReportLabelSample } from "../../../inventory/kretz/report-label";
 import {
   configureReportBarcode,
@@ -41,9 +43,9 @@ export interface KretzIO {
   readReport: typeof readReportProduct;
   sendReport: typeof syncProductsToScale;
   /** Mostrador de la sucursal lee los códigos por producto de la Aura (2-3-7 con importe). Solo con base. */
-  saveItemConfig?: (branchId: string) => Promise<void>;
+  saveItemConfig?: (branchId: string, config?: ScaleConfig) => Promise<void>;
   /** Report: manda el formato del código de barras de las etiquetas (1070). */
-  configureReportBarcode?: () => Promise<"ok" | "rechazada" | "sin_respuesta">;
+  configureReportBarcode?: (config?: string) => Promise<"ok" | "rechazada" | "sin_respuesta">;
   /** Report: primeros productos de la balanza con su formato de etiqueta (solo lectura). */
   readLabelSample?: () => Promise<ReportLabelSample[]>;
   /** Report: formato de etiqueta con el que se graban (y se verifican) los productos. */
@@ -60,6 +62,12 @@ export const KRETZ_IO: KretzIO = {
   readLabelSample: () => readReportLabelSample(),
   setLabelCode: setReportLabelCode
 };
+
+/**
+ * 1070 para la Report por red (Nx §4.17): inicio pesable "21" + peso (1) + inicio no pesable "20" + importe (0) +
+ * formato 1 (2-5-5). Es lo que imprimía la NX2 de Lauda antes de recibir el 2-3-7 (2100037017403 = PLU 37, 1,740 kg).
+ */
+export const REPORT_NET_BARCODE_CONFIG = "2112001";
 
 export function kretzModelForLetter(deviceType: string | null | undefined): ScaleModelId {
   return deviceType === "H" ? "kretz-aura" : deviceType === "C" ? "kretz-report-lt" : "kretz-otra";
@@ -258,9 +266,12 @@ export class KretzSession implements ScaleSession {
     if (!this.io.configureReportBarcode) return "ok";
     onProgress("sincronizar", "Configurando el código de barras de las etiquetas…");
     try {
-      const r = await this.io.configureReportBarcode();
+      // Por red (Report NX/NX2): el formato que traía la balanza (21 + producto de 5 + peso). Con el 2-3-7 la NX2 de
+      // Lauda dejó de imprimir el código de barras (real 18/11). Por USB/Bluetooth (Report LT) sigue el 2-3-7.
+      const net = this.diagnostic.red === true;
+      const r = await this.io.configureReportBarcode(net ? REPORT_NET_BARCODE_CONFIG : undefined);
       if (r === "ok") {
-        if (this.ctx.online && this.ctx.branchId && this.io.saveItemConfig) await this.io.saveItemConfig(this.ctx.branchId);
+        if (this.ctx.online && this.ctx.branchId && this.io.saveItemConfig) await this.io.saveItemConfig(this.ctx.branchId, net ? KRETZ_PLU5_WEIGHT_CONFIG : undefined);
         markBarcodeConfigured(this.barcodeKey());
       }
       return r;
@@ -278,7 +289,8 @@ export class KretzSession implements ScaleSession {
 
   private barcodeKey(): string {
     const id = this.identity();
-    return `${this.ctx.scaleKey ?? ""}|${String(id.letter ?? "")}${String(id.equipment ?? "")}`;
+    // Por red se marca aparte: así una NX que ya recibió el 2-3-7 vuelve a recibir su formato.
+    return `${this.ctx.scaleKey ?? ""}|${String(id.letter ?? "")}${String(id.equipment ?? "")}${this.diagnostic.red === true ? `|${REPORT_NET_BARCODE_CONFIG}` : ""}`;
   }
 
   async close(): Promise<void> {
