@@ -319,3 +319,18 @@ Para elegir entre H2 y H3 hace falta una escritura más, o el tráfico real de i
 - **Omitir:** N y C, porque pasarían a venderse por kilo.
 
 **Código de barras** (`kretz/aura-barcode.ts`): lee los formatos del manual y reconoce el ticket de suma. El ticket real da suma sin importe. Si se configura la balanza con importe (PESO = NO), el ticket traería el total; falta un ticket real para calibrar los decimales.
+
+## Report NX2 por red: formato de etiqueta (Lauda, 18/11/2026) | Real
+
+Kretz Report NX2 (modelo RPF NP30P2CAR) por cable de red (192.168.19.170). Al sincronizar, Patagonia grababa todos los
+productos con el formato de etiqueta "01" (campo 15), y en ESTA balanza el "01" imprime la etiqueta SIN código de
+barras (MOLIDA C., PLU 1). Un producto cargado antes en la balanza (PLU 37 BONDIOLA/ENTERA) usa otro formato que sí
+imprime el código: `2100037017403` = "21" + PLU 00037 + 01740 g + verificador, aunque la balanza aceptó el 1070
+"2002005" (2-3-7 con importe). O sea: en la NX2 el código de barras depende del formato de etiqueta.
+
+Cambio: antes de comparar, `KretzSession.prepare` lee los primeros 40 productos de la balanza (5005 encadenado, solo
+lectura, `readReportLabelSample`) y `chooseReportLabel` (kretz/report-label.ts, testeado) elige el formato que usan los
+productos reales que Patagonia no graba: si alguno usa "01" queda "01" (lo que ya andaba); si no, el más usado; sin
+productos reales, "01". Mostrador (`scan-resolve.ts`) además lee "20/21" + PLU 5 + gramos 5 cuando el formato de la
+sucursal no encontró producto (solo producto por kilo, ≤ 31 kg, EAN válido). Falta confirmar con la balanza: el número
+real de formato de la Bondiola y que una etiqueta nueva de MOLIDA C. salga con código.

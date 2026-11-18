@@ -74,7 +74,36 @@ export function amountOverflow(raw: string, config: ScaleConfig, active: Product
   return `La etiqueta de ${product.name} no trae el importe en el código de barras: pasa de ${max.toLocaleString("es-AR", { minimumFractionDigits: 2 })}, lo más alto que entra. No se agregó nada. Cobralo con "Vender algo sin código" por el importe impreso, o pesalo en dos partes.`;
 }
 
-const fmtQty = (q: number, unit: string) => (unit === "kg" ? `${q.toLocaleString("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg` : `${q} u.`);
+/**
+ * Etiqueta Kretz con peso: "20"/"21" + producto (5) + gramos (5) + verificador (real Lauda 18/11/2026, Report NX2:
+ * 2100037017403 = PLU 37, 1,740 kg). Ese formato lo trae la etiqueta de la balanza aunque la sucursal tenga guardado
+ * otro (la 2-3-7 con importe que Patagonia les configura con 1070), así que se prueba SOLO cuando el formato de la
+ * sucursal no encontró producto, y solo si da un producto por kilo que existe con un peso de balanza de mostrador.
+ */
+export const KRETZ_PLU5_WEIGHT_CONFIG: ScaleConfig = { prefixLength: 2, pluLength: 5, weightLength: 5, weightDivisor: 1000, totalLength: 13, payloadType: "weight" };
+
+export function kretzWeightLabel(raw: string, config: ScaleConfig, active: Product[]): { label: { plu: string; kind: "weight"; weightKg: number }; product: Product } | null {
+  const same = config.prefixLength === 2 && config.pluLength === 5 && config.weightLength === 5 && config.payloadType === "weight";
+  if (same || !/^2[01]\d{11}$/.test(raw) || !validEan13(raw)) return null;
+  const parsed = parseWeightBarcode(raw, KRETZ_PLU5_WEIGHT_CONFIG);
+  if (!parsed || parsed.kind !== "weight" || parsed.weightKg > MAX_COUNTER_SCALE_KG) return null;
+  const product = findByPlu(active, parsed.plu);
+  return product && product.unit === "kg" ? { label: parsed, product } : null;
+}
+
+/**
+ * El producto de un N.º de balanza: el código igual; si no hay, el único código de solo números con el mismo valor
+ * ("0037" = 37: Patagonia graba en la balanza Number(código), así que los ceros de adelante se pierden en la etiqueta).
+ */
+export function findByPlu(products: Product[], plu: string): Product | undefined {
+  const exact = products.find((p) => p.code === plu);
+  if (exact) return exact;
+  const n = Number(plu);
+  const same = products.filter((p) => /^\d+$/.test(p.code) && Number(p.code) === n);
+  return same.length === 1 ? same[0] : undefined;
+}
+
+const fmtQty =(q: number, unit: string) => (unit === "kg" ? `${q.toLocaleString("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg` : `${q} u.`);
 
 export function resolveScan(rawInput: string, products: Product[], config: ScaleConfig): ScanResolution {
   const raw = rawInput.trim();
@@ -97,8 +126,15 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
   // en 0 (REAL Aura con 2-5-5) o todo en 9 (REAL Systel). Nunca se cobra: el importe impreso no está en el código.
   const overflow = amountOverflow(raw, config, active);
   if (overflow) return { type: "error", message: overflow };
-  const label = looksLikeScaleLabel(raw, config) ? parseWeightBarcode(raw, config) : null;
-  const labelProduct = label ? active.find((p) => p.code === label.plu) : undefined;
+  let label = looksLikeScaleLabel(raw, config) ? parseWeightBarcode(raw, config) : null;
+  let labelProduct = label ? findByPlu(active, label.plu) : undefined;
+  if (!labelProduct) {
+    const alt = kretzWeightLabel(raw, config, active);
+    if (alt) {
+      label = alt.label;
+      labelProduct = alt.product;
+    }
+  }
   if (!labelProduct && systelSumWithoutAmount(raw)) {
     return {
       type: "ticket_without_amount",
@@ -120,7 +156,7 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
   // 3. Etiqueta de balanza.
   if (label) {
     if (!labelProduct) {
-      const inactive = products.find((p) => p.code === label.plu);
+      const inactive = findByPlu(products, label.plu);
       return {
         type: "error",
         message: inactive

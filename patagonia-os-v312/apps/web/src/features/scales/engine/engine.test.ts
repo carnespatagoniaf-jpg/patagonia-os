@@ -4,7 +4,7 @@ import { installFakeLocalStorage } from "../test-fake-storage";
 import { FakeCuora } from "../../inventory/systel/systel-fake";
 import { pluEanSetting } from "../../inventory/systel/systel-plu";
 import { auraName } from "../../inventory/kretz/aura-sync";
-import { expectedReportProduct, type ReportProductFields } from "../../inventory/scale-serial";
+import { expectedReportProduct, getReportLabelCode, setReportLabelCode, type ReportProductFields } from "../../inventory/scale-serial";
 import { SystelSession, type SystelDeps } from "./adapters/systel";
 import { KretzSession, kretzModelForLetter, makeKretzAdapter, type KretzIO } from "./adapters/kretz";
 import { connectScale } from "./engine";
@@ -637,5 +637,46 @@ describe("Systel: nunca redondea el precio (auditoría 28/10)", () => {
     assert.deepEqual(plan.map((p) => p.action), ["omitir", "omitir"]);
     assert.match(plan[0].reason, /centavos/);
     assert.match(plan[1].reason, /máximo \$999\.999/);
+  });
+});
+
+describe("[SIMULADO] Report: formato de etiqueta de la balanza (real Lauda 18/11, NX2)", () => {
+  const vacio = { id: "a", code: "1", name: "Molida C.", unit: "kg" as const, priceRetail: 11215 };
+  function io(samples: { plu: number; name: string; label: string }[]) {
+    const scale = new Map<string, ReportProductFields>();
+    setReportLabelCode("01");
+    scale.set("1", expectedReportProduct(vacio)); // ya pisado por Patagonia con el "01"
+    const x: KretzIO = {
+      diagnose: (async () => { throw new Error("no se usa"); }) as unknown as KretzIO["diagnose"],
+      readAuraList: (async () => { throw new Error("no se usa"); }) as unknown as KretzIO["readAuraList"],
+      runAuraSync: (async () => { throw new Error("no se usa"); }) as unknown as KretzIO["runAuraSync"],
+      readReport: (async (code: string) => scale.get(code) ?? null) as KretzIO["readReport"],
+      sendReport: (async (list: Parameters<KretzIO["sendReport"]>[0]) => {
+        for (const p of list) scale.set(p.code, expectedReportProduct(p));
+        return { attempted: list.length, skipped: [], noResponse: [], transportErrors: [], responseCodeCounts: { "01": list.length }, failed: [] };
+      }) as KretzIO["sendReport"],
+      readLabelSample: async () => samples,
+      setLabelCode: setReportLabelCode
+    };
+    return { io: x, scale };
+  }
+
+  it("copia el formato de los productos viejos y regraba los que tenían el 01", async () => {
+    const { io: x, scale } = io([{ plu: 1, name: "MOLIDA C.", label: "01" }, { plu: 37, name: "BONDIOLA/ENTERA", label: "03" }]);
+    const s = new KretzSession("kretz-report-lt", ctx([vacio]), "datos", x);
+    const prep = await s.prepare(noop);
+    assert.equal(getReportLabelCode(), "03");
+    assert.equal(prep.writes, 1);
+    const out = await s.sync(prep, noop);
+    assert.equal(out.verified, 1);
+    assert.equal(scale.get("1")?.label, "03");
+    setReportLabelCode("01");
+  });
+
+  it("si la balanza ya usa el 01 en sus productos, nada cambia", async () => {
+    const { io: x } = io([{ plu: 3, name: "ASADO", label: "01" }]);
+    const prep = await new KretzSession("kretz-report-lt", ctx([vacio]), "datos", x).prepare(noop);
+    assert.equal(getReportLabelCode(), "01");
+    assert.equal(prep.ready, 1);
   });
 });

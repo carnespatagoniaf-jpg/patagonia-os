@@ -8,6 +8,7 @@ import { AURA_BARCODE_CONFIG, readAuraList, runAuraSync, setAuraItemBarcodes, ty
 import { getKretzModel, getSavedModelId } from "./kretz/models";
 import { buildKretzFrame, describeKretzCode } from "./kretz/kretz-frame";
 import { isNetPort } from "./kretz/net-port";
+import { DEFAULT_REPORT_LABEL, type ReportLabelSample } from "./kretz/report-label";
 
 /** Lo mínimo que hace falta de un producto para mandarlo a la balanza --
  * no el `Product` completo de @patagonia/domain. Así esta función sirve
@@ -884,7 +885,9 @@ async function buildPluFrame(
   // que sí muestra bien su etiqueta (PLU 3) trae "01" acá, no "00".
   // Siempre la etiqueta "01": es la que imprime el código de barras en la Report LT (Carnes Patagonia, que
   // vende escaneando). Heredar la de fábrica dejaba etiquetas sin código (real M2 Alimentos 24/10).
-  const codigoEtiqueta = fixedDigits(1, 2);
+  // Pero el número depende de la balanza (real Lauda 18/11: en su Report NX2 el "01" sale SIN código de barras):
+  // se usa el que eligió chooseReportLabel con los productos reales de ESA balanza ("01" si no hay otro).
+  const codigoEtiqueta = reportLabelCode;
   const codigoReceta = existing?.[16] ?? fixedDigits(0, 4);
   const codigoNutricional = existing?.[17] ?? fixedDigits(0, 4);
   // Sin documentación de qué es este campo, pero el mismo PLU 3 trae
@@ -1323,6 +1326,41 @@ export function isFactoryPluName(name: string | null | undefined): boolean {
   return n === "" || /^NOMBRE *\d*$/.test(n);
 }
 
+/** Formato de etiqueta (campo 15) con el que se graban los productos en la Report conectada. Ver kretz/report-label.ts. */
+let reportLabelCode: string = DEFAULT_REPORT_LABEL;
+
+export function setReportLabelCode(code: string): void {
+  reportLabelCode = /^\d{2}$/.test(code) && code !== "00" ? code : DEFAULT_REPORT_LABEL;
+}
+
+export function getReportLabelCode(): string {
+  return reportLabelCode;
+}
+
+/**
+ * Report: los primeros productos guardados en la balanza (número, nombre y formato de etiqueta), SOLO LECTURA (5005
+ * encadenado: cada lectura devuelve el siguiente número). Sirve para copiar el formato de etiqueta que ya imprime el
+ * código de barras en ESA balanza. Frena en el primer número que no contesta bien o al llegar a `max`.
+ */
+export async function readReportLabelSample(max = 40): Promise<ReportLabelSample[]> {
+  const settings = getScaleSerialSettings();
+  const port = await pickPort();
+  const out: ReportLabelSample[] = [];
+  let after = 0;
+  for (let i = 0; i < max; i++) {
+    const frame = buildFrame(settings.deviceType, settings.equipmentId, "5005", fixedDigits(after, 6));
+    const response = await writeFrameResilient(port, frame, settings.baudRate);
+    if (!isKretzResponse(response) || extractResponseCode(response) !== "01") break;
+    const dataBytes = response.length > 10 ? response.slice(8, -3) : new Uint8Array();
+    const fields = splitPluFields(Array.from(dataBytes).map((b) => String.fromCharCode(b)).join(""));
+    const plu = Number(fields[0]);
+    if (!Number.isFinite(plu) || plu <= after) break;
+    out.push({ plu, name: (fields[3] ?? "").trimEnd(), label: fields[15] ?? "" });
+    after = plu;
+  }
+  return out;
+}
+
 /** Report: lo que tiene grabado la balanza en el PLU `code` (SOLO LECTURA, 5005), o null si está libre. */
 export async function readReportProduct(code: string): Promise<ReportProductFields | null> {
   const settings = getScaleSerialSettings();
@@ -1343,7 +1381,7 @@ export async function readReportProduct(code: string): Promise<ReportProductFiel
 /** Report: cómo tiene que quedar grabado un producto de Patagonia (mismo armado que buildPluFrame). */
 export function expectedReportProduct(product: ScaleSyncableProduct): ReportProductFields {
   // El precio es el de Stock tal cual (reportSkipReason ya descartó centavos o precios que no entran).
-  return { name: fixedAscii(product.name, 26).trimEnd(), byWeight: product.unit === "kg", price: product.priceRetail, taxes: 0, code: Number(product.code), label: fixedDigits(1, 2), decimals: fixedDigits(2, 6) };
+  return { name: fixedAscii(product.name, 26).trimEnd(), byWeight: product.unit === "kg", price: product.priceRetail, taxes: 0, code: Number(product.code), label: reportLabelCode, decimals: fixedDigits(2, 6) };
 }
 
 /** Aura: ¿entrega lo vendido por producto? SOLO LECTURA (5008/5001, nunca borra). Ver kretz/aura-totals-probe.ts. */
