@@ -69,6 +69,13 @@ export const KRETZ_IO: KretzIO = {
  */
 export const REPORT_NET_BARCODE_CONFIG = "2112001";
 
+/**
+ * 1070 para la Report por USB/Bluetooth con etiqueta por peso (ctx.weightBarcode): inicio pesable "21" + peso (1) +
+ * inicio no pesable "20" + importe (0) + formato 5 (2-3-7). Los no pesables y las etiquetas viejas siguen "20" + importe,
+ * así Mostrador lee las dos (scan-resolve: "21" con el formato 2-3-7 de la sucursal = gramos).
+ */
+export const REPORT_WEIGHT_BARCODE_CONFIG = "2112005";
+
 export function kretzModelForLetter(deviceType: string | null | undefined): ScaleModelId {
   return deviceType === "H" ? "kretz-aura" : deviceType === "C" ? "kretz-report-lt" : "kretz-otra";
 }
@@ -269,7 +276,7 @@ export class KretzSession implements ScaleSession {
       // Por red (Report NX/NX2): el formato que traía la balanza (21 + producto de 5 + peso). Con el 2-3-7 la NX2 de
       // Lauda dejó de imprimir el código de barras (real 18/11). Por USB/Bluetooth (Report LT) sigue el 2-3-7.
       const net = this.diagnostic.red === true;
-      const r = await this.io.configureReportBarcode(net ? REPORT_NET_BARCODE_CONFIG : undefined);
+      const r = await this.io.configureReportBarcode(net ? REPORT_NET_BARCODE_CONFIG : this.ctx.weightBarcode ? REPORT_WEIGHT_BARCODE_CONFIG : undefined);
       if (r === "ok") {
         if (this.ctx.online && this.ctx.branchId && this.io.saveItemConfig) await this.io.saveItemConfig(this.ctx.branchId, net ? KRETZ_PLU5_WEIGHT_CONFIG : undefined);
         markBarcodeConfigured(this.barcodeKey());
@@ -290,7 +297,7 @@ export class KretzSession implements ScaleSession {
   private barcodeKey(): string {
     const id = this.identity();
     // Por red se marca aparte: así una NX que ya recibió el 2-3-7 vuelve a recibir su formato.
-    return `${this.ctx.scaleKey ?? ""}|${String(id.letter ?? "")}${String(id.equipment ?? "")}${this.diagnostic.red === true ? `|${REPORT_NET_BARCODE_CONFIG}` : ""}`;
+    return `${this.ctx.scaleKey ?? ""}|${String(id.letter ?? "")}${String(id.equipment ?? "")}${this.diagnostic.red === true ? `|${REPORT_NET_BARCODE_CONFIG}` : this.ctx.weightBarcode ? `|${REPORT_WEIGHT_BARCODE_CONFIG}` : ""}`;
   }
 
   async close(): Promise<void> {

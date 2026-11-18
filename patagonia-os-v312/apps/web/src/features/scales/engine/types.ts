@@ -144,6 +144,11 @@ export interface EngineContext {
    * SOLO LECTURA (pedido del dueño 19/10): la 25 cambia el estado de la balanza.
    */
   allowSystelRelease?: boolean;
+  /**
+   * Report por USB/Bluetooth: las etiquetas de los productos por kilo llevan el PESO ("21" + producto de 3 + gramos de
+   * 7) en vez del importe, y Mostrador cobra kilos × precio de Patagonia (pedido de Carplat 18/11/2026).
+   */
+  weightBarcode?: boolean;
 }
 
 export interface ScaleAdapter {
