@@ -64,6 +64,22 @@ tests `rec-logic.test.ts` y `arca-remcarne.test.ts`). `arca-invoice` no se tocó
   idReq correlativo, reglas del manual, cajera sin permiso, contador solo lectura, otra empresa no ve
   nada, plan Estándar sin acceso.
 
+## Prueba real en producción (Della Finca, 2026-11-17/18)
+
+- El certificado propio de Della Finca obtuvo el ticket del WSAA para `wsremcarne` (la relación
+  con el computador fiscal "patagonia" funciona). El ticket de facturación (`wsfe`) no se tocó.
+- ARCA respondió las consultas: categorías de emisor (1 Frigorífico/Establecimiento Faenador,
+  2 Usuario Faena, 3 Abastecedor, 4 Despostador, 5 Consignatario Cárnico, 6 Consignatario Directo,
+  7 Cámara de frío/Depósito), de receptor (las mismas + 8 Carnicero, 9 Restaurantes/parrillas y
+  otros receptores finales), estados, grupos de carne y los domicilios del CUIT (1 Chacabuco 480,
+  2 Obispo Trejo 1096, 0 fiscal Juan del Risco y Alvarado 3427).
+- `consultarPuntosEmision` → 1500 "No se han encontrado datos" y el punto 20 → 4010. La constancia
+  del 00020 muestra **domicilio FISCAL**; el manual pide un domicilio **comercial**. La mercadería sale
+  de Juan del Risco y Alvarado 3427: hay que declarar esa dirección también como domicilio comercial
+  en el Sistema Registral y asociarle el punto (o dar de alta otro punto con ese domicilio).
+- La actividad del punto es "venta al por menor de carnes rojas" y "Carnicero" solo existe como
+  categoría de receptor: el contador tiene que confirmar en qué categoría de emisor está registrada.
+
 ## Falta (en orden)
 
 1. **Homologación de ARCA**: autorizar el certificado de prueba de Patagonia (CUIT 27-18244890-2,

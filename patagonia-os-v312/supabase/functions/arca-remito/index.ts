@@ -284,7 +284,10 @@ async function checkConnection(admin: SupabaseClient, companyId: string, userId:
     const ptsXml = await ws(ctx, "consultarPuntosEmision", auth);
     if (!ptsXml) return save(false, "ARCA no respondió al consultar los puntos de emisión.");
     const pts = parseLista(ptsXml, "arrayPuntosEmision");
-    if (pts.fault || pts.errores.length > 0) return save(false, friendlyRemcarneMessage({ errores: pts.errores, fault: pts.fault }));
+    // 1500 "No se han encontrado datos" = el CUIT no tiene ningún punto para este servicio (visto en producción
+    // el 2026-11-18): no es un error de conexión, se siguen trayendo las tablas para dejar la pantalla lista.
+    const ptsErrores = pts.errores.filter((e) => e.codigo !== "1500");
+    if (pts.fault || ptsErrores.length > 0) return save(false, friendlyRemcarneMessage({ errores: ptsErrores, fault: pts.fault }));
 
     const { data: points } = await admin.from("rec_points").select("*").eq("company_id", companyId).eq("active", true);
     const missing: number[] = [];
@@ -324,15 +327,24 @@ async function checkConnection(admin: SupabaseClient, companyId: string, userId:
       domiciliosPropios
     };
 
+    // Manual de ARCA (1.5 y 3.1): el punto de emisión tiene que estar asociado a un domicilio COMERCIAL.
+    const domicilioAviso =
+      ' Se da de alta en "Administración de Puntos de Venta y Domicilios" para el sistema "Remito Electrónico Web Services", asociado a un domicilio COMERCIAL (si la mercadería sale del domicilio fiscal, primero hay que declarar esa misma dirección como domicilio comercial en el Sistema Registral).';
     if ((points ?? []).length === 0) {
       const list = pts.items.map((i) => i.codigo).join(", ");
-      return save(false, `Conectado con ARCA, pero falta cargar el punto de emisión${list ? ` (ARCA tiene: ${list})` : " (ARCA no tiene ninguno para este CUIT)"}.`, { catalog });
+      return save(
+        false,
+        list
+          ? `Conectado con ARCA, pero falta cargar el punto de emisión (ARCA tiene: ${list}).`
+          : `Conectado con ARCA, pero ARCA no tiene ningún punto de emisión de remito cárnico para este CUIT.${domicilioAviso}`,
+        { catalog }
+      );
     }
     if (missing.length > 0) {
       const list = pts.items.map((i) => i.codigo).join(", ");
       return save(
         false,
-        `En ARCA no hay punto de emisión ${missing.join(", ")} para el remito cárnico${list ? ` (ARCA tiene: ${list})` : ""}. Se da de alta en "Administración de Puntos de Venta y Domicilios" para el sistema "Remito Electrónico Web Services".`,
+        `Conectado con ARCA, pero ARCA todavía no reconoce el punto de emisión ${missing.join(", ")} para el remito cárnico${list ? ` (ARCA tiene: ${list})` : ""}.${domicilioAviso}`,
         { catalog }
       );
     }
