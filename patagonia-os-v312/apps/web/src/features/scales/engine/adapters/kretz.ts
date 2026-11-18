@@ -2,14 +2,17 @@ import { parseAuraPlu } from "../../../inventory/kretz/aura-plu";
 import { planAuraSync, summarizeAuraPlan, type AuraSyncItem } from "../../../inventory/kretz/aura-sync";
 import { getStoredModelId, saveModelId } from "../../../inventory/kretz/models";
 import { isNetPort } from "../../../inventory/kretz/net-port";
+import { chooseReportLabel, type ReportLabelSample } from "../../../inventory/kretz/report-label";
 import {
   configureReportBarcode,
   diagnoseScaleLink,
   expectedReportProduct,
   planScaleSync,
   readAuraListOnScale,
+  readReportLabelSample,
   readReportProduct,
   reportDifferences,
+  setReportLabelCode,
   runAuraSyncOnScale,
   setScaleSerialPort,
   syncProductsToScale,
@@ -41,9 +44,22 @@ export interface KretzIO {
   saveItemConfig?: (branchId: string) => Promise<void>;
   /** Report: manda el formato del código de barras de las etiquetas (1070). */
   configureReportBarcode?: () => Promise<"ok" | "rechazada" | "sin_respuesta">;
+  /** Report: primeros productos de la balanza con su formato de etiqueta (solo lectura). */
+  readLabelSample?: () => Promise<ReportLabelSample[]>;
+  /** Report: formato de etiqueta con el que se graban (y se verifican) los productos. */
+  setLabelCode?: (code: string) => void;
 }
 
-export const KRETZ_IO: KretzIO = { diagnose: diagnoseScaleLink, readAuraList: readAuraListOnScale, runAuraSync: runAuraSyncOnScale, readReport: readReportProduct, sendReport: syncProductsToScale, configureReportBarcode };
+export const KRETZ_IO: KretzIO = {
+  diagnose: diagnoseScaleLink,
+  readAuraList: readAuraListOnScale,
+  runAuraSync: runAuraSyncOnScale,
+  readReport: readReportProduct,
+  sendReport: syncProductsToScale,
+  configureReportBarcode,
+  readLabelSample: () => readReportLabelSample(),
+  setLabelCode: setReportLabelCode
+};
 
 export function kretzModelForLetter(deviceType: string | null | undefined): ScaleModelId {
   return deviceType === "H" ? "kretz-aura" : deviceType === "C" ? "kretz-report-lt" : "kretz-otra";
@@ -126,6 +142,19 @@ export class KretzSession implements ScaleSession {
 
     // Report: se lee cada número antes de escribir, para no pisar otro producto.
     const plan = planScaleSync(active.map(toSyncable));
+    // Formato de etiqueta: el que ya usan los productos reales de ESTA balanza (en la NX2 de Lauda el "01" sale sin
+    // código de barras, real 18/11). Se elige antes de comparar, así un producto grabado con otro formato se corrige.
+    if (this.io.readLabelSample && this.io.setLabelCode) {
+      onProgress("leer", "Revisando cómo imprime las etiquetas tu balanza…");
+      try {
+        const samples = await this.io.readLabelSample();
+        const label = chooseReportLabel(samples, plan.toSend.map((p) => Number(p.code)));
+        this.io.setLabelCode(label);
+        this.diagnostic.formato_etiqueta = { elegido: label, muestras: samples.slice(0, 40) };
+      } catch (err) {
+        this.diagnostic.formato_etiqueta = { error: err instanceof Error ? err.message : String(err) };
+      }
+    }
     const create: ScaleSyncableProduct[] = [];
     const update: ScaleSyncableProduct[] = [];
     const occupied: ReportState["occupied"] = [];

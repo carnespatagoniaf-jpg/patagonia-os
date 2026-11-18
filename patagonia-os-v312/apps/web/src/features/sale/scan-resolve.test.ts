@@ -222,3 +222,38 @@ describe("Peso de la etiqueta fuera del piloto Systel (auditoría 29/10: El Dora
     if (r.type === "label") assert.equal(labelWeightProblem(r.product.unit, r.quantity), "excesivo");
   });
 });
+
+describe("[REAL] Lauda 18/11 (Kretz Report NX2): etiqueta con producto de 5 cifras y peso", () => {
+  // La sucursal quedó leyendo la 2-3-7 con importe (la que Patagonia configura con 1070), pero la etiqueta de la NX2
+  // trae "21" + PLU 00037 + 01740 g + verificador. Antes se leía como "producto N.º 0".
+  const AMOUNT_237 = { prefixLength: 2, pluLength: 3, weightLength: 7, weightDivisor: 100, totalLength: 13, payloadType: "amount" as const };
+  const code = "2100037017403";
+
+  it("lee BONDIOLA/ENTERA (37) con 1,740 kg", () => {
+    assert.ok(validEan13(code));
+    const r = resolveScan(code, [product("37", "Bondiola entera", "kg", 11000)], AMOUNT_237);
+    assert.equal(r.type, "label");
+    if (r.type === "label") {
+      assert.equal(r.product.code, "37");
+      assert.equal(r.quantity, 1.74);
+      assert.equal(r.amount, undefined);
+    }
+  });
+
+  it("el código del producto con ceros adelante (\"0037\") también", () => {
+    const r = resolveScan(code, [product("0037", "Bondiola entera", "kg", 11000)], AMOUNT_237);
+    assert.equal(r.type, "label");
+  });
+
+  it("si el producto no existe sigue el aviso de siempre, y un producto por unidad no se toma por kilos", () => {
+    assert.equal(resolveScan(code, [product("5", "Otro", "kg", 100)], AMOUNT_237).type, "error");
+    assert.equal(resolveScan(code, [product("37", "Bondiola x unidad", "unit", 100)], AMOUNT_237).type, "error");
+  });
+
+  it("no cambia nada cuando el formato de la sucursal ya encuentra el producto", () => {
+    const M2 = AMOUNT_237;
+    const r = resolveScan("2009901890008", [product("99", "Bondiola PifPaf", "kg", 7000)], M2);
+    assert.equal(r.type, "label");
+    if (r.type === "label") assert.equal(r.amount, 1890);
+  });
+});
