@@ -9,11 +9,11 @@ values ('00000000-0000-0000-0000-0000000c2051', 'Carnicería Vieja', 'Pedro', '0
 do $$
 declare r text; v record;
 begin
-  -- 1) Contacto nuevo (aviso de "contacto agregado", sin mensaje): entra para hoy.
+  -- 1) Contacto nuevo (aviso de "contacto agregado", sin mensaje): entra sin fecha (207).
   r := public.kommo_lead_event(9001, 'Juan Pérez', '+54 9 299 444-1111', false, null);
   if r <> 'nuevo' then raise exception '1: %', r; end if;
   select * into v from platform_leads where kommo_contact_id = 9001;
-  if v.stage <> 'contacto' or v.source <> 'Kommo' or v.next_contact_on <> public.today_ar()
+  if v.stage <> 'contacto' or v.source <> 'Kommo' or v.next_contact_on is not null
      or v.replied_at is not null or v.phone_digits <> '2994441111' or v.business_name <> 'Juan Pérez' then
     raise exception '1 fila: %', row_to_json(v);
   end if;
