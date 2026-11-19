@@ -67,7 +67,7 @@ Deno.serve(async (req) => {
   if (!sameKey(req.headers.get("x-kommo-sync-token") ?? "", schedule.token)) return new Response("No autorizado", { status: 401 });
 
   const save = (patch: Record<string, unknown>, result: Record<string, unknown>) =>
-    admin.from("kommo_sync_schedule").update({ ...patch, last_run_at: new Date().toISOString(), last_result: result }).eq("id", 1);
+    admin.from("kommo_sync_schedule").update({ ...patch, subdomain: SUBDOMAIN || null, last_run_at: new Date().toISOString(), last_result: result }).eq("id", 1);
 
   if (!TOKEN || !SUBDOMAIN) {
     await save({}, { skipped: "Faltan los secretos KOMMO_TOKEN y KOMMO_SUBDOMAIN" });

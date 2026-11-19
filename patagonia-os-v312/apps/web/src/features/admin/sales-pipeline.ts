@@ -64,6 +64,8 @@ export interface Lead {
   lastContactedAt?: string | null;
   /** Cuándo contestó por última vez (null = nunca). */
   repliedAt?: string | null;
+  /** Id del contacto en Kommo (migración 205), para el botón "Abrir en Kommo". */
+  kommoContactId?: number | null;
 }
 
 /** Mensajes de seguimiento para quien escribió por la publicidad y no siguió:

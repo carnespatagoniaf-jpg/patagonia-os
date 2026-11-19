@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { contactName, contactStatus, daysSinceTouch, matchesContact } from "./contacts";
+import { contactName, contactStatus, daysSinceTouch, kommoContactLink, kommoSyncNotice, matchesContact } from "./contacts";
 import type { Lead } from "./sales-pipeline";
 
 const NOW = Date.parse("2026-11-20T12:00:00Z");
@@ -43,5 +43,31 @@ describe("contactos", () => {
   it("nombre para mostrar", () => {
     assert.equal(contactName(base), "Sin nombre");
     assert.equal(contactName({ ...base, contactName: "Gustavo" }), "Gustavo");
+  });
+});
+
+describe("Kommo en el panel", () => {
+  it("dirección del contacto en Kommo", () => {
+    assert.equal(kommoContactLink("carnes", 123), "https://carnes.kommo.com/contacts/detail/123");
+    assert.equal(kommoContactLink(" Carnes ", 5), "https://carnes.kommo.com/contacts/detail/5");
+    assert.equal(kommoContactLink(null, 123), null);
+    assert.equal(kommoContactLink("carnes", null), null);
+    assert.equal(kommoContactLink("evil.com/x", 1), null);
+  });
+
+  it("cartel de la sincronización", () => {
+    const now = Date.parse("2026-11-19T15:00:00Z");
+    const base = { configured: true, subdomain: "carnes", lastResult: { contacts: 0 } };
+    assert.equal(kommoSyncNotice(null, now), null);
+    assert.equal(kommoSyncNotice({ ...base, configured: false, lastRunAt: null }, now), null);
+    assert.deepEqual(kommoSyncNotice({ ...base, lastRunAt: "2026-11-19T14:57:00Z" }, now), { ok: true, text: "Kommo sincronizado hace 3 minutos." });
+    const stale = kommoSyncNotice({ ...base, lastRunAt: "2026-11-19T12:00:00Z" }, now);
+    assert.equal(stale?.ok, false);
+    assert.match(stale!.text, /desde hace 3 horas/);
+    const rejected = kommoSyncNotice({ ...base, lastRunAt: "2026-11-19T14:59:00Z", lastResult: { error: "Kommo rechazó el token (401)" } }, now);
+    assert.equal(rejected?.ok, false);
+    assert.match(rejected!.text, /rechazó el token/);
+    assert.equal(kommoSyncNotice({ ...base, lastRunAt: "2026-11-19T14:59:00Z", lastResult: { skipped: "x" } }, now)?.ok, false);
+    assert.equal(kommoSyncNotice({ ...base, lastRunAt: null }, now)?.ok, false);
   });
 });
