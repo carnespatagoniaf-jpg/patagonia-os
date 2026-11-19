@@ -86,13 +86,23 @@ describe("plan de envío a la Aura (D/C en pesos enteros)", () => {
   it("crea, actualiza, deja sin cambios, frena conflictos y omite lo que no entra", () => {
     const plan = planAuraSync(SCALE_NOW, PRODUCTS);
     assert.deepEqual(plan.map((p) => p.action), ["actualizar", "actualizar", "sin_cambios", "conflicto", "reemplazar", "crear", "crear", "omitir", "omitir"]);
-    // FRUTILLA: pasa de P (centavos) a D en pesos, conserva código 1 y validez 5 días.
-    assert.equal(plan[0].record, "000001FRUTILLA        000001D0098000000005");
-    assert.equal(plan[0].expected, "000001FRUTILLA        D0000100098000000005");
+    // FRUTILLA: pasa de P (centavos) a D en pesos, conserva código 1; la validez de 5 días pasa a 0 (sin vencimiento).
+    assert.equal(plan[0].record, "000001FRUTILLA        000001D0098000000000");
+    assert.equal(plan[0].expected, "000001FRUTILLA        D0000100098000000000");
     // MILA BERENJENA: solo cambia el precio.
     assert.equal(plan[1].expected, "000006MILA BERENJENA  D0000600061000000000");
     assert.match(plan[6].record!, /^000121EMPANADAS X12   000121C014501/);
     assert.match(plan[3].reason, /PASTELITOS/);
+  });
+
+  it("nunca deja vencimiento en la etiqueta: mismo precio con validez se reescribe en 0 (2026-11-19)", () => {
+    const plan = planAuraSync(["000097PRUEBA KILO     D0009700260000000002", "000098OTRO            D0009800260000000000"], [
+      { code: "97", name: "Prueba kilo", byWeight: true, price: 26000 },
+      { code: "98", name: "Otro", byWeight: true, price: 26000 }
+    ]);
+    assert.deepEqual(plan.map((p) => p.action), ["actualizar", "sin_cambios"]);
+    assert.equal(plan[0].expected, "000097PRUEBA KILO     D0009700260000000000");
+    assert.match(plan[0].reason, /saca el vencimiento/);
   });
 
   it("con \"Reemplazar\" tildado, pisa los conflictos", () => {

@@ -11,7 +11,8 @@ import { namesEquivalent } from "../matching";
  *
  * Seguridad (igual que la escritura del código de barras, comprobada en Los gringos el 14/10):
  * - el registro se arma sobre lo que la balanza tiene HOY en ese número: solo cambian nombre, precio de la lista 1,
- *   código, forma de venta y código de barras; todo lo demás (lista 2, sector, vencimiento, nutrición, lote) igual;
+ *   código, forma de venta, código de barras y vencimiento (siempre 0: no se imprime); todo lo demás (lista 2, sector,
+ *   nutrición, lote) igual;
  * - un número con OTRO producto no se pisa sin autorización;
  * - un producto sin precio en Patagonia no va (la balanza quedaría en $0);
  * - se relee cada uno y se compara; ante cualquier diferencia se vuelve a escribir lo que había y se frena.
@@ -82,9 +83,10 @@ export function desiredRead(layout: SystelLayout, number: number, product: PushP
   r = put(r, o.pricesAt, pad(priceRaw, 6));
   r = put(r, o.codeAt, pad(number, info.codeDigits));
   r = put(r, o.saleAt, saleType);
-  // Producto nuevo: sin la tara ni el vencimiento del producto que se usó de modelo.
+  // Producto nuevo: sin la tara del producto que se usó de modelo.
   if (!product.byWeight || !current) r = put(r, o.tareAt, pad(0, info.tareDigits));
-  if (!current) r = put(r, o.saleAt - 4, "0000");
+  // Nunca vencimiento en la etiqueta (dueño 2026-11-19, Carnes premium): 0 días = no lo imprime. También en los que ya estaban.
+  r = put(r, o.saleAt - 4, "0000");
   return r;
 }
 
