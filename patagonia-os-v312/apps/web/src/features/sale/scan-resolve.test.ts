@@ -223,6 +223,33 @@ describe("Peso de la etiqueta fuera del piloto Systel (auditoría 29/10: El Dora
   });
 });
 
+describe("[REAL] Oliem 18/11: dos balanzas, una con \"21\" + peso y otra con \"20\" + importe", () => {
+  // La sucursal quedó leyendo 2-5-5 con peso (Report por red). La otra balanza imprime "20" + PLU 5 + importe en pesos.
+  const PLU5_WEIGHT = { prefixLength: 2, pluLength: 5, weightLength: 5, weightDivisor: 1000, totalLength: 13, payloadType: "weight" as const };
+  const products = [product("0000003", "SALAME CAÑOLI", "kg", 40000), product("212", "PROMO PATA", "kg", 3333)];
+
+  it("21 = peso: SALAME CAÑOLI 0,235 kg", () => {
+    const r = resolveScan("2100003002358", products, PLU5_WEIGHT);
+    assert.equal(r.type, "label");
+    if (r.type === "label") {
+      assert.equal(r.product.code, "0000003");
+      assert.equal(r.quantity, 0.235);
+      assert.equal(r.amount, undefined);
+    }
+  });
+
+  it("20 = importe: PROMO PATA $5.183 (1,555 kg), no 5,183 kg", () => {
+    assert.ok(validEan13("2000212051836"));
+    const r = resolveScan("2000212051836", products, PLU5_WEIGHT);
+    assert.equal(r.type, "label");
+    if (r.type === "label") {
+      assert.equal(r.product.code, "212");
+      assert.equal(r.amount, 5183);
+      assert.equal(r.quantity, 1.555);
+    }
+  });
+});
+
 describe("[REAL] Lauda 18/11 (Kretz Report NX2): etiqueta con producto de 5 cifras y peso", () => {
   // La sucursal quedó leyendo la 2-3-7 con importe (la que Patagonia configura con 1070), pero la etiqueta de la NX2
   // trae "21" + PLU 00037 + 01740 g + verificador. Antes se leía como "producto N.º 0".

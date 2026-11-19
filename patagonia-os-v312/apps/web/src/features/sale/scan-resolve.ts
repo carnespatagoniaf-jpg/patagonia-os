@@ -82,11 +82,27 @@ export function amountOverflow(raw: string, config: ScaleConfig, active: Product
  */
 export const KRETZ_PLU5_WEIGHT_CONFIG: ScaleConfig = { prefixLength: 2, pluLength: 5, weightLength: 5, weightDivisor: 1000, totalLength: 13, payloadType: "weight" };
 
-export function kretzWeightLabel(raw: string, config: ScaleConfig, active: Product[]): { label: { plu: string; kind: "weight"; weightKg: number }; product: Product } | null {
-  const same = config.prefixLength === 2 && config.pluLength === 5 && config.weightLength === 5 && config.payloadType === "weight";
-  if (same || !/^2[01]\d{11}$/.test(raw) || !validEan13(raw)) return null;
-  const parsed = parseWeightBarcode(raw, KRETZ_PLU5_WEIGHT_CONFIG);
-  if (!parsed || parsed.kind !== "weight" || parsed.weightKg > MAX_COUNTER_SCALE_KG) return null;
+function isKretzPlu5Weight(config: ScaleConfig): boolean {
+  return config.prefixLength === 2 && config.pluLength === 5 && config.weightLength === 5 && config.totalLength === 13 && config.payloadType === "weight";
+}
+
+/**
+ * Etiqueta Kretz 2-5-5: "21" = gramos, "20" = IMPORTE en pesos enteros (real Oliem 18/11/2026: una Report por red con
+ * "21" + peso y otra balanza en el mismo local con "20" + importe; 2000212051836 = PLU 212, $5.183, que se leía como
+ * 5,183 kg y cobraba 3,3 veces de más).
+ */
+function kretzPlu5Label(raw: string): { plu: string; kind: "weight"; weightKg: number } | { plu: string; kind: "amount"; amount: number } | null {
+  if (!/^2[01]\d{11}$/.test(raw) || !validEan13(raw)) return null;
+  const plu = String(parseInt(raw.slice(2, 7), 10));
+  const value = parseInt(raw.slice(7, 12), 10);
+  if (!(value > 0)) return null;
+  return raw.startsWith("20") ? { plu, kind: "amount", amount: value } : { plu, kind: "weight", weightKg: value / 1000 };
+}
+
+export function kretzWeightLabel(raw: string, config: ScaleConfig, active: Product[]): { label: NonNullable<ReturnType<typeof kretzPlu5Label>>; product: Product } | null {
+  if (isKretzPlu5Weight(config)) return null;
+  const parsed = kretzPlu5Label(raw);
+  if (!parsed || (parsed.kind === "weight" && parsed.weightKg > MAX_COUNTER_SCALE_KG)) return null;
   const product = findByPlu(active, parsed.plu);
   return product && product.unit === "kg" ? { label: parsed, product } : null;
 }
@@ -148,7 +164,13 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
   // "21" trae los GRAMOS (nunca un importe) y "20" sigue siendo importe (etiquetas viejas y productos por unidad).
   const weight237 = kretz237WeightLabel(raw, config, active);
   const is237Weight = weight237 !== null || (isKretz237Amount(config) && raw.startsWith("21"));
-  let label = weight237 ? weight237.label : !is237Weight && looksLikeScaleLabel(raw, config) ? parseWeightBarcode(raw, config) : null;
+  let label = weight237
+    ? weight237.label
+    : !is237Weight && looksLikeScaleLabel(raw, config)
+      ? isKretzPlu5Weight(config) && /^2[01]/.test(raw)
+        ? kretzPlu5Label(raw)
+        : parseWeightBarcode(raw, config)
+      : null;
   let labelProduct = weight237 ? weight237.product : label ? findByPlu(active, label.plu) : undefined;
   if (!labelProduct) {
     const alt = kretzWeightLabel(raw, config, active);
