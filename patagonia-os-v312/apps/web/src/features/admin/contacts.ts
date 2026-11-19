@@ -61,3 +61,41 @@ export function matchesContact(lead: Lead, filter: ContactFilter, query: string,
 export function contactName(lead: Lead): string {
   return lead.contactName || (lead.businessName !== "Sin nombre" ? lead.businessName : "") || "Sin nombre";
 }
+
+/** Dirección del contacto en Kommo (null si no vino de Kommo o falta el subdominio). */
+export function kommoContactLink(subdomain: string | null | undefined, contactId: number | null | undefined): string | null {
+  const sub = (subdomain ?? "").trim().toLowerCase();
+  if (!contactId || !/^[a-z0-9-]+$/.test(sub)) return null;
+  return `https://${sub}.kommo.com/contacts/detail/${contactId}`;
+}
+
+export interface KommoSyncStatus {
+  configured: boolean;
+  subdomain: string | null;
+  lastRunAt: string | null;
+  lastResult: Record<string, unknown> | null;
+}
+
+/** Corre cada 5 minutos: si pasaron 30 sin noticias, algo se cortó. */
+export const KOMMO_STALE_MINUTES = 30;
+
+function agoLabel(minutes: number): string {
+  if (minutes < 1) return "recién";
+  if (minutes < 60) return `hace ${minutes} ${minutes === 1 ? "minuto" : "minutos"}`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `hace ${hours} ${hours === 1 ? "hora" : "horas"}`;
+  const days = Math.floor(hours / 24);
+  return `hace ${days} ${days === 1 ? "día" : "días"}`;
+}
+
+/** Cartel de la sincronización con Kommo: verde si anda, rojo si se cortó. Null si Kommo no está conectado. */
+export function kommoSyncNotice(status: KommoSyncStatus | null, now: number = Date.now()): { ok: boolean; text: string } | null {
+  if (!status?.configured) return null;
+  const error = status.lastResult?.error;
+  if (typeof error === "string" && error) return { ok: false, text: `Kommo no está sincronizando: ${error}` };
+  if (status.lastResult?.skipped) return { ok: false, text: "Kommo no está sincronizando: faltan cargar KOMMO_TOKEN y KOMMO_SUBDOMAIN en Supabase." };
+  if (!status.lastRunAt) return { ok: false, text: "Kommo todavía no sincronizó nunca. Si en 10 minutos sigue así, avisá." };
+  const minutes = Math.max(0, Math.floor((now - new Date(status.lastRunAt).getTime()) / 60_000));
+  if (minutes >= KOMMO_STALE_MINUTES) return { ok: false, text: `Kommo no sincroniza desde ${agoLabel(minutes)}: los mensajes nuevos no están entrando.` };
+  return { ok: true, text: `Kommo sincronizado ${agoLabel(minutes)}.` };
+}

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, MessageCircle, Search } from "lucide-react";
-import { listLeads, scheduleLeads } from "./admin-service";
-import { CONTACT_FILTERS, contactName, contactStatus, daysSinceTouch, matchesContact, type ContactFilter } from "./contacts";
+import { Download, ExternalLink, MessageCircle, Search } from "lucide-react";
+import { getKommoSyncStatus, listLeads, scheduleLeads } from "./admin-service";
+import { CONTACT_FILTERS, contactName, contactStatus, daysSinceTouch, kommoContactLink, kommoSyncNotice, matchesContact, type ContactFilter, type KommoSyncStatus } from "./contacts";
 import { formatDayMonth } from "./company-billing";
 import { whatsappLink, type Lead } from "./sales-pipeline";
 import { LeadImport } from "./LeadImport";
@@ -28,11 +28,14 @@ export function AdminContacts({ onScheduled }: { onScheduled: () => void }) {
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [showImport, setShowImport] = useState(false);
+  const [kommo, setKommo] = useState<KommoSyncStatus | null>(null);
 
   const reload = useCallback(async () => {
     setLoading(true);
     try {
-      setLeads(await listLeads());
+      const [rows, status] = await Promise.all([listLeads(), getKommoSyncStatus()]);
+      setLeads(rows);
+      setKommo(status);
     } catch (err) {
       setError(err instanceof Error ? err.message : "No se pudieron cargar los contactos.");
     } finally {
@@ -49,6 +52,7 @@ export function AdminContacts({ onScheduled }: { onScheduled: () => void }) {
     [leads, filter, query]
   );
   const counts = useMemo(() => Object.fromEntries(CONTACT_FILTERS.map((f) => [f.id, leads.filter((l) => matchesContact(l, f.id, "")).length])), [leads]);
+  const kommoNotice = kommoSyncNotice(kommo);
   const selectedVisible = visible.filter((l) => selected.has(l.id) && l.stage !== "alta");
   const allSelected = visible.length > 0 && visible.every((l) => selected.has(l.id) || l.stage === "alta");
 
@@ -123,6 +127,9 @@ export function AdminContacts({ onScheduled }: { onScheduled: () => void }) {
         />
       )}
 
+      {kommoNotice && (kommoNotice.ok
+        ? <p className="muted" style={{ margin: 0, fontSize: 13 }}>{kommoNotice.text}</p>
+        : <div className="message warning">{kommoNotice.text}</div>)}
       {message && <p className="admin-mp-ok">{message}</p>}
       {error && <div className="message warning">{error}</div>}
 
@@ -162,6 +169,7 @@ export function AdminContacts({ onScheduled }: { onScheduled: () => void }) {
         {visible.map((l) => {
           const status = contactStatus(l);
           const link = whatsappLink(l.phone, "");
+          const kommoLink = kommoContactLink(kommo?.subdomain, l.kommoContactId);
           const days = daysSinceTouch(l);
           return (
             <div key={l.id} className="contacts-row">
@@ -176,6 +184,7 @@ export function AdminContacts({ onScheduled }: { onScheduled: () => void }) {
                 {l.nextContactOn && l.stage !== "perdido" && l.stage !== "alta" ? ` · próximo ${formatDayMonth(l.nextContactOn)}` : ""}
               </span>
               <span className="muted contacts-note">{l.note ?? ""}</span>
+              {kommoLink && <a className="sales-wa-button" href={kommoLink} target="_blank" rel="noreferrer"><ExternalLink size={14} /> Kommo</a>}
               {link && <a className="sales-wa-button" href={link.replace(/\?text=$/, "")} target="_blank" rel="noreferrer"><MessageCircle size={14} /> Abrir</a>}
             </div>
           );

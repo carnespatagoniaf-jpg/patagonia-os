@@ -1,6 +1,7 @@
 import { supabase } from "../../lib/supabase";
 import type { Plan } from "../auth/permissions";
 import type { CompanyUsage, Lead, LeadStage } from "./sales-pipeline";
+import type { KommoSyncStatus } from "./contacts";
 import type { MpSubscription } from "./mercadopago";
 import type { Currency, FinKind, FinOverview, FinPartner } from "./finance";
 import { toError } from "../../lib/supabase-error";
@@ -374,7 +375,7 @@ export async function listLeads(): Promise<Lead[]> {
   interface Row {
     id: string; business_name: string; contact_name: string | null; phone: string | null; province: string | null; city: string | null;
     stage: LeadStage; source: string | null; note: string | null; next_contact_on: string | null; lost_reason: string | null; company_id: string | null; created_at: string;
-    attempts?: number | null; last_contacted_at?: string | null; replied_at?: string | null;
+    attempts?: number | null; last_contacted_at?: string | null; replied_at?: string | null; kommo_contact_id?: number | null;
   }
   return ((data ?? []) as Row[]).map((row) => ({
     id: row.id,
@@ -392,8 +393,19 @@ export async function listLeads(): Promise<Lead[]> {
     createdAt: row.created_at,
     attempts: row.attempts ?? 0,
     lastContactedAt: row.last_contacted_at ?? null,
-    repliedAt: row.replied_at ?? null
+    repliedAt: row.replied_at ?? null,
+    kommoContactId: row.kommo_contact_id ?? null
   }));
+}
+
+/** Estado de la sincronización con Kommo (migración 208). Null si falta la migración o no hay datos. */
+export async function getKommoSyncStatus(): Promise<KommoSyncStatus | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.rpc("kommo_sync_status");
+  if (error) return null;
+  const row = (data as { configured: boolean; subdomain: string | null; last_run_at: string | null; last_result: Record<string, unknown> | null }[] | null)?.[0];
+  if (!row) return null;
+  return { configured: row.configured, subdomain: row.subdomain, lastRunAt: row.last_run_at, lastResult: row.last_result };
 }
 
 export type LeadInput = Omit<Lead, "id" | "createdAt"> & { id: string | null };
