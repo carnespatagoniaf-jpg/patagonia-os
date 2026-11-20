@@ -807,3 +807,67 @@ export async function listDailyChecks(): Promise<DailyCheck[]> {
     problems: Number(r.problems)
   }));
 }
+
+// ── Resumen diario por WhatsApp (migración 209, Edge Function daily-summary) ──
+
+export interface DailySummarySettings {
+  enabled: boolean;
+  recipients: string[];
+  sendHour: number;
+  /** La dirección de la función está anotada en la base (se hace una vez por proyecto). */
+  urlSet: boolean;
+  lastSentOn: string | null;
+  lastRunAt: string | null;
+  lastResult: { sent?: number; failed?: { to: string; error?: string }[]; dryRun?: boolean; reason?: string; error?: string; cost?: { amount: number; error?: string } | null } | null;
+  /** Cuenta de Finanzas donde se anota el costo de cada envío (migración 210). */
+  costAccountId: string | null;
+  /** Precio por mensaje, en la moneda de esa cuenta. */
+  costPerMessage: number | null;
+}
+
+/** Null si la base todavía no tiene la migración 209. */
+export async function getDailySummarySettings(): Promise<DailySummarySettings | null> {
+  if (!supabase) return null;
+  const { data, error } = await supabase.rpc("get_daily_summary_settings");
+  if (error) return null;
+  const d = (data ?? {}) as Record<string, unknown>;
+  return {
+    enabled: Boolean(d.enabled),
+    recipients: Array.isArray(d.recipients) ? (d.recipients as string[]) : [],
+    sendHour: Number(d.send_hour ?? 8),
+    urlSet: Boolean(d.url_set),
+    lastSentOn: (d.last_sent_on as string | null) ?? null,
+    lastRunAt: (d.last_run_at as string | null) ?? null,
+    lastResult: (d.last_result as DailySummarySettings["lastResult"]) ?? null,
+    costAccountId: (d.cost_account_id as string | null) ?? null,
+    costPerMessage: d.cost_per_message === null || d.cost_per_message === undefined ? null : Number(d.cost_per_message)
+  };
+}
+
+export async function setDailySummarySettings(enabled: boolean, recipients: string[], sendHour: number, costAccountId: string | null, costPerMessage: number | null): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("set_daily_summary_settings", {
+    p_enabled: enabled, p_recipients: recipients, p_send_hour: sendHour, p_cost_account_id: costAccountId, p_cost_per_message: costPerMessage
+  });
+  if (error) throw toError(error);
+}
+
+/** Lo manda ya a los números cargados ("Probar ahora"). */
+export async function sendDailySummaryNow(): Promise<{ sent?: number; failed?: { to: string; error?: string }[]; dryRun?: boolean; reason?: string; error?: string }> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { data, error } = await supabase.functions.invoke("daily-summary", { body: { mode: "send" } });
+  if (error) {
+    let message = error.message;
+    const context = (error as { context?: Response }).context;
+    if (context) {
+      try {
+        const body = await context.json();
+        if (body?.error) message = body.error;
+      } catch {
+        // queda el mensaje de siempre
+      }
+    }
+    throw new Error(message.includes("Failed to send") ? "La función daily-summary no está publicada todavía." : message);
+  }
+  return data as Awaited<ReturnType<typeof sendDailySummaryNow>>;
+}

@@ -4,15 +4,17 @@
 import { useCallback, useEffect, useState } from "react";
 import { Scale } from "lucide-react";
 import { listScaleSupportReports, setScaleSupportReportResolved, type ScaleSupportReport } from "./admin-service";
+import { Alert, Badge, Button, Card, EmptyState, useConfirm } from "./ui/components";
 
 /** Reportes de balanzas que mandan los clientes con "Enviar a soporte"
  * (pantalla Balanzas). Las balanzas se prueban en el local del cliente sin
- * nadie de Patagonia OS al lado: esto es lo que pasó allá, con el nombre del cliente. */
+ * nadie nuestro al lado: esto es lo que pasó allá, con el nombre del cliente. */
 export function AdminScaleReports({ onChange }: { onChange?: () => void } = {}) {
   const [reports, setReports] = useState<ScaleSupportReport[]>([]);
   const [error, setError] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [ask, confirmDialog] = useConfirm();
 
   const reload = useCallback(async () => {
     try {
@@ -42,7 +44,7 @@ export function AdminScaleReports({ onChange }: { onChange?: () => void } = {}) 
 
   async function resolveAll() {
     const open = reports.filter((r) => !r.resolvedAt);
-    if (!window.confirm(`¿Marcar los ${open.length} reportes como resueltos?`)) return;
+    if (!(await ask({ title: `¿Marcar los ${open.length} reportes como resueltos?`, confirmLabel: "Marcar resueltos" }))) return;
     setBusyId("all");
     try {
       for (const r of open) await setScaleSupportReportResolved(r.id, true);
@@ -68,55 +70,48 @@ export function AdminScaleReports({ onChange }: { onChange?: () => void } = {}) 
   }
 
   const pending = reports.filter((r) => !r.resolvedAt);
-  if (!error && reports.length === 0) return <p className="muted">No hay reportes de balanzas. Cuando un cliente toque "Enviar a soporte" (o la balanza dé un error), aparece acá.</p>;
 
   return (
-    <section className="admin-trial-alert">
-      <strong>
-        <Scale size={16} style={{ verticalAlign: "-3px" }} /> Reportes de balanzas {pending.length > 0 ? `· ${pending.length} sin resolver` : "· todos resueltos"}
-      </strong>
-      {pending.length > 1 && (
-        <div className="admin-actions" style={{ marginTop: 8 }}>
-          <button className="secondary" disabled={busyId === "all"} onClick={() => void resolveAll()}>
-            {busyId === "all" ? "Marcando…" : `Marcar los ${pending.length} como resueltos`}
-          </button>
-        </div>
+    <Card
+      title={<span className="pa-row"><Scale size={16} aria-hidden /> Reportes de balanzas</span>}
+      subtitle={reports.length === 0 ? undefined : pending.length > 0 ? `${pending.length} sin resolver` : "Todos resueltos"}
+      actions={pending.length > 1 ? <Button variant="secondary" size="sm" loading={busyId === "all"} onClick={() => void resolveAll()}>Marcar los {pending.length} como resueltos</Button> : undefined}
+    >
+      {error && <Alert tone="warn" onClose={() => setError("")}>{error}</Alert>}
+      {!error && reports.length === 0 && (
+        <EmptyState icon={Scale} title="No hay reportes de balanzas">Cuando un cliente toque “Enviar a soporte” (o la balanza dé un error), aparece acá.</EmptyState>
       )}
-      {error && <p className="message warning">{error}</p>}
-      <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+      <div style={{ display: "grid", gap: 8 }}>
         {reports.map((report) => (
-          <details key={report.id} style={{ opacity: report.resolvedAt ? 0.6 : 1 }}>
-            <summary style={{ cursor: "pointer" }}>
-              {report.resolvedAt ? "✓ " : ""}
-              <strong>{report.companyName}</strong>
-              {report.branchName ? ` · ${report.branchName}` : ""} · {new Date(report.createdAt).toLocaleString("es-AR")}
-              {report.note ? ` — "${report.note}"` : ""}
+          <details key={report.id} className="pa-list-row pa-report" style={{ opacity: report.resolvedAt ? 0.65 : 1 }}>
+            <summary>
+              <span className="pa-row" style={{ gap: 8, display: "inline-flex" }}>
+                {report.resolvedAt ? <Badge tone="ok">Resuelto</Badge> : <Badge tone="warn">Sin resolver</Badge>}
+                <strong>{report.companyName}</strong>
+                <span className="pa-muted" style={{ fontWeight: 400 }}>
+                  {report.branchName ? `${report.branchName} · ` : ""}{new Date(report.createdAt).toLocaleString("es-AR")}
+                  {report.note ? ` — “${report.note}”` : ""}
+                </span>
+              </span>
             </summary>
-            <div style={{ marginTop: 8 }}>
-              <p className="muted" style={{ margin: "0 0 6px", fontSize: 13 }}>
+            <div style={{ display: "grid", gap: 8, marginTop: 8 }}>
+              <span className="pa-muted" style={{ fontSize: 13 }}>
                 Enviado por {report.userName ?? "-"} · {report.connections.length} balanza(s) configurada(s)
-              </p>
-              <pre style={{ maxHeight: 260, overflowY: "auto", background: "#f7f7f8", borderRadius: 6, padding: 10, fontSize: 12, whiteSpace: "pre-wrap", margin: "0 0 8px" }}>
-                {fullText(report)}
-              </pre>
-              <div className="admin-actions">
-                <button
-                  className="secondary"
-                  onClick={() => {
-                    void navigator.clipboard.writeText(fullText(report));
-                    setCopiedId(report.id);
-                  }}
-                >
+              </span>
+              <pre className="pa-pre">{fullText(report)}</pre>
+              <div className="pa-row">
+                <Button variant="secondary" size="sm" onClick={() => { void navigator.clipboard.writeText(fullText(report)); setCopiedId(report.id); }}>
                   {copiedId === report.id ? "¡Copiado!" : "Copiar todo"}
-                </button>
-                <button className="secondary" disabled={busyId === report.id} onClick={() => void toggleResolved(report)}>
+                </Button>
+                <Button variant="secondary" size="sm" loading={busyId === report.id} onClick={() => void toggleResolved(report)}>
                   {report.resolvedAt ? "Marcar sin resolver" : "Marcar resuelto"}
-                </button>
+                </Button>
               </div>
             </div>
           </details>
         ))}
       </div>
-    </section>
+      {confirmDialog}
+    </Card>
   );
 }

@@ -162,7 +162,7 @@ export function followUpMessage(kind: FollowUpKind, name: string | null, busines
     case "no_sales":
       return `${hi} Ya tenés los productos cargados en Patagonia System 👏 ¿Probaste hacer una venta desde Mostrador? Si querés te muestro en 5 minutos por videollamada cómo cobrar y cerrar la caja.`;
     case "trial_ending":
-      return `${hi} Tu prueba de Patagonia System para ${business} termina en estos días. Para seguir usándolo sin perder nada de lo que cargaste, te paso los planes: Básico $20.000, Estándar $39.000 y Full $69.000 por mes. ¿Cuál te sirve más?`;
+      return `${hi} Tu prueba de Patagonia System para ${business} termina en estos días. Para seguir usándolo sin perder nada de lo que cargaste, el abono es de $39.000 por mes por local. ¿Te paso cómo pagarlo?`;
     case "trial_expired":
       return `${hi} Tu prueba de Patagonia System terminó. Todo lo que cargaste sigue guardado. ¿Querés que te extienda unos días más para probarlo con tranquilidad, o lo dejamos acá? Cualquier respuesta me sirve.`;
     case "paid_idle":
