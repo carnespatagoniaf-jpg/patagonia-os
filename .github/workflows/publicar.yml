@@ -228,7 +228,7 @@ jobs:
           set -e
           if [ -z "$SUPABASE_ACCESS_TOKEN" ] || [ -z "$PROD_REF" ]; then echo "::error::Faltan SUPABASE_ACCESS_TOKEN o SUPABASE_PROJECT_REF en el entorno produccion."; exit 1; fi
           # Las que se llaman sin sesión (el chat de ayuda; mp-sync, que llama la base cada hora con su token); todas las demás exigen la sesión del usuario.
-          SIN_SESION=" help-chat mp-sync kommo-webhook kommo-sync "
+          SIN_SESION=" help-chat mp-sync kommo-webhook kommo-sync daily-summary "
           deploy() {
             local fn="$1" ref="$2" extra=""
             case "$SIN_SESION" in *" $fn "*) extra="--no-verify-jwt" ;; esac

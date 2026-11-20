@@ -144,6 +144,8 @@ function rpc(name: string, args: Record<string, unknown> = {}): unknown {
         monthly: [{ month: date(0).slice(0, 7) + "-01", currency: "ARS", income: 585000, expenses: 160000 }]
       };
     case "fin_meta_status": return { connected: false };
+    case "get_daily_summary_settings":
+      return { enabled: false, recipients: [], send_hour: 8, url_set: true, last_sent_on: null, last_run_at: null, last_result: null };
     case "kommo_sync_status": return null;
     case "list_payments_for_admin": return [];
     default:
