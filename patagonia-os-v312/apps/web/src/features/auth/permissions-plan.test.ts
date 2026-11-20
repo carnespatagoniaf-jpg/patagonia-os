@@ -86,3 +86,12 @@ describe("Clientes sin cobrar (customers.payments, 2026-11-17)", () => {
     assert.equal(can(owner("basico"), "customers.payments"), false);
   });
 });
+
+describe("pantalla suelta escondida (no:page:<página>, 2026-11-20)", () => {
+  it("Fabrica: sin Exportar pero con Reportes", () => {
+    const p: UserProfile = { ...owner("estandar"), role: "admin", features: ["no:page:export"] };
+    assert.equal(canAccessPage(p, "export"), false);
+    assert.equal(canAccessPage(p, "reports"), true);
+    assert.equal(canAccessPage(p, "profitability"), true);
+  });
+});
