@@ -12,20 +12,22 @@ type Demo = {
   name: string; owner: string; email: string; phone: string; province: string; city: string; plan: string;
   /** Días hasta el vencimiento (negativo = vencido). null = nunca pagó. */
   paid: number | null; trial: number | null; lastPay: number | null; sales7d: number; lastSale: number | null; signIn: number | null; products: number;
+  /** Ventas por semana de antes (para mostrar a quién se le cayeron las ventas). Sin dato = igual que esta semana. */
+  usual?: number;
   active?: boolean; branches?: number; users?: number;
 };
 
 const DEMO: Demo[] = [
   { name: "Carnicería El Novillo", owner: "Ana Pérez", email: "ana@ejemplo.com", phone: "2804 555-101", province: "Chubut", city: "Trelew", plan: "full", paid: 23, trial: null, lastPay: -7, sales7d: 412, lastSale: 0, signIn: 0, products: 184, branches: 2, users: 5 },
   { name: "Granja La Esquina", owner: "Marcos Díaz", email: "marcos@ejemplo.com", phone: "299 555-202", province: "Neuquén", city: "Neuquén", plan: "estandar", paid: -9, trial: null, lastPay: -40, sales7d: 230, lastSale: -1, signIn: -1, products: 96 },
-  { name: "Fiambrería Don Tito", owner: "Rubén Sosa", email: "ruben@ejemplo.com", phone: "2966 555-303", province: "Santa Cruz", city: "Río Gallegos", plan: "estandar", paid: 9, trial: null, lastPay: -21, sales7d: 41, lastSale: -9, signIn: -6, products: 140 },
+  { name: "Fiambrería Don Tito", owner: "Rubén Sosa", email: "ruben@ejemplo.com", phone: "2966 555-303", province: "Santa Cruz", city: "Río Gallegos", plan: "estandar", paid: 9, trial: null, lastPay: -21, sales7d: 41, lastSale: -1, signIn: -6, products: 140, usual: 300 },
   { name: "Súper Los Andes", owner: "Lucía Gómez", email: "lucia@ejemplo.com", phone: "260 555-404", province: "Mendoza", city: "San Rafael", plan: "full", paid: null, trial: 4, lastPay: null, sales7d: 0, lastSale: null, signIn: -2, products: 12 },
   { name: "Pollería Doña Rosa", owner: "Rosa Medina", email: "rosa@ejemplo.com", phone: "2920 555-505", province: "Río Negro", city: "Viedma", plan: "basico", paid: 47, trial: null, lastPay: -13, sales7d: 288, lastSale: -2, signIn: -2, products: 58 },
   { name: "Carnes del Sur", owner: "Javier Ruiz", email: "javier@ejemplo.com", phone: "2901 555-606", province: "Tierra del Fuego", city: "Ushuaia", plan: "estandar", paid: 3, trial: null, lastPay: -27, sales7d: 356, lastSale: 0, signIn: 0, products: 210 },
   { name: "La Vaquita", owner: "Sofía Herrera", email: "sofia@ejemplo.com", phone: "2954 555-707", province: "La Pampa", city: "Santa Rosa", plan: "full", paid: 15, trial: null, lastPay: -15, sales7d: 501, lastSale: 0, signIn: 0, products: 230, branches: 3, users: 8 },
   { name: "Frigorífico Patagones", owner: "Pedro Acosta", email: "pedro@ejemplo.com", phone: "2920 555-808", province: "Buenos Aires", city: "Carmen de Patagones", plan: "full", paid: 28, trial: null, lastPay: -2, sales7d: 97, lastSale: -1, signIn: -1, products: 75 },
   { name: "Almacén Lo de Menon", owner: "Carla Benítez", email: "carla@ejemplo.com", phone: "387 555-909", province: "Salta", city: "Salta", plan: "estandar", paid: null, trial: -3, lastPay: null, sales7d: 0, lastSale: null, signIn: -5, products: 0 },
-  { name: "Carnicería San Cayetano", owner: "Hugo Castro", email: "hugo@ejemplo.com", phone: "351 555-010", province: "Córdoba", city: "Villa María", plan: "estandar", paid: -2, trial: null, lastPay: -32, sales7d: 12, lastSale: -5, signIn: -4, products: 120 },
+  { name: "Carnicería San Cayetano", owner: "Hugo Castro", email: "hugo@ejemplo.com", phone: "351 555-010", province: "Córdoba", city: "Villa María", plan: "estandar", paid: -2, trial: null, lastPay: -32, sales7d: 12, lastSale: -5, signIn: -4, products: 120, usual: 150 },
   { name: "El Buen Corte", owner: "Laura Ríos", email: "laura@ejemplo.com", phone: "", province: "Santa Fe", city: "Rafaela", plan: "basico", paid: null, trial: null, lastPay: null, sales7d: 0, lastSale: -60, signIn: -58, products: 44, active: false }
 ];
 
@@ -88,8 +90,8 @@ function rpc(name: string, args: Record<string, unknown> = {}): unknown {
     case "register_company_payment": return date(30 * Number(args.p_months ?? 1));
     case "list_sales_pipeline_for_admin":
       return DEMO.map((d, i) => ({
-        company_id: `c${i + 1}`, product_count: d.products, sale_count: d.sales7d * 8, sales_last_7d: d.sales7d,
-        first_sale_at: d.lastSale === null ? null : iso(-150), last_sale_at: d.lastSale === null ? null : iso(d.lastSale),
+        company_id: `c${i + 1}`, product_count: d.products, sale_count: (d.usual ?? d.sales7d) * 20 + d.sales7d, sales_last_7d: d.sales7d,
+        first_sale_at: d.lastSale === null ? null : iso(-147), last_sale_at: d.lastSale === null ? null : iso(d.lastSale),
         closed_shift_count: 40, purchase_count: 12, last_sign_in_at: d.signIn === null ? null : iso(d.signIn),
         sales_note: null, sales_contacted_at: null, sales_lost_reason: null
       }));
@@ -142,6 +144,8 @@ function rpc(name: string, args: Record<string, unknown> = {}): unknown {
         monthly: [{ month: date(0).slice(0, 7) + "-01", currency: "ARS", income: 585000, expenses: 160000 }]
       };
     case "fin_meta_status": return { connected: false };
+    case "get_daily_summary_settings":
+      return { enabled: false, recipients: [], send_hour: 8, url_set: true, last_sent_on: null, last_run_at: null, last_result: null, cost_account_id: null, cost_per_message: null };
     case "kommo_sync_status": return null;
     case "list_payments_for_admin": return [];
     default:
