@@ -1,7 +1,9 @@
 import { useEffect, useState } from "react";
 import { Copy, MessageCircle, Send } from "lucide-react";
-import { getDailySummarySettings, sendDailySummaryNow, setDailySummarySettings, type DailySummarySettings } from "./admin-service";
+import { getDailySummarySettings, getFinanceOverview, sendDailySummaryNow, setDailySummarySettings, type DailySummarySettings } from "./admin-service";
+import type { FinAccount } from "./finance";
 import { whatsappLink } from "./sales-pipeline";
+import { amountInputText, parseAmount } from "../../lib/money";
 import { Alert, Badge, Button, Card, Checkbox, Field, Input, Select } from "./ui/components";
 
 const PHONE_KEY = "patagonia-admin-whatsapp";
@@ -21,12 +23,13 @@ function resultText(r: DailySummarySettings["lastResult"]): { tone: "ok" | "warn
   if (r.dryRun) return { tone: "warn", text: "No se mandó: falta conectar el número de WhatsApp (secretos de Meta)." };
   const failed = r.failed ?? [];
   if (failed.length > 0) return { tone: (r.sent ?? 0) > 0 ? "warn" : "danger", text: `Llegó a ${r.sent ?? 0}; falló en ${failed.length}: ${failed[0].error ?? ""}` };
-  return { tone: "ok", text: `Mandado a ${r.sent ?? 0} ${(r.sent ?? 0) === 1 ? "número" : "números"}.` };
+  const costText = r.cost ? (r.cost.error ? ` No se pudo anotar el costo: ${r.cost.error}` : ` Costo anotado en Finanzas: ${r.cost.amount.toLocaleString("es-AR")}.`) : "";
+  return { tone: r.cost?.error ? "warn" : "ok", text: `Mandado a ${r.sent ?? 0} ${(r.sent ?? 0) === 1 ? "número" : "números"}.${costText}` };
 }
 
 /**
  * "Resumen del día" (Etapa 4): el texto listo, un botón para mandártelo a mano y el envío automático por
- * WhatsApp (migración 209 + Edge Function daily-summary) a la hora que elijas.
+ * WhatsApp (migraciones 209-210 + Edge Function daily-summary) a la hora que elijas, con el costo anotado en Finanzas.
  */
 export function DailySummaryCard({ text }: { text: string }) {
   const [phone, setPhone] = useState(readPhone);
@@ -35,6 +38,9 @@ export function DailySummaryCard({ text }: { text: string }) {
   const [enabled, setEnabled] = useState(false);
   const [numbers, setNumbers] = useState("");
   const [hour, setHour] = useState(8);
+  const [accounts, setAccounts] = useState<FinAccount[]>([]);
+  const [costAccountId, setCostAccountId] = useState("");
+  const [price, setPrice] = useState("");
   const [busy, setBusy] = useState<"" | "save" | "send">("");
   const [notice, setNotice] = useState<{ tone: "ok" | "warn" | "danger"; text: string } | null>(null);
   const link = whatsappLink(phone.trim() || null, text);
@@ -46,11 +52,17 @@ export function DailySummaryCard({ text }: { text: string }) {
       setEnabled(s.enabled);
       setNumbers(s.recipients.join(", "));
       setHour(s.sendHour);
+      setCostAccountId(s.costAccountId ?? "");
+      setPrice(s.costPerMessage !== null ? amountInputText(s.costPerMessage) : "");
     }
   }
 
   useEffect(() => {
     void load();
+    // Cuentas de Finanzas donde anotar el costo (la tarjeta, por ejemplo).
+    getFinanceOverview(new Date().toISOString().slice(0, 7))
+      .then((o) => setAccounts(o.accounts.filter((a) => a.active)))
+      .catch(() => setAccounts([]));
   }, []);
 
   function savePhone(value: string) {
@@ -63,12 +75,16 @@ export function DailySummaryCard({ text }: { text: string }) {
   }
 
   const list = numbers.split(/[,;\n]+/).map((n) => n.trim()).filter(Boolean);
+  const priceValue = price.trim() ? parseAmount(price) : null;
+  const priceOk = priceValue === null || (Number.isFinite(priceValue) && priceValue >= 0);
+  const costAccount = accounts.find((a) => a.id === costAccountId) ?? null;
 
   async function save() {
     setBusy("save");
     setNotice(null);
     try {
-      await setDailySummarySettings(enabled, list, hour);
+      if (!priceOk) throw new Error("El precio por mensaje no es válido.");
+      await setDailySummarySettings(enabled, list, hour, costAccountId || null, costAccountId ? priceValue : null);
       await load();
       setNotice({ tone: "ok", text: enabled ? `Listo: todos los días a las ${hour} h.` : "Guardado. El envío automático quedó apagado." });
     } catch (err) {
@@ -93,7 +109,13 @@ export function DailySummaryCard({ text }: { text: string }) {
   }
 
   const last = resultText(settings?.lastResult ?? null);
-  const dirty = settings !== null && (enabled !== settings.enabled || hour !== settings.sendHour || list.join(",") !== settings.recipients.join(","));
+  const dirty =
+    settings !== null &&
+    (enabled !== settings.enabled ||
+      hour !== settings.sendHour ||
+      list.join(",") !== settings.recipients.join(",") ||
+      (costAccountId || null) !== settings.costAccountId ||
+      (costAccountId ? priceValue : null) !== settings.costPerMessage);
 
   return (
     <Card
@@ -135,6 +157,32 @@ export function DailySummaryCard({ text }: { text: string }) {
                 <Select id={id} value={hour} onChange={(e) => setHour(Number(e.target.value))}>
                   {HOURS.map((h) => <option key={h} value={h}>{String(h).padStart(2, "0")}:00</option>)}
                 </Select>
+              )}
+            </Field>
+            <Field label="Anotar el costo en" hint="Cada envío se anota como gasto “WhatsApp” en Finanzas.">
+              {(id) => (
+                <Select id={id} value={costAccountId} onChange={(e) => setCostAccountId(e.target.value)}>
+                  <option value="">No anotarlo</option>
+                  {accounts.map((a) => <option key={a.id} value={a.id}>{a.name} ({a.currency})</option>)}
+                </Select>
+              )}
+            </Field>
+            <Field
+              label={`Precio por mensaje${costAccount ? ` (${costAccount.currency})` : ""}`}
+              hint={costAccount?.currency === "USD" ? "Lo que cobra Meta, ej. 0,03" : "En pesos, lo que te cobra la tarjeta por mensaje"}
+              error={priceOk ? undefined : "No es un número válido"}
+            >
+              {(id) => (
+                <Input
+                  id={id}
+                  inputMode="decimal"
+                  className="pa-num"
+                  disabled={!costAccountId}
+                  placeholder={costAccount?.currency === "USD" ? "0,03" : "40"}
+                  value={price}
+                  onChange={(e) => setPrice(e.target.value)}
+                  invalid={!priceOk}
+                />
               )}
             </Field>
           </div>

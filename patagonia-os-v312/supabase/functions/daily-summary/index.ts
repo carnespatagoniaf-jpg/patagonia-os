@@ -10,6 +10,7 @@
 // WHATSAPP_PHONE_NUMBER_ID (el id del número nuevo, no el número). Opcionales: WHATSAPP_TEMPLATE (por defecto
 // resumen_diario), WHATSAPP_TEMPLATE_LANG (es_AR), WHATSAPP_API_VERSION (v23.0), BRAND_NAME (Patagonia System).
 // Sin los dos primeros no manda nada: guarda el texto en last_result para ver qué hubiera mandado.
+// Si el dueño eligió cuenta y precio (migración 210), cada envío anota un gasto "WhatsApp" en Finanzas.
 // Deploy con --no-verify-jwt (la base la llama sin sesión; la sesión del panel se revisa acá adentro).
 
 import { createClient } from "npm:@supabase/supabase-js@2";
@@ -128,7 +129,32 @@ Deno.serve(async (req) => {
   const results = [];
   for (const to of recipients) results.push(await sendTemplate(to, params));
   const sent = results.filter((r) => r.ok).length;
-  const result = { sent, failed: results.filter((r) => !r.ok), text, mode };
+
+  // Migración 210: el costo se anota solo en Finanzas (cuenta y precio por mensaje que eligió el dueño).
+  let cost: { amount: number; error?: string } | null = null;
+  const price = Number(schedule.cost_per_message ?? 0);
+  if (sent > 0 && schedule.cost_account_id && price > 0) {
+    const amount = Math.round(sent * price * 100) / 100;
+    if (amount > 0) {
+      const key = mode === "cron" ? `resumen|${summary.today}` : `resumen-prueba|${new Date(now).toISOString()}`;
+      const { error: costErr } = await admin.from("platform_fin_movements").upsert(
+        {
+          whatsapp_key: key,
+          occurred_on: summary.today,
+          account_id: schedule.cost_account_id,
+          kind: "gasto",
+          direction: "out",
+          amount,
+          category: "WhatsApp",
+          description: `Resumen diario por WhatsApp (${sent} ${sent === 1 ? "mensaje" : "mensajes"}${mode === "cron" ? "" : ", prueba"})`
+        },
+        { onConflict: "whatsapp_key" }
+      );
+      cost = costErr ? { amount, error: costErr.message } : { amount };
+    }
+  }
+
+  const result = { sent, failed: results.filter((r) => !r.ok), text, mode, cost };
   // Se marca el día aunque alguno falle, así no le llegan diez mensajes si Meta rechaza uno.
   await save({ last_result: result, ...(mode === "cron" ? { last_sent_on: summary.today } : {}) });
   return json(result, sent > 0 ? 200 : 502);

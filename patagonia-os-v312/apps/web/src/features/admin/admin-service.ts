@@ -818,7 +818,11 @@ export interface DailySummarySettings {
   urlSet: boolean;
   lastSentOn: string | null;
   lastRunAt: string | null;
-  lastResult: { sent?: number; failed?: { to: string; error?: string }[]; dryRun?: boolean; reason?: string; error?: string } | null;
+  lastResult: { sent?: number; failed?: { to: string; error?: string }[]; dryRun?: boolean; reason?: string; error?: string; cost?: { amount: number; error?: string } | null } | null;
+  /** Cuenta de Finanzas donde se anota el costo de cada envío (migración 210). */
+  costAccountId: string | null;
+  /** Precio por mensaje, en la moneda de esa cuenta. */
+  costPerMessage: number | null;
 }
 
 /** Null si la base todavía no tiene la migración 209. */
@@ -834,13 +838,17 @@ export async function getDailySummarySettings(): Promise<DailySummarySettings | 
     urlSet: Boolean(d.url_set),
     lastSentOn: (d.last_sent_on as string | null) ?? null,
     lastRunAt: (d.last_run_at as string | null) ?? null,
-    lastResult: (d.last_result as DailySummarySettings["lastResult"]) ?? null
+    lastResult: (d.last_result as DailySummarySettings["lastResult"]) ?? null,
+    costAccountId: (d.cost_account_id as string | null) ?? null,
+    costPerMessage: d.cost_per_message === null || d.cost_per_message === undefined ? null : Number(d.cost_per_message)
   };
 }
 
-export async function setDailySummarySettings(enabled: boolean, recipients: string[], sendHour: number): Promise<void> {
+export async function setDailySummarySettings(enabled: boolean, recipients: string[], sendHour: number, costAccountId: string | null, costPerMessage: number | null): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
-  const { error } = await supabase.rpc("set_daily_summary_settings", { p_enabled: enabled, p_recipients: recipients, p_send_hour: sendHour });
+  const { error } = await supabase.rpc("set_daily_summary_settings", {
+    p_enabled: enabled, p_recipients: recipients, p_send_hour: sendHour, p_cost_account_id: costAccountId, p_cost_per_message: costPerMessage
+  });
   if (error) throw toError(error);
 }
 

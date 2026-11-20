@@ -145,7 +145,7 @@ function rpc(name: string, args: Record<string, unknown> = {}): unknown {
       };
     case "fin_meta_status": return { connected: false };
     case "get_daily_summary_settings":
-      return { enabled: false, recipients: [], send_hour: 8, url_set: true, last_sent_on: null, last_run_at: null, last_result: null };
+      return { enabled: false, recipients: [], send_hour: 8, url_set: true, last_sent_on: null, last_run_at: null, last_result: null, cost_account_id: null, cost_per_message: null };
     case "kommo_sync_status": return null;
     case "list_payments_for_admin": return [];
     default:
