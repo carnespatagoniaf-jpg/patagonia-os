@@ -299,6 +299,9 @@ export function canAccessPage(profile: UserProfile | null, page: Page) {
   // Pedidos para tienda (196): el dueño y el administrador también (la base exige lo mismo).
   const ownerOrders = page === "orders" && ordersForOwner(profile) && (profile?.role === "owner" || profile?.role === "admin");
   if (onlyRoles && !ownerOrders && (!profile || !onlyRoles.includes(profile.role))) return false;
+  // Pantalla suelta escondida para toda la empresa (2026-11-20, Fabrica: Exportar comparte reports.view con Reportes,
+  // así que "no:reports.view" se llevaría las dos). companies.features "no:page:<página>". Solo web.
+  if (profile?.features?.includes(`no:page:${page}`)) return false;
   const feature = PAGE_REQUIRED_FEATURE[page];
   if (feature && !profile?.features?.includes(feature)) return false;
   const minPlan = PAGE_MIN_PLAN[page];
