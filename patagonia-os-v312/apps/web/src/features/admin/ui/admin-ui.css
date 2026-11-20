@@ -292,6 +292,17 @@ body:has(.pa-shell[data-pa-theme="dark"]) { background: #151212; }
 .pa .pa-legacy { display: grid; gap: var(--pa-4); min-width: 0; }
 .pa .pa-legacy:empty { display: none; }
 
+/* ── Buscador rápido (Ctrl+K) ───────────────────────── */
+.pa .pa-kbd { font: inherit; font-size: 11px; font-weight: 600; padding: 1px 6px; border-radius: 4px; border: 1px solid var(--pa-line-strong); color: var(--pa-muted); background: var(--pa-surface-2); }
+@media (max-width: 600px) { .pa .pa-kbd { display: none; } }
+.pa-search { position: relative; }
+.pa-search svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--pa-muted); pointer-events: none; }
+.pa-search .pa-input { padding-left: 36px; }
+.pa-palette { display: grid; gap: 2px; max-height: min(420px, 55dvh); overflow-y: auto; }
+.pa-palette-item { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: var(--pa-3); width: 100%; padding: var(--pa-2) var(--pa-3); border: 0; border-radius: var(--pa-r); background: none; color: var(--pa-ink); font: inherit; text-align: left; cursor: pointer; }
+.pa-palette-item[aria-selected="true"] { background: var(--pa-brand-soft); }
+.pa-palette-icon { width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center; background: var(--pa-surface-2); color: var(--pa-brand-ink); }
+
 /* ── Soporte ────────────────────────────────────────── */
 .pa .pa-report { display: block; }
 .pa .pa-pre { max-height: 260px; overflow: auto; margin: 0; padding: var(--pa-3); border-radius: var(--pa-r-sm); background: var(--pa-surface); border: 1px solid var(--pa-line); color: var(--pa-ink); font-size: 12px; white-space: pre-wrap; }

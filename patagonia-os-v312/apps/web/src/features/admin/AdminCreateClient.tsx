@@ -9,6 +9,8 @@ import {
 import { PLAN_LABELS, PLAN_LIMITS, type Plan } from "../auth/permissions";
 import { billingLabel, billingReminderMessage, billingStatus, formatDayMonth, revenueSummary, matchesBillingFilter, matchesCompanySearch, STATUS_ORDER, type BillingStatus } from "./company-billing";
 import type { CompanyUsage } from "./sales-pipeline";
+import { HEALTH_LABEL, HEALTH_RANK, clientHealth, healthMessage, upsellCandidates, type Health, type HealthLevel } from "./client-health";
+import { CommandPalette } from "./CommandPalette";
 import { AdminThemeRoot } from "./ui/theme";
 import { Alert, Badge, BrandMark, Button, Checkbox, Field, Input, Kpi, Modal, Select, Skeleton, Tabs, ThemeToggle, useConfirm, type Tone } from "./ui/components";
 import { DataTable, type Column, type TableFilter } from "./ui/DataTable";
@@ -592,6 +594,14 @@ export function AdminCreateClient() {
     return days <= 0 ? "Hoy" : days === 1 ? "Ayer" : `Hace ${days} días`;
   }
 
+  /** Semáforo del cliente (Etapa 4): uso + cobro. */
+  function healthOf(company: CompanySummary): Health {
+    const info = collectInfo(company);
+    const owes = info.mpIssue !== null || (!info.mpOk && matchesBillingFilter(info.status, "owes"));
+    return clientHealth({ createdAt: company.createdAt, owes, usage: usage[company.id] });
+  }
+  const HEALTH_TONE: Record<HealthLevel, Tone> = { ok: "ok", warn: "warn", risk: "danger" };
+
   const clientColumns: Column<CompanySummary>[] = [
     { key: "n", header: "N.º", render: (c) => c.clientNumber ?? "-", sortValue: (c) => c.clientNumber ?? null, align: "right", hideOn: "sm" },
     {
@@ -606,6 +616,16 @@ export function AdminCreateClient() {
       ),
       sortValue: (c) => c.name,
       csvValue: (c) => c.name
+    },
+    {
+      key: "health",
+      header: "Salud",
+      render: (c) => {
+        const h = healthOf(c);
+        return <span title={h.reasons.join(" · ") || "Vende y está al día"}><Badge tone={HEALTH_TONE[h.level]}>{HEALTH_LABEL[h.level]}</Badge></span>;
+      },
+      sortValue: (c) => HEALTH_RANK[healthOf(c).level],
+      csvValue: (c) => [HEALTH_LABEL[healthOf(c).level], ...healthOf(c).reasons].join(" · ")
     },
     { key: "owner", header: "Dueño", render: () => null, csvValue: (c) => c.ownerFullName ?? "", csvOnly: true },
     { key: "phone", header: "Teléfono", render: () => null, csvValue: (c) => c.contactPhone ?? "", csvOnly: true },
@@ -662,16 +682,12 @@ export function AdminCreateClient() {
     }
   ];
 
-  const riskTest = (c: CompanySummary) => {
-    if (!usage[c.id]) return false;
-    const days = daysSinceSale(c);
-    return days === null ? usage[c.id].productCount > 0 || statusOf(c) !== "none" : days >= 7;
-  };
 
   const clientFilters: TableFilter<CompanySummary>[] = [
     { key: "owes", label: "Deben", test: (c) => matchesBillingFilter(statusOf(c), "owes") },
     { key: "due", label: "Vencen pronto", test: (c) => statusOf(c) === "due_soon" },
-    { key: "risk", label: "Sin vender 7 días o más", test: riskTest },
+    { key: "risk", label: "En riesgo", test: (c) => healthOf(c).level === "risk" },
+    { key: "warn", label: "Para mirar", test: (c) => healthOf(c).level === "warn" },
     { key: "trial", label: "En prueba", test: (c) => matchesBillingFilter(statusOf(c), "trial") },
     { key: "paid", label: "Pagaron", test: (c) => matchesBillingFilter(statusOf(c), "paid") },
     { key: "none", label: "Sin pagos", test: (c) => matchesBillingFilter(statusOf(c), "none") }
@@ -693,6 +709,21 @@ export function AdminCreateClient() {
           {!company.active && <Badge tone="neutral">Desactivado</Badge>}
           {info.mpOk && info.nextCharge && <span className="pa-muted" style={{ fontSize: 13 }}>Próximo cobro automático: {formatDayMonth(info.nextCharge)}</span>}
         </div>
+
+        {(() => {
+          const h = healthOf(company);
+          if (h.level === "ok") return null;
+          const link = whatsappLink(company.contactPhone, healthMessage(BRAND.name, company.name, company.ownerFullName, h));
+          return (
+            <Alert
+              tone={h.level === "risk" ? "danger" : "warn"}
+              title={h.level === "risk" ? "Puede dejar de usar el sistema" : "Para mirar"}
+              action={link ? <a className="pa-btn pa-btn-whatsapp pa-btn-sm" href={link} target="_blank" rel="noreferrer"><MessageCircle size={14} /> Escribirle por WhatsApp</a> : undefined}
+            >
+              {h.reasons.join(" · ")}
+            </Alert>
+          );
+        })()}
 
         {u && (
           <div className="pa-mini-kpis">
@@ -920,6 +951,12 @@ export function AdminCreateClient() {
         <header className="pa-topbar">
           <BrandMark suffix="Panel" />
           <div className="pa-row">
+            <CommandPalette
+              companies={companies}
+              onOpenClient={(id) => { setTab("clientes"); setDetailId(id); }}
+              onGoTab={(t) => setTab(t as AdminTab)}
+              onNewClient={() => { setShowForm(true); setResult(null); setLeadForForm(null); }}
+            />
             <ThemeToggle />
             <Button icon={Plus} onClick={() => { setShowForm(true); setResult(null); setLeadForForm(null); }}>Nuevo cliente</Button>
             <Button variant="secondary" icon={LogOut} onClick={() => void signOut()}>Salir</Button>
@@ -960,6 +997,17 @@ export function AdminCreateClient() {
                 return !!mp && mp.status === "authorized" && !mpProblem(mp);
               }}
               today={today}
+              health={activeCompanies.map((c) => ({ company: c, health: healthOf(c) }))}
+              upsells={upsellCandidates(activeCompanies.map((c) => ({
+                id: c.id,
+                name: c.name,
+                plan: plans[c.id]?.plan ?? null,
+                activeBranches: plans[c.id]?.activeBranches ?? c.branchCount,
+                lastPaymentAmount: c.lastPaymentAmount,
+                autoCharged: collectInfo(c).mpOk,
+                usage: usage[c.id]
+              })))}
+              onOpenClient={(id) => { setTab("clientes"); setDetailId(id); }}
             />
           )}
 
@@ -1012,7 +1060,7 @@ export function AdminCreateClient() {
               matches={(c, q) => matchesCompanySearch(c, q)}
               searchPlaceholder="Buscar por número, negocio, dueño, mail, teléfono o ciudad"
               filters={clientFilters}
-              defaultSort={{ key: "status", dir: "asc" }}
+              defaultSort={{ key: "health", dir: "asc" }}
               exportName="clientes"
               loading={companiesLoading}
               onRowClick={(c) => setDetailId(c.id)}

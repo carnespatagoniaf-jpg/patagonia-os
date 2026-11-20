@@ -1,9 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { Download } from "lucide-react";
-import { PLAN_LABELS, PLAN_LIMITS, type Plan } from "../auth/permissions";
+import { Download, MessageCircle } from "lucide-react";
+import { PLAN_LABELS, type Plan } from "../auth/permissions";
 import { getPlatformSummary, listPaymentsForAdmin, type CompanyPlanInfo, type CompanySummary, type PlatformSummary } from "./admin-service";
 import { billingLabel, formatDayMonth } from "./company-billing";
-import { dueSoonList, monthChangePct, pageLabel, upgradeCandidates } from "./platform-summary";
+import { dueSoonList, monthChangePct, pageLabel } from "./platform-summary";
+import { HEALTH_LABEL, healthMessage, type Health, type Upsell } from "./client-health";
+import { whatsappLink } from "./sales-pipeline";
+import { BRAND } from "../../lib/brand";
 import { downloadCsv, toCsv } from "../../lib/csv";
 import { Alert, Badge, Button, Card, Kpi, Select, Skeleton } from "./ui/components";
 
@@ -71,7 +74,10 @@ export function AdminSummary({
   planPrice,
   monthlyFee,
   isAutoCharged,
-  today
+  today,
+  health,
+  upsells,
+  onOpenClient
 }: {
   companies: CompanySummary[];
   plans: Record<string, CompanyPlanInfo>;
@@ -81,6 +87,11 @@ export function AdminSummary({
   /** true = suscripción de Mercado Pago al día (se cobra solo). */
   isAutoCharged: (companyId: string) => boolean;
   today: string;
+  /** Semáforo de cada cliente activo (client-health.ts). */
+  health: { company: CompanySummary; health: Health }[];
+  /** A quién venderle más (por pantallas y locales). */
+  upsells: Upsell[];
+  onOpenClient: (companyId: string) => void;
 }) {
   const [summary, setSummary] = useState<PlatformSummary | null>(null);
   const [error, setError] = useState("");
@@ -94,7 +105,8 @@ export function AdminSummary({
   const byId = useMemo(() => new Map(companies.map((c) => [c.id, c])), [companies]);
   const active = companies.filter((c) => c.active);
   const paying = active.filter((c) => (c.paidUntil && c.paidUntil >= today) || isAutoCharged(c.id));
-  const upgrades = upgradeCandidates(active.map((c) => c.id), plans, PLAN_LIMITS as Record<string, { maxBranches: number | null; maxUsers: number | null }>);
+  const atRisk = health.filter((h) => h.health.level !== "ok").sort((a, b) => (a.health.level === b.health.level ? 0 : a.health.level === "risk" ? -1 : 1));
+  const riskCount = health.filter((h) => h.health.level === "risk").length;
   const dueSoon = dueSoonList(companies, today, (c) => isAutoCharged(c.id));
   const nextMonthIdx = (Number(today.slice(5, 7)) % 12);
 
@@ -162,8 +174,30 @@ export function AdminSummary({
           value={summary ? `${summary.newThisMonth} / ${summary.lostThisMonth.length}` : "…"}
           hint={summary && summary.lostThisMonth.length > 0 ? `se fue: ${summary.lostThisMonth.join(", ")}` : "nadie se dio de baja"}
         />
+        <Kpi label="En riesgo de irse" value={<span className={riskCount > 0 ? "pa-text-danger" : undefined}>{riskCount}</span>} hint={`${atRisk.length - riskCount} más para mirar`} />
         <Kpi label="Pruebas que pasaron a pago" value={summary ? `${summary.trials60dPaid} de ${summary.trials60d}` : "…"} hint="altas de los últimos 60 días" />
       </div>
+
+      <Card
+        title="Clientes que pueden irse"
+        subtitle={atRisk.length === 0 ? "Todos los clientes activos venden y están al día." : "Venden menos que antes, no venden hace días o no arrancaron. Escribiles antes de que se vayan."}
+      >
+        {atRisk.map(({ company, health: h }) => {
+          const link = whatsappLink(company.contactPhone, healthMessage(BRAND.name, company.name, company.ownerFullName, h));
+          return (
+            <div key={company.id} className="pa-list-row">
+              <span style={{ flex: 1, minWidth: 0 }}>
+                <button type="button" className="pa-link" onClick={() => onOpenClient(company.id)}>{company.name}</button>
+                <span className="pa-muted"> · {h.reasons.join(" · ")}</span>
+              </span>
+              <span className="pa-row" style={{ gap: 6 }}>
+                <Badge tone={h.level === "risk" ? "danger" : "warn"}>{HEALTH_LABEL[h.level]}</Badge>
+                {link && <a className="pa-btn pa-btn-whatsapp pa-btn-sm" href={link} target="_blank" rel="noreferrer"><MessageCircle size={14} /> Escribirle</a>}
+              </span>
+            </div>
+          );
+        })}
+      </Card>
 
       <div className="pa-sum-grid">
         <Card title="Cobrado mes a mes" subtitle={<>Si nadie se va, en {MONTHS_LONG[nextMonthIdx]} cobrás <b>{formatMoney(monthlyFee)}</b>.</>}>
@@ -186,14 +220,17 @@ export function AdminSummary({
             ))}
           </Card>
 
-          {upgrades.length > 0 && (
-            <Card title="Podrían subir de plan" subtitle="Llegaron al tope de usuarios o sucursales de su plan.">
-              {upgrades.map((u) => {
+          {upsells.length > 0 && (
+            <Card title="A quién venderle más" subtitle="Según las pantallas que le faltan y los locales que tiene.">
+              {upsells.map((u, i) => {
                 const c = byId.get(u.companyId);
                 const plan = plans[u.companyId]?.plan as Plan | undefined;
                 return c ? (
-                  <div key={u.companyId} className="pa-list-row">
-                    <span><b>{c.name}</b> <span className="pa-muted">· {u.reason}</span></span>
+                  <div key={`${u.companyId}-${i}`} className="pa-list-row" style={{ alignItems: "flex-start" }}>
+                    <span style={{ flex: 1, minWidth: 0, display: "grid", gap: 2 }}>
+                      <span><button type="button" className="pa-link" onClick={() => onOpenClient(c.id)}>{c.name}</button> · <b>{u.offer}</b></span>
+                      <span className="pa-muted" style={{ fontSize: 13 }}>{u.reason}</span>
+                    </span>
                     {plan && <Badge tone="brand" dot={false}>{PLAN_LABELS[plan]}</Badge>}
                   </div>
                 ) : null;
