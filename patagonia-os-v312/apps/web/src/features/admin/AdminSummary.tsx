@@ -7,6 +7,8 @@ import { dueSoonList, monthChangePct, pageLabel } from "./platform-summary";
 import { HEALTH_LABEL, healthMessage, type Health, type Upsell } from "./client-health";
 import { whatsappLink } from "./sales-pipeline";
 import { BRAND } from "../../lib/brand";
+import { buildDailySummary } from "./daily-summary";
+import { DailySummaryCard } from "./DailySummaryCard";
 import { downloadCsv, toCsv } from "../../lib/csv";
 import { Alert, Badge, Button, Card, Kpi, Select, Skeleton } from "./ui/components";
 
@@ -77,7 +79,10 @@ export function AdminSummary({
   today,
   health,
   upsells,
-  onOpenClient
+  onOpenClient,
+  overdue,
+  overdueCount,
+  collectedYesterday
 }: {
   companies: CompanySummary[];
   plans: Record<string, CompanyPlanInfo>;
@@ -92,6 +97,10 @@ export function AdminSummary({
   /** A quién venderle más (por pantallas y locales). */
   upsells: Upsell[];
   onOpenClient: (companyId: string) => void;
+  /** Para el resumen del día. */
+  overdue: number;
+  overdueCount: number;
+  collectedYesterday: number;
 }) {
   const [summary, setSummary] = useState<PlatformSummary | null>(null);
   const [error, setError] = useState("");
@@ -177,6 +186,21 @@ export function AdminSummary({
         <Kpi label="En riesgo de irse" value={<span className={riskCount > 0 ? "pa-text-danger" : undefined}>{riskCount}</span>} hint={`${atRisk.length - riskCount} más para mirar`} />
         <Kpi label="Pruebas que pasaron a pago" value={summary ? `${summary.trials60dPaid} de ${summary.trials60d}` : "…"} hint="altas de los últimos 60 días" />
       </div>
+
+      <DailySummaryCard
+        text={buildDailySummary({
+          brandName: BRAND.name,
+          today,
+          activeClients: active.length,
+          collectedThisMonth: current,
+          collectedYesterday,
+          overdue,
+          overdueCount,
+          dueSoon: dueSoon.map(({ company, days }) => ({ name: company.name, days })),
+          atRisk: atRisk.map(({ company, health: h }) => ({ name: company.name, level: h.level === "risk" ? "risk" : "warn", reason: h.reasons[0] ?? "" })),
+          upsellCount: upsells.length
+        })}
+      />
 
       <Card
         title="Clientes que pueden irse"

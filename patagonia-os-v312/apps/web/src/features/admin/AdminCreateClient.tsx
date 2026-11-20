@@ -11,6 +11,7 @@ import { billingLabel, billingReminderMessage, billingStatus, formatDayMonth, re
 import type { CompanyUsage } from "./sales-pipeline";
 import { HEALTH_LABEL, HEALTH_RANK, clientHealth, healthMessage, upsellCandidates, type Health, type HealthLevel } from "./client-health";
 import { CommandPalette } from "./CommandPalette";
+import { previousDay } from "./daily-summary";
 import { AdminThemeRoot } from "./ui/theme";
 import { Alert, Badge, BrandMark, Button, Checkbox, Field, Input, Kpi, Modal, Select, Skeleton, Tabs, ThemeToggle, useConfirm, type Tone } from "./ui/components";
 import { DataTable, type Column, type TableFilter } from "./ui/DataTable";
@@ -1008,6 +1009,9 @@ export function AdminCreateClient() {
                 usage: usage[c.id]
               })))}
               onOpenClient={(id) => { setTab("clientes"); setDetailId(id); }}
+              overdue={revenue.overdue}
+              overdueCount={revenue.overdueCount}
+              collectedYesterday={monthPayments.filter((p) => p.paymentDate === previousDay(today)).reduce((s, p) => s + (p.amount ?? 0), 0)}
             />
           )}
 
