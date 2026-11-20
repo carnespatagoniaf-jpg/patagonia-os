@@ -26,8 +26,13 @@ import { AdminContacts } from "./AdminContacts";
 import { AdminFinance } from "./AdminFinance";
 import { mpFailedChargeMessage, mpProblem, toArDate, type MpSubscription } from "./mercadopago";
 
-const PLAN_OPTIONS: Plan[] = ["basico", "estandar", "full", "empresa", "planta"];
-const PLAN_PRICES: Record<Plan, string> = { basico: "$20.000", estandar: "$39.000", full: "$69.000", empresa: "precio a definir", planta: "precio a definir" };
+/** Planes que se ofrecen hoy. Básico ya no se vende (dueño, 03/11/2026): solo aparece en un cliente que todavía lo tiene. */
+const PLAN_OPTIONS: Plan[] = ["estandar", "full", "empresa", "planta"];
+/** Todos cuestan lo mismo por local; los planes solo cambian las pantallas que incluyen (dueño, 03/11/2026). */
+const PRICE_PER_LOCAL = "$39.000 por local";
+function planOptionsFor(current?: Plan): Plan[] {
+  return current && !PLAN_OPTIONS.includes(current) ? [current, ...PLAN_OPTIONS] : PLAN_OPTIONS;
+}
 const PLAN_PRICE_VALUES: Record<Plan, number> = { basico: 20000, estandar: 39000, full: 69000, empresa: 0, planta: 0 };
 const MONTH_OPTIONS = [1, 2, 3, 6, 12];
 
@@ -60,7 +65,8 @@ Te recomendamos cambiarla la primera vez que entres (arriba a la izquierda, "Cam
 
 /** Mensaje para mandarle al dueño su contraseña nueva. */
 function passwordMessage(company: CompanySummary, password: string) {
-  const name = company.ownerFullName?.trim().split(/s+/)[0];
+  // \s = espacio. Antes decía /s+/ y cortaba el nombre en la primera "s" ("Marcos" → "Marco").
+  const name = company.ownerFullName?.trim().split(/\s+/)[0];
   return `¡Hola${name ? ` ${name}` : ""}! Te dejo una contraseña nueva para entrar a ${BRAND.name}.
 
 Entrá en: ${BRAND.appUrl}
@@ -793,10 +799,10 @@ export function AdminCreateClient() {
             <section className="pa-section">
               <h3 className="pa-section-title">Plan y pantallas</h3>
               <div className="pa-row" style={{ alignItems: "flex-end" }}>
-                <Field label="Plan">
+                <Field label="Plan" hint={`Todos cuestan ${PRICE_PER_LOCAL}; cambian las pantallas que incluyen`}>
                   {(id) => (
                     <Select id={id} value={planInfo.plan} disabled={planBusyId === company.id} onChange={(e) => void changePlan(company, e.target.value as Plan)}>
-                      {PLAN_OPTIONS.map((p) => <option key={p} value={p}>{PLAN_LABELS[p]} ({PLAN_PRICES[p]})</option>)}
+                      {planOptionsFor(planInfo.plan).map((p) => <option key={p} value={p}>{PLAN_LABELS[p]}{PLAN_OPTIONS.includes(p) ? "" : " (ya no se vende)"}</option>)}
                     </Select>
                   )}
                 </Field>
@@ -1069,10 +1075,10 @@ export function AdminCreateClient() {
               <Field label="Nombre del dueño">{(id) => <Input id={id} value={draft.ownerFullName} onChange={(e) => setDraft({ ...draft, ownerFullName: e.target.value })} required />}</Field>
               <Field label="Email del dueño">{(id) => <Input id={id} type="email" value={draft.ownerEmail} onChange={(e) => setDraft({ ...draft, ownerEmail: e.target.value })} required />}</Field>
               <Field label="Teléfono" hint="Uso interno, para escribirle por WhatsApp">{(id) => <Input id={id} inputMode="tel" value={draft.contactPhone} onChange={(e) => setDraft({ ...draft, contactPhone: e.target.value })} />}</Field>
-              <Field label="Plan">
+              <Field label="Plan" hint={`Todos cuestan ${PRICE_PER_LOCAL}`}>
                 {(id) => (
                   <Select id={id} value={draft.plan} onChange={(e) => setDraft({ ...draft, plan: e.target.value as Plan })}>
-                    {PLAN_OPTIONS.map((p) => <option key={p} value={p}>{PLAN_LABELS[p]} ({PLAN_PRICES[p]})</option>)}
+                    {PLAN_OPTIONS.map((p) => <option key={p} value={p}>{PLAN_LABELS[p]}</option>)}
                   </Select>
                 )}
               </Field>
