@@ -4,6 +4,7 @@ import { assignMpSubscription, getMpScheduleStatus, listMpSubscriptions, syncMer
 import { mpFailedChargeMessage, mpProblem, mpStatusLabel, suggestCompany, toArDate, type MpSubscription } from "./mercadopago";
 import { formatDayMonth } from "./company-billing";
 import { whatsappLink } from "./sales-pipeline";
+import { Alert, Button, Card, Select, useConfirm } from "./ui/components";
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
@@ -28,6 +29,7 @@ export function AdminMercadoPago({
   const [error, setError] = useState("");
   const [choice, setChoice] = useState<Record<string, string>>({});
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [ask, confirmDialog] = useConfirm();
   const [lastSync, setLastSync] = useState<Date | null>(null);
   const [schedule, setSchedule] = useState<MpScheduleStatus | null>(null);
   const onChangedRef = useRef(onPaymentsChanged);
@@ -90,7 +92,7 @@ export function AdminMercadoPago({
   }
 
   async function unassign(sub: MpSubscription) {
-    if (!window.confirm(`¿Sacar esta suscripción de ${sub.companyName}? Los pagos ya sumados quedan; los próximos no se suman.`)) return;
+    if (!(await ask({ title: `¿Sacar esta suscripción de ${sub.companyName}?`, message: "Los pagos ya sumados quedan; los próximos no se suman.", confirmLabel: "Sacar suscripción", danger: true }))) return;
     setBusyId(sub.id);
     try {
       await assignMpSubscription(sub.id, null);
@@ -109,9 +111,11 @@ export function AdminMercadoPago({
 
   if (connected === false) {
     return (
-      <section className="admin-mp">
-        <strong><CreditCard size={16} style={{ verticalAlign: "-3px" }} /> Mercado Pago sin conectar</strong>
-        <p className="muted">Para que los cobros de la suscripción se anoten solos, falta cargar el Access Token de tu cuenta de Mercado Pago en Supabase.</p>
+      <Card
+        title={<span className="pa-row"><CreditCard size={16} aria-hidden /> Mercado Pago sin conectar</span>}
+        subtitle="Para que los cobros de la suscripción se anoten solos, falta cargar el Access Token de tu cuenta de Mercado Pago en Supabase."
+        actions={<Button variant="secondary" icon={RefreshCw} loading={syncing} onClick={() => void sync()}>Actualizar</Button>}
+      >
         <details>
           <summary>Cómo conectarlo</summary>
           <ol>
@@ -121,45 +125,39 @@ export function AdminMercadoPago({
             <li>Volvé acá y tocá <b>Actualizar</b>.</li>
           </ol>
         </details>
-        <button className="secondary" disabled={syncing} onClick={() => void sync()}>{syncing ? "Buscando…" : "Actualizar"}</button>
-      </section>
+        {confirmDialog}
+      </Card>
     );
   }
 
+  const subtitle = [
+    syncing ? "Buscando cobros…" : `${assigned.length} de ${subs.filter((s) => s.status !== "cancelled" || s.companyId).length} suscripciones asignadas`,
+    lastSync && !syncing ? `actualizado ${lastSync.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}` : "",
+    schedule?.scheduled
+      ? `se buscan solos cada hora${schedule.lastRunAt ? ` (última vez ${new Date(schedule.lastRunAt).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })})` : ""}`
+      : ""
+  ].filter(Boolean).join(" · ");
+
   return (
-    <section className="admin-mp">
-      <div className="admin-mp-head">
-        <strong><CreditCard size={16} style={{ verticalAlign: "-3px" }} /> Mercado Pago</strong>
-        <span className="muted">
-          {syncing ? "Buscando cobros…" : `${assigned.length} de ${subs.filter((s) => s.status !== "cancelled" || s.companyId).length} suscripciones asignadas`}
-          {lastSync && !syncing ? ` · actualizado ${lastSync.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}` : ""}
-        </span>
-        <button className="secondary" disabled={syncing} onClick={() => void sync()}>
-          <RefreshCw size={14} style={{ verticalAlign: "-2px" }} /> Actualizar
-        </button>
-      </div>
-      {schedule?.scheduled && (
-        <p className="muted">
-          Los cobros se buscan solos cada hora
-          {schedule.lastRunAt
-            ? ` · última vez ${new Date(schedule.lastRunAt).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}`
-            : ""}
-          {schedule.lastError ? ` · falló: ${schedule.lastError}` : ""}
-        </p>
-      )}
-      {message && <p className="admin-mp-ok">{message}</p>}
-      {error && <p className="message warning">{error}</p>}
+    <Card
+      title={<span className="pa-row"><CreditCard size={16} aria-hidden /> Mercado Pago</span>}
+      subtitle={subtitle}
+      actions={<Button variant="secondary" size="sm" icon={RefreshCw} loading={syncing} onClick={() => void sync()}>Actualizar</Button>}
+    >
+      {schedule?.lastError && <Alert tone="warn" title="La última búsqueda automática falló">{schedule.lastError}</Alert>}
+      {message && <Alert tone="ok" onClose={() => setMessage("")}>{message}</Alert>}
+      {error && <Alert tone="danger" onClose={() => setError("")}>{error}</Alert>}
 
       {problems.length > 0 && (
-        <div className="admin-mp-list">
-          <b>No pasó el cobro</b>
+        <div style={{ display: "grid", gap: 6 }}>
+          <strong className="pa-text-danger">No pasó el cobro</strong>
           {problems.map((s) => {
             const company = companies.find((c) => c.id === s.companyId);
             const link = company ? whatsappLink(company.contactPhone, mpFailedChargeMessage(company.name, company.ownerFullName)) : null;
             return (
-              <div key={s.id} className="admin-mp-row admin-mp-problem">
+              <div key={s.id} className="pa-list-row">
                 <span><b>{s.companyName}</b> · {mpProblem(s)}</span>
-                {link && <a className="sales-wa-button" href={link} target="_blank" rel="noreferrer"><MessageCircle size={14} /> Avisarle</a>}
+                {link && <a className="pa-btn pa-btn-whatsapp pa-btn-sm" href={link} target="_blank" rel="noreferrer"><MessageCircle size={14} /> Avisarle</a>}
               </div>
             );
           })}
@@ -167,14 +165,14 @@ export function AdminMercadoPago({
       )}
 
       {unassigned.length > 0 && (
-        <div className="admin-mp-list">
-          <b>¿De qué cliente es cada suscripción?</b>
-          <span className="muted" style={{ fontSize: 13 }}>Se elige una sola vez. Lo que ya habías anotado a mano no se suma de nuevo.</span>
+        <div style={{ display: "grid", gap: 6 }}>
+          <strong>¿De qué cliente es cada suscripción?</strong>
+          <span className="pa-muted" style={{ fontSize: 13 }}>Se elige una sola vez. Lo que ya habías anotado a mano no se suma de nuevo.</span>
           {unassigned.map((s) => {
             const suggested = suggestCompany(s, active);
             const value = choice[s.id] ?? suggested ?? "";
             return (
-              <div key={s.id} className="admin-mp-row">
+              <div key={s.id} className="pa-list-row">
                 <span>
                   <b>{s.payerName || s.payerEmail || "Suscriptor sin nombre"}</b>
                   {s.payerName && s.payerEmail ? ` · ${s.payerEmail}` : ""}
@@ -183,14 +181,14 @@ export function AdminMercadoPago({
                   {s.dateCreated ? ` · desde ${formatDayMonth(toArDate(s.dateCreated))}` : ""}
                   {` · ${s.approvedCount} ${s.approvedCount === 1 ? "cobro" : "cobros"}`}
                 </span>
-                <div className="admin-actions">
-                  <select value={value} onChange={(e) => setChoice({ ...choice, [s.id]: e.target.value })}>
+                <div className="pa-row">
+                  <Select aria-label="Cliente" value={value} onChange={(e) => setChoice({ ...choice, [s.id]: e.target.value })} style={{ maxWidth: 260 }}>
                     <option value="">Elegí el cliente…</option>
                     {active.map((c) => (
                       <option key={c.id} value={c.id}>{c.clientNumber !== undefined ? `N.º ${c.clientNumber} · ` : ""}{c.name}</option>
                     ))}
-                  </select>
-                  <button disabled={!value || busyId === s.id} onClick={() => void assign(s, value)}>{busyId === s.id ? "…" : "Asignar"}</button>
+                  </Select>
+                  <Button disabled={!value} loading={busyId === s.id} onClick={() => void assign(s, value)}>Asignar</Button>
                 </div>
               </div>
             );
@@ -199,19 +197,22 @@ export function AdminMercadoPago({
       )}
 
       {assigned.length > 0 && (
-        <details className="admin-mp-assigned">
+        <details>
           <summary>Suscripciones asignadas ({assigned.length})</summary>
-          {assigned.map((s) => (
-            <div key={s.id} className="admin-mp-row">
-              <span>
-                <b>{s.companyName}</b> · {s.payerName || s.payerEmail || "-"} · {mpStatusLabel(s.status)}
-                {s.lastChargeDate ? ` · último cobro ${formatDayMonth(toArDate(s.lastChargeDate))}` : ""}
-              </span>
-              <button className="admin-link" disabled={busyId === s.id} onClick={() => void unassign(s)}>No es de este cliente</button>
-            </div>
-          ))}
+          <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
+            {assigned.map((s) => (
+              <div key={s.id} className="pa-list-row">
+                <span>
+                  <b>{s.companyName}</b> · {s.payerName || s.payerEmail || "-"} · {mpStatusLabel(s.status)}
+                  {s.lastChargeDate ? ` · último cobro ${formatDayMonth(toArDate(s.lastChargeDate))}` : ""}
+                </span>
+                <Button variant="ghost" size="sm" disabled={busyId === s.id} onClick={() => void unassign(s)}>No es de este cliente</Button>
+              </div>
+            ))}
+          </div>
         </details>
       )}
-    </section>
+      {confirmDialog}
+    </Card>
   );
 }

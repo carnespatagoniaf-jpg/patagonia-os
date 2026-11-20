@@ -1,13 +1,18 @@
-import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
-import { Building2, LockKeyhole, MapPin, MessageCircle, Plus, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Building2, KeyRound, LayoutDashboard, LifeBuoy, LogOut, MapPin, MessageCircle, Plus, Trash2, TrendingUp, Users, Wallet } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import {
   COMPANY_FEATURES, PROVINCES, createClient, deleteClient, deleteCompanyPayment, listCompanies, listCompanyFeatures, listCompanyPayments, listCompanyPlans, registerCompanyPayment,
-  setCompanyActive, setCompanyFeature, setCompanyLocation, setCompanyPaidUntil, setCompanyPlan, setCompanyTrial,
+  setCompanyActive, setCompanyFeature, setCompanyLocation, setCompanyPaidUntil, setCompanyPlan, setCompanyTrial, listSalesPipeline,
   listScaleSupportReports, resetUserPassword, saveLead, type CompanyPayment, type CompanyPlanInfo, type CompanySummary, type CreateClientResult
 } from "./admin-service";
 import { PLAN_LABELS, PLAN_LIMITS, type Plan } from "../auth/permissions";
-import { billingLabel, billingReminderMessage, billingStatus, formatDayMonth, revenueSummary, matchesBillingFilter, matchesCompanySearch, sortByBilling, type BillingFilter, type BillingStatus } from "./company-billing";
+import { billingLabel, billingReminderMessage, billingStatus, formatDayMonth, revenueSummary, matchesBillingFilter, matchesCompanySearch, STATUS_ORDER, type BillingStatus } from "./company-billing";
+import type { CompanyUsage } from "./sales-pipeline";
+import { AdminThemeRoot } from "./ui/theme";
+import { Alert, Badge, BrandMark, Button, Checkbox, Field, Input, Kpi, Modal, Select, Skeleton, Tabs, ThemeToggle, useConfirm, type Tone } from "./ui/components";
+import { DataTable, type Column, type TableFilter } from "./ui/DataTable";
+import { BRAND } from "../../lib/brand";
 import { todayIso } from "../shifts/format";
 import { grantScaleSupportAccess, listScaleSupportAccess, revokeScaleSupportAccess } from "../scales/support-access";
 import { parseAmount } from "../../lib/money";
@@ -26,16 +31,15 @@ const PLAN_PRICES: Record<Plan, string> = { basico: "$20.000", estandar: "$39.00
 const PLAN_PRICE_VALUES: Record<Plan, number> = { basico: 20000, estandar: 39000, full: 69000, empresa: 0, planta: 0 };
 const MONTH_OPTIONS = [1, 2, 3, 6, 12];
 
-const BILLING_TONE: Record<BillingStatus, string> = {
-  paid: "admin-trial-ok",
-  due_soon: "admin-trial-soon",
-  overdue: "admin-trial-expired",
-  trial: "admin-trial-trial",
-  trial_expired: "admin-trial-expired",
-  none: "admin-trial-none"
+const BILLING_TONE: Record<BillingStatus, Tone> = {
+  paid: "ok",
+  due_soon: "warn",
+  overdue: "danger",
+  trial: "info",
+  trial_expired: "danger",
+  none: "neutral"
 };
 
-type SortMode = "status" | "number" | "province";
 type AdminTab = "resumen" | "clientes" | "ventas" | "contactos" | "finanzas" | "soporte";
 
 function formatMoney(value: number) {
@@ -45,9 +49,9 @@ function formatMoney(value: number) {
 /** Mensaje listo para pegar en WhatsApp/mail y mandarle al dueño nuevo --
  * evita tener que copiar el usuario y la contraseña por separado a mano. */
 function buildWelcomeMessage(companyName: string, result: CreateClientResult) {
-  return `¡Hola! Ya está listo el acceso a Patagonia OS para ${companyName}.
+  return `¡Hola! Ya está listo el acceso a ${BRAND.name} para ${companyName}.
 
-Entrá en: https://app.patagoniasystem.com.ar
+Entrá en: ${BRAND.appUrl}
 Usuario: ${result.email}
 Contraseña temporal: ${result.tempPassword}
 
@@ -57,9 +61,9 @@ Te recomendamos cambiarla la primera vez que entres (arriba a la izquierda, "Cam
 /** Mensaje para mandarle al dueño su contraseña nueva. */
 function passwordMessage(company: CompanySummary, password: string) {
   const name = company.ownerFullName?.trim().split(/s+/)[0];
-  return `¡Hola${name ? ` ${name}` : ""}! Te dejo una contraseña nueva para entrar a Patagonia OS.
+  return `¡Hola${name ? ` ${name}` : ""}! Te dejo una contraseña nueva para entrar a ${BRAND.name}.
 
-Entrá en: https://app.patagoniasystem.com.ar
+Entrá en: ${BRAND.appUrl}
 Usuario: ${company.ownerEmail ?? ""}
 Contraseña: ${password}
 
@@ -85,7 +89,6 @@ function emptyDraft(): Draft {
   return { companyName: "", branchName: "", ownerFullName: "", ownerEmail: "", contactPhone: "", province: "", city: "", plan: "estandar" };
 }
 
-const NO_LOCATION = "Sin ubicación";
 const TRIAL_DAYS = 7;
 const DAY_MS = 86_400_000;
 
@@ -100,21 +103,13 @@ function trialLabel(days: number) {
   return days === 1 ? "Prueba: vence mañana" : `Prueba: ${days} días`;
 }
 
-function trialTone(days: number) {
-  return days <= 0 ? "admin-trial-expired" : days <= 2 ? "admin-trial-soon" : "admin-trial-ok";
-}
-
-function groupByProvince(list: CompanySummary[]) {
-  const map = new Map<string, CompanySummary[]>();
-  for (const c of list) {
-    const key = c.province ?? NO_LOCATION;
-    map.set(key, [...(map.get(key) ?? []), c]);
-  }
-  return Array.from(map).sort(([a], [b]) => (a === NO_LOCATION ? 1 : b === NO_LOCATION ? -1 : a.localeCompare(b, "es")));
-}
-
 export function AdminCreateClient() {
   const { signOut } = useAuth();
+  const [ask, confirmDialog] = useConfirm();
+  /** Cliente con la ficha abierta. */
+  const [detailId, setDetailId] = useState<string | null>(null);
+  /** Uso real de cada cliente (última venta, ventas de la semana, último ingreso), el mismo dato que usa Ventas. */
+  const [usage, setUsage] = useState<Record<string, CompanyUsage>>({});
   const [draft, setDraft] = useState<Draft>(emptyDraft());
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
@@ -122,7 +117,6 @@ export function AdminCreateClient() {
   const [resultCompanyName, setResultCompanyName] = useState("");
   const [copied, setCopied] = useState(false);
   const [showForm, setShowForm] = useState(false);
-  const [search, setSearch] = useState("");
   const [tab, setTab] = useState<AdminTab>("resumen");
   /** Interesado del embudo de ventas que se está dando de alta con el formulario. */
   const [leadForForm, setLeadForForm] = useState<Lead | null>(null);
@@ -163,14 +157,12 @@ export function AdminCreateClient() {
         setSupportAccess({ ...supportAccess, [company.id]: until });
       }
     } catch (err) {
-      window.alert(err instanceof Error ? err.message : "No se pudo cambiar el acceso de soporte.");
+      setMessage(err instanceof Error ? err.message : "No se pudo cambiar el acceso de soporte.");
     } finally {
       setSupportBusyId(null);
     }
   }
 
-  const [billingFilter, setBillingFilter] = useState<BillingFilter>("all");
-  const [sortMode, setSortMode] = useState<SortMode>("status");
   const [payingId, setPayingId] = useState<string | null>(null);
   const [payMonths, setPayMonths] = useState(1);
   const [payAmount, setPayAmount] = useState("");
@@ -183,8 +175,6 @@ export function AdminCreateClient() {
   const [history, setHistory] = useState<CompanyPayment[]>([]);
   const [historyLoading, setHistoryLoading] = useState(false);
   const [editPaidUntil, setEditPaidUntil] = useState("");
-  /** Tarjeta con "Más opciones" abierto. */
-  const [moreId, setMoreId] = useState<string | null>(null);
   /** Contraseña temporal recién generada (se muestra una sola vez). */
   const [newPassword, setNewPassword] = useState<{ companyId: string; password: string } | null>(null);
   const [passwordBusyId, setPasswordBusyId] = useState<string | null>(null);
@@ -192,7 +182,7 @@ export function AdminCreateClient() {
 
   async function resetOwnerPassword(company: CompanySummary) {
     if (!company.ownerId) return;
-    if (!window.confirm(`¿Cambiar la contraseña de ${company.ownerFullName ?? "el dueño"} (${company.name})? La que tiene ahora deja de andar.`)) return;
+    if (!(await ask({ title: "¿Cambiar la contraseña del dueño?", message: `${company.ownerFullName ?? "El dueño"} (${company.name}) va a recibir una contraseña nueva. La que tiene ahora deja de andar.`, confirmLabel: "Cambiar contraseña" }))) return;
     setPasswordBusyId(company.id);
     setMessage("");
     try {
@@ -256,6 +246,12 @@ export function AdminCreateClient() {
         // Base sin la migración 169 todavía: no se muestran los tildes.
         setFeatures({});
       }
+      try {
+        setUsage(await listSalesPipeline());
+      } catch {
+        // Sin el dato de uso, la lista igual se ve (la columna "Última venta" queda vacía).
+        setUsage({});
+      }
     } finally {
       setCompaniesLoading(false);
     }
@@ -300,7 +296,7 @@ export function AdminCreateClient() {
         overBranches ? `${info.activeBranches} sucursales (el plan permite ${limits.maxBranches})` : "",
         overUsers ? `${info.activeUsers} usuarios (el plan permite ${limits.maxUsers})` : ""
       ].filter(Boolean).join(" y ");
-      if (!window.confirm(`${company.name} tiene ${detail}. No se borra ni se desactiva nada: solo no va a poder agregar más. ¿Pasarlo igual a ${PLAN_LABELS[plan]}?`)) return;
+      if (!(await ask({ title: `¿Pasar a ${company.name} al plan ${PLAN_LABELS[plan]}?`, message: `Tiene ${detail}. No se borra ni se desactiva nada: solo no va a poder agregar más.`, confirmLabel: "Cambiar el plan" }))) return;
     }
     setPlanBusyId(company.id);
     try {
@@ -393,7 +389,7 @@ export function AdminCreateClient() {
 
   async function removeLastPayment(company: CompanySummary, payment: CompanyPayment) {
     const amountText = payment.amount !== null ? ` por ${formatMoney(payment.amount)}` : "";
-    if (!window.confirm(`¿Borrar el pago del ${formatDayMonth(payment.paymentDate)}${amountText}? La fecha de "pagado hasta" vuelve a la que tenía antes.`)) return;
+    if (!(await ask({ title: `¿Borrar el pago del ${formatDayMonth(payment.paymentDate)}${amountText}?`, message: "La fecha de “pagado hasta” vuelve a la que tenía antes.", confirmLabel: "Borrar pago", danger: true }))) return;
     setPayBusy(true);
     try {
       await deleteCompanyPayment(payment.id);
@@ -444,13 +440,19 @@ export function AdminCreateClient() {
    * empresa tiene cualquier actividad real cargada, así que acá solo hace
    * falta la confirmación de "estás seguro" antes de intentarlo. */
   async function handleDeleteClient(company: CompanySummary) {
-    if (!window.confirm(`¿Borrar "${company.name}" para siempre? Esto no se puede deshacer. Si ya tiene productos, ventas o cualquier otro dato cargado, el sistema va a rechazar el borrado solo.`)) {
-      return;
-    }
+    const ok = await ask({
+      title: `¿Borrar ${company.name} para siempre?`,
+      message: "Esto no se puede deshacer. Si ya tiene productos, ventas o cualquier otro dato cargado, el sistema no lo deja borrar (en ese caso, desactivalo).",
+      confirmLabel: "Borrar para siempre",
+      danger: true,
+      typeToConfirm: company.name
+    });
+    if (!ok) return;
     setMessage("");
     setDeletingId(company.id);
     try {
       await deleteClient(company.id);
+      setDetailId(null);
       await reloadCompanies();
     } catch (error) {
       setMessage(error instanceof Error ? error.message : "No se pudo borrar el cliente.");
@@ -511,15 +513,10 @@ export function AdminCreateClient() {
   }
 
   const today = todayIso();
-  const matches = (c: CompanySummary) => matchesCompanySearch(c, search);
   const statusOf = (c: CompanySummary) => billingStatus(c, today);
 
   const activeCompanies = useMemo(() => companies.filter((c) => c.active), [companies]);
-  const inactiveCompanies = companies.filter((c) => !c.active && matches(c));
-  const visibleActive = activeCompanies.filter((c) => matches(c) && matchesBillingFilter(statusOf(c), billingFilter));
-  const activeGroups = groupByProvince(visibleActive);
-  const sortedActive =
-    sortMode === "number" ? [...visibleActive].sort((a, b) => (a.clientNumber ?? 0) - (b.clientNumber ?? 0)) : sortByBilling(visibleActive, today);
+  const inactiveCompanies = companies.filter((c) => !c.active);
   const billingCounts = { all: activeCompanies.length, paid: 0, owes: 0, trial: 0, none: 0 };
   for (const c of activeCompanies) {
     for (const f of ["paid", "owes", "trial", "none"] as const) if (matchesBillingFilter(statusOf(c), f)) billingCounts[f] += 1;
@@ -548,9 +545,8 @@ export function AdminCreateClient() {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
 
-  function renderCard(company: CompanySummary) {
-    const editing = editingLocationId === company.id;
-    const moreOpen = moreId === company.id;
+  /** Cómo está el cobro de un cliente, mirando también Mercado Pago (igual que la tarjeta de antes). */
+  function collectInfo(company: CompanySummary) {
     const status = statusOf(company);
     const mp = mpByCompany[company.id];
     const mpIssue = mp ? mpProblem(mp) : null;
@@ -566,472 +562,540 @@ export function AdminCreateClient() {
           ? billingReminderMessage(company, planPrice(company.id), today)
           : null;
     const waLink = reminder ? whatsappLink(company.contactPhone, reminder) : null;
+    const label = mpOk ? "Mercado Pago al día" : mpIssue ?? billingLabel(company, today);
+    const tone: Tone = mpOk ? "ok" : mpIssue ? "danger" : BILLING_TONE[status];
+    // Para ordenar: primero a quién hay que cobrarle (mismo orden que antes).
+    const rank = mpOk ? STATUS_ORDER.paid : mpIssue ? -1 : STATUS_ORDER[status];
+    return { status, mp, mpIssue, mpOk, needsCollect, nextCharge, reminder, waLink, label, tone, rank };
+  }
+
+  /** Días desde la última venta por Mostrador (null = nunca vendió). */
+  function daysSinceSale(company: CompanySummary): number | null {
+    const last = usage[company.id]?.lastSaleAt;
+    return last ? Math.max(0, Math.floor((Date.now() - new Date(last).getTime()) / DAY_MS)) : null;
+  }
+
+  function saleText(days: number | null) {
+    if (days === null) return "Nunca vendió";
+    return days === 0 ? "Hoy" : days === 1 ? "Ayer" : `Hace ${days} días`;
+  }
+
+  function signInText(iso: string | null | undefined) {
+    if (!iso) return "Nunca";
+    const days = Math.floor((Date.now() - new Date(iso).getTime()) / DAY_MS);
+    return days <= 0 ? "Hoy" : days === 1 ? "Ayer" : `Hace ${days} días`;
+  }
+
+  const clientColumns: Column<CompanySummary>[] = [
+    { key: "n", header: "N.º", render: (c) => c.clientNumber ?? "-", sortValue: (c) => c.clientNumber ?? null, align: "right", hideOn: "sm" },
+    {
+      key: "name",
+      header: "Cliente",
+      main: true,
+      render: (c) => (
+        <div style={{ minWidth: 0 }}>
+          <strong>{c.name}</strong>
+          <div className="pa-muted" style={{ fontSize: 12, fontWeight: 400 }}>{[c.ownerFullName, c.contactPhone].filter(Boolean).join(" · ") || "Sin dueño cargado"}</div>
+        </div>
+      ),
+      sortValue: (c) => c.name,
+      csvValue: (c) => c.name
+    },
+    { key: "owner", header: "Dueño", render: () => null, csvValue: (c) => c.ownerFullName ?? "", csvOnly: true },
+    { key: "phone", header: "Teléfono", render: () => null, csvValue: (c) => c.contactPhone ?? "", csvOnly: true },
+    { key: "email", header: "Email", render: () => null, csvValue: (c) => c.ownerEmail ?? "", csvOnly: true },
+    { key: "place", header: "Ubicación", render: (c) => [c.city, c.province].filter(Boolean).join(", ") || <span className="pa-muted">-</span>, sortValue: (c) => [c.province, c.city].filter(Boolean).join(" ") || null, csvValue: (c) => [c.city, c.province].filter(Boolean).join(", "), hideOn: "md" },
+    { key: "plan", header: "Plan", render: (c) => (plans[c.id] ? <Badge tone="brand" dot={false}>{PLAN_LABELS[plans[c.id].plan]}</Badge> : "-"), sortValue: (c) => (plans[c.id] ? PLAN_LABELS[plans[c.id].plan] : null), hideOn: "md" },
+    {
+      key: "status",
+      header: "Cobro",
+      render: (c) => <Badge tone={collectInfo(c).tone}>{collectInfo(c).label}</Badge>,
+      sortValue: (c) => collectInfo(c).rank,
+      csvValue: (c) => collectInfo(c).label
+    },
+    {
+      key: "sale",
+      header: "Última venta",
+      render: (c) => {
+        if (!usage[c.id]) return <span className="pa-muted">-</span>;
+        const days = daysSinceSale(c);
+        const cls = days === null || days >= 7 ? "pa-text-warn" : undefined;
+        return (
+          <div>
+            <span className={cls} style={{ fontWeight: cls ? 650 : undefined }}>{saleText(days)}</span>
+            <div className="pa-muted" style={{ fontSize: 12 }}>{usage[c.id].salesLast7d} ventas en 7 días</div>
+          </div>
+        );
+      },
+      sortValue: (c) => (usage[c.id] ? daysSinceSale(c) ?? 9999 : null),
+      firstDir: "desc",
+      csvValue: (c) => (usage[c.id] ? saleText(daysSinceSale(c)) : "")
+    },
+    {
+      key: "due",
+      header: "Próximo cobro",
+      render: (c) => {
+        const next = collectInfo(c).nextCharge;
+        return next ? formatDayMonth(next) : <span className="pa-muted">-</span>;
+      },
+      sortValue: (c) => collectInfo(c).nextCharge ?? null,
+      hideOn: "sm"
+    },
+    { key: "fee", header: "Abono", render: (c) => formatMoney(planPrice(c.id)), sortValue: (c) => planPrice(c.id), align: "right", hideOn: "sm" },
+    {
+      key: "action",
+      header: "",
+      render: (c) => {
+        const { waLink, mpIssue } = collectInfo(c);
+        return waLink ? (
+          <a className="pa-btn pa-btn-whatsapp pa-btn-sm" href={waLink} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()}>
+            <MessageCircle size={14} /> {mpIssue ? "Avisarle" : "Cobrar"}
+          </a>
+        ) : null;
+      }
+    }
+  ];
+
+  const riskTest = (c: CompanySummary) => {
+    if (!usage[c.id]) return false;
+    const days = daysSinceSale(c);
+    return days === null ? usage[c.id].productCount > 0 || statusOf(c) !== "none" : days >= 7;
+  };
+
+  const clientFilters: TableFilter<CompanySummary>[] = [
+    { key: "owes", label: "Deben", test: (c) => matchesBillingFilter(statusOf(c), "owes") },
+    { key: "due", label: "Vencen pronto", test: (c) => statusOf(c) === "due_soon" },
+    { key: "risk", label: "Sin vender 7 días o más", test: riskTest },
+    { key: "trial", label: "En prueba", test: (c) => matchesBillingFilter(statusOf(c), "trial") },
+    { key: "paid", label: "Pagaron", test: (c) => matchesBillingFilter(statusOf(c), "paid") },
+    { key: "none", label: "Sin pagos", test: (c) => matchesBillingFilter(statusOf(c), "none") }
+  ];
+
+  function renderDetail(company: CompanySummary) {
+    const editing = editingLocationId === company.id;
+    const info = collectInfo(company);
     const planInfo = plans[company.id];
+    const u = usage[company.id];
+    const days = daysSinceSale(company);
+    const trialDays = trialDaysLeft(company);
+    const trialBusy = trialBusyId === company.id;
     return (
-      <article key={company.id} className={`admin-card admin-card-${mpOk ? "paid" : mpIssue ? "overdue" : status}${company.active ? "" : " admin-card-off"}`}>
-        <header className="admin-card-head">
-          <h3>
-            {company.clientNumber !== undefined && <span className="admin-client-number">N.º {company.clientNumber}</span>}
-            {company.name}
-          </h3>
-          <span className="admin-card-owner">{[company.ownerFullName, company.contactPhone].filter(Boolean).join(" · ") || "Sin dueño cargado"}</span>
-        </header>
-
-        <div className="admin-card-status">
-          {mpOk ? (
-            <span className="admin-trial admin-trial-ok">Se cobra solo por Mercado Pago{nextCharge ? ` · ${formatDayMonth(nextCharge)}` : ""}</span>
-          ) : mpIssue ? (
-            <span className="admin-trial admin-trial-expired">{mpIssue}</span>
-          ) : (
-            <span className={`admin-trial ${BILLING_TONE[status]}`}>{billingLabel(company, today)}</span>
-          )}
-          {planInfo && <span className="admin-plan-chip">{PLAN_LABELS[planInfo.plan]}</span>}
+      <>
+        <div className="pa-row">
+          <Badge tone={info.tone}>{info.label}</Badge>
+          {planInfo && <Badge tone="brand" dot={false}>Plan {PLAN_LABELS[planInfo.plan]}</Badge>}
+          {!company.active && <Badge tone="neutral">Desactivado</Badge>}
+          {info.mpOk && info.nextCharge && <span className="pa-muted" style={{ fontSize: 13 }}>Próximo cobro automático: {formatDayMonth(info.nextCharge)}</span>}
         </div>
-        {company.lastPaymentDate && (
-          <span className="muted" style={{ fontSize: 12 }}>
-            Último pago: {formatDayMonth(company.lastPaymentDate)}
-            {company.lastPaymentAmount !== null ? ` · ${formatMoney(company.lastPaymentAmount)}` : ""}
-          </span>
-        )}
 
-        <div className="admin-actions admin-card-actions">
-          {waLink && (
-            <a className="sales-wa-button" href={waLink} target="_blank" rel="noreferrer"><MessageCircle size={14} /> {mpIssue ? "Avisarle" : "Cobrar por WhatsApp"}</a>
-          )}
-          {!mpOk && (
-            <button className={needsCollect ? "" : "secondary"} disabled={payBusy} onClick={() => (payingId === company.id ? setPayingId(null) : openPayment(company))}>
-              {payingId === company.id ? "Cancelar" : "Registrar pago"}
-            </button>
-          )}
-          <button className="admin-link admin-more-toggle" onClick={() => setMoreId(moreOpen ? null : company.id)}>
-            {moreOpen ? "Menos opciones ▴" : "Más opciones ▾"}
-          </button>
-        </div>
-        {reminder && !waLink && <span className="muted" style={{ fontSize: 12 }}>Para escribirle por WhatsApp falta su teléfono (se carga al crear el cliente).</span>}
-
-        {payingId === company.id && (
-          <div className="admin-edit-location">
-            <label className="admin-pay-field">
-              Meses que paga
-              <select value={payMonths} onChange={(e) => changePayMonths(company, Number(e.target.value))}>
-                {MONTH_OPTIONS.map((m) => <option key={m} value={m}>{m} {m === 1 ? "mes" : "meses"}</option>)}
-              </select>
-            </label>
-            <label className="admin-pay-field">
-              Monto (opcional)
-              <input type="text" inputMode="decimal" value={payFree ? "" : payAmount} disabled={payFree} onChange={(e) => setPayAmount(e.target.value)} placeholder={payFree ? "sin cobro" : "$"} />
-            </label>
-            <label className="admin-pay-field" style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <input type="checkbox" checked={payFree} onChange={(e) => setPayFree(e.target.checked)} />
-              Pase libre (sin cobro)
-            </label>
-            <label className="admin-pay-field">
-              Fecha del pago
-              <input type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />
-            </label>
-            <input placeholder="Nota (ej. transferencia, efectivo)" value={payNote} onChange={(e) => setPayNote(e.target.value)} />
-            <span className="muted" style={{ fontSize: 12 }}>
-              Se suma a partir de {company.paidUntil && company.paidUntil >= today ? `su vencimiento (${formatDayMonth(company.paidUntil)})` : "hoy"}.
-              {company.trialEndsAt ? " Se le saca el aviso de prueba gratuita." : ""}
-            </span>
-            <div className="admin-actions">
-              <button disabled={payBusy} onClick={() => void savePayment(company)}>{payBusy ? "…" : "Guardar pago"}</button>
-            </div>
+        {u && (
+          <div className="pa-mini-kpis">
+            <div><span>Última venta</span><strong className={days === null || days >= 7 ? "pa-text-warn" : undefined}>{saleText(days)}</strong></div>
+            <div><span>Ventas en 7 días</span><strong>{u.salesLast7d}</strong></div>
+            <div><span>Último ingreso</span><strong>{signInText(u.lastSignInAt)}</strong></div>
+            <div><span>Productos cargados</span><strong>{u.productCount}</strong></div>
           </div>
         )}
 
-        {historyId === company.id && (
-          <div className="admin-edit-location">
-            {historyLoading && <span className="muted">Cargando…</span>}
-            {!historyLoading && history.length === 0 && <span className="muted">Todavía no hay pagos registrados.</span>}
-            {history.map((payment, index) => (
-              <div key={payment.id} className="admin-pay-history-row">
-                <span>
-                  <b>{formatDayMonth(payment.paymentDate)}</b> · {payment.months} {payment.months === 1 ? "mes" : "meses"}
-                  {payment.amount !== null ? ` · ${formatMoney(payment.amount)}` : ""} · hasta {formatDayMonth(payment.paidUntil)}
-                  {payment.note ? ` · ${payment.note}` : ""}
-                </span>
-                {index === 0 && (
-                  <button className="admin-link" disabled={payBusy} onClick={() => void removeLastPayment(company, payment)}>Borrar</button>
+        <section className="pa-section">
+          <h3 className="pa-section-title">Cobro</h3>
+          {company.lastPaymentDate && (
+            <span className="pa-muted" style={{ fontSize: 13 }}>
+              Último pago: {formatDayMonth(company.lastPaymentDate)}
+              {company.lastPaymentAmount !== null ? ` · ${formatMoney(company.lastPaymentAmount)}` : ""}
+            </span>
+          )}
+          <div className="pa-row">
+            {info.waLink && (
+              <a className="pa-btn pa-btn-whatsapp" href={info.waLink} target="_blank" rel="noreferrer"><MessageCircle size={16} /> {info.mpIssue ? "Avisarle por WhatsApp" : "Cobrar por WhatsApp"}</a>
+            )}
+            <Button variant={info.needsCollect && !info.mpOk ? "primary" : "secondary"} disabled={payBusy} onClick={() => (payingId === company.id ? setPayingId(null) : openPayment(company))}>
+              {payingId === company.id ? "Cancelar pago" : info.mpOk ? "Registrar pago a mano" : "Registrar pago"}
+            </Button>
+            <Button variant="secondary" onClick={() => void openHistory(company)}>{historyId === company.id ? "Cerrar pagos" : "Ver pagos"}</Button>
+          </div>
+          {info.reminder && !info.waLink && <span className="pa-muted" style={{ fontSize: 12 }}>Para escribirle por WhatsApp falta su teléfono.</span>}
+
+          {payingId === company.id && (
+            <div className="pa-card" style={{ background: "var(--pa-surface-2)" }}>
+              <div className="pa-form-grid">
+                <Field label="Meses que paga">
+                  {(id) => (
+                    <Select id={id} value={payMonths} onChange={(e) => changePayMonths(company, Number(e.target.value))}>
+                      {MONTH_OPTIONS.map((m) => <option key={m} value={m}>{m} {m === 1 ? "mes" : "meses"}</option>)}
+                    </Select>
+                  )}
+                </Field>
+                <Field label="Monto (opcional)">
+                  {(id) => <Input id={id} className="pa-num" inputMode="decimal" value={payFree ? "" : payAmount} disabled={payFree} onChange={(e) => setPayAmount(e.target.value)} placeholder={payFree ? "sin cobro" : "$"} />}
+                </Field>
+                <Field label="Fecha del pago">{(id) => <Input id={id} type="date" value={payDate} onChange={(e) => setPayDate(e.target.value)} />}</Field>
+                <Field label="Nota">{(id) => <Input id={id} placeholder="Ej.: transferencia, efectivo" value={payNote} onChange={(e) => setPayNote(e.target.value)} />}</Field>
+              </div>
+              <Checkbox label="Pase libre (sin cobro)" checked={payFree} onChange={(e) => setPayFree(e.target.checked)} />
+              <span className="pa-muted" style={{ fontSize: 12 }}>
+                Se suma a partir de {company.paidUntil && company.paidUntil >= today ? `su vencimiento (${formatDayMonth(company.paidUntil)})` : "hoy"}.
+                {company.trialEndsAt ? " Se le saca el aviso de prueba gratuita." : ""}
+              </span>
+              <div className="pa-form-actions">
+                <Button variant="secondary" onClick={() => setPayingId(null)}>Cancelar</Button>
+                <Button loading={payBusy} onClick={() => void savePayment(company)}>Guardar pago</Button>
+              </div>
+            </div>
+          )}
+
+          {historyId === company.id && (
+            <div style={{ display: "grid", gap: 6 }}>
+              {historyLoading && <Skeleton lines={2} />}
+              {!historyLoading && history.length === 0 && <span className="pa-muted">Todavía no hay pagos registrados.</span>}
+              {history.map((payment, index) => (
+                <div key={payment.id} className="pa-list-row">
+                  <span className="pa-num">
+                    <b>{formatDayMonth(payment.paymentDate)}</b> · {payment.months} {payment.months === 1 ? "mes" : "meses"}
+                    {payment.amount !== null ? ` · ${formatMoney(payment.amount)}` : ""} · hasta {formatDayMonth(payment.paidUntil)}
+                    {payment.note ? ` · ${payment.note}` : ""}
+                  </span>
+                  {index === 0 && <Button variant="ghost" size="sm" disabled={payBusy} onClick={() => void removeLastPayment(company, payment)}>Borrar</Button>}
+                </div>
+              ))}
+              <div className="pa-row" style={{ alignItems: "flex-end" }}>
+                <Field label="Corregir “pagado hasta”">{(id) => <Input id={id} type="date" value={editPaidUntil} onChange={(e) => setEditPaidUntil(e.target.value)} />}</Field>
+                <Button variant="secondary" disabled={payBusy || !editPaidUntil} onClick={() => void savePaidUntil(company, editPaidUntil)}>Guardar fecha</Button>
+                {company.paidUntil && <Button variant="secondary" disabled={payBusy} onClick={() => void savePaidUntil(company, null)}>Dejar sin pago</Button>}
+              </div>
+            </div>
+          )}
+
+          {!company.paidUntil && (
+            <div className="pa-row-between">
+              <span>
+                Prueba gratuita:{" "}
+                <b>{trialDays === null ? "sin prueba" : trialDays <= 0 ? "vencida" : trialDays === 1 ? "vence mañana" : `quedan ${trialDays} días`}</b>
+              </span>
+              <div className="pa-row">
+                {trialDays === null ? (
+                  <Button variant="secondary" size="sm" loading={trialBusy} onClick={() => void changeTrial(company, new Date(Date.now() + TRIAL_DAYS * DAY_MS))}>Iniciar prueba de {TRIAL_DAYS} días</Button>
+                ) : (
+                  <>
+                    <Button variant="secondary" size="sm" disabled={trialBusy} onClick={() => void changeTrial(company, new Date(Math.max(Date.now(), new Date(company.trialEndsAt!).getTime()) + TRIAL_DAYS * DAY_MS))}>+{TRIAL_DAYS} días</Button>
+                    <Button variant="secondary" size="sm" disabled={trialBusy} onClick={() => void changeTrial(company, null)}>Quitar prueba</Button>
+                  </>
                 )}
               </div>
-            ))}
-            <label className="admin-pay-field">
-              Corregir “pagado hasta”
-              <input type="date" value={editPaidUntil} onChange={(e) => setEditPaidUntil(e.target.value)} />
-            </label>
-            <div className="admin-actions">
-              <button className="secondary" disabled={payBusy || !editPaidUntil} onClick={() => void savePaidUntil(company, editPaidUntil)}>Guardar fecha</button>
-              {company.paidUntil && (
-                <button className="secondary" disabled={payBusy} onClick={() => void savePaidUntil(company, null)}>Dejar sin pago</button>
-              )}
-            </div>
-          </div>
-        )}
-
-        {moreOpen && (
-          <div className="admin-card-more">
-            <dl className="admin-card-data">
-              <div><dt>Email</dt><dd>{company.ownerEmail ?? "-"}</dd></div>
-              <div>
-                <dt>Ubicación</dt>
-                <dd>
-                  {editing ? null : (
-                    <button className="admin-link" onClick={() => startEditLocation(company)}>
-                      <MapPin size={13} />
-                      {[company.city, company.province].filter(Boolean).join(", ") || "Agregar ubicación"}
-                    </button>
-                  )}
-                </dd>
-              </div>
-            </dl>
-          {editing && (
-            <div className="admin-edit-location">
-              <select value={editProvince} onChange={(e) => setEditProvince(e.target.value)}>
-                <option value="">Provincia…</option>
-                {PROVINCES.map((p) => <option key={p} value={p}>{p}</option>)}
-              </select>
-              <input placeholder="Ciudad" value={editCity} onChange={(e) => setEditCity(e.target.value)} />
-              <div className="admin-actions">
-                <button disabled={savingLocation} onClick={() => void saveLocation(company)}>{savingLocation ? "…" : "Guardar"}</button>
-                <button className="secondary" onClick={() => setEditingLocationId(null)}>Cancelar</button>
-              </div>
             </div>
           )}
+        </section>
 
-            {company.ownerId && (
-              <div className="admin-trial-row">
-                <span className="muted" style={{ fontSize: 13 }}>¿Se olvidó la contraseña?</span>
-                <button className="secondary" disabled={passwordBusyId === company.id} onClick={() => void resetOwnerPassword(company)}>
-                  {passwordBusyId === company.id ? "…" : "Cambiar contraseña del dueño"}
-                </button>
+        {planInfo && (() => {
+          const limits = PLAN_LIMITS[planInfo.plan];
+          const limitText = (count: number, max: number | null, one: string, many: string) => `${count}${max !== null ? `/${max}` : ""} ${count === 1 && max === null ? one : many}`;
+          return (
+            <section className="pa-section">
+              <h3 className="pa-section-title">Plan y pantallas</h3>
+              <div className="pa-row" style={{ alignItems: "flex-end" }}>
+                <Field label="Plan">
+                  {(id) => (
+                    <Select id={id} value={planInfo.plan} disabled={planBusyId === company.id} onChange={(e) => void changePlan(company, e.target.value as Plan)}>
+                      {PLAN_OPTIONS.map((p) => <option key={p} value={p}>{PLAN_LABELS[p]} ({PLAN_PRICES[p]})</option>)}
+                    </Select>
+                  )}
+                </Field>
+                <span className="pa-muted" style={{ fontSize: 13, paddingBottom: 10 }}>
+                  {limitText(planInfo.activeBranches, limits.maxBranches, "sucursal", "sucursales")} · {limitText(planInfo.activeUsers, limits.maxUsers, "usuario", "usuarios")}
+                </span>
               </div>
-            )}
-            {newPassword?.companyId === company.id && (() => {
-              const text = passwordMessage(company, newPassword.password);
-              const link = whatsappLink(company.contactPhone, text);
-              return (
-                <div className="message" style={{ borderColor: "#2f9e44" }}>
-                  Contraseña nueva de <strong>{company.ownerEmail}</strong> (copiala ahora, no se vuelve a mostrar):{" "}
-                  <code style={{ fontSize: 16, fontWeight: 700 }}>{newPassword.password}</code>
-                  <div className="admin-actions" style={{ marginTop: 10 }}>
-                    {link && <a className="sales-wa-button" href={link} target="_blank" rel="noreferrer"><MessageCircle size={14} /> Mandársela por WhatsApp</a>}
-                    <button className="secondary" onClick={() => { void navigator.clipboard.writeText(text); setPasswordCopied(true); }}>
-                      {passwordCopied ? "¡Copiado!" : "Copiar mensaje"}
-                    </button>
-                    <button className="secondary" onClick={() => setNewPassword(null)}>Listo</button>
+              {features[company.id] && (
+                <details>
+                  <summary>
+                    Pantallas a pedido{" "}
+                    <span className="pa-muted" style={{ fontWeight: 400, fontSize: 13 }}>
+                      · {COMPANY_FEATURES.filter((f) => features[company.id].includes(f.key)).map((f) => f.short).join(", ") || "ninguna"}
+                    </span>
+                  </summary>
+                  <div style={{ display: "grid", marginTop: 4 }}>
+                    {COMPANY_FEATURES.map((f) => (
+                      <Checkbox key={f.key} label={f.label} checked={features[company.id].includes(f.key)} disabled={featureBusyId === company.id} onChange={(e) => void toggleFeature(company, f.key, e.target.checked)} />
+                    ))}
                   </div>
-                </div>
-              );
-            })()}
-            <div className="admin-actions">
-              <button className="secondary" onClick={() => void openHistory(company)}>{historyId === company.id ? "Cerrar pagos" : "Ver pagos"}</button>
-              {mpOk && (
-                <button className="secondary" disabled={payBusy} onClick={() => (payingId === company.id ? setPayingId(null) : openPayment(company))}>
-                  {payingId === company.id ? "Cancelar" : "Registrar pago a mano"}
-                </button>
+                </details>
+              )}
+            </section>
+          );
+        })()}
+
+        <section className="pa-section">
+          <h3 className="pa-section-title">Datos y acceso</h3>
+          <dl className="pa-dl">
+            <div><dt>Email del dueño</dt><dd>{company.ownerEmail ?? "-"}</dd></div>
+            <div><dt>Teléfono</dt><dd>{company.contactPhone ?? "-"}</dd></div>
+            <div><dt>Sucursales · usuarios</dt><dd>{company.branchCount} · {company.userCount}</dd></div>
+            <div><dt>Cliente desde</dt><dd>{formatDate(company.createdAt)}</dd></div>
+          </dl>
+          {editing ? (
+            <div className="pa-row" style={{ alignItems: "flex-end" }}>
+              <Field label="Provincia">
+                {(id) => (
+                  <Select id={id} value={editProvince} onChange={(e) => setEditProvince(e.target.value)}>
+                    <option value="">Provincia…</option>
+                    {PROVINCES.map((p) => <option key={p} value={p}>{p}</option>)}
+                  </Select>
+                )}
+              </Field>
+              <Field label="Ciudad">{(id) => <Input id={id} value={editCity} onChange={(e) => setEditCity(e.target.value)} />}</Field>
+              <Button loading={savingLocation} onClick={() => void saveLocation(company)}>Guardar</Button>
+              <Button variant="secondary" onClick={() => setEditingLocationId(null)}>Cancelar</Button>
+            </div>
+          ) : (
+            <div className="pa-row">
+              <Button variant="secondary" size="sm" icon={MapPin} onClick={() => startEditLocation(company)}>
+                {[company.city, company.province].filter(Boolean).join(", ") || "Agregar ubicación"}
+              </Button>
+              {company.ownerId && (
+                <Button variant="secondary" size="sm" icon={KeyRound} loading={passwordBusyId === company.id} onClick={() => void resetOwnerPassword(company)}>Cambiar contraseña del dueño</Button>
               )}
             </div>
-          {!company.paidUntil && (() => {
-            const days = trialDaysLeft(company);
-            const busy = trialBusyId === company.id;
-            return (
-              <div className="admin-trial-row">
-                <span className="muted" style={{ fontSize: 13 }}>Prueba gratuita</span>
-                <div className="admin-actions">
-                  {days === null ? (
-                    <button className="secondary" disabled={busy} onClick={() => void changeTrial(company, new Date(Date.now() + TRIAL_DAYS * DAY_MS))}>
-                      Iniciar prueba de {TRIAL_DAYS} días
-                    </button>
-                  ) : (
-                    <>
-                      <button
-                        className="secondary"
-                        disabled={busy}
-                        onClick={() => void changeTrial(company, new Date(Math.max(Date.now(), new Date(company.trialEndsAt!).getTime()) + TRIAL_DAYS * DAY_MS))}
-                      >
-                        +{TRIAL_DAYS} días
-                      </button>
-                      <button className="secondary" disabled={busy} onClick={() => void changeTrial(company, null)}>Quitar prueba</button>
-                    </>
-                  )}
-                </div>
-              </div>
-            );
-          })()}
-
-          {plans[company.id] && (() => {
-            const info = plans[company.id];
-            const limits = PLAN_LIMITS[info.plan];
-            const limitText = (count: number, max: number | null, one: string, many: string) =>
-              `${count}${max !== null ? `/${max}` : ""} ${count === 1 && max === null ? one : many}`;
-            return (
-              <div className="admin-trial-row">
-                <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <strong>Plan</strong>
-                  <select value={info.plan} disabled={planBusyId === company.id} onChange={(e) => void changePlan(company, e.target.value as Plan)}>
-                    {PLAN_OPTIONS.map((p) => <option key={p} value={p}>{PLAN_LABELS[p]} ({PLAN_PRICES[p]})</option>)}
-                  </select>
-                </label>
-                <span className="muted" style={{ fontSize: 13 }}>
-                  {limitText(info.activeBranches, limits.maxBranches, "sucursal", "sucursales")} · {limitText(info.activeUsers, limits.maxUsers, "usuario", "usuarios")}
-                </span>
-              </div>
-            );
-          })()}
-
-          {features[company.id] && (
-            <details className="admin-features">
-              <summary>
-                <strong>Pantallas a pedido</strong>
-                <span className="muted" style={{ fontSize: 13 }}>
-                  {" "}· {COMPANY_FEATURES.filter((f) => features[company.id].includes(f.key)).map((f) => f.short).join(", ") || "ninguna"}
-                </span>
-              </summary>
-              <div style={{ display: "grid", gap: 6, marginTop: 8 }}>
-                {COMPANY_FEATURES.map((f) => (
-                  <label key={f.key} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13 }}>
-                    <input
-                      type="checkbox"
-                      checked={features[company.id].includes(f.key)}
-                      disabled={featureBusyId === company.id}
-                      onChange={(e) => void toggleFeature(company, f.key, e.target.checked)}
-                    />
-                    {f.label}
-                  </label>
-                ))}
-              </div>
-            </details>
           )}
+          {newPassword?.companyId === company.id && (() => {
+            const text = passwordMessage(company, newPassword.password);
+            const link = whatsappLink(company.contactPhone, text);
+            return (
+              <Alert
+                tone="ok"
+                title="Contraseña nueva (copiala ahora, no se vuelve a mostrar)"
+                onClose={() => setNewPassword(null)}
+                action={
+                  <div className="pa-row">
+                    {link && <a className="pa-btn pa-btn-whatsapp pa-btn-sm" href={link} target="_blank" rel="noreferrer"><MessageCircle size={14} /> Mandársela por WhatsApp</a>}
+                    <Button variant="secondary" size="sm" onClick={() => { void navigator.clipboard.writeText(text); setPasswordCopied(true); }}>{passwordCopied ? "¡Copiado!" : "Copiar mensaje"}</Button>
+                  </div>
+                }
+              >
+                {company.ownerEmail} · <span className="pa-secret">{newPassword.password}</span>
+              </Alert>
+            );
+          })()}
+        </section>
 
-          <div className="admin-chips">
-            <span>{company.branchCount} {company.branchCount === 1 ? "sucursal" : "sucursales"}</span>
-            <span>{company.userCount} {company.userCount === 1 ? "usuario" : "usuarios"}</span>
-            <span>Alta {formatDate(company.createdAt)}</span>
-          </div>
-
-          <div className="admin-trial-row">
-            <span className="muted" style={{ fontSize: 13 }}>
+        <section className="pa-section">
+          <h3 className="pa-section-title">Soporte</h3>
+          <div className="pa-row-between">
+            <span style={{ fontSize: 13 }}>
               {supportAccess[company.id]
                 ? `Herramientas técnicas de balanza abiertas hasta las ${new Date(supportAccess[company.id]).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}`
                 : "Herramientas técnicas de balanza: cerradas"}
             </span>
-            <button className="secondary" disabled={supportBusyId === company.id} onClick={() => void toggleSupportAccess(company)}>
-              {supportBusyId === company.id ? "…" : supportAccess[company.id] ? "Cerrar" : "Abrir por 2 horas"}
-            </button>
+            <Button variant="secondary" size="sm" loading={supportBusyId === company.id} onClick={() => void toggleSupportAccess(company)}>
+              {supportAccess[company.id] ? "Cerrar" : "Abrir por 2 horas"}
+            </Button>
           </div>
+        </section>
 
-          <div className="admin-actions">
-            <button className="secondary" disabled={togglingId === company.id} onClick={() => void toggleActive(company)}>
-              {togglingId === company.id ? "…" : company.active ? "Desactivar" : "Activar"}
-            </button>
-            <button className="danger" disabled={deletingId === company.id} onClick={() => void handleDeleteClient(company)}>
-              {deletingId === company.id ? "…" : "Borrar"}
-            </button>
+        <section className="pa-section">
+          <h3 className="pa-section-title">Activar o borrar</h3>
+          <div className="pa-row-between">
+            <span className="pa-muted" style={{ fontSize: 13 }}>
+              {company.active ? "Si lo desactivás, nadie de ese negocio puede entrar. Se puede volver a activar." : "Está desactivado: nadie de ese negocio puede entrar."}
+            </span>
+            <div className="pa-row">
+              <Button variant="secondary" loading={togglingId === company.id} onClick={() => void toggleActive(company)}>{company.active ? "Desactivar" : "Activar"}</Button>
+              <Button variant="danger" icon={Trash2} loading={deletingId === company.id} onClick={() => void handleDeleteClient(company)}>Borrar</Button>
+            </div>
           </div>
-          </div>
-        )}
-      </article>
+        </section>
+      </>
     );
   }
 
+  const detailCompany = detailId ? companies.find((c) => c.id === detailId) ?? null : null;
+  const tabTitles: Record<AdminTab, string> = { resumen: "Resumen", clientes: "Clientes", ventas: "Ventas", contactos: "Contactos", finanzas: "Finanzas", soporte: "Soporte" };
   return (
-    <main className="admin-page">
-      <header className="admin-header">
-        <div className="admin-brand">
-          <div className="login-logo" style={{ margin: 0 }}><LockKeyhole /></div>
-          <div>
-            <p className="eyebrow">PATAGONIA OS · ADMIN</p>
-            <h1>{tab === "resumen" ? "Resumen" : tab === "ventas" ? "Ventas" : tab === "contactos" ? "Contactos" : tab === "finanzas" ? "Finanzas" : tab === "soporte" ? "Soporte" : "Clientes"}</h1>
+    <AdminThemeRoot className="pa-shell">
+      <div className="pa-container">
+        <header className="pa-topbar">
+          <BrandMark suffix="Panel" />
+          <div className="pa-row">
+            <ThemeToggle />
+            <Button icon={Plus} onClick={() => { setShowForm(true); setResult(null); setLeadForForm(null); }}>Nuevo cliente</Button>
+            <Button variant="secondary" icon={LogOut} onClick={() => void signOut()}>Salir</Button>
           </div>
-        </div>
-        <div className="admin-actions">
-          <button onClick={() => { setShowForm((v) => !v); setResult(null); setLeadForForm(null); }}>
-            <Plus size={16} style={{ verticalAlign: "-3px" }} /> {showForm ? "Cerrar" : "Nuevo cliente"}
-          </button>
-          <button className="secondary" onClick={() => void signOut()}>Salir</button>
-        </div>
-      </header>
+        </header>
 
-      <div className="admin-tabs">
-        <button className={tab === "resumen" ? "active" : ""} onClick={() => setTab("resumen")}>Resumen</button>
-        <button className={tab === "clientes" ? "active" : ""} onClick={() => setTab("clientes")}>Clientes</button>
-        <button className={tab === "ventas" ? "active" : ""} onClick={() => setTab("ventas")}>Ventas</button>
-        <button className={tab === "contactos" ? "active" : ""} onClick={() => setTab("contactos")}>Contactos</button>
-        <button className={tab === "finanzas" ? "active" : ""} onClick={() => setTab("finanzas")}>Finanzas</button>
-        <button className={tab === "soporte" ? "active" : ""} onClick={() => setTab("soporte")}>
-          Soporte{pendingReports > 0 && <span className="admin-tab-badge">{pendingReports}</span>}
-        </button>
-      </div>
-
-      {tab === "clientes" && <div className="admin-kpis">
-        <div className="kpi-card"><span>Clientes activos</span><strong>{activeCompanies.length}</strong></div>
-        <div className="kpi-card"><span>Pagaron</span><strong>{billingCounts.paid}</strong></div>
-        <div className="kpi-card"><span>Deben</span><strong>{billingCounts.owes}</strong></div>
-        <div className="kpi-card"><span>En prueba</span><strong>{billingCounts.trial}</strong></div>
-        <div className="kpi-card"><span>Abono mensual</span><strong>{formatMoney(revenue.monthly)}</strong></div>
-        <div className="kpi-card"><span>Cobrado en {monthName}</span><strong>{formatMoney(revenue.collectedThisMonth)}</strong></div>
-        <div className="kpi-card">
-          <span>Vencido sin cobrar</span>
-          <strong style={revenue.overdue > 0 ? { color: "#c92a2a" } : undefined}>{formatMoney(revenue.overdue)}</strong>
-          {revenue.overdueCount > 0 && <small className="muted">{revenue.overdueCount} {revenue.overdueCount === 1 ? "cliente" : "clientes"}</small>}
-        </div>
-        <div className="kpi-card">
-          <span>Falta cobrar en {monthName}</span>
-          <strong>{formatMoney(revenue.dueThisMonth)}</strong>
-          {revenue.dueThisMonthCount > 0 && <small className="muted">{revenue.dueThisMonthCount} {revenue.dueThisMonthCount === 1 ? "cliente" : "clientes"}, contando lo vencido</small>}
-        </div>
-      </div>}
-
-      {(showForm || result) && (
-        <section className="panel admin-form-panel">
-          <div className="panel-title">
-            <h2>{result ? "Cliente creado" : leadForForm ? `Dar de alta a ${leadForForm.businessName}` : "Dar de alta un cliente"}</h2>
-          </div>
-          {result ? (
-            <div className="message" style={{ borderColor: "#2f9e44" }}>
-              Login del dueño: <strong>{result.email}</strong>
-              <br />
-              Contraseña temporal (copiala ahora, no se vuelve a mostrar):{" "}
-              <code style={{ fontSize: 16, fontWeight: 700 }}>{result.tempPassword}</code>
-              <div className="admin-actions" style={{ marginTop: 10 }}>
-                <button
-                  onClick={() => {
-                    void navigator.clipboard.writeText(buildWelcomeMessage(resultCompanyName, result));
-                    setCopied(true);
-                  }}
-                >
-                  {copied ? "¡Copiado!" : "Copiar mensaje para el cliente"}
-                </button>
-                <button className="secondary" onClick={() => setResult(null)}>Crear otro cliente</button>
-              </div>
-            </div>
-          ) : (
-            <form onSubmit={submit} className="admin-form">
-              <label>Nombre del negocio<input value={draft.companyName} onChange={(e) => setDraft({ ...draft, companyName: e.target.value })} required /></label>
-              <label>Nombre de la primera sucursal<input value={draft.branchName} onChange={(e) => setDraft({ ...draft, branchName: e.target.value })} required /></label>
-              <label>Nombre del dueño<input value={draft.ownerFullName} onChange={(e) => setDraft({ ...draft, ownerFullName: e.target.value })} required /></label>
-              <label>Email del dueño<input value={draft.ownerEmail} onChange={(e) => setDraft({ ...draft, ownerEmail: e.target.value })} type="email" required /></label>
-              <label>
-                Provincia (opcional)
-                <select value={draft.province} onChange={(e) => setDraft({ ...draft, province: e.target.value })}>
-                  <option value="">Sin especificar</option>
-                  {PROVINCES.map((p) => <option key={p} value={p}>{p}</option>)}
-                </select>
-              </label>
-              <label>Ciudad (opcional)<input value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} /></label>
-              <label>
-                Plan
-                <select value={draft.plan} onChange={(e) => setDraft({ ...draft, plan: e.target.value as Plan })}>
-                  {PLAN_OPTIONS.map((p) => <option key={p} value={p}>{PLAN_LABELS[p]} ({PLAN_PRICES[p]})</option>)}
-                </select>
-              </label>
-              <label>Teléfono de contacto (opcional, uso interno)<input value={draft.contactPhone} onChange={(e) => setDraft({ ...draft, contactPhone: e.target.value })} /></label>
-              <div className="admin-form-submit">
-                <button className="charge-button" disabled={busy}>{busy ? "Creando…" : "Crear cliente"}</button>
-              </div>
-            </form>
-          )}
-        </section>
-      )}
-
-      {message && <div className="message warning">{message}</div>}
-
-      {tab === "finanzas" && <AdminFinance />}
-
-      {tab === "soporte" && <AdminScaleReports onChange={reloadPendingReports} />}
-
-      {tab === "resumen" && <AdminDailyChecks />}
-      {tab === "resumen" && (
-        <AdminSummary
-          companies={companies}
-          plans={plans}
-          planPrice={planPrice}
-          monthlyFee={revenue.monthly}
-          isAutoCharged={(id) => {
-            const mp = mpByCompany[id];
-            return !!mp && mp.status === "authorized" && !mpProblem(mp);
-          }}
-          today={today}
+        <Tabs
+          value={tab}
+          onChange={setTab}
+          tabs={[
+            { key: "resumen", label: "Resumen", icon: LayoutDashboard },
+            { key: "clientes", label: "Clientes", icon: Building2 },
+            { key: "ventas", label: "Ventas", icon: TrendingUp },
+            { key: "contactos", label: "Contactos", icon: Users },
+            { key: "finanzas", label: "Finanzas", icon: Wallet },
+            { key: "soporte", label: "Soporte", icon: LifeBuoy, count: pendingReports }
+          ]}
         />
-      )}
+        <h1 className="pa-sr-only">{tabTitles[tab]}</h1>
 
-      <div style={tab === "clientes" ? undefined : { display: "none" }}>
-        <AdminMercadoPago companies={companies} onPaymentsChanged={() => void reloadCompanies()} onSubscriptions={handleMpSubscriptions} />
-      </div>
+        {message && !detailCompany && !showForm && <Alert tone={message.startsWith("Pago registrado") ? "ok" : "warn"} onClose={() => setMessage("")}>{message}</Alert>}
 
-      {tab === "contactos" && <AdminContacts onScheduled={() => setPipelineReloadKey((k) => k + 1)} />}
+        {/* Ventas, Contactos y Finanzas todavía usan piezas viejas: "pa-legacy" las pinta con los colores nuevos. */}
+        <div className="pa-legacy">
+          {tab === "finanzas" && <AdminFinance />}
 
-      {tab === "ventas" && <AdminSalesPipeline companies={companies} onCreateFromLead={createFromLead} reloadKey={pipelineReloadKey} />}
+          {tab === "soporte" && <AdminScaleReports onChange={reloadPendingReports} />}
 
-      {tab === "clientes" && <>
-      {trialAlerts.length > 0 && (
-        <section className="admin-trial-alert">
-          <strong>Prueba gratuita por vencer o vencida</strong>
-          <ul>
-            {trialAlerts.map(({ company, days }) => (
-              <li key={company.id}>
-                <span className={`admin-trial ${trialTone(days)}`}>{trialLabel(days)}</span> {company.name}
-                {company.contactPhone ? ` · ${company.contactPhone}` : ""}
-                {company.ownerEmail ? ` · ${company.ownerEmail}` : ""}
-              </li>
-            ))}
-          </ul>
-          <span className="muted">No se bloquea nada al vencer: podés extender los días o dejarlo sin vencimiento desde cada tarjeta.</span>
-        </section>
-      )}
+          {tab === "resumen" && <AdminDailyChecks />}
+          {tab === "resumen" && (
+            <AdminSummary
+              companies={companies}
+              plans={plans}
+              planPrice={planPrice}
+              monthlyFee={revenue.monthly}
+              isAutoCharged={(id) => {
+                const mp = mpByCompany[id];
+                return !!mp && mp.status === "authorized" && !mpProblem(mp);
+              }}
+              today={today}
+            />
+          )}
 
+          {tab === "contactos" && <AdminContacts onScheduled={() => setPipelineReloadKey((k) => k + 1)} />}
 
-
-      <div className="admin-search">
-        <Search size={16} />
-        <input placeholder="Buscar por número, negocio, dueño, mail, teléfono, ciudad o provincia" value={search} onChange={(e) => setSearch(e.target.value)} />
-      </div>
-
-      <div className="admin-filters">
-        <div className="admin-actions">
-          {(
-            [
-              ["all", `Todos (${billingCounts.all})`],
-              ["owes", `Deben (${billingCounts.owes})`],
-              ["paid", `Pagaron (${billingCounts.paid})`],
-              ["trial", `En prueba (${billingCounts.trial})`],
-              ["none", `Sin pagos (${billingCounts.none})`]
-            ] as [BillingFilter, string][]
-          ).map(([value, label]) => (
-            <button key={value} className={billingFilter === value ? "" : "secondary"} onClick={() => setBillingFilter(value)}>{label}</button>
-          ))}
+          {tab === "ventas" && <AdminSalesPipeline companies={companies} onCreateFromLead={createFromLead} reloadKey={pipelineReloadKey} />}
         </div>
-        <label className="admin-sort">
-          Ordenar
-          <select value={sortMode} onChange={(e) => setSortMode(e.target.value as SortMode)}>
-            <option value="status">Primero los que deben</option>
-            <option value="number">Por número</option>
-            <option value="province">Por provincia</option>
-          </select>
-        </label>
+
+        {tab === "clientes" && (
+          <div className="pa-kpis">
+            <Kpi label="Clientes activos" value={activeCompanies.length} hint={`${billingCounts.paid} pagaron · ${billingCounts.trial} en prueba`} />
+            <Kpi label="Abono mensual" value={formatMoney(revenue.monthly)} hint="lo que entra por mes si nadie se va" />
+            <Kpi label={`Cobrado en ${monthName}`} value={formatMoney(revenue.collectedThisMonth)} />
+            <Kpi
+              label="Vencido sin cobrar"
+              value={<span className={revenue.overdue > 0 ? "pa-text-danger" : undefined}>{formatMoney(revenue.overdue)}</span>}
+              hint={revenue.overdueCount > 0 ? `${revenue.overdueCount} ${revenue.overdueCount === 1 ? "cliente" : "clientes"}` : "nadie debe"}
+            />
+            <Kpi
+              label={`Falta cobrar en ${monthName}`}
+              value={formatMoney(revenue.dueThisMonth)}
+              hint={revenue.dueThisMonthCount > 0 ? `${revenue.dueThisMonthCount} ${revenue.dueThisMonthCount === 1 ? "cliente" : "clientes"}, contando lo vencido` : undefined}
+            />
+          </div>
+        )}
+
+        {/* Siempre montado: le pasa al panel las suscripciones de Mercado Pago aunque se esté en otra pestaña. */}
+        <div style={tab === "clientes" ? undefined : { display: "none" }}>
+          <AdminMercadoPago companies={companies} onPaymentsChanged={() => void reloadCompanies()} onSubscriptions={handleMpSubscriptions} />
+        </div>
+
+        {tab === "clientes" && (
+          <>
+            {trialAlerts.length > 0 && (
+              <Alert tone="warn" title="Prueba gratuita por vencer o vencida">
+                {trialAlerts.map(({ company, days }, i) => (
+                  <span key={company.id}>
+                    {i > 0 ? " · " : ""}
+                    <button type="button" className="pa-link" onClick={() => setDetailId(company.id)}>{company.name}</button> ({trialLabel(days).toLowerCase()})
+                  </span>
+                ))}
+                . No se bloquea nada al vencer: desde la ficha podés sumarle días o sacarle la prueba.
+              </Alert>
+            )}
+
+            <DataTable
+              rows={activeCompanies}
+              columns={clientColumns}
+              rowKey={(c) => c.id}
+              matches={(c, q) => matchesCompanySearch(c, q)}
+              searchPlaceholder="Buscar por número, negocio, dueño, mail, teléfono o ciudad"
+              filters={clientFilters}
+              defaultSort={{ key: "status", dir: "asc" }}
+              exportName="clientes"
+              loading={companiesLoading}
+              onRowClick={(c) => setDetailId(c.id)}
+              emptyTitle="Todavía no diste de alta ningún cliente"
+              emptyText="Tocá “Nuevo cliente” arriba para crear el primero."
+            />
+
+            {inactiveCompanies.length > 0 && (
+              <details className="pa-card">
+                <summary>Clientes desactivados ({inactiveCompanies.length})</summary>
+                <div style={{ display: "grid", gap: 6 }}>
+                  {inactiveCompanies.map((c) => (
+                    <button key={c.id} type="button" className="pa-list-row pa-list-button" onClick={() => setDetailId(c.id)}>
+                      <span><b>{c.name}</b> <span className="pa-muted">· {[c.ownerFullName, c.city].filter(Boolean).join(" · ")}</span></span>
+                      <span className="pa-muted">Ver ficha</span>
+                    </button>
+                  ))}
+                </div>
+              </details>
+            )}
+          </>
+        )}
       </div>
 
-      {companiesLoading && companies.length === 0 && <p className="muted">Cargando…</p>}
-      {!companiesLoading && activeCompanies.length === 0 && <p className="muted">Todavía no diste de alta ningún cliente.</p>}
-      {!companiesLoading && activeCompanies.length > 0 && visibleActive.length === 0 && <p className="muted">Ningún cliente coincide con la búsqueda o el filtro.</p>}
+      <Modal
+        open={detailCompany !== null}
+        size="lg"
+        title={detailCompany ? `${detailCompany.clientNumber !== undefined ? `N.º ${detailCompany.clientNumber} · ` : ""}${detailCompany.name}` : ""}
+        headerExtra={detailCompany && <span className="pa-muted" style={{ fontSize: 13 }}>{[detailCompany.ownerFullName, [detailCompany.city, detailCompany.province].filter(Boolean).join(", ")].filter(Boolean).join(" · ")}</span>}
+        onClose={() => { setDetailId(null); setPayingId(null); setHistoryId(null); setEditingLocationId(null); }}
+      >
+        {message && <Alert tone={message.startsWith("Pago registrado") ? "ok" : "warn"} onClose={() => setMessage("")}>{message}</Alert>}
+        {detailCompany && renderDetail(detailCompany)}
+      </Modal>
 
-      {sortMode === "province"
-        ? activeGroups.map(([province, group]) => (
-            <Fragment key={province}>
-              <h2 className="admin-group-title"><Building2 size={16} /> {province} <span>{group.length}</span></h2>
-              <div className="admin-grid">{group.map(renderCard)}</div>
-            </Fragment>
-          ))
-        : visibleActive.length > 0 && <div className="admin-grid">{sortedActive.map(renderCard)}</div>}
+      <Modal
+        open={showForm || result !== null}
+        title={result ? "Cliente creado" : leadForForm ? `Dar de alta a ${leadForForm.businessName}` : "Dar de alta un cliente"}
+        onClose={() => { setShowForm(false); setResult(null); setLeadForForm(null); }}
+      >
+        {result ? (
+          <>
+            <Alert tone="ok" title="Listo. Mandale estos datos al dueño">
+              Usuario: <b>{result.email}</b>
+              <br />
+              Contraseña temporal (copiala ahora, no se vuelve a mostrar): <span className="pa-secret">{result.tempPassword}</span>
+            </Alert>
+            <div className="pa-form-actions">
+              <Button variant="secondary" onClick={() => { setResult(null); setShowForm(true); }}>Crear otro cliente</Button>
+              <Button onClick={() => { void navigator.clipboard.writeText(buildWelcomeMessage(resultCompanyName, result)); setCopied(true); }}>
+                {copied ? "¡Copiado!" : "Copiar mensaje para el cliente"}
+              </Button>
+            </div>
+          </>
+        ) : (
+          <form onSubmit={submit} style={{ display: "grid", gap: 16 }}>
+            <div className="pa-form-grid">
+              <Field label="Nombre del negocio">{(id) => <Input id={id} value={draft.companyName} onChange={(e) => setDraft({ ...draft, companyName: e.target.value })} required />}</Field>
+              <Field label="Primera sucursal">{(id) => <Input id={id} value={draft.branchName} onChange={(e) => setDraft({ ...draft, branchName: e.target.value })} required />}</Field>
+              <Field label="Nombre del dueño">{(id) => <Input id={id} value={draft.ownerFullName} onChange={(e) => setDraft({ ...draft, ownerFullName: e.target.value })} required />}</Field>
+              <Field label="Email del dueño">{(id) => <Input id={id} type="email" value={draft.ownerEmail} onChange={(e) => setDraft({ ...draft, ownerEmail: e.target.value })} required />}</Field>
+              <Field label="Teléfono" hint="Uso interno, para escribirle por WhatsApp">{(id) => <Input id={id} inputMode="tel" value={draft.contactPhone} onChange={(e) => setDraft({ ...draft, contactPhone: e.target.value })} />}</Field>
+              <Field label="Plan">
+                {(id) => (
+                  <Select id={id} value={draft.plan} onChange={(e) => setDraft({ ...draft, plan: e.target.value as Plan })}>
+                    {PLAN_OPTIONS.map((p) => <option key={p} value={p}>{PLAN_LABELS[p]} ({PLAN_PRICES[p]})</option>)}
+                  </Select>
+                )}
+              </Field>
+              <Field label="Provincia (opcional)">
+                {(id) => (
+                  <Select id={id} value={draft.province} onChange={(e) => setDraft({ ...draft, province: e.target.value })}>
+                    <option value="">Sin especificar</option>
+                    {PROVINCES.map((p) => <option key={p} value={p}>{p}</option>)}
+                  </Select>
+                )}
+              </Field>
+              <Field label="Ciudad (opcional)">{(id) => <Input id={id} value={draft.city} onChange={(e) => setDraft({ ...draft, city: e.target.value })} />}</Field>
+            </div>
+            {message && <Alert tone="warn">{message}</Alert>}
+            <div className="pa-form-actions">
+              <Button variant="secondary" onClick={() => { setShowForm(false); setLeadForForm(null); }}>Cancelar</Button>
+              <Button type="submit" loading={busy}>{busy ? "Creando…" : "Crear cliente"}</Button>
+            </div>
+          </form>
+        )}
+      </Modal>
 
-      {inactiveCompanies.length > 0 && (
-        <details className="admin-inactive">
-          <summary className="admin-group-title">Clientes desactivados <span>{inactiveCompanies.length}</span></summary>
-          <div className="admin-grid" style={{ marginTop: 12 }}>{inactiveCompanies.map(renderCard)}</div>
-        </details>
-      )}
-      </>}
-    </main>
+      {confirmDialog}
+    </AdminThemeRoot>
   );
 }

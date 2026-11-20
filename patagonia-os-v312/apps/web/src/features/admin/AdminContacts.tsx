@@ -137,10 +137,10 @@ export function AdminContacts({ onScheduled }: { onScheduled: () => void }) {
         <Search size={16} />
         <input placeholder="Buscar por nombre, teléfono o nota" value={query} onChange={(e) => setQuery(e.target.value)} />
       </div>
-      <div className="admin-actions">
+      <div className="pa-chips">
         {CONTACT_FILTERS.map((f) => (
-          <button key={f.id} className={filter === f.id ? "" : "secondary"} onClick={() => setFilter(f.id)}>
-            {f.label} ({counts[f.id] ?? 0})
+          <button key={f.id} type="button" className="pa-chip" aria-pressed={filter === f.id} onClick={() => setFilter(f.id)}>
+            {f.label} <span className="pa-chip-count">{counts[f.id] ?? 0}</span>
           </button>
         ))}
       </div>

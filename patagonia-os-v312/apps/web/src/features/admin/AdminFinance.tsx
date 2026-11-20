@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { parseAmount } from "../../lib/money";
+import { BRAND } from "../../lib/brand";
+import { useConfirm } from "./ui/components";
 import {
   addPlatformAdmin,
   deleteFinanceMovement,
@@ -55,6 +57,7 @@ export function AdminFinance() {
   const [data, setData] = useState<FinOverview | null>(null);
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(true);
+  const [ask, confirmDialog] = useConfirm();
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -179,7 +182,7 @@ export function AdminFinance() {
                           {m.fromInvestment && <span className="muted"> · con la inversión</span>}
                         </td>
                         <td>{account?.name ?? "—"}</td>
-                        <td className="num" style={{ color: m.direction === "out" ? "#8b1e1e" : undefined }}>
+                        <td className="num" style={{ color: m.direction === "out" ? "var(--pa-danger)" : undefined }}>
                           {m.direction === "out" ? "−" : "+"}{formatCurrency(m.amount, account?.currency ?? "ARS")}
                         </td>
                         <td>
@@ -189,7 +192,7 @@ export function AdminFinance() {
                             <button
                               className="link-button"
                               onClick={async () => {
-                                if (!window.confirm(m.transferId ? "¿Borrar esta transferencia (las dos puntas)?" : "¿Borrar este movimiento?")) return;
+                                if (!(await ask({ title: m.transferId ? "¿Borrar esta transferencia?" : "¿Borrar este movimiento?", message: m.transferId ? "Se borran las dos puntas." : undefined, confirmLabel: "Borrar", danger: true }))) return;
                                 try {
                                   await deleteFinanceMovement(m.id);
                                   setMessage("Movimiento borrado.");
@@ -223,7 +226,7 @@ export function AdminFinance() {
                     <td className="num">{formatCurrency(r.amount, accountById.get(r.accountId)?.currency ?? "ARS")}</td>
                     <td>
                       <button className="link-button" onClick={async () => {
-                        if (!window.confirm(`¿Sacar "${r.name}" de los gastos fijos? Los ya anotados quedan.`)) return;
+                        if (!(await ask({ title: `¿Sacar “${r.name}” de los gastos fijos?`, message: "Los ya anotados quedan.", confirmLabel: "Sacar", danger: true }))) return;
                         await deleteFinanceRecurring(r.id).catch((err) => setMessage(errorText(err)));
                         void reload();
                       }}>Sacar</button>
@@ -251,6 +254,7 @@ export function AdminFinance() {
           </details>
         </>
       )}
+      {confirmDialog}
     </div>
   );
 }
@@ -467,6 +471,7 @@ function ImportPayments({ onDone }: { onDone: (text: string) => void }) {
 }
 
 function AddAdmin() {
+  const [ask, confirmDialog] = useConfirm();
   const [email, setEmail] = useState("");
   const [name, setName] = useState("");
   const [result, setResult] = useState("");
@@ -478,12 +483,12 @@ function AddAdmin() {
         <input placeholder="Nombre" value={name} onChange={(e) => setName(e.target.value)} />
         <input type="email" placeholder="Mail" value={email} onChange={(e) => setEmail(e.target.value)} style={{ minWidth: 240 }} />
         <button className="secondary" disabled={busy} onClick={async () => {
-          if (!window.confirm(`¿Crear la cuenta de administrador de Patagonia para ${email}? Va a ver todo el panel.`)) return;
+          if (!(await ask({ title: `¿Crear la cuenta de administrador para ${email}?`, message: "Va a ver y manejar todo este panel.", confirmLabel: "Crear cuenta" }))) return;
           setBusy(true);
           setResult("");
           try {
             const r = await addPlatformAdmin(email, name);
-            setResult(`Listo. Entra en app.patagoniasystem.com.ar con ${r.email} y la contraseña temporal ${r.tempPassword} (pedile que la cambie al entrar).`);
+            setResult(`Listo. Entra en ${BRAND.appUrl.replace(/^https?:\/\//, "")} con ${r.email} y la contraseña temporal ${r.tempPassword} (pedile que la cambie al entrar).`);
             setEmail("");
             setName("");
           } catch (err) {
@@ -494,6 +499,7 @@ function AddAdmin() {
         }}>{busy ? "Creando…" : "Crear administrador"}</button>
       </div>
       {result && <p className="setting-help">{result}</p>}
+      {confirmDialog}
     </div>
   );
 }
@@ -507,6 +513,7 @@ function MetaConnect({ accounts, onChange }: { accounts: FinAccount[]; onChange:
   const [fromInvestment, setFromInvestment] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [ask, confirmDialog] = useConfirm();
 
   const load = useCallback(async () => {
     const st = await getMetaStatus().catch(() => null);
@@ -570,8 +577,8 @@ function MetaConnect({ accounts, onChange }: { accounts: FinAccount[]; onChange:
               const r = await syncMetaAds();
               return `Gasto de Meta actualizado (${r.saved ?? 0} días de campañas).`;
             })}>Traer gasto ahora</button>
-            <button className="link-button" disabled={busy} onClick={() => {
-              if (!window.confirm("¿Desconectar Meta? Los gastos ya anotados quedan.")) return;
+            <button className="link-button" disabled={busy} onClick={async () => {
+              if (!(await ask({ title: "¿Desconectar Meta?", message: "Los gastos ya anotados quedan.", confirmLabel: "Desconectar", danger: true }))) return;
               void run(async () => {
                 await disconnectMeta();
                 return "Meta desconectado.";
@@ -581,6 +588,7 @@ function MetaConnect({ accounts, onChange }: { accounts: FinAccount[]; onChange:
         )}
       </div>
       {error && <p className="setting-help">{error}</p>}
+      {confirmDialog}
     </div>
   );
 }

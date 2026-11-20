@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { MessageCircle, Plus } from "lucide-react";
 import { PROVINCES, deleteLead, listLeads, listSalesPipeline, markLeadContacted, markLeadReplied, saveLead, setCompanySalesFollowup, type CompanySummary, type LeadInput } from "./admin-service";
 import { LeadImport } from "./LeadImport";
+import { useConfirm } from "./ui/components";
 import { FollowUpRound } from "./FollowUpRound";
 import {
   LEAD_MAX_ATTEMPTS, PIPELINE_STAGES, companyStage, followUpsForToday, funnelCounts, whatsappLink,
@@ -50,6 +51,7 @@ export function AdminSalesPipeline({ companies, onCreateFromLead, reloadKey }: P
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [ask, confirmDialog, askText] = useConfirm();
   const [stage, setStage] = useState<PipelineStage>("sin_arrancar");
   const [leadDraft, setLeadDraft] = useState<LeadInput | null>(null);
   const [editingCompanyId, setEditingCompanyId] = useState<string | null>(null);
@@ -221,8 +223,8 @@ export function AdminSalesPipeline({ companies, onCreateFromLead, reloadKey }: P
             <button
               className="danger"
               disabled={busy}
-              onClick={() => {
-                const reason = window.prompt(`¿Por qué no sigue ${lead.businessName}? (${LOST_REASONS.join(", ")})`, LOST_REASONS[0]);
+              onClick={async () => {
+                const reason = await askText({ title: `¿Por qué no sigue ${lead.businessName}?`, confirmLabel: "Marcar perdido", danger: true, input: { label: "Motivo", defaultValue: LOST_REASONS[0], suggestions: [...LOST_REASONS] } });
                 if (reason === null) return;
                 void run(lead.id, async () => { await saveLead({ ...leadToInput(lead), stage: "perdido", lostReason: reason.trim() || "Otro" }); });
               }}
@@ -234,8 +236,8 @@ export function AdminSalesPipeline({ companies, onCreateFromLead, reloadKey }: P
             <button
               className="danger"
               disabled={busy}
-              onClick={() => {
-                if (window.confirm(`¿Borrar a ${lead.businessName} de la lista?`)) void run(lead.id, () => deleteLead(lead.id));
+              onClick={async () => {
+                if (await ask({ title: `¿Borrar a ${lead.businessName} de la lista?`, confirmLabel: "Borrar", danger: true })) void run(lead.id, () => deleteLead(lead.id));
               }}
             >
               Borrar
@@ -410,10 +412,10 @@ export function AdminSalesPipeline({ companies, onCreateFromLead, reloadKey }: P
       )}
 
       <div className="admin-filters">
-        <div className="admin-actions">
+        <div className="pa-chips">
           {PIPELINE_STAGES.map((s) => (
-            <button key={s.id} className={stage === s.id ? "" : "secondary"} onClick={() => setStage(s.id)}>
-              {s.label} ({stageCount(s.id)})
+            <button key={s.id} type="button" className="pa-chip" aria-pressed={stage === s.id} onClick={() => setStage(s.id)}>
+              {s.label} <span className="pa-chip-count">{stageCount(s.id)}</span>
             </button>
           ))}
         </div>
@@ -425,6 +427,7 @@ export function AdminSalesPipeline({ companies, onCreateFromLead, reloadKey }: P
         {stageLeads.map(renderLeadCard)}
         {stageCompanies.map(renderCompanyCard)}
       </div>
+      {confirmDialog}
     </div>
   );
 }
