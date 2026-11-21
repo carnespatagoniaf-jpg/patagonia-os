@@ -334,7 +334,13 @@ export async function setAuraItemBarcodes(
   port: SerialPort,
   responder: KretzResponder,
   enable: boolean,
-  options: { timeoutMs?: number; onProgress?: (text: string) => void } = {}
+  options: {
+    timeoutMs?: number;
+    onProgress?: (text: string) => void;
+    /** Report LT (El Abastero 21/11/2026): no mandar el 1070. Su etiqueta de cada producto ya la lee Mostrador con el
+     * formato guardado de la sucursal; el código de cada renglón del ticket de suma sale con ese mismo formato. */
+    keepFormat?: boolean;
+  } = {}
 ): Promise<AuraItemBarcodeResult> {
   const timeout = options.timeoutMs ?? 1500;
   const progress = options.onProgress ?? (() => {});
@@ -379,7 +385,7 @@ export async function setAuraItemBarcodes(
     if (!hello.kretz) hello = await sendRead(port, result.exchanges, "test de conexión (reintento)", link, deviceType, equipmentId, "0001", "", timeout);
     if (!hello.kretz) return finish("sin_respuesta", "la balanza no contestó: no se mandó nada");
 
-    if (enable) {
+    if (enable && !options.keepFormat) {
       progress("Ajustando el formato del código de barras…");
       const format = await send("código de barras (1070)", "1070", AURA_BARCODE_CONFIG);
       result.formatCode = format?.code ?? null;

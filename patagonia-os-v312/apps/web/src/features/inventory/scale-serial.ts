@@ -619,6 +619,25 @@ export async function setAuraItemBarcodesOnScale(enable: boolean, onProgress: (t
   return r;
 }
 
+/**
+ * Report LT: código de barras por producto en el ticket de suma (1080, Multiprotocolo Report Nx §4.18).
+ * Solo manda 0001 y 1080, con la conexión que ya quedó guardada al mandar precios (no toca el formato del código
+ * de barras, ni productos, ni precios). NUNCA probado en una Report LT real: si no lo tiene, contesta y no cambia nada.
+ */
+export async function setReportItemBarcodesOnScale(enable: boolean, onProgress: (text: string) => void): Promise<AuraItemBarcodeResult> {
+  const settings = getScaleSerialSettings();
+  const port = await pickPort();
+  cachedPortOpenKey = null;
+  const r = await setAuraItemBarcodes(
+    port,
+    { link: { baudRate: settings.baudRate, stopBits: settings.stopBits }, deviceType: settings.deviceType, equipmentId: settings.equipmentId },
+    enable,
+    { onProgress, keepFormat: true }
+  );
+  cachedPortOpenKey = null;
+  return r;
+}
+
 /** Resumen por etapa: dónde se cortó la comunicación. */
 export function stagesSummary(r: DiagnosticRecord): string {
   if (!r.stages) return "";
