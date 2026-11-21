@@ -1,0 +1,3 @@
+# Los scripts de shell siempre con fin de línea LF: en Windows (core.autocrlf=true) salían con CRLF
+# y bash no los puede correr desde Git Bash.
+*.sh text eol=lf
