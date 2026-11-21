@@ -483,8 +483,9 @@ export function Invoicing() {
         />
       )}
 
-      {/* Punto de venta y domicilio de cada local (migración 191): plan Empresa, una vez cargados los datos generales. */}
-      {planAllows(profile, "empresa") && settings && <BranchFiscalPanel generalPointOfSale={settings.pointOfSale ?? null} />}
+      {/* Punto de venta y domicilio de cada local (191; todos los planes desde la 198), una vez cargados los datos
+          generales. El panel no se muestra con un solo local. */}
+      {settings && <BranchFiscalPanel generalPointOfSale={settings.pointOfSale ?? null} />}
 
       {/* Remito R con CAI (migración 147): plan Full. */}
       {planAllows(profile, "full") && <RemitoRPanel issuerCondition={settings?.taxCondition ?? null} />}

@@ -2,8 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { listTransferBranches, type TransferBranch } from "../transfers/transfers-service";
 import { checkBranchArcaConnection, listBranchFiscal, saveBranchFiscal, type BranchFiscal } from "./invoicing-service";
 
-// Facturas → "Datos de cada local" (plan Empresa, migración 191). El CUIT y el certificado son uno solo; cada local
-// puede facturar con su punto de venta y su domicilio. Vacío = usa los datos generales, como siempre.
+// Facturas → "Datos de cada local" (migración 191; todos los planes desde la 198). El CUIT y el certificado son uno
+// solo; cada local puede facturar con su punto de venta y su domicilio. Vacío = usa los datos generales, como siempre.
 
 interface Row {
   pointOfSale: string;
@@ -58,7 +58,6 @@ export function BranchFiscalPanel({ generalPointOfSale }: { generalPointOfSale: 
     <section className="panel" style={{ marginBottom: 18 }}>
       <div className="panel-title">
         <h2>Datos de cada local</h2>
-        <span>plan Empresa</span>
       </div>
       <p className="muted" style={{ marginTop: -6 }}>
         El CUIT y el certificado son uno solo para toda la empresa. Cada local puede facturar con su punto de venta y su domicilio (los dos van impresos). Vacío = usa los generales
