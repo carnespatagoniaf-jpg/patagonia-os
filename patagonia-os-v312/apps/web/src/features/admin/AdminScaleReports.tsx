@@ -60,7 +60,7 @@ export function AdminScaleReports({ onChange }: { onChange?: () => void } = {}) 
   function fullText(report: ScaleSupportReport) {
     return [
       `Cliente: ${report.companyName}${report.branchName ? ` · ${report.branchName}` : ""}`,
-      `Enviado por: ${report.userName ?? "-"} · ${new Date(report.createdAt).toLocaleString("es-AR")}`,
+      `Enviado por: ${report.userName ?? "-"} · ${new Date(report.createdAt).toLocaleString("es-AR", { hourCycle: "h23" })}`,
       `Nota: ${report.note ?? "-"}`,
       `Navegador: ${report.userAgent ?? "-"}`,
       `Balanzas configuradas: ${JSON.stringify(report.connections, null, 2)}`,
@@ -89,7 +89,7 @@ export function AdminScaleReports({ onChange }: { onChange?: () => void } = {}) 
                 {report.resolvedAt ? <Badge tone="ok">Resuelto</Badge> : <Badge tone="warn">Sin resolver</Badge>}
                 <strong>{report.companyName}</strong>
                 <span className="pa-muted" style={{ fontWeight: 400 }}>
-                  {report.branchName ? `${report.branchName} · ` : ""}{new Date(report.createdAt).toLocaleString("es-AR")}
+                  {report.branchName ? `${report.branchName} · ` : ""}{new Date(report.createdAt).toLocaleString("es-AR", { hourCycle: "h23" })}
                   {report.note ? ` — “${report.note}”` : ""}
                 </span>
               </span>

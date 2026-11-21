@@ -231,7 +231,7 @@ export function BlindCloseForm(p: BlindCloseFormProps) {
           ) : (
             swap.candidates.slice(0, 4).map((c) => (
               <div key={c.paymentId} style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginTop: 4 }}>
-                <span>Venta de las {new Date(c.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })} por {formatMoney(c.amount)}</span>
+                <span>Venta de las {new Date(c.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", hourCycle: "h23", minute: "2-digit" })} por {formatMoney(c.amount)}</span>
                 <button className="secondary" disabled={fixingPaymentId !== null} onClick={() => fixPayment(c.paymentId, swap.toAccountId)}>
                   {fixingPaymentId === c.paymentId ? "Corrigiendo…" : `Pasarla a ${swap.toName}`}
                 </button>

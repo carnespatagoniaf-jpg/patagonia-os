@@ -53,6 +53,6 @@ export function exportActivityLogText(): string {
   const log = getActivityLog();
   if (log.length === 0) return "Sin actividad registrada todavía.";
   return log
-    .map((e) => `[${new Date(e.at).toLocaleString("es-AR")}] ${e.kind.toUpperCase()}${e.connectionLabel ? ` (${e.connectionLabel})` : ""}: ${e.message}`)
+    .map((e) => `[${new Date(e.at).toLocaleString("es-AR", { hourCycle: "h23" })}] ${e.kind.toUpperCase()}${e.connectionLabel ? ` (${e.connectionLabel})` : ""}: ${e.message}`)
     .join("\n");
 }

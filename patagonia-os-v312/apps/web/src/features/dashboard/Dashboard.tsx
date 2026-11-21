@@ -1,3 +1,4 @@
+import { formatQuantity } from "../../lib/quantity-format";
 import { useEffect, useState } from "react";
 import type { Product } from "@patagonia/domain";
 import { isOverdueDebt } from "@patagonia/domain";
@@ -340,7 +341,7 @@ export function Dashboard({ onNavigate }: { onNavigate?: (page: Page) => void } 
                     <AlertTriangle size={18} />
                     <div>
                       <strong>{product.name}</strong>
-                      <span>En negativo: {product.stock} {product.unit === "kg" ? "kg" : "u."} · se vendió más de lo cargado</span>
+                      <span>En negativo: {formatQuantity(product.stock, product.unit)} · se vendió más de lo cargado</span>
                     </div>
                   </div>
                 ))
@@ -350,7 +351,7 @@ export function Dashboard({ onNavigate }: { onNavigate?: (page: Page) => void } 
                   <AlertTriangle size={18} />
                   <div>
                     <strong>{product.name}</strong>
-                    <span>Queda {product.stock} {product.unit === "kg" ? "kg" : "u."} · mínimo {product.minStock}</span>
+                    <span>Queda {formatQuantity(product.stock, product.unit)} · mínimo {formatQuantity(product.minStock, product.unit)}</span>
                   </div>
                 </div>
               ))}

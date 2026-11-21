@@ -395,7 +395,7 @@ export function Sale() {
    * (producto borrado, cuenta de cobro desactivada...), para que no trabe
    * el cierre del turno para siempre. Queda avisado en Sentry. */
   function discardPendingSale(sale: PendingSale) {
-    const when = new Date(sale.createdAt).toLocaleString("es-AR");
+    const when = new Date(sale.createdAt).toLocaleString("es-AR", { hourCycle: "h23" });
     const amount = sale.total != null ? ` de $${sale.total.toLocaleString("es-AR")}` : "";
     if (!window.confirm(`¿Descartar la venta${amount} de las ${when}?\n\nNo va a quedar registrada en el sistema. Si la cobraste, cargala de nuevo a mano para que el stock y la caja den bien.`)) return;
     Sentry.captureMessage("Venta offline descartada a mano", { level: "warning", extra: { sale } });
@@ -514,7 +514,8 @@ export function Sale() {
       accountName: deposit.safeAccountName ? `${deposit.fromAccountName} -> ${deposit.safeAccountName}` : deposit.fromAccountName,
       detail: "Guardar este papel junto con la plata retirada.",
       counterpartLabel: "Cajera",
-      counterpartName: deposit.employeeName ?? profile?.full_name ?? "-"
+      // Quien atiende el turno (cajero con PIN o el nombre del inicio de caja), no quien está logueado en la PC.
+      counterpartName: deposit.employeeName ?? shift?.cashierName ?? profile?.full_name ?? "-"
     };
     setReceipt(null);
     setMovementReceipt(data);
@@ -1197,7 +1198,7 @@ Cancelar = es el mismo papel: no cobrar.`)) {
               .map((s) => (
                 <span key={s.localId} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap", fontSize: "0.9em", marginTop: 6 }}>
                   <span>
-                    Venta de las {new Date(s.createdAt).toLocaleTimeString("es-AR")}
+                    Venta de las {new Date(s.createdAt).toLocaleTimeString("es-AR", { hourCycle: "h23" })}
                     {s.total != null && ` ($${s.total.toLocaleString("es-AR")})`}:{" "}
                     {s.status === "error" ? `no se pudo subir — ${s.errorMessage ?? "error desconocido"}. Tocá "Sincronizar ahora" para reintentar.` : s.note}
                   </span>

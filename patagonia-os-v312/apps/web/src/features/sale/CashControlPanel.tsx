@@ -119,7 +119,7 @@ function ScaleCloseToggle({ enabled, onChange, onMessage }: { enabled: boolean; 
 }
 
 function fmtDate(iso: string) {
-  return new Date(iso).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return new Date(iso).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", hourCycle: "h23", minute: "2-digit" });
 }
 
 function diffText(diff: number | null) {

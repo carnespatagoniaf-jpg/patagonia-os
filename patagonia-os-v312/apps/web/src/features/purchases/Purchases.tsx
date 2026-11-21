@@ -1366,7 +1366,7 @@ export function Purchases() {
                                               </>
                                             ) : (
                                               <>
-                                                <td>{item.quantity} {item.unit}</td>
+                                                <td>{formatQuantity(item.quantity)} {item.unit}</td>
                                                 <td className="num">{formatMoney(item.unitPrice)}</td>
                                                 <td className="num">{formatMoney(item.lineTotal)}</td>
                                                 <td>

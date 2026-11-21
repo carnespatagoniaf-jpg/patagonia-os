@@ -1,3 +1,4 @@
+import { formatQuantity } from "../../lib/quantity-format";
 import { forwardRef, Fragment } from "react";
 import type { TreasuryAccount } from "@patagonia/domain";
 import type { PosShiftVale } from "../employees/employees-service";
@@ -43,7 +44,7 @@ export function ReceiptView({ receipt, branchName, thermalPrintBusy, onPrint, on
         <div className="ticket-header">
           <strong>{branchName}</strong>
           <p>Comprobante interno · no válido como factura</p>
-          <p>{new Date(receipt.soldAt).toLocaleString("es-AR")}</p>
+          <p>{new Date(receipt.soldAt).toLocaleString("es-AR", { hourCycle: "h23" })}</p>
           {receipt.pending && <p className="no-print" style={{ color: "#8a4b00", fontWeight: 700 }}>⏳ Guardada sin conexión, pendiente de subir</p>}
         </div>
       )}
@@ -54,7 +55,7 @@ export function ReceiptView({ receipt, branchName, thermalPrintBusy, onPrint, on
           <div className="ticket-item" key={idx}>
             <span className="ticket-item-name">{item.name}</span>
             <span className="ticket-item-detail">
-              <span>{item.quantity} {UNIT_LABELS[item.unit]} x {formatMoney(item.unitPrice)}</span>
+              <span>{formatQuantity(item.quantity, item.unit, UNIT_LABELS[item.unit])} x {formatMoney(item.unitPrice)}</span>
               <b>{formatMoney(item.quantity * item.unitPrice - item.discountAmount)}</b>
             </span>
           </div>
@@ -100,7 +101,7 @@ export const MovementReceiptView = forwardRef<HTMLDivElement, {
       <div className="ticket-header">
         <strong>{branchName}</strong>
         <p>{movementReceipt.title}</p>
-        <p>{new Date(movementReceipt.date).toLocaleString("es-AR")}</p>
+        <p>{new Date(movementReceipt.date).toLocaleString("es-AR", { hourCycle: "h23" })}</p>
       </div>
 
       <div className="ticket-rule" />
@@ -148,7 +149,7 @@ export function CloseSummaryView({ summary, accounts, adjustments, vales, suppli
           <button className="secondary" onClick={() => onPrint()}>Imprimir</button>
         </div>
       </div>
-      <p className="muted print-only-header">Cerrado {new Date().toLocaleString("es-AR")}</p>
+      <p className="muted print-only-header">Cerrado {new Date().toLocaleString("es-AR", { hourCycle: "h23" })}</p>
       <p><strong>Total del turno: {formatMoney(summary.total)}</strong></p>
       <div className="panel" style={{ padding: 14, marginBottom: 16 }}>
         <p className="muted" style={{ margin: 0, marginBottom: 6, fontWeight: 800, textTransform: "uppercase", fontSize: 12 }}>Arqueo de caja</p>
@@ -278,7 +279,7 @@ export function CloseSummaryView({ summary, accounts, adjustments, vales, suppli
             <tbody>
               {adjustments.map((adj) => (
                 <tr key={adj.id}>
-                  <td>{new Date(adj.createdAt).toLocaleTimeString("es-AR")}</td>
+                  <td>{new Date(adj.createdAt).toLocaleTimeString("es-AR", { hourCycle: "h23" })}</td>
                   <td>{adj.movementType === "transferencia" ? "Traspaso" : adj.direction === "in" ? "Ingreso" : "Egreso"}</td>
                   <td>{adj.accountName}</td>
                   <td>{adj.notes ?? "-"}</td>
@@ -292,7 +293,7 @@ export function CloseSummaryView({ summary, accounts, adjustments, vales, suppli
               <div key={adj.id}>
                 <div className="print-row">
                   <span className="print-row-label">
-                    {new Date(adj.createdAt).toLocaleTimeString("es-AR")} · {adj.movementType === "transferencia" ? "Traspaso" : adj.direction === "in" ? "Ingreso" : "Egreso"} · {adj.accountName}
+                    {new Date(adj.createdAt).toLocaleTimeString("es-AR", { hourCycle: "h23" })} · {adj.movementType === "transferencia" ? "Traspaso" : adj.direction === "in" ? "Ingreso" : "Egreso"} · {adj.accountName}
                   </span>
                   <span className="print-row-amount">{adj.direction === "in" ? "" : "-"}{formatMoney(adj.amount)}</span>
                 </div>
@@ -320,7 +321,7 @@ export function CloseSummaryView({ summary, accounts, adjustments, vales, suppli
             <tbody>
               {vales.map((v) => (
                 <tr key={v.id}>
-                  <td>{new Date(v.createdAt).toLocaleTimeString("es-AR")}</td>
+                  <td>{new Date(v.createdAt).toLocaleTimeString("es-AR", { hourCycle: "h23" })}</td>
                   <td>{v.employeeName}</td>
                   <td>{v.detail || "-"}</td>
                   <td className="num">{formatMoney(v.amount)}</td>
@@ -332,7 +333,7 @@ export function CloseSummaryView({ summary, accounts, adjustments, vales, suppli
             {vales.map((v) => (
               <div key={v.id}>
                 <div className="print-row">
-                  <span className="print-row-label">{new Date(v.createdAt).toLocaleTimeString("es-AR")} · {v.employeeName}</span>
+                  <span className="print-row-label">{new Date(v.createdAt).toLocaleTimeString("es-AR", { hourCycle: "h23" })} · {v.employeeName}</span>
                   <span className="print-row-amount">{formatMoney(v.amount)}</span>
                 </div>
                 {v.detail && <p className="print-row-detail">{v.detail}</p>}
@@ -356,7 +357,7 @@ export function CloseSummaryView({ summary, accounts, adjustments, vales, suppli
             <tbody>
               {supplierPayments.map((p) => (
                 <tr key={p.id}>
-                  <td>{new Date(p.createdAt).toLocaleTimeString("es-AR")}</td>
+                  <td>{new Date(p.createdAt).toLocaleTimeString("es-AR", { hourCycle: "h23" })}</td>
                   <td>{p.supplierName}</td>
                   <td>{p.accountName}</td>
                   <td>{p.notes || "-"}</td>
@@ -369,7 +370,7 @@ export function CloseSummaryView({ summary, accounts, adjustments, vales, suppli
             {supplierPayments.map((p) => (
               <div key={p.id}>
                 <div className="print-row">
-                  <span className="print-row-label">{new Date(p.createdAt).toLocaleTimeString("es-AR")} · {p.supplierName} · {p.accountName}</span>
+                  <span className="print-row-label">{new Date(p.createdAt).toLocaleTimeString("es-AR", { hourCycle: "h23" })} · {p.supplierName} · {p.accountName}</span>
                   <span className="print-row-amount">{formatMoney(p.amount)}</span>
                 </div>
                 {p.notes && <p className="print-row-detail">{p.notes}</p>}
@@ -389,9 +390,9 @@ export function CloseSummaryView({ summary, accounts, adjustments, vales, suppli
           {detail.flatMap((sale) =>
             sale.items.map((item, idx) => (
               <tr key={`${sale.id}-${idx}`}>
-                <td>{idx === 0 ? new Date(sale.createdAt).toLocaleTimeString("es-AR") : ""}</td>
+                <td>{idx === 0 ? new Date(sale.createdAt).toLocaleTimeString("es-AR", { hourCycle: "h23" }) : ""}</td>
                 <td>{item.productName}</td>
-                <td className="num">{item.quantity} {UNIT_LABELS[item.unit]}</td>
+                <td className="num">{formatQuantity(item.quantity, item.unit, UNIT_LABELS[item.unit])}</td>
                 <td className="num">{formatMoney(item.lineTotal)}</td>
                 <td>{idx === 0 ? sale.payments.map((p) => p.accountName).join(" + ") : ""}</td>
               </tr>
@@ -404,14 +405,14 @@ export function CloseSummaryView({ summary, accounts, adjustments, vales, suppli
           <div key={sale.id} style={{ marginBottom: 6 }}>
             <div className="print-row">
               <span className="print-row-label">
-                {new Date(sale.createdAt).toLocaleTimeString("es-AR")} · {sale.payments.map((p) => p.accountName).join(" + ")}
+                {new Date(sale.createdAt).toLocaleTimeString("es-AR", { hourCycle: "h23" })} · {sale.payments.map((p) => p.accountName).join(" + ")}
                 {sale.voidedAt ? " · ANULADA" : ""}
               </span>
               <span className="print-row-amount">{formatMoney(sale.total)}</span>
             </div>
             {sale.items.map((item, idx) => (
               <p className="print-row-detail" key={idx}>
-                {item.productName} ({item.quantity} {UNIT_LABELS[item.unit]}) {formatMoney(item.lineTotal)}
+                {item.productName} ({formatQuantity(item.quantity, item.unit, UNIT_LABELS[item.unit])}) {formatMoney(item.lineTotal)}
               </p>
             ))}
           </div>

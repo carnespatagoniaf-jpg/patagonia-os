@@ -14,7 +14,7 @@ import { listShiftWastes, registerStockWaste, voidStockWaste, type StockWaste, t
 const REASONS: WasteReason[] = ["vencido", "mal_estado", "roto", "otro"];
 const qtyText = (unit: string | null, n: number) =>
   unit === "kg" ? `${n.toLocaleString("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg` : `${n.toLocaleString("es-AR", { maximumFractionDigits: 3 })} u.`;
-const time = (iso: string) => new Date(iso).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+const time = (iso: string) => new Date(iso).toLocaleTimeString("es-AR", { hour: "2-digit", hourCycle: "h23", minute: "2-digit" });
 
 /**
  * Mostrador → "Decomiso" (migraciones 151 y 152, todos los planes): lo que se tira se pesa y se

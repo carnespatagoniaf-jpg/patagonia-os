@@ -1,3 +1,4 @@
+import { formatQuantity } from "../../lib/quantity-format";
 import { useEffect, useMemo, useState } from "react";
 import { STOCK_COUNT_CATEGORIES } from "@patagonia/domain";
 import { useProfitability } from "./useProfitability";
@@ -580,7 +581,7 @@ export function Profitability() {
                   <thead><tr><th>Producto</th><th className="num">Cantidad</th><th className="num">Monto</th></tr></thead>
                   <tbody>
                     {purchasedProducts.map((p) => (
-                      <tr key={p.label}><td>{p.label}</td><td className="num">{p.quantity} {p.unit === "kg" ? "kg" : "u"}</td><td className="num">{formatMoney(p.amount)}</td></tr>
+                      <tr key={p.label}><td>{p.label}</td><td className="num">{formatQuantity(p.quantity, p.unit, "u")}</td><td className="num">{formatMoney(p.amount)}</td></tr>
                     ))}
                   </tbody>
                 </table>

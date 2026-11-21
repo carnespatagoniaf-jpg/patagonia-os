@@ -919,7 +919,7 @@ export function AdminCreateClient() {
           <div className="pa-row-between">
             <span style={{ fontSize: 13 }}>
               {supportAccess[company.id]
-                ? `Herramientas técnicas de balanza abiertas hasta las ${new Date(supportAccess[company.id]).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}`
+                ? `Herramientas técnicas de balanza abiertas hasta las ${new Date(supportAccess[company.id]).toLocaleTimeString("es-AR", { hour: "2-digit", hourCycle: "h23", minute: "2-digit" })}`
                 : "Herramientas técnicas de balanza: cerradas"}
             </span>
             <Button variant="secondary" size="sm" loading={supportBusyId === company.id} onClick={() => void toggleSupportAccess(company)}>

@@ -381,16 +381,36 @@ export interface InvoiceItemLine {
   lineTotal: number;
 }
 
+/** Unidad (kg / unidad / caja) de cada renglón, por id de renglón. Si no se puede leer, el renglón queda sin unidad. */
+async function productUnits(lines: { id: string; product_id: string | null }[]): Promise<Map<string, "kg" | "unit" | "box">> {
+  const out = new Map<string, "kg" | "unit" | "box">();
+  const ids = [...new Set(lines.map((l) => l.product_id).filter((id): id is string => !!id))];
+  if (!supabase || ids.length === 0) return out;
+  // products_price_list: los cajeros no leen products (051), esta vista sí y no trae costo.
+  const { data } = await supabase.from("products_price_list").select("id,unit").in("id", ids);
+  const byProduct = new Map(((data ?? []) as { id: string; unit: "kg" | "unit" | "box" }[]).map((p) => [p.id, p.unit]));
+  for (const l of lines) {
+    const unit = l.product_id ? byProduct.get(l.product_id) : undefined;
+    if (unit) out.set(l.id, unit);
+  }
+  return out;
+}
+
 /** Renglones de la venta facturada, para reimprimir desde Facturas. */
 export async function loadInvoiceItems(inv: Invoice): Promise<InvoiceItemLine[]> {
   if (!supabase) return [];
   if (inv.customerChargeId) {
     const { data, error } = await supabase.rpc("get_customer_charge_items", { p_charge_id: inv.customerChargeId });
     if (error) throw toError(error);
-    return ((data ?? []) as { product_name: string; quantity: number; unit_price: number; line_total: number }[]).map((r) => ({
+    const rows = (data ?? []) as { id: string; product_name: string; quantity: number; unit_price: number; line_total: number }[];
+    // La función no trae el producto: se busca el de cada renglón para imprimir kg o unidad (antes salía todo "unidad").
+    const units = await productUnits(
+      await supabase.from("customer_charge_items").select("id,product_id").eq("charge_id", inv.customerChargeId).then(({ data: items }) => (items ?? []) as { id: string; product_id: string | null }[])
+    );
+    return rows.map((r) => ({
       name: r.product_name,
       quantity: Number(r.quantity),
-      unit: "unit" as const,
+      unit: units.get(r.id) ?? "unit",
       unitPrice: Number(r.unit_price),
       lineTotal: Number(r.line_total)
     }));

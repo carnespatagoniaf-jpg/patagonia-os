@@ -40,7 +40,7 @@ export interface InstallStep {
 
 const fmt = (iso: string, now: Date) => {
   const at = new Date(iso);
-  const hh = at.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+  const hh = at.toLocaleTimeString("es-AR", { hour: "2-digit", hourCycle: "h23", minute: "2-digit" });
   return at.toDateString() === now.toDateString() ? `hoy ${hh}` : `${at.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })} ${hh}`;
 };
 

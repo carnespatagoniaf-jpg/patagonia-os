@@ -225,7 +225,7 @@ export function RecPanel({ canSetup, cuitEmisor }: { canSetup: boolean; cuitEmis
           {settings.lastCheckMessage && (
             <p style={{ color: settings.lastCheckOk ? "#176329" : "#8b1e1e", fontSize: 13 }}>
               {settings.lastCheckMessage}
-              {settings.lastCheckAt && <span className="muted"> ({new Date(settings.lastCheckAt).toLocaleString("es-AR")})</span>}
+              {settings.lastCheckAt && <span className="muted"> ({new Date(settings.lastCheckAt).toLocaleString("es-AR", { hourCycle: "h23" })})</span>}
             </p>
           )}
           {catalog.categoriasEmisor.length > 0 && (

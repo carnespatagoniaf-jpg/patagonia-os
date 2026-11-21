@@ -19,7 +19,7 @@ import { quantityNumber } from "./quantity";
  */
 
 const kg = (n: number) => `${n.toLocaleString("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg`;
-const time = (iso: string) => new Date(iso).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+const time = (iso: string) => new Date(iso).toLocaleTimeString("es-AR", { hour: "2-digit", hourCycle: "h23", minute: "2-digit" });
 
 export function ScaleVoidForm({ visible, shift, products, scaleConfig, onMessage, onClose }: {
   visible: boolean;

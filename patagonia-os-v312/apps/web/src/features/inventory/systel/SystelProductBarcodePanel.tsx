@@ -261,7 +261,7 @@ export function SystelProductBarcodePanel(p: ProductBarcodePanelProps) {
       </div>
       {backup && check && (
         <span style={{ fontSize: 13 }} className={check.ok ? "" : "num-negative"}>
-          Respaldo guardado {new Date(backup.takenAt).toLocaleString("es-AR")}: {check.detail}{check.ok ? "" : " (NO usar)"}{check.ok && !sameDay(backup.takenAt) ? " · es de otro día: hacé uno nuevo antes de escribir" : ""}
+          Respaldo guardado {new Date(backup.takenAt).toLocaleString("es-AR", { hourCycle: "h23" })}: {check.detail}{check.ok ? "" : " (NO usar)"}{check.ok && !sameDay(backup.takenAt) ? " · es de otro día: hacé uno nuevo antes de escribir" : ""}
         </span>
       )}
       {!w ? (

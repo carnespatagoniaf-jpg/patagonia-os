@@ -146,7 +146,7 @@ export function scaleStatus(s: ScaleStatusInput, now = new Date()): { tone: "ok"
   if (!s.localOkAt) return { tone: "warn", text: "Todavía no se conectó en esta computadora." };
   const at = new Date(s.localOkAt);
   const sameDay = at.toDateString() === now.toDateString();
-  const hh = at.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+  const hh = at.toLocaleTimeString("es-AR", { hour: "2-digit", hourCycle: "h23", minute: "2-digit" });
   const when = sameDay ? `hoy ${hh}` : `${at.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })} ${hh}`;
   return { tone: "ok", text: `Lista en esta computadora · última conexión ${when}` };
 }
