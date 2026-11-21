@@ -8,7 +8,7 @@ import { formatQty, qtyTotals, totalsLabel, type Transfer } from "./transfer-log
 
 // Remito interno de traslado (cuando no sale el Remito R) y la lista para armar el pedido. A4, original y copia.
 
-const ar = (iso: string | null) => (iso ? new Date(iso).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", dateStyle: "short", timeStyle: "short" }) : "");
+const ar = (iso: string | null) => (iso ? new Date(iso).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", dateStyle: "short", timeStyle: "short", hourCycle: "h23" }) : "");
 
 function Copy({ t, kind, copy, branchName, showCost }: { t: Transfer; kind: "remito" | "lista"; copy: string; branchName: (id: string) => string; showCost: boolean }) {
   const cell = { border: "1px solid #000", padding: "5px 8px" } as const;

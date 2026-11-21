@@ -446,7 +446,7 @@ export function Invoicing() {
           {filteredSales.slice(0, SALES_SHOWN).map((sale) => (
             <div key={sale.id} className="list-row" style={{ flexWrap: "wrap" }}>
               <span>
-                {new Date(sale.createdAt).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short" })} · <strong>{formatMoney(sale.total)}</strong>
+                {new Date(sale.createdAt).toLocaleString("es-AR", { dateStyle: "short", timeStyle: "short", hourCycle: "h23" })} · <strong>{formatMoney(sale.total)}</strong>
               </span>
               {invoicing?.saleId === sale.id ? (
                 <div style={{ flexBasis: "100%" }}>

@@ -31,7 +31,7 @@ function saveDraft(branchId: string, lines: EntryLine[]) {
 }
 
 const when = (iso: string) =>
-  new Date(iso).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  new Date(iso).toLocaleString("es-AR", { timeZone: "America/Argentina/Buenos_Aires", day: "2-digit", month: "2-digit", hour: "2-digit", hourCycle: "h23", minute: "2-digit" });
 
 export function StockEntry({ products, branchId, boxLabels, packages, boxWord, canUndo, onClose, onDone }: {
   products: Product[];

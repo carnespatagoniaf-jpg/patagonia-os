@@ -132,9 +132,9 @@ export function AdminMercadoPago({
 
   const subtitle = [
     syncing ? "Buscando cobros…" : `${assigned.length} de ${subs.filter((s) => s.status !== "cancelled" || s.companyId).length} suscripciones asignadas`,
-    lastSync && !syncing ? `actualizado ${lastSync.toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}` : "",
+    lastSync && !syncing ? `actualizado ${lastSync.toLocaleTimeString("es-AR", { hour: "2-digit", hourCycle: "h23", minute: "2-digit" })}` : "",
     schedule?.scheduled
-      ? `se buscan solos cada hora${schedule.lastRunAt ? ` (última vez ${new Date(schedule.lastRunAt).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })})` : ""}`
+      ? `se buscan solos cada hora${schedule.lastRunAt ? ` (última vez ${new Date(schedule.lastRunAt).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", hourCycle: "h23", minute: "2-digit" })})` : ""}`
       : ""
   ].filter(Boolean).join(" · ");
 

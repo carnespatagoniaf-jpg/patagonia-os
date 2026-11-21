@@ -139,8 +139,8 @@ export const STALE_SHIFT_HOURS = 18;
 
 export function formatShiftStart(openedAt: string): string {
   const opened = new Date(openedAt);
-  if (opened.toDateString() === new Date().toDateString()) return opened.toLocaleTimeString("es-AR");
-  return opened.toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  if (opened.toDateString() === new Date().toDateString()) return opened.toLocaleTimeString("es-AR", { hourCycle: "h23" });
+  return opened.toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", hourCycle: "h23", minute: "2-digit" });
 }
 
 /** Por caja/equipo (localStorage), no por empresa -- cada mostrador puede

@@ -436,7 +436,7 @@ export function Scales() {
               <p className="muted" style={{ margin: "8px 0 0", fontSize: 12, whiteSpace: "pre-wrap" }}>
                 driver: {connection.driverId}{"\n"}
                 ajustes: {JSON.stringify(connection.settings)}{"\n"}
-                conectada desde: {new Date(connection.pairedAt).toLocaleString("es-AR")}
+                conectada desde: {new Date(connection.pairedAt).toLocaleString("es-AR", { hourCycle: "h23" })}
               </p>
             </details>
           </div>
@@ -446,7 +446,7 @@ export function Scales() {
               Última sincronización: {(() => {
                 const summary = summarizeSyncSession(syncSessions[connection.id]);
                 return `${summary.confirmed} confirmados, ${summary.uncertain} sin confirmar, ${summary.failed} rechazados, de ${summary.total}`;
-              })()} ({new Date(syncSessions[connection.id].updatedAt).toLocaleString("es-AR")})
+              })()} ({new Date(syncSessions[connection.id].updatedAt).toLocaleString("es-AR", { hourCycle: "h23" })})
             </p>
           )}
           {rowDiagnostics[connection.id] && (
@@ -608,7 +608,7 @@ export function Scales() {
           <pre style={{ maxHeight: 220, overflowY: "auto", background: "#f7f7f8", borderRadius: 6, padding: 10, fontSize: 12, whiteSpace: "pre-wrap", margin: 0 }}>
             {activityLog.length === 0
               ? "Sin actividad registrada todavía."
-              : [...activityLog].reverse().map((e) => `[${new Date(e.at).toLocaleString("es-AR")}] ${e.kind.toUpperCase()}${e.connectionLabel ? ` (${e.connectionLabel})` : ""}: ${e.message}`).join("\n")}
+              : [...activityLog].reverse().map((e) => `[${new Date(e.at).toLocaleString("es-AR", { hourCycle: "h23" })}] ${e.kind.toUpperCase()}${e.connectionLabel ? ` (${e.connectionLabel})` : ""}: ${e.message}`).join("\n")}
           </pre>
         </div>
       </details>

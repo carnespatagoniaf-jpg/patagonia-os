@@ -863,7 +863,7 @@ export function ShiftPanel(p: ShiftPanelProps) {
               {p.shiftSales.map((s) => (
                 <Fragment key={s.id}>
                   <tr style={s.voidedAt ? { opacity: 0.5, textDecoration: "line-through" } : undefined}>
-                    <td>{new Date(s.createdAt).toLocaleTimeString("es-AR")}</td>
+                    <td>{new Date(s.createdAt).toLocaleTimeString("es-AR", { hourCycle: "h23" })}</td>
                     <td className="num">{formatMoney(s.total)}</td>
                     <td>{s.voidedAt ? "Anulada" : ""}</td>
                     <td>
@@ -905,7 +905,7 @@ export function ShiftPanel(p: ShiftPanelProps) {
               <tbody>
                 {p.cajaAdjustments.map((m) => (
                   <tr key={m.id}>
-                    <td>{new Date(m.createdAt).toLocaleTimeString("es-AR")}</td>
+                    <td>{new Date(m.createdAt).toLocaleTimeString("es-AR", { hourCycle: "h23" })}</td>
                     <td>{m.accountName}</td>
                     <td>{m.notes ?? "-"}</td>
                     <td className="num">{m.direction === "in" ? "+" : "-"}{formatMoney(m.amount)}</td>
@@ -936,8 +936,8 @@ export function ShiftPanel(p: ShiftPanelProps) {
                   <tr key={w.id}>
                     <td>
                       {w.previousShift
-                        ? new Date(w.createdAt).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
-                        : new Date(w.createdAt).toLocaleTimeString("es-AR")}
+                        ? new Date(w.createdAt).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", hourCycle: "h23", minute: "2-digit" })
+                        : new Date(w.createdAt).toLocaleTimeString("es-AR", { hourCycle: "h23" })}
                     </td>
                     <td>N.º {w.number}</td>
                     <td className="num">{formatMoney(w.amount)}</td>
@@ -980,7 +980,7 @@ export function ShiftPanel(p: ShiftPanelProps) {
               <tbody>
                 {p.posShiftVales.map((v) => (
                   <tr key={v.id}>
-                    <td>{new Date(v.createdAt).toLocaleTimeString("es-AR")}</td>
+                    <td>{new Date(v.createdAt).toLocaleTimeString("es-AR", { hourCycle: "h23" })}</td>
                     <td>{v.employeeName}</td>
                     <td>{v.detail}{v.liquidated && <span className="muted"> · Liquidado</span>}</td>
                     <td className="num">{formatMoney(v.amount)}</td>

@@ -194,7 +194,7 @@ export function DailySummaryCard({ text }: { text: string }) {
           {notice && <Alert tone={notice.tone} onClose={() => setNotice(null)}>{notice.text}</Alert>}
           {!notice && last && settings.lastRunAt && (
             <span className={`pa-text-${last.tone}`} style={{ fontSize: 13 }}>
-              Última vez {new Date(settings.lastRunAt).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })}: {last.text}
+              Última vez {new Date(settings.lastRunAt).toLocaleString("es-AR", { day: "2-digit", month: "2-digit", hour: "2-digit", hourCycle: "h23", minute: "2-digit" })}: {last.text}
             </span>
           )}
         </section>

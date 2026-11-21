@@ -405,7 +405,7 @@ export function Accounting() {
                   </span>
                 </li>
               )}
-              {mono && (
+              {!ri && mono && (
                 <li className={mono.level === "ok" ? "info" : "warn"}>
                   <span className="acc-todo-icon">{mono.level === "ok" ? "$" : "!"}</span>
                   <span>

@@ -138,7 +138,7 @@ export function ScaleLinksPanel({ branchId, products }: { branchId: string | nul
         <span className="muted" style={{ fontSize: 13 }}>Todavía no hay productos de la balanza guardados en Patagonia.</span>
       ) : (
         <span style={{ fontSize: 13 }}>
-          {catalog.length} productos de la balanza{setup.readAt ? ` (leídos el ${new Date(setup.readAt).toLocaleString("es-AR")})` : ""}: <b>{linked.length}</b> vinculados, <b>{libre.length}</b> venta libre, <b>{undecided.length}</b> por decidir.
+          {catalog.length} productos de la balanza{setup.readAt ? ` (leídos el ${new Date(setup.readAt).toLocaleString("es-AR", { hourCycle: "h23" })})` : ""}: <b>{linked.length}</b> vinculados, <b>{libre.length}</b> venta libre, <b>{undecided.length}</b> por decidir.
         </span>
       )}
       {setup && (

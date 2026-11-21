@@ -306,7 +306,7 @@ export function ArcaSetup({ companyId, settings, cert, loading, busy, message, f
             </div>
             {settings?.lastCheckAt && !settings.lastCheckOk && (
               <div className="arca-errors">
-                <b>La última prueba ({new Date(settings.lastCheckAt).toLocaleString("es-AR")}) falló:</b> {settings.lastCheckMessage ?? ""}
+                <b>La última prueba ({new Date(settings.lastCheckAt).toLocaleString("es-AR", { hourCycle: "h23" })}) falló:</b> {settings.lastCheckMessage ?? ""}
                 <ul>
                   <li>Si habla de permiso, autorización o "computador fiscal": falta la parte A del paso 5.</li>
                   <li>Si habla del punto de venta: no existe en ARCA o no es de Web Services (parte B del paso 5).</li>

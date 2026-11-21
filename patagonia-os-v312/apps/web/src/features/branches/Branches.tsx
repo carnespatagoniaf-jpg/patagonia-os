@@ -1,3 +1,4 @@
+import { formatQuantity } from "../../lib/quantity-format";
 import { useMemo, useState } from "react";
 import type { Product } from "@patagonia/domain";
 import { formatMoney } from "../shifts/format";
@@ -50,7 +51,7 @@ function ProductPicker({ products, placeholder, onPick }: { products: Product[];
               }}
             >
               <span>{product.name} <span className="muted">({product.code})</span></span>
-              <strong>{product.stock} {product.unit === "kg" ? "kg" : "u."}</strong>
+              <strong>{formatQuantity(product.stock, product.unit)}</strong>
             </button>
           ))}
         </div>
@@ -196,7 +197,7 @@ function BranchesFull() {
           )}
           {product && (
             <p style={{ margin: "8px 0 0" }}>
-              <strong>{product.name}</strong> <span className="muted">— disponible: {product.stock} {product.unit === "kg" ? "kg" : "u."}</span>{" "}
+              <strong>{product.name}</strong> <span className="muted">— disponible: {formatQuantity(product.stock, product.unit)}</span>{" "}
               <button className="secondary" onClick={() => setProduct(null)}>Cambiar</button>
             </p>
           )}

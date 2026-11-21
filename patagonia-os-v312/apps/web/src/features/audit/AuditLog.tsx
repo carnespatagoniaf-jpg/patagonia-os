@@ -41,7 +41,7 @@ function actionLabel(action: string) {
 }
 
 function formatDateTime(iso: string) {
-  return new Date(iso).toLocaleString("es-AR");
+  return new Date(iso).toLocaleString("es-AR", { hourCycle: "h23" });
 }
 
 export function AuditLog() {

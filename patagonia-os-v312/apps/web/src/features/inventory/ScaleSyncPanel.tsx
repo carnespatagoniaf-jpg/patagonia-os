@@ -914,7 +914,7 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
                     )}
                   </div>
                   {model.id !== "aura" && pluScan && (
-                    <p className="setting-help">{pluScan.records.length} productos leídos el {new Date(pluScan.startedAt).toLocaleString("es-AR")}.</p>
+                    <p className="setting-help">{pluScan.records.length} productos leídos el {new Date(pluScan.startedAt).toLocaleString("es-AR", { hourCycle: "h23" })}.</p>
                   )}
                 </SettingSection>
               )}
