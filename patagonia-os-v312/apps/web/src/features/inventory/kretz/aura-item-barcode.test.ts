@@ -105,3 +105,20 @@ describe("Mostrador lee los códigos de la Aura en 2-3-7 con importe", () => {
     }
   });
 });
+
+describe("Report LT: código por producto en el ticket sin tocar el formato (El Abastero 21/11)", () => {
+  it("con keepFormat manda SOLO 0001 y 1080 \"1\" (nunca el 1070)", async () => {
+    const scale = new Aura1080("acepta");
+    const r = await setAuraItemBarcodes(scale as unknown as SerialPort, { link: { baudRate: 115200, stopBits: 1 as const }, deviceType: "C", equipmentId: "01" }, true, { timeoutMs: 200, keepFormat: true });
+    assert.equal(r.verdict, "ok", r.detail);
+    assert.deepEqual(scale.commands.map((c) => `${c.command}${c.data}`), ["0001", "10801"]);
+    assert.equal(r.formatCode, null);
+  });
+
+  it("si la Report LT no tiene el 1080, avisa y no mandó nada más", async () => {
+    const scale = new Aura1080("inexistente");
+    const r = await setAuraItemBarcodes(scale as unknown as SerialPort, responder, true, { timeoutMs: 200, keepFormat: true });
+    assert.equal(r.verdict, "rechazada");
+    assert.deepEqual(scale.commands.map((c) => c.command), ["0001", "1080"]);
+  });
+});

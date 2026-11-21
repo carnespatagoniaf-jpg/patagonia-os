@@ -18,6 +18,7 @@ import {
   readAuraListOnScale,
   runAuraSyncOnScale,
   setAuraItemBarcodesOnScale,
+  setReportItemBarcodesOnScale,
   probeAuraTotalsOnScale,
   listenScaleOnScale,
   getScalePortDescription,
@@ -327,7 +328,7 @@ export function ScaleSyncPanel({ products, onDownloadCsv }: { products: ScaleSyn
    * acepta, Mostrador de esta sucursal pasa a leer esos códigos (2-3-7 con importe). Siempre manda
    * el resultado a soporte (dueño/admin), para no tener que pedirle fotos a la clienta.
    */
-  async function handleAuraItemBarcodes(enable: boolean) {
+  async function handleAuraItemBarcodes(enable: boolean, report_lt = false) {
     const question = enable
       ? "Se le va a pedir a la balanza que en cada ticket imprima un código de barras por producto (además del total). No toca productos ni precios, y se puede apagar. ¿Seguir?"
       : "Se le va a pedir a la balanza que vuelva a imprimir solo el código del total. ¿Seguir?";
@@ -335,10 +336,14 @@ export function ScaleSyncPanel({ products, onDownloadCsv }: { products: ScaleSyn
     setScaleBusy(true);
     setScaleLog(enable ? "Activando el código por producto…" : "Apagando el código por producto…");
     try {
-      const r = await setAuraItemBarcodesOnScale(enable, (text) => setScaleLog(text));
-      logScaleActivity({ kind: r.verdict === "ok" ? "test" : "error", message: `Aura código por producto (${enable ? "activar" : "apagar"}): ${r.verdict} - ${r.detail}` });
+      const r = report_lt
+        ? await setReportItemBarcodesOnScale(enable, (text) => setScaleLog(text))
+        : await setAuraItemBarcodesOnScale(enable, (text) => setScaleLog(text));
+      const who = report_lt ? "Report LT" : "Aura";
+      logScaleActivity({ kind: r.verdict === "ok" ? "test" : "error", message: `${who} código por producto (${enable ? "activar" : "apagar"}): ${r.verdict} - ${r.detail}` });
       let mostradorText = "";
-      if (r.verdict === "ok" && enable && branchId) {
+      // La Report LT no cambia de formato (no se manda el 1070): Mostrador sigue con la calibración que ya lee sus etiquetas.
+      if (r.verdict === "ok" && enable && branchId && !report_lt) {
         try {
           await saveBranchScaleConfig(branchId, AURA_ITEM_SCALE_CONFIG);
           mostradorText = " Mostrador de esta sucursal ya quedó preparado para leer esos códigos.";
@@ -348,7 +353,7 @@ export function ScaleSyncPanel({ products, onDownloadCsv }: { products: ScaleSyn
       }
       const canSend = profile?.role === "owner" || profile?.role === "admin";
       const exchanges = r.exchanges.map((e) => `${e.step}: tx ${e.tx} | rx ${e.rx || "(nada)"}${e.kretz ? ` [${e.kretz.code}]` : ""}`).join("\n");
-      const sent = canSend ? await handleSendToSupport(`Aura código por producto (1080 ${enable ? "1" : "0"}): ${r.verdict} - ${r.detail}\n${exchanges}`) : false;
+      const sent = canSend ? await handleSendToSupport(`${who} código por producto (1080 ${enable ? "1" : "0"}): ${r.verdict} - ${r.detail}\n${exchanges}`) : false;
       const supportText = sent ? " El resultado ya le llegó al equipo de Patagonia OS." : "";
       if (r.verdict === "ok") {
         report(
@@ -893,6 +898,18 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
                     <button className="secondary" disabled={scaleBusy || noSerial || !scalePortReady} onClick={() => void handleListenScale()}>Escuchar la balanza 60 segundos</button>
                   </div>
                   {listenText && <pre style={{ whiteSpace: "pre-wrap", fontSize: 12, background: "#f6f7f9", padding: 10, borderRadius: 8, maxHeight: 320, overflow: "auto" }}>{listenText}</pre>}
+                </SettingSection>
+              )}
+
+              {model.id === "report-lt" && writeAllowed && (
+                <SettingSection title="Un código por producto en el ticket" actionLabel="Abrir">
+                  <p className="setting-help">
+                    Si pesás varios productos en un mismo ticket, la balanza imprime un solo código con el total y Mostrador no sabe qué productos son. Con esta opción la balanza imprime además un código debajo de cada producto: al escanearlos, Mostrador carga cada producto y descuenta el stock. No toca productos, precios ni el formato de las etiquetas; si la balanza no la tiene, avisa y no cambia nada. Primero mandá los precios, así el importe de cada código coincide con Patagonia.
+                  </p>
+                  <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    <button className="secondary" disabled={scaleBusy || noSerial || !scalePortReady} onClick={() => void handleAuraItemBarcodes(true, true)}>Imprimir un código por producto</button>
+                    <button className="secondary" disabled={scaleBusy || noSerial || !scalePortReady} onClick={() => void handleAuraItemBarcodes(false, true)}>Volver a solo el total</button>
+                  </div>
                 </SettingSection>
               )}
 

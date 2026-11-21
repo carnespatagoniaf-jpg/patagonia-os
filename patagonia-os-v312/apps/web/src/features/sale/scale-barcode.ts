@@ -106,6 +106,30 @@ export function parseAuraSumTicket(rawCode: string): { amount: number | null; fo
 }
 
 /**
+ * Ticket de SUMA leído con el formato de etiqueta que la sucursal tiene guardado (el que su balanza usa de
+ * verdad). REAL El Abastero 21/11/2026: su Kretz imprime 1-6-5 con importe en PESOS enteros ("2 000101 69000 9"
+ * = PLU 101, $69.000) y el ticket de suma "2 099998 68932 6" = $68.932,10. parseAuraSumTicket probaba primero el
+ * 2-5-5 en centavos de fábrica y lo leía como $689,32. Si el formato guardado es de importe y el código del medio
+ * es el de suma (99998 con ceros adelante, o sus últimas cifras: 9998, 998), el importe sale con ESE formato.
+ * undefined = no aplica (formato de peso, otro largo, o no es un ticket de suma); amount null = suma sin importe
+ * (todo en 0 o todo en 9: el total no entró en el campo).
+ */
+export function parseSumTicketWithConfig(rawCode: string, config: ScaleConfig): { amount: number | null } | undefined {
+  const code = rawCode.trim();
+  if (config.payloadType !== "amount" || config.totalLength !== 13) return undefined;
+  if (config.prefixLength + config.pluLength + config.weightLength !== 12) return undefined;
+  if (!/^2[0-9]{12}$/.test(code)) return undefined;
+  const digits = code.split("").map(Number);
+  const sum = digits.slice(0, 12).reduce((acc, d, i) => acc + d * (i % 2 === 0 ? 1 : 3), 0);
+  if ((10 - (sum % 10)) % 10 !== digits[12]) return undefined;
+  const codePart = code.slice(config.prefixLength, config.prefixLength + config.pluLength).replace(/^0+/, "");
+  if (codePart.length < 3 || !"99998".endsWith(codePart)) return undefined;
+  const value = code.slice(config.prefixLength + config.pluLength, 12);
+  if (/^(0+|9+)$/.test(value)) return { amount: null };
+  return { amount: parseInt(value, 10) / config.weightDivisor };
+}
+
+/**
  * Ticket de SUMA (total) de una Systel Cuora. REAL, Los gringos, 2026-10-13: su balanza tiene
  * configurado "E_S=22BBIIIIIIII" (leído de la balanza el 2026-10-09). Eso es 22 + número de
  * balanza (2) + importe (8) + verificador. El ticket "TOTAL $780" trae 2220000007801: balanza 00,

@@ -985,6 +985,31 @@ Cancelar = es el mismo papel: no cobrar.`)) {
     for (let i = 0; i < copies; i++) window.print();
   }
 
+  /** "Reimprimir" / "2 copias" de un comprobante: si esta PC tiene la térmica
+   * lista (programa de impresión o USB), mismo camino que al cobrar
+   * (autoPrintReceipt). Antes iban siempre al diálogo de Windows, y con el
+   * driver en una hoja larga cada ticket gastaba un palmo de papel en blanco
+   * (El Abastero, 21/11). */
+  async function handleReprint(bytes: Uint8Array, copies = 1) {
+    setMessage("");
+    if (await isThermalPrinterPaired()) {
+      setThermalPrintBusy(true);
+      try {
+        for (let i = 0; i < copies; i++) await printBytes(bytes);
+        return;
+      } catch (err) {
+        if (await pingPrintAgent()) {
+          setMessage(err instanceof Error ? err.message : "No se pudo imprimir el ticket.");
+          return;
+        }
+        // térmica emparejada por USB pero falló el envío -- cae al diálogo de abajo.
+      } finally {
+        setThermalPrintBusy(false);
+      }
+    }
+    handlePrint(copies);
+  }
+
   const currentBranchName = () => branches.find((b) => b.id === branchId)?.name;
   const buildReceiptTicket = (r: ReceiptState) => buildReceiptTicketBytes(r, currentBranchName());
   const buildMovementTicket = (m: MovementReceiptState) => buildMovementTicketBytes(m, currentBranchName());
@@ -1385,7 +1410,7 @@ Cancelar = es el mismo papel: no cobrar.`)) {
           receipt={receipt}
           branchName={currentBranchName() ?? "Patagonia OS"}
           thermalPrintBusy={thermalPrintBusy}
-          onPrint={handlePrint}
+          onPrint={(copies) => void handleReprint(buildReceiptTicket(receipt), copies)}
           onThermalPrint={handleThermalPrint}
         />
       )}
@@ -1395,7 +1420,7 @@ Cancelar = es el mismo papel: no cobrar.`)) {
           ref={movementReceiptRef}
           movementReceipt={movementReceipt}
           branchName={currentBranchName() ?? "Patagonia OS"}
-          onPrint={() => handlePrint()}
+          onPrint={() => void handleReprint(buildMovementTicket(movementReceipt))}
           onClose={() => setMovementReceipt(null)}
         />
       )}
