@@ -1,5 +1,5 @@
 import type { Product } from "@patagonia/domain";
-import { parseAuraSumTicket, parseSystelSumTicket, parseTicketTotalBarcode, parseWeightBarcode, systelSumWithoutAmount, type ScaleConfig } from "./scale-barcode";
+import { parseAuraSumTicket, parseSumTicketWithConfig, parseSystelSumTicket, parseTicketTotalBarcode, parseWeightBarcode, systelSumWithoutAmount, type ScaleConfig } from "./scale-barcode";
 
 /**
  * Qué hacer con un código escaneado (o tipeado + Enter) en Mostrador. Lógica pura, testeada
@@ -149,7 +149,9 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
   if (exact) return { type: "product", product: exact };
 
   // 2. Ticket de total.
-  const aura = parseAuraSumTicket(raw);
+  // El formato guardado de la sucursal manda sobre los de fábrica (El Abastero: 1-6-5 en pesos, no 2-5-5 en centavos).
+  const ownSum = parseSumTicketWithConfig(raw, config);
+  const aura = ownSum ? { amount: ownSum.amount } : parseAuraSumTicket(raw);
   if (aura && aura.amount === null) {
     return {
       type: "ticket_without_amount",

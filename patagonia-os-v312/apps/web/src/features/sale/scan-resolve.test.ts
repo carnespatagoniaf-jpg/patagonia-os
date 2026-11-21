@@ -318,3 +318,50 @@ describe("[REAL] Carplat: Report con 2-3-7 y etiqueta por peso (1070 \"2112005\"
     assert.equal(resolveScan("2199900064255", products, CARPLAT).type, "error"); // N.º 999
   });
 });
+
+describe("[REAL] El Abastero 21/11: Kretz con 1-6-5 e importe en pesos enteros", () => {
+  // Formato guardado de la sucursal (calibrado el 20/11): prefijo 1, PLU 6, importe 5 en pesos.
+  const ABASTERO = { prefixLength: 1, pluLength: 6, weightLength: 5, weightDivisor: 1, totalLength: 13, payloadType: "amount" as const };
+  const products = [product("101", "CAJON DE POLLO FRESCO", "unit", 69000), product("1", "NALGA XKG", "kg", 18333)];
+
+  it("ticket de suma de 3 productos: $68.932 (impreso 68932.10), no $689,32", () => {
+    assert.ok(validEan13("2099998689326"));
+    const r = resolveScan("2099998689326", products, ABASTERO);
+    assert.equal(r.type, "ticket_total");
+    if (r.type === "ticket_total") assert.equal(r.amount, 68932);
+  });
+
+  it("la etiqueta de un producto se sigue leyendo igual: CAJON DE POLLO $69.000", () => {
+    const r = resolveScan("2000101690009", products, ABASTERO);
+    assert.equal(r.type, "label");
+    if (r.type === "label") {
+      assert.equal(r.product.code, "101");
+      assert.equal(r.amount, 69000);
+    }
+  });
+
+  it("suma con el importe en ceros: no se cobra", () => {
+    const r = resolveScan(withCheck("209999800000"), products, ABASTERO);
+    assert.equal(r.type, "ticket_without_amount");
+  });
+
+  it("sin formato de importe guardado sigue la lectura de fábrica (Pollo y mar, 2-5-5 en centavos)", () => {
+    const r = resolveScan(withCheck("209999800592"), products, DEFAULT_SCALE_CONFIG);
+    assert.equal(r.type, "ticket_total");
+    if (r.type === "ticket_total") assert.equal(r.amount, 5.92);
+  });
+});
+
+describe("ticket de suma con el formato 2-3-7 en centavos guardado (Pollo y mar): igual que antes", () => {
+  const AMOUNT_237 = { prefixLength: 2, pluLength: 3, weightLength: 7, weightDivisor: 100, totalLength: 13, payloadType: "amount" as const };
+  it("20 998 0210600 = $2.106", () => {
+    const r = resolveScan(withCheck("209980210600"), [], AMOUNT_237);
+    assert.equal(r.type, "ticket_total");
+    if (r.type === "ticket_total") assert.equal(r.amount, 2106);
+  });
+  it("un 2-5-5 viejo (20 99998 00592) sigue dando $5,92, no $98.005,92", () => {
+    const r = resolveScan(withCheck("209999800592"), [], AMOUNT_237);
+    assert.equal(r.type, "ticket_total");
+    if (r.type === "ticket_total") assert.equal(r.amount, 5.92);
+  });
+});
