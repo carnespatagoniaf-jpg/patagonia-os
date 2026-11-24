@@ -1,5 +1,5 @@
 import { parseAuraPlu } from "../../../inventory/kretz/aura-plu";
-import { planAuraSync, summarizeAuraPlan, type AuraSyncItem } from "../../../inventory/kretz/aura-sync";
+import { auraMaySetBranchConfig, planAuraSync, summarizeAuraPlan, type AuraSyncItem } from "../../../inventory/kretz/aura-sync";
 import { getStoredModelId, saveModelId } from "../../../inventory/kretz/models";
 import { isNetPort } from "../../../inventory/kretz/net-port";
 import { KRETZ_PLU5_WEIGHT_CONFIG } from "../../../sale/scan-resolve";
@@ -44,6 +44,8 @@ export interface KretzIO {
   sendReport: typeof syncProductsToScale;
   /** Mostrador de la sucursal lee los códigos por producto de la Aura (2-3-7 con importe). Solo con base. */
   saveItemConfig?: (branchId: string, config?: ScaleConfig) => Promise<void>;
+  /** Formato de etiqueta que la sucursal ya tiene guardado (null = ninguno). Sin esto, la Aura no cambia el formato. */
+  loadBranchConfig?: (branchId: string) => Promise<ScaleConfig | null>;
   /** Report: manda el formato del código de barras de las etiquetas (1070). */
   configureReportBarcode?: (config?: string) => Promise<"ok" | "rechazada" | "sin_respuesta">;
   /** Report: primeros productos de la balanza con su formato de etiqueta (solo lectura). */
@@ -219,10 +221,11 @@ export class KretzSession implements ScaleSession {
       }
       // La Aura imprime el TOTAL en los tickets con varios productos (manual Aura Eco §7.1.7; el código por producto
       // del ticket de suma no existe: real Pollo y mar 15/10). En Pre-Empaque (ALT + 7) imprime un ticket por producto
-      // con su código 2-3-7 + importe: Mostrador de la sucursal queda leyendo ese formato.
-      if (r.barcode === "ok" && this.ctx.online && this.ctx.branchId && this.io.saveItemConfig) {
+      // con su código 2-3-7 + importe: Mostrador de la sucursal queda leyendo ese formato, salvo que la sucursal ya
+      // tenga otro guardado (el de otra balanza del local: auraMaySetBranchConfig). Si no se puede leer, no se toca.
+      if (r.barcode === "ok" && this.ctx.online && this.ctx.branchId && this.io.saveItemConfig && this.io.loadBranchConfig) {
         try {
-          await this.io.saveItemConfig(this.ctx.branchId);
+          if (auraMaySetBranchConfig(await this.io.loadBranchConfig(this.ctx.branchId))) await this.io.saveItemConfig(this.ctx.branchId);
         } catch {
           // sin esto, Mostrador sigue leyendo el TOTAL (detalle a mano); no frena la sincronización
         }

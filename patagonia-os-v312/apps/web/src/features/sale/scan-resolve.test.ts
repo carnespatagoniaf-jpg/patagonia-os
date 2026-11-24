@@ -365,3 +365,21 @@ describe("ticket de suma con el formato 2-3-7 en centavos guardado (Pollo y mar)
     if (r.type === "ticket_total") assert.equal(r.amount, 5.92);
   });
 });
+
+it("REAL El Abastero 24/11: con el 1-6-5 de su Report LT se leen sus etiquetas por unidad de 3 cifras y el TOTAL 2-3-7 de su Aura", () => {
+  const lt = { prefixLength: 1, pluLength: 6, weightLength: 5, weightDivisor: 1, totalLength: 13, payloadType: "amount" as const };
+  const prods = [
+    { id: "n", code: "1", name: "NALGA XKG", unit: "kg", priceRetail: 18333, active: true },
+    { id: "f", code: "127", name: "CAJA FORMITA", unit: "u", priceRetail: 42000, active: true }
+  ] as unknown as Product[];
+  const label = resolveScan("2000127420000", prods, lt);
+  assert.equal(label.type, "label");
+  if (label.type === "label") {
+    assert.equal(label.product.name, "CAJA FORMITA");
+    assert.equal(label.quantity, 1);
+    assert.equal(label.amount, 42000);
+  }
+  const total = resolveScan("2099869000007", prods, lt);
+  assert.equal(total.type, "ticket_total");
+  if (total.type === "ticket_total") assert.equal(total.amount, 69000);
+});

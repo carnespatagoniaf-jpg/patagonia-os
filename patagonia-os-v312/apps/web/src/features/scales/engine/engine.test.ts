@@ -337,10 +337,29 @@ describe("[SIMULADO] Mi balanza con una Kretz Aura (mismo plan y envío que el p
   it("al sincronizar, Mostrador de la sucursal queda leyendo el código por producto (Pre-Empaque)", async () => {
     const { io } = auraIO();
     const saved: string[] = [];
-    const s = new KretzSession("kretz-aura", ctx(products), "datos", { ...io, saveItemConfig: async (b) => void saved.push(b) });
+    const s = new KretzSession("kretz-aura", ctx(products), "datos", { ...io, saveItemConfig: async (b) => void saved.push(b), loadBranchConfig: async () => null });
     const out = await s.sync(await s.prepare(noop), noop);
     assert.equal(out.ok, true);
     assert.deepEqual(saved, ["b1"]);
+  });
+
+  it("REAL El Abastero 24/11: si la sucursal ya lee las etiquetas de otra balanza (Report LT 1-6-5), la Aura no le cambia el formato", async () => {
+    const { io } = auraIO();
+    const saved: string[] = [];
+    const lt = { prefixLength: 1, pluLength: 6, weightLength: 5, weightDivisor: 1, totalLength: 13, payloadType: "amount" as const };
+    const s = new KretzSession("kretz-aura", ctx(products), "datos", { ...io, saveItemConfig: async (b) => void saved.push(b), loadBranchConfig: async () => lt });
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, true);
+    assert.deepEqual(saved, []);
+  });
+
+  it("si no se puede leer el formato de la sucursal, la Aura no lo toca y la sincronización sigue", async () => {
+    const { io } = auraIO();
+    const saved: string[] = [];
+    const s = new KretzSession("kretz-aura", ctx(products), "datos", { ...io, saveItemConfig: async (b) => void saved.push(b), loadBranchConfig: async () => { throw new Error("sin red"); } });
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, true);
+    assert.deepEqual(saved, []);
   });
 
   it("modo pesaje: no hay nada que sincronizar, se explica qué hacer", async () => {

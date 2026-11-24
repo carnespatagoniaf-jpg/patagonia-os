@@ -2,6 +2,7 @@ import { buildKretzFrame, describeKretzCode, parseKretzResponse, toHex, toPrinta
 import { auraWriteToReadOrder, buildAuraWriteRecord, parseAuraPlu, rewriteWithNewPrice, AURA_PLU_RECORD_LENGTH } from "./aura-plu";
 import { collect, readPluList, sendRead, type DiagnosticExchange, type KretzResponder } from "./discovery";
 import { claimPort, closeQuietly, errorClassification, freshPortFor, newSession, openForSession, releasePort, type OpenAttempt } from "./port-session";
+import type { ScaleConfig } from "../../sale/scale-barcode";
 
 /**
  * Envío REAL de productos de Patagonia a la Kretz Aura (2026-10-05).
@@ -57,6 +58,19 @@ export const AURA_ITEM_SCALE_CONFIG = {
   totalLength: 13,
   payloadType: "amount" as const
 };
+
+/**
+ * ¿Sincronizar una Aura puede dejar a Mostrador de la sucursal leyendo AURA_ITEM_SCALE_CONFIG? Solo si la sucursal no
+ * tiene un formato guardado, o ya tiene ese. REAL El Abastero 24/11/2026: tenía guardado el 1-6-5 en pesos de su Report
+ * LT; la sincronización de su Aura lo cambió por el 2-3-7 y la etiqueta "2 000127 42000 0" (Caja Formita, $42.000) se leyó
+ * como producto 001 (NALGA) por $27.420. El ticket de TOTAL de la Aura no necesita el formato guardado
+ * (parseAuraSumTicket lo reconoce con cualquiera); solo las etiquetas de Pre-Empaque dejan de leerse en ese caso.
+ */
+export function auraMaySetBranchConfig(existing: ScaleConfig | null): boolean {
+  if (!existing) return true;
+  const a = AURA_ITEM_SCALE_CONFIG;
+  return existing.prefixLength === a.prefixLength && existing.pluLength === a.pluLength && existing.weightLength === a.weightLength && existing.weightDivisor === a.weightDivisor && existing.totalLength === a.totalLength && existing.payloadType === a.payloadType;
+}
 
 export const AURA_MAX_PLU = 9999;
 
