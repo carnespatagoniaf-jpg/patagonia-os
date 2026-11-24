@@ -493,6 +493,20 @@ describe("[SIMULADO] Mi balanza con una Kretz Report", () => {
     assert.deepEqual(sent, [undefined, "2112005"]);
   });
 
+  it("REAL El Abastero 24/11: la Report con importe en pesos vuelve a su 2-5-5 (2002001) y Mostrador lee 1-6-5 en pesos", async () => {
+    localStorage.clear();
+    const vacio = P("a", "10", "Vacio", "kg", 15000);
+    const { io } = reportIO({ "10": expectedReportProduct({ id: "a", code: "10", name: "Vacio", unit: "kg", priceRetail: 15000 }) });
+    const sent: (string | undefined)[] = [];
+    const saved: unknown[] = [];
+    io.configureReportBarcode = async (config?: string) => { sent.push(config); return "ok"; };
+    io.saveItemConfig = async (_b: string, config?: unknown) => { saved.push(config); };
+    const s = new KretzSession("kretz-report-lt", { ...ctx([vacio]), scaleKey: "ab", pesosBarcode: true }, "datos", io);
+    await s.sync(await s.prepare(noop), noop);
+    assert.deepEqual(sent, ["2002001"]);
+    assert.deepEqual(saved, [{ prefixLength: 1, pluLength: 6, weightLength: 5, weightDivisor: 1, totalLength: 13, payloadType: "amount" }]);
+  });
+
   it("código de barras SIEMPRE: con los productos ya iguales igual se configura, y va antes que los productos", async () => {
     localStorage.clear();
     const vacio = P("a", "10", "Vacio", "kg", 15000);

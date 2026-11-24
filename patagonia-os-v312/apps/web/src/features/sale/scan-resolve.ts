@@ -137,6 +137,18 @@ export function findByPlu(products: Product[], plu: string): Product | undefined
   return same.length === 1 ? same[0] : undefined;
 }
 
+/**
+ * Etiqueta por kilo cuyo código trae el importe en PESOS ENTEROS: el papel trae los centavos (kilos × precio) y el
+ * código no. REAL El Abastero 24/11/2026, Report LT: "CUADRIL 0,125 kg × $18.333 = $2.291,63", código $2.291. Se cobra
+ * kilos (al gramo) × precio, solo si da el mismo peso entero que el código (si el precio de la balanza es otro, se
+ * cobra el del código). Cuentas en enteros (gramos × precio) para no perder el medio centavo.
+ */
+export function pesosLabelWithCents(amount: number, kg: number, price: number): number {
+  const cents = Math.round((Math.round(kg * 1000) * Math.round(price * 100)) / 1000);
+  const exact = cents / 100;
+  return Math.abs(exact - amount) < 1 ? exact : amount;
+}
+
 const fmtQty =(q: number, unit: string) => (unit === "kg" ? `${q.toLocaleString("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg` : `${q} u.`);
 
 export function resolveScan(rawInput: string, products: Product[], config: ScaleConfig): ScanResolution {
@@ -166,6 +178,7 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
   // "21" trae los GRAMOS (nunca un importe) y "20" sigue siendo importe (etiquetas viejas y productos por unidad).
   const weight237 = kretz237WeightLabel(raw, config, active);
   const is237Weight = weight237 !== null || (isKretz237Amount(config) && raw.startsWith("21"));
+  const byConfig = !weight237 && !is237Weight && looksLikeScaleLabel(raw, config) && !(isKretzPlu5Weight(config) && /^2[01]/.test(raw));
   let label = weight237
     ? weight237.label
     : !is237Weight && looksLikeScaleLabel(raw, config)
@@ -173,12 +186,15 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
         ? kretzPlu5Label(raw)
         : parseWeightBarcode(raw, config)
       : null;
+  // Importe en PESOS ENTEROS del formato de la sucursal (divisor 1): el papel trae los centavos y el código no.
+  let pesosAmount = byConfig && config.payloadType === "amount" && config.weightDivisor === 1;
   let labelProduct = weight237 ? weight237.product : label ? findByPlu(active, label.plu) : undefined;
   if (!labelProduct) {
     const alt = kretzWeightLabel(raw, config, active);
     if (alt) {
       label = alt.label;
       labelProduct = alt.product;
+      pesosAmount = false;
     }
   }
   if (!labelProduct && is237Weight && /^21\d{11}$/.test(raw) && validEan13(raw)) {
@@ -256,7 +272,8 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
     }
     // Con importe: se cobra lo que cobró la balanza (real Pollo y mar 15/10: 0,245 kg × $15.900 = $3.895,50 y la Aura
     // imprime $3.895; recalcular daba $3.896).
-    return { type: "label", product: p, quantity, plu: label.plu, detail: `${p.name}: ${fmtQty(quantity, p.unit)} (etiqueta de balanza)`, ...(label.kind === "amount" ? { amount: label.amount } : {}) };
+    const amount = label.kind === "amount" ? (pesosAmount && p.unit === "kg" ? pesosLabelWithCents(label.amount, quantity, p.priceRetail) : label.amount) : undefined;
+    return { type: "label", product: p, quantity, plu: label.plu, detail: `${p.name}: ${fmtQty(quantity, p.unit)} (etiqueta de balanza)`, ...(amount !== undefined ? { amount } : {}) };
   }
 
   // 4. Código exacto sin distinguir mayúsculas, o búsqueda.
