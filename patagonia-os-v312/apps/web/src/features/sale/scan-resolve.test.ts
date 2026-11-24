@@ -383,3 +383,36 @@ it("REAL El Abastero 24/11: con el 1-6-5 de su Report LT se leen sus etiquetas p
   assert.equal(total.type, "ticket_total");
   if (total.type === "ticket_total") assert.equal(total.amount, 69000);
 });
+
+describe("[REAL] El Abastero 24/11: etiqueta por kilo con el importe en pesos enteros, se cobra con centavos", () => {
+  const ABASTERO = { prefixLength: 1, pluLength: 6, weightLength: 5, weightDivisor: 1, totalLength: 13, payloadType: "amount" as const };
+  const products = [product("17", "FALDA XKG", "kg", 15555), product("15", "MATAMBRE XKG", "kg", 17222), product("1", "NALGA XKG", "kg", 18333), product("127", "CAJA FORMITA", "unit", 42000)];
+
+  for (const [code, name, kg, amount] of [["2000017195216", "FALDA XKG", 1.255, 19521.53], ["2000015216135", "MATAMBRE XKG", 1.255, 21613.61], ["2000001230077", "NALGA XKG", 1.255, 23007.92]] as const) {
+    it(`${name}: ${kg} kg, $${amount} como el papel`, () => {
+      const r = resolveScan(code, products, ABASTERO);
+      assert.equal(r.type, "label");
+      if (r.type === "label") {
+        assert.equal(r.product.name, name);
+        assert.equal(r.quantity, kg);
+        assert.equal(r.amount, amount);
+      }
+    });
+  }
+
+  it("por unidad no cambia: CAJA FORMITA $42.000", () => {
+    const r = resolveScan("2000127420000", products, ABASTERO);
+    assert.ok(r.type === "label" && r.amount === 42000 && r.quantity === 1);
+  });
+
+  it("si el precio de Patagonia no coincide con el de la balanza, se cobra el importe del código", () => {
+    const caro = [product("17", "FALDA XKG", "kg", 20000)];
+    const r = resolveScan("2000017195216", caro, ABASTERO);
+    assert.ok(r.type === "label" && r.amount === 19521);
+  });
+
+  it("el TOTAL de la Aura (2-3-7 en centavos) sigue siendo un total", () => {
+    const r = resolveScan("2099826857002", products, ABASTERO);
+    assert.ok(r.type === "ticket_total" && r.amount === 26857);
+  });
+});

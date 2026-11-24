@@ -149,6 +149,8 @@ export interface EngineContext {
    * 7) en vez del importe, y Mostrador cobra kilos × precio de Patagonia (pedido de Carplat 18/11/2026).
    */
   weightBarcode?: boolean;
+  /** Report por USB/Bluetooth: 2-5-5 con importe en pesos enteros (REPORT_PESOS_BARCODE_COMPANIES, El Abastero 24/11/2026). */
+  pesosBarcode?: boolean;
 }
 
 export interface ScaleAdapter {

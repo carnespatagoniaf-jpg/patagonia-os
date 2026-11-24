@@ -78,6 +78,16 @@ export const REPORT_NET_BARCODE_CONFIG = "2112001";
  */
 export const REPORT_WEIGHT_BARCODE_CONFIG = "2112005";
 
+/**
+ * 1070 para la Report con importe en pesos enteros (ctx.pesosBarcode): inicio pesable "20" + importe (0) + inicio no
+ * pesable "20" + importe (0) + formato 1 (2-5-5). Es lo que imprimía la Report LT de El Abastero antes del 24/11/2026
+ * ("2 00017 19521 6" = FALDA $19.521); la sucursal lo lee con REPORT_PESOS_SCALE_CONFIG.
+ */
+export const REPORT_PESOS_BARCODE_CONFIG = "2002001";
+
+/** Cómo lee Mostrador esa etiqueta: 1-6-5 en pesos (mismos dígitos que el 2-5-5; así lo tenía calibrado El Abastero). */
+export const REPORT_PESOS_SCALE_CONFIG: ScaleConfig = { prefixLength: 1, pluLength: 6, weightLength: 5, weightDivisor: 1, totalLength: 13, payloadType: "amount" };
+
 export function kretzModelForLetter(deviceType: string | null | undefined): ScaleModelId {
   return deviceType === "H" ? "kretz-aura" : deviceType === "C" ? "kretz-report-lt" : "kretz-otra";
 }
@@ -279,9 +289,10 @@ export class KretzSession implements ScaleSession {
       // Por red (Report NX/NX2): el formato que traía la balanza (21 + producto de 5 + peso). Con el 2-3-7 la NX2 de
       // Lauda dejó de imprimir el código de barras (real 18/11). Por USB/Bluetooth (Report LT) sigue el 2-3-7.
       const net = this.diagnostic.red === true;
-      const r = await this.io.configureReportBarcode(net ? REPORT_NET_BARCODE_CONFIG : this.ctx.weightBarcode ? REPORT_WEIGHT_BARCODE_CONFIG : undefined);
+      const pesos = !net && !this.ctx.weightBarcode && this.ctx.pesosBarcode === true;
+      const r = await this.io.configureReportBarcode(net ? REPORT_NET_BARCODE_CONFIG : this.ctx.weightBarcode ? REPORT_WEIGHT_BARCODE_CONFIG : pesos ? REPORT_PESOS_BARCODE_CONFIG : undefined);
       if (r === "ok") {
-        if (this.ctx.online && this.ctx.branchId && this.io.saveItemConfig) await this.io.saveItemConfig(this.ctx.branchId, net ? KRETZ_PLU5_WEIGHT_CONFIG : undefined);
+        if (this.ctx.online && this.ctx.branchId && this.io.saveItemConfig) await this.io.saveItemConfig(this.ctx.branchId, net ? KRETZ_PLU5_WEIGHT_CONFIG : pesos ? REPORT_PESOS_SCALE_CONFIG : undefined);
         markBarcodeConfigured(this.barcodeKey());
       }
       return r;
@@ -300,7 +311,7 @@ export class KretzSession implements ScaleSession {
   private barcodeKey(): string {
     const id = this.identity();
     // Por red se marca aparte: así una NX que ya recibió el 2-3-7 vuelve a recibir su formato.
-    return `${this.ctx.scaleKey ?? ""}|${String(id.letter ?? "")}${String(id.equipment ?? "")}${this.diagnostic.red === true ? `|${REPORT_NET_BARCODE_CONFIG}` : this.ctx.weightBarcode ? `|${REPORT_WEIGHT_BARCODE_CONFIG}` : ""}`;
+    return `${this.ctx.scaleKey ?? ""}|${String(id.letter ?? "")}${String(id.equipment ?? "")}${this.diagnostic.red === true ? `|${REPORT_NET_BARCODE_CONFIG}` : this.ctx.weightBarcode ? `|${REPORT_WEIGHT_BARCODE_CONFIG}` : this.ctx.pesosBarcode ? `|${REPORT_PESOS_BARCODE_CONFIG}` : ""}`;
   }
 
   async close(): Promise<void> {
