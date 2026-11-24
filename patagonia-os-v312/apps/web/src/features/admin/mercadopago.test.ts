@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { mpFailedChargeMessage, mpProblem, mpStatusLabel, suggestCompany, toArDate, type MpSubscription } from "./mercadopago";
+import { mpFailedChargeMessage, mpProblem, mpStatusLabel, suggestCompany, suggestMatch, toArDate, type MpSubscription } from "./mercadopago";
 
 const base: MpSubscription = {
   id: "s1", companyId: null, companyName: null, status: "authorized", reason: "Patagonia OS", payerName: null, payerEmail: null,
@@ -36,5 +36,24 @@ describe("mercado pago", () => {
   });
   it("mensaje de cobro fallido", () => {
     assert.match(mpFailedChargeMessage("Don Julio", "Julio Pérez"), /^¡Hola Julio! .*suscripción de Don Julio/);
+  });
+  it("propone por nombre del negocio, nombre desordenado o mail parecido", () => {
+    const list = [
+      ...companies,
+      { id: "d", name: "Pollo y Mar", ownerFullName: "Roberto Sosa", ownerEmail: "rsosa@mail.com" },
+      { id: "e", name: "Carnicería La Esperanza", ownerFullName: "Ana Ruiz", ownerEmail: null },
+      { id: "f", name: "AJOVA SAS", ownerFullName: "Jorge Vaca", ownerEmail: null },
+      { id: "g", name: "Mi Carnicería", ownerFullName: "Brian Benítez", ownerEmail: "brianbenitez@gmail.com" }
+    ];
+    assert.deepEqual(suggestMatch({ payerEmail: null, payerName: "Pollo y mar" }, list), { companyId: "d", why: "nombre del negocio" });
+    assert.equal(suggestCompany({ payerEmail: null, payerName: "La Esperanza" }, list), "e");
+    assert.equal(suggestCompany({ payerEmail: null, payerName: "AJOVA SOCIEDAD POR ACIONES SIM" }, list), "f");
+    // Segundo nombre de más y otro mail: igual reconoce al dueño.
+    assert.deepEqual(suggestMatch({ payerEmail: "otro@hotmail.com", payerName: "Brian Gaston Benitez" }, list), { companyId: "g", why: "mismo nombre del dueño" });
+    assert.deepEqual(suggestMatch({ payerEmail: "brianbenitez@hotmail.com", payerName: null }, list), { companyId: "g", why: "mail parecido al del dueño" });
+    // "Carnicería" sola no alcanza: hay muchas.
+    assert.equal(suggestCompany({ payerEmail: null, payerName: "Carniceria" }, list), null);
+    // Dos clientes posibles: no propone ninguno.
+    assert.equal(suggestCompany({ payerEmail: null, payerName: "Gomez" }, list), null);
   });
 });

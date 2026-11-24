@@ -1,10 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CreditCard, MessageCircle, RefreshCw } from "lucide-react";
+import { CheckCheck, CreditCard, MessageCircle, RefreshCw } from "lucide-react";
 import { assignMpSubscription, getMpScheduleStatus, listMpSubscriptions, syncMercadoPago, type CompanySummary, type MpScheduleStatus } from "./admin-service";
-import { mpFailedChargeMessage, mpProblem, mpStatusLabel, suggestCompany, toArDate, type MpSubscription } from "./mercadopago";
+import { mpFailedChargeMessage, mpProblem, mpStatusLabel, suggestMatch, toArDate, type MpSubscription, type MpSuggestion } from "./mercadopago";
 import { formatDayMonth } from "./company-billing";
 import { whatsappLink } from "./sales-pipeline";
-import { Alert, Button, Card, Select, useConfirm } from "./ui/components";
+import { Alert, Badge, Button, Card, Select, useConfirm } from "./ui/components";
 
 function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
@@ -91,6 +91,31 @@ export function AdminMercadoPago({
     }
   }
 
+  /** Asigna de una vez todas las que tienen cliente elegido (sugerido o a mano). Sigue aunque alguna falle. */
+  async function assignAll() {
+    const todo = chosen;
+    if (todo.length === 0) return;
+    setBusyId("all");
+    setError("");
+    setMessage("");
+    let ok = 0, applied = 0;
+    const failed: string[] = [];
+    for (const { sub, companyId } of todo) {
+      try {
+        applied += await assignMpSubscription(sub.id, companyId);
+        ok++;
+      } catch (err) {
+        failed.push(`${sub.payerName || sub.payerEmail || "sin nombre"}: ${err instanceof Error ? err.message : "error"}`);
+      }
+    }
+    setChoice({});
+    await reloadList();
+    onChangedRef.current();
+    setMessage(`Listo: ${ok} ${ok === 1 ? "suscripción asignada" : "suscripciones asignadas"}${applied > 0 ? `, se sumaron ${applied} ${applied === 1 ? "cobro" : "cobros"}` : ""}. Los próximos cobros se anotan solos.`);
+    if (failed.length) setError(`No se pudieron asignar ${failed.length}: ${failed.join(" · ")}`);
+    setBusyId(null);
+  }
+
   async function unassign(sub: MpSubscription) {
     if (!(await ask({ title: `¿Sacar esta suscripción de ${sub.companyName}?`, message: "Los pagos ya sumados quedan; los próximos no se suman.", confirmLabel: "Sacar suscripción", danger: true }))) return;
     setBusyId(sub.id);
@@ -106,6 +131,14 @@ export function AdminMercadoPago({
 
   const active = companies.filter((c) => c.active);
   const unassigned = subs.filter((s) => !s.companyId && s.status !== "cancelled");
+  /** Cliente que propone el panel para cada suscripción sin asignar (mail, nombre del dueño, negocio…). */
+  const suggestions: Record<string, MpSuggestion | null> = Object.fromEntries(unassigned.map((s) => [s.id, suggestMatch(s, active)]));
+  /** Las que tienen cliente elegido: la sugerencia, salvo que se haya cambiado (o dejado en blanco) a mano. */
+  const chosen = unassigned
+    .map((sub) => ({ sub, companyId: choice[sub.id] ?? suggestions[sub.id]?.companyId ?? "" }))
+    .filter((x) => x.companyId);
+  /** Primero las reconocidas, para revisarlas juntas. */
+  const sortedUnassigned = [...unassigned].sort((a, b) => Number(Boolean(suggestions[b.id])) - Number(Boolean(suggestions[a.id])));
   const problems = subs.filter((s) => s.companyId && mpProblem(s));
   const assigned = subs.filter((s) => s.companyId);
 
@@ -166,11 +199,21 @@ export function AdminMercadoPago({
 
       {unassigned.length > 0 && (
         <div style={{ display: "grid", gap: 6 }}>
-          <strong>¿De qué cliente es cada suscripción?</strong>
-          <span className="pa-muted" style={{ fontSize: 13 }}>Se elige una sola vez. Lo que ya habías anotado a mano no se suma de nuevo.</span>
-          {unassigned.map((s) => {
-            const suggested = suggestCompany(s, active);
-            const value = choice[s.id] ?? suggested ?? "";
+          <div className="pa-row-between">
+            <strong>¿De qué cliente es cada suscripción?</strong>
+            {chosen.length > 0 && (
+              <Button icon={CheckCheck} loading={busyId === "all"} onClick={() => void assignAll()}>
+                Asignar {chosen.length === 1 ? "la elegida" : `las ${chosen.length} elegidas`}
+              </Button>
+            )}
+          </div>
+          <span className="pa-muted" style={{ fontSize: 13 }}>
+            Se elige una sola vez y después cada cobro se anota solo. Las que reconozco ya vienen con el cliente elegido: revisalas, cambiá o
+            dejá en blanco las que no estén bien, y tocá “Asignar”. Lo que ya habías anotado a mano no se suma de nuevo.
+          </span>
+          {sortedUnassigned.map((s) => {
+            const match = suggestions[s.id];
+            const value = choice[s.id] ?? match?.companyId ?? "";
             return (
               <div key={s.id} className="pa-list-row">
                 <span>
@@ -180,6 +223,7 @@ export function AdminMercadoPago({
                   {` · ${mpStatusLabel(s.status)}`}
                   {s.dateCreated ? ` · desde ${formatDayMonth(toArDate(s.dateCreated))}` : ""}
                   {` · ${s.approvedCount} ${s.approvedCount === 1 ? "cobro" : "cobros"}`}
+                  {match && choice[s.id] === undefined && <> {" "}<Badge tone="info" dot={false}>Lo reconocí: {match.why}</Badge></>}
                 </span>
                 <div className="pa-row">
                   <Select aria-label="Cliente" value={value} onChange={(e) => setChoice({ ...choice, [s.id]: e.target.value })} style={{ maxWidth: 260 }}>
