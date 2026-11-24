@@ -432,6 +432,21 @@ describe("[SIMULADO] Mi balanza con una Kretz Report", () => {
     assert.equal(scale.get("1")?.taxes, 0);
   });
 
+  it("mismo nombre y precio pero con vencimiento y el nombre repetido abajo (M2 23/11): se vuelve a grabar sin los dos", async () => {
+    const roast = P("a", "4", "Roast Beef Novillo G", "kg", 14600);
+    const base = expectedReportProduct({ id: "a", code: "4", name: "Roast Beef Novillo G", unit: "kg", priceRetail: 14600 });
+    const { io, sent, scale } = reportIO({ "4": { ...base, expiryDays: 5, description: "Roast Beef Novillo G." } });
+    const s = new KretzSession("kretz-report-lt", ctx([roast]), "datos", io);
+    const prep = await s.prepare(noop);
+    assert.equal(prep.ready, 0);
+    assert.equal(prep.writes, 1);
+    const out = await s.sync(prep, noop);
+    assert.equal(out.ok, true);
+    assert.deepEqual(sent, ["4"]);
+    assert.equal(scale.get("4")?.expiryDays, 0);
+    assert.equal(scale.get("4")?.description, "");
+  });
+
   it("después de mandar, configura el código de barras de las etiquetas (1070) y deja a Mostrador leyéndolo", async () => {
     const { io } = reportIO({});
     const calls: string[] = [];
