@@ -6,6 +6,8 @@ import { listProductsForBranch } from "../inventory/inventory-service";
 import { rulePrice, type PriceList } from "../pricing/price-lists";
 import { deletePriceList, listPriceLists, listZoneBranches, savePriceZone, setProductListPrices } from "../pricing/price-lists-service";
 import { listTransferBranches, type TransferBranch } from "../transfers/transfers-service";
+import { useAuth } from "../auth/AuthProvider";
+import { ZonePricesExcel } from "./ZonePricesExcel";
 
 // Sucursales → Precios por zona (migración 192; todos los planes desde Estándar con la 197). Una zona = precio general ± %, con precios a mano
 // por producto, para los locales que se le asignan. Mostrador de esos locales cobra el precio de la zona solo;
@@ -25,6 +27,9 @@ interface ZoneForm {
 }
 
 export function ZonesTab({ activeBranchId }: { activeBranchId: string }) {
+  const { profile } = useAuth();
+  // Pantalla a pedido 'precios_excel' (migración 211): bajar y subir los precios de cada local en Excel.
+  const excel = Boolean(profile?.features?.includes("precios_excel"));
   const [zones, setZones] = useState<PriceList[]>([]);
   const [zoneBranches, setZoneBranches] = useState<Map<string, string[]>>(new Map());
   const [branches, setBranches] = useState<TransferBranch[]>([]);
@@ -185,6 +190,18 @@ export function ZonesTab({ activeBranchId }: { activeBranchId: string }) {
           </button>
         </div>
         {message && <div className="message">{message}</div>}
+        {excel && (
+          <ZonePricesExcel
+            products={products}
+            branches={branches}
+            zones={zones}
+            zoneBranches={zoneBranches}
+            onSaved={async (msg) => {
+              setMessage(msg);
+              await reload();
+            }}
+          />
+        )}
         {zones.length === 0 ? (
           <p className="muted">Todavía no hay zonas: todos los locales venden al precio general (el de Stock). Creá una con "+ Nueva zona".</p>
         ) : (
