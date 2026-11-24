@@ -176,17 +176,22 @@ export function Tabs<K extends string>({ tabs, value, onChange }: { tabs: Array<
 export function Modal({ open, title, onClose, children, footer, size = "md", headerExtra }: { open: boolean; title: string; onClose: () => void; children?: ReactNode; footer?: ReactNode; size?: "md" | "lg"; headerExtra?: ReactNode }) {
   const { theme } = useAdminTheme();
   const boxRef = useRef<HTMLDivElement>(null);
+  // onClose suele venir como función nueva en cada dibujo (() => ...). Si el efecto dependiera de ella, se volvería
+  // a correr con cada letra y mandaría el cursor al primer campo (error real del 23/11: "pongo una letra y se va").
+  const onCloseRef = useRef(onClose);
+  onCloseRef.current = onClose;
   useEffect(() => {
     if (!open) return;
     const previous = document.activeElement as HTMLElement | null;
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onCloseRef.current();
     document.addEventListener("keydown", onKey);
+    // Solo al abrir: el cursor va al primer campo una vez.
     boxRef.current?.querySelector<HTMLElement>("input, select, textarea, button")?.focus();
     return () => {
       document.removeEventListener("keydown", onKey);
       previous?.focus?.();
     };
-  }, [open, onClose]);
+  }, [open]);
   if (!open) return null;
   return createPortal(
     <div className="pa" data-pa-theme={theme} style={{ background: "none" }}>
