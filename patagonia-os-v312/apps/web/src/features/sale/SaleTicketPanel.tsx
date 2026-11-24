@@ -1,7 +1,7 @@
 import { Fragment, useState, type ReactNode } from "react";
 import type { Product, TreasuryAccount } from "@patagonia/domain";
 import { parseAmount } from "../../lib/money";
-import { formatMoney } from "../shifts/format";
+import { formatMoney, formatMoneyCents } from "../shifts/format";
 import { parseQuantity } from "./quantity";
 import { lineGross, UNIT_LABELS } from "./sale-model";
 import { productPrice } from "../pricing/price-lists";
@@ -277,7 +277,7 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
               onChange={(e) => setItemDiscounts({ ...itemDiscounts, [line.key]: e.target.value })}
             />
             <span className="pos-line-total">
-              {formatMoney(lineGross(line) - (parseAmount(itemDiscounts[line.key] || "0") || 0))}
+              {formatMoneyCents(lineGross(line) - (parseAmount(itemDiscounts[line.key] || "0") || 0))}
             </span>
             <button className="pos-remove-btn" onClick={() => removeFromCart(line.key)} aria-label="Quitar" title="Quitar">×</button>
           </div>
@@ -330,7 +330,7 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
         )}
         {hasAdjustment && (
           <p className="pos-subtotal-line" style={{ marginTop: showDiscountForm ? 0 : 10 }}>
-            Subtotal {formatMoney(grossTotal)}
+            Subtotal {formatMoneyCents(grossTotal)}
             {(itemDiscountTotal > 0 || saleDiscountValue > 0) && ` · Descuentos -${formatMoney(itemDiscountTotal + saleDiscountValue)}`}
             {saleSurchargeValue > 0 && ` · Recargo +${formatMoney(saleSurchargeValue)}`}
           </p>
@@ -469,6 +469,7 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
           <div>
             <p className="pos-total-label">Total a cobrar</p>
             <strong className="pos-total-value">{formatMoney(total)}</strong>
+            {!hasAdjustment && Math.abs(grossTotal - total) >= 0.005 && <p className="pos-total-label">Suma {formatMoneyCents(grossTotal)}, redondeado al peso</p>}
           </div>
           <button
             ref={chargeButtonRef}

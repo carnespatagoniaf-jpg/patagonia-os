@@ -17,6 +17,15 @@ export function addDaysIso(date: string, days: number) {
   return d.toISOString().slice(0, 10);
 }
 
+/**
+ * Como formatMoney, pero con centavos cuando el importe los tiene (etiqueta de balanza: "$ 2.291,63"). Pedido de El
+ * Abastero 24/11/2026: ver en Mostrador los centavos del papel. El total a cobrar sigue en pesos enteros.
+ */
+export function formatMoneyCents(value: number) {
+  const cents = Math.abs(value - Math.round(value)) >= 0.005;
+  return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", minimumFractionDigits: cents ? 2 : 0, maximumFractionDigits: cents ? 2 : 0 }).format(value);
+}
+
 export function formatMoney(value: number) {
   return new Intl.NumberFormat("es-AR", { style: "currency", currency: "ARS", maximumFractionDigits: 0 }).format(value);
 }
