@@ -37,6 +37,8 @@ class FakeReportScale {
   writes: number[] = [];
   /** PLUs en los que la balanza contesta "01" pero no graba nada (lo que hace la real con algunos PLUs de iTegra). */
   ignore = new Set<number>();
+  /** Departamentos que existen en la balanza (null = cualquiera). Un alta con otro contesta "21", como la de El Abastero. */
+  departments: Set<string> | null = null;
   getInfo() {
     return { usbVendorId: 0x1a86, usbProductId: 0x7523 };
   }
@@ -63,6 +65,10 @@ class FakeReportScale {
           assert.equal(data.length, 135, "el registro 2005 tiene que tener 135 caracteres");
           const plu = Number(data.slice(0, 6));
           this.writes.push(plu);
+          if (this.departments && !this.records.has(plu) && !this.departments.has(data.slice(6, 9))) {
+            reply("21");
+            return;
+          }
           if (!this.ignore.has(plu)) this.records.set(plu, data);
           reply("01");
         } else if (command === "5005") {
@@ -120,7 +126,7 @@ describe("[SIMULADO] Kretz Report: 100 productos de punta a punta (tramas reales
     assert.equal(prep.writes, 100);
     assert.equal(prep.pending.length, 0, "los de fábrica no cuentan como ocupados");
     const out = await s.sync(prep, noop);
-    assert.equal(out.ok, true, out.message);
+    assert.equal(out.ok, true, `${out.message} ${JSON.stringify(out.failures)} writes=${JSON.stringify(scale.writes)}`);
     assert.equal(out.verified, 100);
     assert.equal(out.failures, undefined);
 
@@ -207,5 +213,31 @@ describe("[SIMULADO] Kretz Report: 100 productos de punta a punta (tramas reales
     assert.match(out.failures![0].reason, /impuesto/);
     assert.match(out.failures![0].reason, /etiqueta/);
     assert.match(out.message, /1 producto no quedó bien.*99 sí/);
+  });
+});
+
+describe("[SIMULADO] REAL El Abastero 24/11: la LT rechaza las altas con departamento 001 (respuesta 21)", () => {
+  function record(plu: number, name: string, depto: string, familia: string): string {
+    const d = (v: number, w: number) => String(v).padStart(w, "0");
+    return [d(plu, 6), depto, familia, name.padEnd(26, " "), "".padEnd(26, " "), d(plu, 5), "P", d(0, 7), d(18333, 6), d(0, 6), d(2, 6), d(0, 6), d(0, 6), d(0, 5), d(0, 5), "01", d(0, 4), d(0, 4), d(1000, 4), d(0, 4)].join("");
+  }
+
+  it("un producto nuevo (número libre) se da de alta con el departamento y la familia de los que ya tiene la balanza", async () => {
+    const scale = new FakeReportScale();
+    scale.departments = new Set(["005"]);
+    scale.records.set(1, record(1, "NALGA XKG", "005", "007"));
+    scale.records.set(36, record(36, "LENGUA XKG", "005", "007"));
+    const products: Product[] = [
+      { id: "n", code: "1", name: "NALGA XKG", unit: "kg", priceRetail: 18333 },
+      { id: "l", code: "36", name: "LENGUA XKG", unit: "kg", priceRetail: 18333 },
+      { id: "m", code: "144", name: "MILANESA POLLO XKG", unit: "kg", priceRetail: 11000 }
+    ];
+    const s = await session(scale, products);
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, true, `${out.message} ${JSON.stringify(out.failures)} writes=${JSON.stringify(scale.writes)}`);
+    const f = split(scale.records.get(144)!);
+    assert.equal(f[1], "005");
+    assert.equal(f[2], "007");
+    assert.equal(f[3].trimEnd(), "MILANESA POLLO XKG");
   });
 });

@@ -804,6 +804,30 @@ async function readExistingPluFields(port: SerialPort, settings: ScaleSerialSett
   return fields;
 }
 
+/**
+ * Departamento y familia de un producto que YA está en la balanza (el primero que devuelve 5005 desde 0), para dar de
+ * alta uno nuevo. REAL El Abastero 24/11/2026: su Report LT aceptaba modificar los productos que ya tenía y rechazaba
+ * TODO producto nuevo con la respuesta 21 (no documentada), aun en números libres. Lo único distinto entre un alta y
+ * una modificación es que el alta iba con departamento 001 / familia 001 por defecto, y esa balanza (cargada antes
+ * con iTegra) puede no tenerlos. Se guarda por puerto y configuración durante la sincronización.
+ */
+const templateCache = new WeakMap<SerialPort, { key: string; fields: string[] | null; at: number }>();
+
+async function readTemplatePluFields(port: SerialPort, settings: ScaleSerialSettings): Promise<string[] | null> {
+  const key = `${settings.deviceType}${settings.equipmentId}${settings.baudRate}`;
+  const cached = templateCache.get(port);
+  if (cached && cached.key === key && Date.now() - cached.at < 10 * 60_000) return cached.fields;
+  const response = await writeFrameResilient(port, buildFrame(settings.deviceType, settings.equipmentId, "5005", fixedDigits(0, 6)), settings.baudRate);
+  let fields: string[] | null = null;
+  if (isKretzResponse(response) && extractResponseCode(response) === "01") {
+    const dataBytes = response.length > 10 ? response.slice(8, -3) : new Uint8Array();
+    const read = splitPluFields(Array.from(dataBytes).map((b) => String.fromCharCode(b)).join(""));
+    if (/^\d{3}$/.test(read[1] ?? "") && /^\d{3}$/.test(read[2] ?? "") && !isFactoryPluName(read[3] ?? "")) fields = read;
+  }
+  templateCache.set(port, { key, fields, at: Date.now() });
+  return fields;
+}
+
 /** Modelo de campos REAL del comando 2005, confirmado campo por campo
  * contra esta balanza con el comando 5002 (no asumido de ningún
  * documento). Total: 135 caracteres. Diferencias clave contra el protocolo
@@ -863,6 +887,8 @@ async function buildPluFrame(
   // El producto de ejemplo de fábrica ("NOMBRE") no es un producto real: sus campos secundarios
   // no se heredan (real M2 Alimentos 24/10: traía impuesto 21% y la etiqueta salía $12.100 en vez de $10.000).
   const existing = read && !isFactoryPluName(read[3]) ? read : null;
+  // Alta (número libre): departamento y familia de un producto que ya está en la balanza (readTemplatePluFields).
+  const template = existing ? null : await readTemplatePluFields(port, settings).catch(() => null);
 
   const pluNumber = fixedDigits(pluDigits, 6);
   const pluCode = fixedDigits(pluDigits, 5);
@@ -878,8 +904,8 @@ async function buildPluFrame(
   // 9=precio alternativo, 10=flag decimal, 11-12=impuestos, 13-14=taras,
   // 15=etiqueta, 16-17=receta/nutricional, 18=campo19, 19=campo22). Si es
   // nuevo, se usan los mismos valores por defecto que ya veníamos usando.
-  const departamento = existing?.[1] ?? fixedDigits(1, 3);
-  const familia = existing?.[2] ?? fixedDigits(1, 3);
+  const departamento = existing?.[1] ?? template?.[1] ?? fixedDigits(1, 3);
+  const familia = existing?.[2] ?? template?.[2] ?? fixedDigits(1, 3);
   // Campo 8 "Valor fijo (días de consumo preferente)": es el "VTO:" de la etiqueta. Siempre 0 = sin vencimiento
   // (dueño 23/11, M2 Alimentos imprimía "VTO: 28/11/26" con lo que tenía cargado de antes).
   const valorFijo = fixedDigits(0, 7);
