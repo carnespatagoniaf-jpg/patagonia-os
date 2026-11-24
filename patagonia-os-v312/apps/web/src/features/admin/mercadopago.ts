@@ -64,25 +64,80 @@ function normalize(text: string) {
   return text.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
 }
 
-/** Propone de qué cliente es una suscripción: mismo email del dueño, o mismo
- * nombre y apellido. null si no hay una sola coincidencia clara. */
-export function suggestCompany(sub: Pick<MpSubscription, "payerEmail" | "payerName">, companies: MpCompanyLike[]): string | null {
-  if (sub.payerEmail) {
-    const email = normalize(sub.payerEmail);
-    const byEmail = companies.filter((c) => c.ownerEmail && normalize(c.ownerEmail) === email);
-    if (byEmail.length === 1) return byEmail[0].id;
-  }
-  if (sub.payerName) {
-    const words = normalize(sub.payerName).split(/\s+/).filter((w) => w.length >= 3);
-    if (words.length >= 2) {
-      const byName = companies.filter((c) => {
-        const owner = c.ownerFullName ? normalize(c.ownerFullName) : "";
-        return words.every((w) => owner.includes(w));
-      });
-      if (byName.length === 1) return byName[0].id;
-    }
+/** Palabras que no sirven para reconocer un negocio (rubro, sociedad, conectores). */
+const GENERIC_WORDS = new Set([
+  "de", "del", "la", "las", "el", "los", "y", "e", "en", "sa", "srl", "sas", "sociedad", "por", "acciones", "aciones", "simplificada", "sim",
+  "carniceria", "carnes", "carne", "polleria", "pollos", "granja", "fiambreria", "almacen", "supermercado", "super", "autoservicio",
+  "mayorista", "distribuidora", "frigorifico", "comercial", "local", "sucursal"
+]);
+
+function words(text: string | null | undefined, minLength = 3): string[] {
+  if (!text) return [];
+  return normalize(text).replace(/[^a-z0-9ñ]+/g, " ").split(/\s+/).filter((w) => w.length >= minLength);
+}
+
+function significantWords(text: string | null | undefined): string[] {
+  return words(text, 3).filter((w) => !GENERIC_WORDS.has(w));
+}
+
+function contains(haystack: string[], needles: string[]) {
+  return needles.length > 0 && needles.every((n) => haystack.includes(n));
+}
+
+export interface MpSuggestion {
+  companyId: string;
+  /** Por qué se propone, para mostrarlo al lado ("mismo mail", "nombre del negocio"…). */
+  why: string;
+}
+
+/**
+ * Propone de qué cliente es una suscripción. Se prueba en este orden y gana el primer criterio que da UN solo
+ * cliente (si da varios, no se propone nada para no equivocarse):
+ * 1. mismo mail que el dueño;
+ * 2. mismo nombre y apellido del dueño, en cualquier orden y aunque uno tenga un segundo nombre;
+ * 3. nombre del negocio (sin "carnicería", "S.A.", etc.), porque varios pagan a nombre del negocio;
+ * 4. mismo usuario de mail (lo de antes de la @), para los que pagan con otro mail del mismo nombre.
+ */
+export function suggestMatch(sub: Pick<MpSubscription, "payerEmail" | "payerName">, companies: MpCompanyLike[]): MpSuggestion | null {
+  const email = sub.payerEmail ? normalize(sub.payerEmail) : "";
+  const payer = words(sub.payerName);
+  const payerAll = [...payer, ...words(email.split("@")[0])];
+  const tiers: Array<[string, (c: MpCompanyLike) => boolean]> = [
+    ["mismo mail del dueño", (c) => Boolean(email && c.ownerEmail && normalize(c.ownerEmail) === email)],
+    [
+      "mismo nombre del dueño",
+      (c) => {
+        const owner = words(c.ownerFullName);
+        return (payer.length >= 2 && contains(owner, payer)) || (owner.length >= 2 && contains(payer, owner));
+      }
+    ],
+    [
+      "nombre del negocio",
+      (c) => {
+        const business = significantWords(c.name);
+        const payerBiz = significantWords(sub.payerName);
+        return (business.length > 0 && business.some((w) => w.length >= 4) && contains(payerAll, business)) || (payerBiz.length >= 2 && payerBiz.some((w) => w.length >= 4) && contains(significantWords(c.name), payerBiz));
+      }
+    ],
+    [
+      "mail parecido al del dueño",
+      (c) => {
+        const user = email.split("@")[0];
+        return Boolean(user && user.length >= 5 && c.ownerEmail && normalize(c.ownerEmail).split("@")[0] === user);
+      }
+    ]
+  ];
+  for (const [why, test] of tiers) {
+    const found = companies.filter(test);
+    if (found.length === 1) return { companyId: found[0].id, why };
+    if (found.length > 1) return null;
   }
   return null;
+}
+
+/** Igual que suggestMatch, solo el cliente. */
+export function suggestCompany(sub: Pick<MpSubscription, "payerEmail" | "payerName">, companies: MpCompanyLike[]): string | null {
+  return suggestMatch(sub, companies)?.companyId ?? null;
 }
 
 function firstName(fullName: string | null | undefined) {
