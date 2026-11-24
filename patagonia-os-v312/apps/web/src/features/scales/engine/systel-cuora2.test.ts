@@ -4,7 +4,7 @@ import { installFakeLocalStorage } from "../test-fake-storage";
 import { FakeCuora } from "../../inventory/systel/systel-fake";
 import { parsePluAs } from "../../inventory/systel/systel-plu";
 import { SystelSession, type SystelDeps } from "./adapters/systel";
-import { cuora2WriteData, CUORA2_FIXED, PROOF_NAME } from "./adapters/systel-push";
+import { cuora2WriteData, CUORA2_FIXED, planSystelPush, PROOF_NAME } from "./adapters/systel-push";
 import type { EngineContext, EngineProduct } from "./types";
 
 /**
@@ -65,6 +65,18 @@ describe("[SIMULADO, registros REALES] Systel Cuora 2: Patagonia → balanza", (
     assert.equal(data[CUORA2_FIXED], "M");
     assert.equal(data[4], "1", "versión 1 = gestionado desde la PC");
     assert.equal(data.slice(0, CUORA2_FIXED) + data.slice(CUORA2_FIXED + 1), read);
+  });
+
+  it("nunca deja vencimiento en la etiqueta: un producto con días de vencimiento se reescribe en 0 (2026-11-19)", () => {
+    const withExpiry = "00171bola lomo         02050000000000017010005P000000N";
+    const plu = parsePluAs("cuora2", withExpiry, 17)!;
+    assert.equal(plu.expiryDays, 5);
+    const [item] = planSystelPush([plu], "cuora2", 0, [{ id: "a", code: "17", name: "bola lomo", byWeight: true, price: 20500 }]);
+    assert.equal(item.action, "actualizar");
+    assert.equal(parsePluAs("cuora2", item.data!.slice(0, CUORA2_FIXED) + item.data!.slice(CUORA2_FIXED + 1), 17)!.expiryDays, 0);
+    // Sin vencimiento y el mismo precio: no hay nada que escribir.
+    const [same] = planSystelPush([parsePluAs("cuora2", REAL[0][1], 17)!], "cuora2", 0, [{ id: "a", code: "17", name: "bola lomo", byWeight: true, price: 20500 }]);
+    assert.equal(same.action, "sin_cambios");
   });
 
   it("prepara: ya no es un modelo que solo se lee; los números ocupados quedan para reemplazar", async () => {

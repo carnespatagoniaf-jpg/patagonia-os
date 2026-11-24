@@ -147,17 +147,21 @@ export function planAuraSync(scaleRecords: string[], products: AuraSyncProduct[]
       }
       return { ...base, plu, current, action: "conflicto", reason: `${why}: no se toca (tildá "Reemplazar" si querés pisarlo)` };
     }
+    // Nunca vencimiento en la etiqueta (dueño 2026-11-19): la validez va siempre en 0, también en los que ya estaban.
     let record: string | null;
     if (cur.type === "D" || cur.type === "C") {
-      if (Number(cur.priceRaw) === priceRaw) return { ...base, plu, current, action: "sin_cambios", reason: "ya tiene ese precio" };
-      record = rewriteWithNewPrice(current, priceRaw, ["D", "C"]);
+      if (Number(cur.priceRaw) === priceRaw && cur.validityDays === 0) return { ...base, plu, current, action: "sin_cambios", reason: "ya tiene ese precio" };
+      const rewritten = rewriteWithNewPrice(current, priceRaw, ["D", "C"]);
+      record = rewritten && rewritten.slice(0, -3) + "000";
     } else {
-      // P/N tienen el precio con centavos: se pasa a D/C (pesos enteros) conservando código, tara y validez.
-      record = buildAuraWriteRecord({ plu, name: cur.name, type, code: Number(current.slice(23, 28)), priceRaw, tareGrams: Number(cur.tareRaw), validityDays: cur.validityDays });
+      // P/N tienen el precio con centavos: se pasa a D/C (pesos enteros) conservando código y tara.
+      record = buildAuraWriteRecord({ plu, name: cur.name, type, code: Number(current.slice(23, 28)), priceRaw, tareGrams: Number(cur.tareRaw), validityDays: 0 });
     }
     if (!record) return { ...base, plu, current, action: "omitir", reason: "no se pudo armar el registro" };
-    const what = cur.type === "D" || cur.type === "C" ? `precio ${Number(cur.priceRaw)} → ${priceRaw}` : `precio a ${priceRaw} en pesos enteros`;
-    return { ...base, plu, current, action: "actualizar", reason: `${what}; conserva código, tara y validez`, record, expected: auraWriteToReadOrder(record) };
+    const what = cur.type === "D" || cur.type === "C"
+      ? (Number(cur.priceRaw) === priceRaw ? "saca el vencimiento" : `precio ${Number(cur.priceRaw)} → ${priceRaw}`)
+      : `precio a ${priceRaw} en pesos enteros`;
+    return { ...base, plu, current, action: "actualizar", reason: `${what}; conserva código y tara, sin vencimiento`, record, expected: auraWriteToReadOrder(record) };
   });
 }
 

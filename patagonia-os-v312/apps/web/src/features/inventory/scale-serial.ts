@@ -832,9 +832,9 @@ async function readExistingPluFields(port: SerialPort, settings: ScaleSerialSett
  * forzarlo a 0 decimales aunque no coincida con lo que ya tenía NO dispara
  * el ignorado silencioso de arriba -- el precio se actualiza igual, solo
  * cambia (correctamente) cómo se interpreta.
- * `descriptionOverride` es solo para casos puntuales -- el flujo normal
- * siempre manda el nombre del producto también como descripción, porque
- * Patagonia OS no tiene un campo de descripción separado. */
+ * `descriptionOverride` es solo para casos puntuales -- el flujo normal (desde 23/11)
+ * manda la descripción VACÍA: la etiqueta la imprime abajo del nombre y con
+ * el nombre repetido salía dos veces (M2 Alimentos, 23/11/2026). */
 async function buildPluFrame(
   port: SerialPort,
   product: ScaleSyncableProduct,
@@ -867,7 +867,9 @@ async function buildPluFrame(
   const pluNumber = fixedDigits(pluDigits, 6);
   const pluCode = fixedDigits(pluDigits, 5);
   const name = fixedAscii(product.name, 26);
-  const description = fixedAscii(descriptionOverride ?? product.name, 26);
+  // Descripción vacía: la etiqueta la imprime abajo del nombre, y con el nombre repetido salía 2 veces
+  // (real M2 Alimentos 23/11: "Roast Beef Novillo G" + "Roast Beef Novillo G.").
+  const description = fixedAscii(descriptionOverride ?? "", 26);
   const type = product.unit === "kg" ? "P" : "N";
   const price = fixedDigits(product.priceRetail, 6);
 
@@ -878,7 +880,9 @@ async function buildPluFrame(
   // nuevo, se usan los mismos valores por defecto que ya veníamos usando.
   const departamento = existing?.[1] ?? fixedDigits(1, 3);
   const familia = existing?.[2] ?? fixedDigits(1, 3);
-  const valorFijo = existing?.[7] ?? fixedDigits(0, 7);
+  // Campo 8 "Valor fijo (días de consumo preferente)": es el "VTO:" de la etiqueta. Siempre 0 = sin vencimiento
+  // (dueño 23/11, M2 Alimentos imprimía "VTO: 28/11/26" con lo que tenía cargado de antes).
+  const valorFijo = fixedDigits(0, 7);
   const precioAlternativo = existing?.[9] ?? fixedDigits(0, 6);
   // A diferencia de los demás campos secundarios, este NO se preserva del
   // registro viejo: un PLU cargado antes por iTegra puede traer otra
@@ -1323,6 +1327,10 @@ export interface ReportProductFields {
   label?: string;
   /** Flag decimal (campo 10): "000002" = precio en pesos enteros; otro valor corre el precio. */
   decimals?: string;
+  /** Días de consumo preferente (campo 8, "valor fijo"): el "VTO:" de la etiqueta. Tiene que ser 0. */
+  expiryDays?: number;
+  /** Descripción (campo 5): se imprime abajo del nombre. Tiene que ir vacía. */
+  description?: string;
 }
 
 /** En qué difiere lo que quedó en la balanza de lo que tenía que quedar, en palabras simples ([] = igual). */
@@ -1335,6 +1343,8 @@ export function reportDifferences(actual: ReportProductFields, expected: ReportP
   if (actual.code !== undefined && expected.code !== undefined && actual.code !== expected.code) out.push(`el código de la etiqueta quedó ${actual.code} (tenía que ser ${expected.code})`);
   if (actual.label !== undefined && expected.label !== undefined && actual.label !== expected.label) out.push(`la etiqueta quedó en el formato ${actual.label} (tenía que ser ${expected.label}, la que imprime el código de barras)`);
   if (actual.decimals !== undefined && expected.decimals !== undefined && actual.decimals !== expected.decimals) out.push("la balanza interpreta el precio con otros decimales");
+  if (actual.expiryDays !== undefined && expected.expiryDays !== undefined && actual.expiryDays !== expected.expiryDays) out.push(`la etiqueta sigue con vencimiento (${actual.expiryDays} días)`);
+  if (actual.description !== undefined && expected.description !== undefined && actual.description !== expected.description) out.push("la etiqueta sigue con el nombre repetido abajo");
   return out;
 }
 
@@ -1393,14 +1403,16 @@ export async function readReportProduct(code: string): Promise<ReportProductFiel
     taxes: (Number(fields[11]) || 0) + (Number(fields[12]) || 0),
     code: Number(fields[5]),
     label: fields[15],
-    decimals: fields[10]
+    decimals: fields[10],
+    expiryDays: Number(fields[7]) || 0,
+    description: (fields[4] ?? "").trim()
   };
 }
 
 /** Report: cómo tiene que quedar grabado un producto de Patagonia (mismo armado que buildPluFrame). */
 export function expectedReportProduct(product: ScaleSyncableProduct): ReportProductFields {
   // El precio es el de Stock tal cual (reportSkipReason ya descartó centavos o precios que no entran).
-  return { name: fixedAscii(product.name, 26).trimEnd(), byWeight: product.unit === "kg", price: product.priceRetail, taxes: 0, code: Number(product.code), label: reportLabelCode, decimals: fixedDigits(2, 6) };
+  return { name: fixedAscii(product.name, 26).trimEnd(), byWeight: product.unit === "kg", price: product.priceRetail, taxes: 0, code: Number(product.code), label: reportLabelCode, decimals: fixedDigits(2, 6), expiryDays: 0, description: "" };
 }
 
 /** Aura: ¿entrega lo vendido por producto? SOLO LECTURA (5008/5001, nunca borra). Ver kretz/aura-totals-probe.ts. */
