@@ -103,7 +103,7 @@ export function kretzWeightLabel(raw: string, config: ScaleConfig, active: Produ
   if (isKretzPlu5Weight(config)) return null;
   const parsed = kretzPlu5Label(raw);
   if (!parsed || (parsed.kind === "weight" && parsed.weightKg > MAX_COUNTER_SCALE_KG)) return null;
-  const product = findByPlu(active, parsed.plu);
+  const product = findByPlu(active, parsed.plu, "kg");
   return product && product.unit === "kg" ? { label: parsed, product } : null;
 }
 
@@ -121,7 +121,7 @@ export function kretz237WeightLabel(raw: string, config: ScaleConfig, active: Pr
   const plu = String(parseInt(raw.slice(2, 5), 10));
   const weightKg = parseInt(raw.slice(5, 12), 10) / 1000;
   if (!(weightKg > 0) || weightKg > MAX_COUNTER_SCALE_KG) return null;
-  const product = findByPlu(active, plu);
+  const product = findByPlu(active, plu, "kg");
   return product && product.unit === "kg" ? { label: { plu, kind: "weight", weightKg }, product } : null;
 }
 
@@ -129,12 +129,29 @@ export function kretz237WeightLabel(raw: string, config: ScaleConfig, active: Pr
  * El producto de un N.º de balanza: el código igual; si no hay, el único código de solo números con el mismo valor
  * ("0037" = 37: Patagonia graba en la balanza Number(código), así que los ceros de adelante se pierden en la etiqueta).
  */
-export function findByPlu(products: Product[], plu: string): Product | undefined {
-  const exact = products.find((p) => p.code === plu);
-  if (exact) return exact;
+export function findByPlu(products: Product[], plu: string, unit?: "kg"): Product | undefined {
+  const candidates = pluCandidates(products, plu);
+  if (candidates.length === 1) return candidates[0];
+  // Dos productos con el mismo número (REAL El corte argentino 24/11/2026: "1" Pepas por unidad y "01" AGUJA por kg).
+  // Una etiqueta con PESO solo puede ser del que se vende por kilo: si hay uno solo así, es ese.
+  if (unit === "kg") {
+    const kg = candidates.filter((p) => p.unit === "kg");
+    if (kg.length === 1) return kg[0];
+  }
+  return candidates.find((p) => p.code === plu);
+}
+
+/** Todos los productos que la balanza puede estar nombrando con ese N.º ("1" y "01" son el mismo para la balanza). */
+export function pluCandidates(products: Product[], plu: string): Product[] {
   const n = Number(plu);
-  const same = products.filter((p) => /^\d+$/.test(p.code) && Number(p.code) === n);
-  return same.length === 1 ? same[0] : undefined;
+  return products.filter((p) => p.code === plu || (/^\d+$/.test(p.code) && Number(p.code) === n));
+}
+
+/** Texto para el cajero cuando dos o más productos de Patagonia tienen el mismo N.º de balanza, o null. */
+export function duplicatePluNote(products: Product[], plu: string): string | null {
+  const c = pluCandidates(products, plu);
+  if (c.length < 2) return null;
+  return `En Patagonia hay ${c.length} productos con el número ${plu}: ${c.map((p) => `${p.name} (código "${p.code}", ${p.unit === "kg" ? "por kg" : "por unidad"})`).join(" y ")}. Para la balanza "1" y "01" son el mismo número: cambiale el código a uno de ellos en Stock (Editar).`;
 }
 
 /**
@@ -188,7 +205,7 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
       : null;
   // Importe en PESOS ENTEROS del formato de la sucursal (divisor 1): el papel trae los centavos y el código no.
   let pesosAmount = byConfig && config.payloadType === "amount" && config.weightDivisor === 1;
-  let labelProduct = weight237 ? weight237.product : label ? findByPlu(active, label.plu) : undefined;
+  let labelProduct = weight237 ? weight237.product : label ? findByPlu(active, label.plu, label.kind === "weight" ? "kg" : undefined) : undefined;
   if (!labelProduct) {
     const alt = kretzWeightLabel(raw, config, active);
     if (alt) {
@@ -228,6 +245,8 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
   // 3. Etiqueta de balanza.
   if (label) {
     if (!labelProduct) {
+      const dup = duplicatePluNote(active, label.plu);
+      if (dup) return { type: "error", message: `La etiqueta es del producto N.º ${label.plu} de la balanza. ${dup} No se agregó nada: mientras tanto, buscalo por nombre y cargá lo que dice el papel.` };
       const inactive = findByPlu(products, label.plu);
       return {
         type: "error",
@@ -260,7 +279,9 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
       if (units < 1 || Math.abs(quantity - units) > 0.005) {
         return {
           type: "error",
-          message: `${p.name} se vende por unidad, pero la etiqueta trae ${quantity.toLocaleString("es-AR", { maximumFractionDigits: 3 })}: no se pudo saber cuántas unidades son. No se agregó nada; cargalo a mano y avisá a soporte con una foto de la etiqueta.`
+          message: label.kind === "weight"
+            ? `La etiqueta trae ${quantity.toLocaleString("es-AR", { maximumFractionDigits: 3 })} kg del producto N.º ${label.plu}, pero en Patagonia el N.º ${label.plu} es ${p.name}, que se vende por unidad. ${duplicatePluNote(active, label.plu) ?? `Revisá en Stock que el código de ${p.name} sea el mismo número que tiene ese producto en la balanza, o que ${p.name} esté "por kg".`} No se agregó nada: mientras tanto, buscalo por nombre y cargá los kilos del papel.`
+            : `${p.name} se vende por unidad, pero la etiqueta trae ${quantity.toLocaleString("es-AR", { maximumFractionDigits: 3 })}: no se pudo saber cuántas unidades son. No se agregó nada; cargalo a mano y avisá a soporte con una foto de la etiqueta.`
         };
       }
       quantity = units;

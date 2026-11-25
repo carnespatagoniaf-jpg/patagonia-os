@@ -38,6 +38,7 @@ import { SaleConfigPanel } from "./SaleConfigPanel";
 import { SaleTicketPanel } from "./SaleTicketPanel";
 import { useSaleTicket } from "./useSaleTicket";
 import { applySoldToStock } from "./sale-stock";
+import { gramsToKg, suspiciousKgLines, suspiciousKgQuestion } from "./kilos-check";
 import { getMostradorPin } from "./company-settings-service";
 import { PriceListToggle } from "../pricing/PriceListToggle";
 import { getBranchZone, listPriceLists } from "../pricing/price-lists-service";
@@ -618,6 +619,17 @@ export function Sale() {
     if (cart.some((l) => l.scalePending)) {
       setMessage("Falta escanear el código del TOTAL del ticket de la balanza: confirma el importe de cada artículo.");
       return;
+    }
+
+    // Kilos absurdos (gramos escritos como kilos): se pregunta antes de cobrar. REAL El corte argentino 24/11/2026.
+    const bigKg = suspiciousKgLines(cart);
+    if (bigKg.length > 0 && !confirmCharge) {
+      if (window.confirm(suspiciousKgQuestion(bigKg))) {
+        ticket.setCart((c) => gramsToKg(c, bigKg.map((l) => l.key)));
+        setMessage(`Listo, pasé a kilos: ${bigKg.map((l) => `${l.name} ${l.asGrams.toLocaleString("es-AR", { maximumFractionDigits: 3 })} kg`).join(", ")}. Revisá el total y cobrá.`);
+        return;
+      }
+      if (!window.confirm(`¿Seguro que vendés ${bigKg.map((l) => `${l.quantity.toLocaleString("es-AR")} kg de ${l.name}`).join(" y ")}? Total ${formatMoney(total)}.`)) return;
     }
 
     // Factura pedida: se valida antes de cobrar (CUIT para la A, etc.), así nunca

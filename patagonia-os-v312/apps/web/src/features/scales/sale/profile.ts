@@ -43,6 +43,12 @@ export interface ScaleLink {
   productId: string | null;
 }
 
+/**
+ * Producto que la balanza imprimió y que no estaba cuando Patagonia la leyó (REAL Mercado de la Cruz 24/11/2026: el
+ * 112 MILA DE PECETO se cargó en la Systel después de leerla). No se adivina la cantidad: se dice qué hacer.
+ */
+export const UNKNOWN_SCALE_PRODUCT_NOTE = "ese producto no estaba en la balanza cuando Patagonia la leyó (¿se cargó después?). Para que entre solo: Stock → Mi balanza, con el cable puesto volvé a leer la balanza y vinculalo con su producto de Patagonia. Mientras tanto, buscalo por nombre (o \"Vender algo sin código\") y cargá lo que dice el papel";
+
 export const isWeighed = (t: ScaleSaleType) => t === "P" || t === "C" || t === "E";
 
 /**
@@ -163,7 +169,7 @@ export function decodeScaleCode(raw: string, profile: ScaleSaleProfile): Decoded
   // Venta libre con importe en el código: la cantidad no importa (no descuenta stock).
   if (c === null && amount !== null && generic) return { kind: "item", code: productCode, barcode: code, item, generic, quantity: 1, amount };
   if (c === null) return { kind: "item", code: productCode, barcode: code, item, generic, quantity: null, quantityNote: "el código no trae la cantidad" };
-  if (!item) return { kind: "item", code: productCode, barcode: code, item, generic, quantity: null, quantityNote: "producto que no está en el catálogo leído de la balanza" };
+  if (!item) return { kind: "item", code: productCode, barcode: code, item, generic, quantity: null, quantityNote: UNKNOWN_SCALE_PRODUCT_NOTE };
   if (isWeighed(item.saleType)) return { kind: "item", code: productCode, barcode: code, item, generic, quantity: c > 0 ? c / 1000 : null };
   const units = unitsFromField(c);
   return { kind: "item", code: productCode, barcode: code, item, generic, quantity: units, quantityNote: units === null ? `no se puede saber cuántas unidades son (${c})` : undefined };

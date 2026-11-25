@@ -416,3 +416,40 @@ describe("[REAL] El Abastero 24/11: etiqueta por kilo con el importe en pesos en
     assert.ok(r.type === "ticket_total" && r.amount === 26857);
   });
 });
+
+describe("[REAL] El corte argentino 24/11/2026: dos productos con el mismo número (\"1\" Pepas y \"01\" AGUJA)", () => {
+  const products = [product("1", "Pepas", "unit", 4100), product("01", "AGUJA", "kg", 12000), product("2", "Polvorones", "unit", 4100), product("02", "ASADO", "kg", 19000), product("09", "CARNE PICADA", "kg", 11000)];
+  const label = (plu: string, grams: string) => withCheck(`2${plu}${grams}0`);
+
+  it("una etiqueta con peso del N.º 1 es AGUJA (el único por kg), no Pepas", () => {
+    const r = resolveScan(label("00001", "03333"), products, DEFAULT_SCALE_CONFIG);
+    assert.equal(r.type, "label");
+    if (r.type === "label") {
+      assert.equal(r.product.name, "AGUJA");
+      assert.equal(r.quantity, 3.333);
+    }
+  });
+
+  it("sin repetidos, sigue igual (CARNE PICADA 09)", () => {
+    const r = resolveScan(label("00009", "03333"), products, DEFAULT_SCALE_CONFIG);
+    assert.equal(r.type, "label");
+    if (r.type === "label") assert.equal(r.product.name, "CARNE PICADA");
+  });
+
+  it("dos repetidos por kg: no adivina y dice cuáles son y qué hacer", () => {
+    // Ninguno es exactamente "1" (si uno lo es, gana ese, como siempre).
+    const both = [product("01", "AGUJA", "kg", 12000), product("001", "OFERTA AGUJA", "kg", 11000)];
+    const r = resolveScan(label("00001", "01000"), both, DEFAULT_SCALE_CONFIG);
+    assert.equal(r.type, "error");
+    if (r.type === "error") assert.match(r.message, /2 productos con el número 1: AGUJA .* y OFERTA AGUJA .*cambiale el código/);
+  });
+
+  it("peso de un producto por unidad sin repetido: dice que revise el código o la unidad, no 'avisá a soporte'", () => {
+    const r = resolveScan(label("00002", "01500"), [product("2", "Polvorones", "unit", 4100)], DEFAULT_SCALE_CONFIG);
+    assert.equal(r.type, "error");
+    if (r.type === "error") {
+      assert.match(r.message, /el N\.º 2 es Polvorones, que se vende por unidad/);
+      assert.doesNotMatch(r.message, /soporte/);
+    }
+  });
+});
