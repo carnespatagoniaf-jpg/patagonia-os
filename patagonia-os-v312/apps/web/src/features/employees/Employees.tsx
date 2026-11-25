@@ -8,7 +8,8 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { listPayrollLiquidationDetail, type PayrollLiquidationLineItem } from "./employees-service";
 import { listPosCashiers } from "../sale/pos-shift-service";
 import { setEmployeePosPin } from "../sale/cash-control-service";
-import { earlierPending, shortDate } from "./payroll-period";
+import { daysBetweenInclusive, earlierPending, periodBaseSalary, shortDate } from "./payroll-period";
+import { parseQuantity } from "../sale/quantity";
 import { EmployeeBranches } from "./EmployeeBranches";
 import { useAuth } from "../auth/AuthProvider";
 import { planAllows } from "../auth/permissions";
@@ -22,7 +23,8 @@ const SALARY_PERIOD_LABELS: Record<SalaryPeriod, string> = {
   daily: "por día",
   weekly: "por semana",
   biweekly: "por quincena",
-  monthly: "por mes"
+  monthly: "por mes",
+  hourly: "la hora"
 };
 
 const OUTFLOW_TYPE_LABELS: Record<string, string> = {
@@ -30,22 +32,22 @@ const OUTFLOW_TYPE_LABELS: Record<string, string> = {
   vale_adelanto: "Vale · Adelanto"
 };
 
-const SALARY_PERIOD_DIVISOR: Record<SalaryPeriod, number> = {
-  daily: 1,
-  weekly: 7,
-  biweekly: 14,
-  monthly: 30
-};
+/** Opciones de "Se paga", en el mismo orden en el alta y en Editar. */
+const SALARY_PERIOD_OPTIONS: Array<[SalaryPeriod, string]> = [
+  ["monthly", "Por mes"],
+  ["biweekly", "Por quincena"],
+  ["weekly", "Por semana"],
+  ["daily", "Por día"],
+  ["hourly", "Por hora"]
+];
 
 interface PaymentRow {
   accountId: string;
   amount: string;
 }
 
-function daysBetweenInclusive(start: string, end: string) {
-  const a = new Date(`${start}T00:00:00`);
-  const b = new Date(`${end}T00:00:00`);
-  return Math.round((b.getTime() - a.getTime()) / 86400000) + 1;
+function hoursText(hours: number) {
+  return `${hours.toLocaleString("es-AR", { maximumFractionDigits: 2 })} ${hours === 1 ? "hora" : "horas"}`;
 }
 
 export function Employees() {
@@ -99,6 +101,8 @@ export function Employees() {
 
   const [periodStart, setPeriodStart] = useState(addDaysIso(todayIso(), -6));
   const [periodEnd, setPeriodEnd] = useState(todayIso());
+  // Por hora (migración 212): las horas del período se cargan acá, al liquidar.
+  const [hoursInput, setHoursInput] = useState("");
 
   // PIN de caja (migración 117): quién atiende Mostrador. Solo se sabe quién
   // tiene PIN, nunca el PIN.
@@ -194,12 +198,14 @@ export function Employees() {
     [periodPendingVouchers]
   );
 
+  const isHourly = selectedEmployee?.salaryPeriod === "hourly";
+  const hoursWorked = parseQuantity(hoursInput);
+  const hasHours = Number.isFinite(hoursWorked) && hoursWorked > 0;
+
   const previewBaseSalary = useMemo(() => {
     if (!selectedEmployee) return 0;
-    const days = daysBetweenInclusive(periodStart, periodEnd);
-    const divisor = SALARY_PERIOD_DIVISOR[selectedEmployee.salaryPeriod];
-    return Math.round(((selectedEmployee.baseSalary + selectedEmployee.recurringBonusAmount) * days) / divisor);
-  }, [selectedEmployee, periodStart, periodEnd]);
+    return periodBaseSalary(selectedEmployee, daysBetweenInclusive(periodStart, periodEnd), hoursWorked);
+  }, [selectedEmployee, periodStart, periodEnd, hoursWorked]);
 
   const previewNet = previewBaseSalary + periodAdjustmentsTotal - periodVouchersTotal;
 
@@ -210,7 +216,14 @@ export function Employees() {
   useEffect(() => {
     setPaymentRows([{ accountId: "", amount: previewNet > 0 ? String(previewNet) : "" }]);
     setReceipt(null);
+    setHoursInput("");
   }, [selectedId, periodStart, periodEnd]);
+
+  // El monto del pago sigue al neto mientras se escriben las horas (una sola cuenta; dividido lo maneja la persona).
+  useEffect(() => {
+    if (!isHourly) return;
+    setPaymentRows((rows) => (rows.length === 1 ? [{ ...rows[0], amount: previewNet > 0 ? String(previewNet) : "" }] : rows));
+  }, [isHourly, previewNet]);
 
   function addPaymentRow() {
     setPaymentRows((current) => [...current, { accountId: "", amount: "" }]);
@@ -308,6 +321,11 @@ export function Employees() {
     try {
       if (!selectedEmployee) return;
 
+      if (isHourly) {
+        if (!hasHours) throw new Error("Cargá las horas que trabajó en el período.");
+        if (hoursWorked > daysBetweenInclusive(periodStart, periodEnd) * 24) throw new Error("Son más horas que las que tiene el período.");
+      }
+
       const rowsWithAccount = paymentRows.filter((p) => p.accountId);
       if (rowsWithAccount.length > 0) {
         if (rowsWithAccount.length !== paymentRows.length) {
@@ -327,7 +345,8 @@ export function Employees() {
         employeeId: selectedEmployee.id,
         periodStart,
         periodEnd,
-        payments
+        payments,
+        hours: isHourly ? hoursWorked : undefined
       });
       setPaymentRows([{ accountId: "", amount: "" }]);
       setMessage(`Liquidación registrada: neto ${formatMoney(result.netAmount)}.`);
@@ -434,16 +453,13 @@ export function Employees() {
             <div className="form-box" style={{ marginBottom: 12 }}>
               <div className="form-grid">
                 <label>Nombre<input value={newName} onChange={(e) => setNewName(e.target.value)} /></label>
-                <label>Sueldo base<input type="text" inputMode="decimal" value={newSalary} onChange={(e) => setNewSalary(e.target.value)} /></label>
+                <label>{newSalaryPeriod === "hourly" ? "Valor de la hora" : "Sueldo base"}<input type="text" inputMode="decimal" value={newSalary} onChange={(e) => setNewSalary(e.target.value)} /></label>
                 <label>Se paga
                   <select value={newSalaryPeriod} onChange={(e) => setNewSalaryPeriod(e.target.value as SalaryPeriod)}>
-                    <option value="monthly">Por mes</option>
-                    <option value="biweekly">Por quincena</option>
-                    <option value="weekly">Por semana</option>
-                    <option value="daily">Por día</option>
+                    {SALARY_PERIOD_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                   </select>
                 </label>
-                <label>Premio fijo (opcional)<input type="text" inputMode="decimal" value={newBonusAmount} onChange={(e) => setNewBonusAmount(e.target.value)} /></label>
+                <label>{newSalaryPeriod === "hourly" ? "Premio fijo por hora (opcional)" : "Premio fijo (opcional)"}<input type="text" inputMode="decimal" value={newBonusAmount} onChange={(e) => setNewBonusAmount(e.target.value)} /></label>
                 <label>Motivo del premio fijo<input value={newBonusReason} onChange={(e) => setNewBonusReason(e.target.value)} /></label>
               </div>
               <div className="form-actions">
@@ -477,7 +493,7 @@ export function Employees() {
                   <h2>{selectedEmployee.fullName}</h2>
                   <p className="muted">
                     Sueldo {formatMoney(selectedEmployee.baseSalary)} {SALARY_PERIOD_LABELS[selectedEmployee.salaryPeriod]}
-                    {selectedEmployee.recurringBonusAmount > 0 && ` · Premio fijo ${formatMoney(selectedEmployee.recurringBonusAmount)} (${selectedEmployee.recurringBonusReason})`}
+                    {selectedEmployee.recurringBonusAmount > 0 && ` · Premio fijo ${formatMoney(selectedEmployee.recurringBonusAmount)}${isHourly ? " la hora" : ""} (${selectedEmployee.recurringBonusReason})`}
                     {!selectedEmployee.active && " · Inactivo"}
                     {isSupabaseConfigured && <span className="no-print"> · PIN de caja: {pinHolders.has(selectedEmployee.id) ? "sí" : "no"}</span>}
                   </p>
@@ -493,16 +509,13 @@ export function Employees() {
                 <div className="form-box no-print">
                   <div className="form-grid">
                     <label>Nombre<input value={editName} onChange={(e) => setEditName(e.target.value)} /></label>
-                    <label>Sueldo base<input type="text" inputMode="decimal" value={editSalary} onChange={(e) => setEditSalary(e.target.value)} /></label>
+                    <label>{editSalaryPeriod === "hourly" ? "Valor de la hora" : "Sueldo base"}<input type="text" inputMode="decimal" value={editSalary} onChange={(e) => setEditSalary(e.target.value)} /></label>
                     <label>Se paga
                       <select value={editSalaryPeriod} onChange={(e) => setEditSalaryPeriod(e.target.value as SalaryPeriod)}>
-                        <option value="monthly">Por mes</option>
-                        <option value="biweekly">Por quincena</option>
-                        <option value="weekly">Por semana</option>
-                        <option value="daily">Por día</option>
+                        {SALARY_PERIOD_OPTIONS.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
                       </select>
                     </label>
-                    <label>Premio fijo (opcional)<input type="text" inputMode="decimal" value={editBonusAmount} onChange={(e) => setEditBonusAmount(e.target.value)} /></label>
+                    <label>{editSalaryPeriod === "hourly" ? "Premio fijo por hora (opcional)" : "Premio fijo (opcional)"}<input type="text" inputMode="decimal" value={editBonusAmount} onChange={(e) => setEditBonusAmount(e.target.value)} /></label>
                     <label>Motivo del premio fijo<input value={editBonusReason} onChange={(e) => setEditBonusReason(e.target.value)} /></label>
                     <label>Estado
                       <select value={editActive ? "1" : "0"} onChange={(e) => setEditActive(e.target.value === "1")}>
@@ -554,7 +567,7 @@ export function Employees() {
                     <button className="secondary no-print" onClick={() => setReceipt(null)}>Liquidar otro período</button>
                   </div>
                   <div className="emp-summary">
-                    <div><span>Sueldo del período</span><strong>{formatMoney(receipt.liquidation.baseSalary)}</strong></div>
+                    <div><span>{receipt.liquidation.hoursWorked != null ? `Sueldo (${hoursText(receipt.liquidation.hoursWorked)})` : "Sueldo del período"}</span><strong>{formatMoney(receipt.liquidation.baseSalary)}</strong></div>
                     <div><span>Premios − descuentos</span><strong>{formatMoney(receipt.liquidation.adjustmentsTotal)}</strong></div>
                     <div><span>Vales</span><strong>{formatMoney(receipt.liquidation.vouchersTotal)}</strong></div>
                     <div className="total"><span>Neto pagado</span><strong>{formatMoney(receipt.liquidation.netAmount)}</strong></div>
@@ -598,9 +611,23 @@ export function Employees() {
                     </div>
                     {detailLoading && <span className="muted">Cargando…</span>}
                   </div>
+                  {isHourly && (
+                    <div className="emp-period">
+                      <b>Horas trabajadas</b>
+                      <input
+                        type="text"
+                        inputMode="decimal"
+                        placeholder="Ej: 37,5"
+                        value={hoursInput}
+                        onChange={(e) => setHoursInput(e.target.value)}
+                        style={{ width: 110 }}
+                      />
+                      <span className="muted">a {formatMoney(selectedEmployee.baseSalary + selectedEmployee.recurringBonusAmount)} la hora</span>
+                    </div>
+                  )}
 
                   <div className="emp-summary">
-                    <div><span>Sueldo ({periodDays} {periodDays === 1 ? "día" : "días"})</span><strong>{formatMoney(previewBaseSalary)}</strong></div>
+                    <div><span>{isHourly ? `Sueldo (${hasHours ? hoursText(hoursWorked) : "faltan las horas"})` : `Sueldo (${periodDays} ${periodDays === 1 ? "día" : "días"})`}</span><strong>{formatMoney(previewBaseSalary)}</strong></div>
                     <div>
                       <span>Premios − descuentos</span>
                       <strong className={periodAdjustmentsTotal > 0 ? "num-positive" : periodAdjustmentsTotal < 0 ? "num-negative" : ""}>
@@ -761,7 +788,7 @@ export function Employees() {
                       {visibleLiquidations.map((l) => (
                         <tr key={l.id}>
                           <td>{shortDate(l.periodStart)} al {shortDate(l.periodEnd)}/{l.periodEnd.slice(2, 4)}</td>
-                          <td className="num hide-sm">{formatMoney(l.baseSalary)}</td>
+                          <td className="num hide-sm">{formatMoney(l.baseSalary)}{l.hoursWorked != null && <span className="cell-sub">{hoursText(l.hoursWorked)}</span>}</td>
                           <td className="num hide-sm">{formatMoney(l.adjustmentsTotal)}</td>
                           <td className="num hide-sm">{formatMoney(l.vouchersTotal)}</td>
                           <td className={l.netAmount < 0 ? "num num-negative" : "num"}>{formatMoney(l.netAmount)}</td>

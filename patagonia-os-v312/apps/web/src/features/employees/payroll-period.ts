@@ -1,3 +1,5 @@
+import type { SalaryPeriod } from "@patagonia/domain";
+
 /**
  * Vales y premios/descuentos pendientes que quedaron ANTES del período elegido
  * en Liquidación (ej. se liquida la semana y quedaron vales de la anterior sin
@@ -40,4 +42,28 @@ export function earlierPending(items: PendingItem[], periodStart: string, liquid
 export function shortDate(iso: string) {
   const [, m, d] = iso.split("-");
   return d && m ? `${d}/${m}` : iso;
+}
+
+/** Días entre dos fechas ISO, contando las dos puntas. */
+export function daysBetweenInclusive(start: string, end: string) {
+  const a = new Date(`${start}T00:00:00`);
+  const b = new Date(`${end}T00:00:00`);
+  return Math.round((b.getTime() - a.getTime()) / 86400000) + 1;
+}
+
+const SALARY_PERIOD_DIVISOR: Record<Exclude<SalaryPeriod, "hourly">, number> = { daily: 1, weekly: 7, biweekly: 14, monthly: 30 };
+
+/**
+ * Sueldo del período, igual que close_payroll_liquidation: (sueldo + premio fijo) × días ÷ divisor, o por hora
+ * (migración 212) (valor de la hora + premio fijo) × horas trabajadas. El servidor redondea a centavos; acá a pesos
+ * enteros como siempre mostró la pantalla.
+ */
+export function periodBaseSalary(
+  employee: { baseSalary: number; recurringBonusAmount: number; salaryPeriod: SalaryPeriod },
+  days: number,
+  hours: number
+) {
+  const rate = employee.baseSalary + employee.recurringBonusAmount;
+  if (employee.salaryPeriod === "hourly") return Math.round(rate * (Number.isFinite(hours) && hours > 0 ? hours : 0));
+  return Math.round((rate * days) / SALARY_PERIOD_DIVISOR[employee.salaryPeriod]);
 }

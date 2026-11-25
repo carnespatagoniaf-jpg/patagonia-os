@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { earlierPending, shortDate, type PendingItem } from "./payroll-period";
+import { daysBetweenInclusive, earlierPending, periodBaseSalary, shortDate, type PendingItem } from "./payroll-period";
 
 const vale = (date: string, amount: number): PendingItem => ({ date, kind: "voucher", amount: -amount });
 
@@ -31,4 +31,18 @@ test("nada pendiente antes del período", () => {
 test("shortDate", () => {
   assert.equal(shortDate("2026-10-31"), "31/10");
   assert.equal(shortDate("-"), "-");
+});
+
+test("sueldo del período: por día, por mes y por hora", () => {
+  assert.equal(periodBaseSalary({ baseSalary: 48000, recurringBonusAmount: 0, salaryPeriod: "daily" }, 7, 0), 336000);
+  assert.equal(periodBaseSalary({ baseSalary: 900000, recurringBonusAmount: 0, salaryPeriod: "monthly" }, 15, 0), 450000);
+  // Por hora: (valor de la hora + premio fijo) × horas; los días del período no cuentan.
+  assert.equal(periodBaseSalary({ baseSalary: 5000, recurringBonusAmount: 500, salaryPeriod: "hourly" }, 7, 37.5), 206250);
+  assert.equal(periodBaseSalary({ baseSalary: 5000, recurringBonusAmount: 0, salaryPeriod: "hourly" }, 30, 0), 0);
+  assert.equal(periodBaseSalary({ baseSalary: 5000, recurringBonusAmount: 0, salaryPeriod: "hourly" }, 7, Number.NaN), 0);
+});
+
+test("días entre fechas, contando las dos puntas", () => {
+  assert.equal(daysBetweenInclusive("2026-11-16", "2026-11-22"), 7);
+  assert.equal(daysBetweenInclusive("2026-11-22", "2026-11-22"), 1);
 });
