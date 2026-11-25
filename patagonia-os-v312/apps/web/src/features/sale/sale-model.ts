@@ -41,6 +41,17 @@ export interface TicketLine {
 }
 
 /**
+ * Redondea al peso igual que el servidor (create_pos_sale: round() de numeric, el ,50 sube).
+ * Antes se usaba Math.round sobre la cuenta en coma flotante: 1,035 kg × $14.300 daba 14.800,4999… → $14.800,
+ * pero el servidor calcula 14.800,50 exacto → $14.801, y rechazaba el cobro con "Los medios de pago no suman
+ * el total de la venta". Se limpia el error de coma flotante (a 6 decimales) antes de redondear.
+ */
+export function roundToPeso(n: number): number {
+  const clean = Math.round(n * 1e6) / 1e6;
+  return Math.sign(clean) * Math.round(Math.abs(clean));
+}
+
+/**
  * Importe de una línea antes de descuentos: el de la balanza si vino de un ticket leído de ella.
  * Con lista de precios, el importe de la balanza se cobra en proporción (igual que pos_list_scale_amount).
  */

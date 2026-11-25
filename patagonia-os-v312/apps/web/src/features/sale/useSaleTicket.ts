@@ -20,7 +20,7 @@ import { chargedScaleTickets } from "./sale-service";
 import { useScalePapers } from "./useScalePapers";
 import { submitScaleSupportReport } from "../scales/support-service";
 import type { PosShift } from "./pos-shift-service";
-import { keepCurrentLists, lineGross, lineListFor, withPriceList, type PaymentRow, type TicketLine } from "./sale-model";
+import { keepCurrentLists, lineGross, lineListFor, roundToPeso, withPriceList, type PaymentRow, type TicketLine } from "./sale-model";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { findScaleTicketSale, findScaleTicketVoid, undoScaleTicketVoid } from "./scale-control-service";
 import { chargedTicketQuestion, detailedTotalKey, SAME_SALE_LABEL_QUESTION, type ChargedHit } from "./scale-repeat";
@@ -188,7 +188,8 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
   // Redondeado a pesos enteros -- el resto de la app no maneja centavos, y
   // si no se redondea acá el total que se ve en pantalla no coincide con el
   // que exige el servidor al dividir el pago a mano.
-  const total = Math.round(Math.max(grossTotal - itemDiscountTotal - saleDiscountValue + saleSurchargeValue, 0));
+  // Mismo redondeo que el servidor (roundToPeso): con Math.round, 1,035 kg × $14.300 quedaba $1 abajo.
+  const total = roundToPeso(Math.max(grossTotal - itemDiscountTotal - saleDiscountValue + saleSurchargeValue, 0));
   const hasAdjustment = itemDiscountTotal > 0 || saleDiscountValue > 0 || saleSurchargeValue > 0;
 
   const isSplit = payments.length > 1;
