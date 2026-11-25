@@ -14,14 +14,14 @@ function reply(address: number, fn: number, data: string): Uint8Array {
 class PausingPort {
   readable: ReadableStream<Uint8Array> | null = null;
   writable: WritableStream<Uint8Array> | null = null;
-  constructor(private answer: Uint8Array, private pauseMs: number) {}
+  constructor(private answer: Uint8Array, private pauseMs: number, private cutAt?: number) {}
   async open() {
     let controller!: ReadableStreamDefaultController<Uint8Array>;
     this.readable = new ReadableStream<Uint8Array>({ start: (c) => { controller = c; } });
-    const { answer, pauseMs } = this;
+    const { answer, pauseMs, cutAt } = this;
     this.writable = new WritableStream<Uint8Array>({
       write() {
-        const cut = Math.floor(answer.length / 2);
+        const cut = cutAt ?? Math.floor(answer.length / 2);
         setTimeout(() => controller.enqueue(answer.slice(0, cut)), 2);
         setTimeout(() => controller.enqueue(answer.slice(cut)), 2 + pauseMs);
       }
@@ -44,6 +44,31 @@ describe("respuesta larga con una pausa en el medio", () => {
     await link.close();
     assert.ok(list, "la lista se tiene que leer entera");
     assert.equal(list!.entries.length, 900);
+  });
+  it("no corta la lista si la pausa de antes de la F cae donde el XOR da bien por casualidad (real GRANJAVIER 25/11)", async () => {
+    // Los 104 productos que tenía la Cuora Max (firma 0060) de GRANJAVIER: el "1" final de N2525V1 es el XOR de todo
+    // lo anterior, y la balanza hace la pausa justo antes de la "F".
+    const numbers = [
+      1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007, 1008, 1009, 1010, 1011, 1020, 1021, 1022, 1023, 1025, 1026, 1027, 1028, 1029, 1030, 1031,
+      1032, 1033, 1035, 1036, 1037, 1038, 1039, 1040, 1041, 2000, 2001, 2003, 2010, 2011, 2015, 2016, 2017, 2020, 2021, 2022, 2023, 2030, 2031,
+      2035, 2036, 2040, 2041, 2045, 2046, 2047, 2050, 2100, 2101, 2105, 2106, 2110, 2111, 2115, 2120, 2121, 2200, 2201, 2202, 2203, 2205, 2206,
+      2300, 2301, 2302, 2304, 2305, 2306, 2307, 2310, 2311, 2315, 2316, 2317, 2318, 2320, 2321, 2322, 2340, 2341, 2342, 2343, 2344, 2350, 2351,
+      2400, 2401, 2500, 2510, 2511, 2512, 2520, 2521, 2522, 2523, 2524, 2525
+    ];
+    const entries = numbers.map((n) => `N${n}V1`).join("");
+    const answer = reply(20, 31, entries + "F");
+    const cut = 2 + entries.length;
+    // Lo que llega antes de la pausa parece una trama completa: el último byte es el XOR de los anteriores.
+    assert.equal(answer.slice(0, cut - 1).reduce((x, b) => x ^ b, 0), answer[cut - 1]);
+    const port = new PausingPort(answer, 300, cut);
+    const link = new SerialSystelLink(port as unknown as SerialPort);
+    await link.connect();
+    const client = new SystelClient(link, { address: 20 });
+    const list = await client.list();
+    await link.close();
+    assert.ok(list, "la lista se tiene que leer entera");
+    assert.equal(list!.entries.length, 104);
+    assert.equal(list!.entries.at(-1)!.number, 2525);
   });
 });
 
