@@ -10,6 +10,8 @@ export interface ScaleConfig {
   weightDivisor: number;
   totalLength: number;
   payloadType: ScalePayloadType;
+  /** Solo en el navegador (no se guarda): la sucursal tiene una Aura con inicio "22" además de su formato (AURA_PREFIX_22_BRANCHES). */
+  auraPrefix22?: boolean;
 }
 
 export type ScaleBarcodeResult =

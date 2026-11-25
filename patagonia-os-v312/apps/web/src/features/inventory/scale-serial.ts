@@ -602,10 +602,10 @@ export async function readAuraListOnScale(onProgress: (text: string) => void) {
 }
 
 /** Aura: manda el plan armado con planAuraSync (relee cada producto y frena ante cualquier diferencia). Ver kretz/aura-sync.ts. */
-export async function runAuraSyncOnScale(plan: AuraSyncItem[], onProgress: (text: string) => void, shouldStop: () => boolean, configureBarcode = false): Promise<AuraSyncResult> {
+export async function runAuraSyncOnScale(plan: AuraSyncItem[], onProgress: (text: string) => void, shouldStop: () => boolean, configureBarcode = false, barcodeConfig?: string): Promise<AuraSyncResult> {
   const port = await pickPort();
   cachedPortOpenKey = null;
-  const r = await runAuraSync(port, auraResponder(), plan, { onProgress, shouldStop, configureBarcode });
+  const r = await runAuraSync(port, auraResponder(), plan, { onProgress, shouldStop, configureBarcode, barcodeConfig });
   cachedPortOpenKey = null;
   return r;
 }

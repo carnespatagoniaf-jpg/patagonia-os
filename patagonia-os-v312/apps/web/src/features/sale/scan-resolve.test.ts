@@ -453,3 +453,44 @@ describe("[REAL] El corte argentino 24/11/2026: dos productos con el mismo núme
     }
   });
 });
+
+describe("El Abastero 25/11: Aura con inicio 22 en el mismo local que la Report (etiquetas 20 en pesos)", () => {
+  const ABASTERO = { prefixLength: 1, pluLength: 6, weightLength: 5, weightDivisor: 1, totalLength: 13, payloadType: "amount" as const, auraPrefix22: true };
+  const products = [product("5", "LOMO XKG", "kg", 18333), product("144", "MILANESA POLLO XKG", "kg", 11000), product("9", "BIFE ANGOSTO XKG", "kg", 18333)];
+
+  it("Pre-Empaque de la Aura: 22 + producto + centavos = producto, kilos e importe exacto", () => {
+    const r = resolveScan(withCheck("221440154000"), products, ABASTERO);
+    assert.equal(r.type, "label");
+    if (r.type === "label") {
+      assert.equal(r.product.code, "144");
+      assert.equal(r.quantity, 0.14);
+      assert.equal(r.amount, 1540);
+    }
+  });
+
+  it("TOTAL de la Aura con inicio 22 (código 998) es un total en centavos", () => {
+    const r = resolveScan(withCheck("229980256600"), products, ABASTERO);
+    assert.ok(r.type === "ticket_total" && r.amount === 2566);
+  });
+
+  it("el TOTAL con inicio 20 (antes de cambiar la Aura) se sigue leyendo: REAL 2099802566003 = $2.566", () => {
+    const r = resolveScan("2099802566003", products, ABASTERO);
+    assert.ok(r.type === "ticket_total" && r.amount === 2566);
+  });
+
+  it("la etiqueta de la Report (20, pesos) se sigue leyendo igual: BIFE ANGOSTO $27.866,16", () => {
+    const r = resolveScan("2000009278668", products, ABASTERO);
+    assert.ok(r.type === "label" && r.product.code === "9" && r.amount === 27866.16);
+  });
+
+  it("una etiqueta 22 de un producto que no existe: error, no se agrega", () => {
+    const r = resolveScan(withCheck("227770154000"), products, ABASTERO);
+    assert.equal(r.type, "error");
+  });
+
+  it("sin la marca, un 22 no se lee como Aura", () => {
+    const { auraPrefix22: _x, ...plain } = ABASTERO;
+    const r = resolveScan(withCheck("221440154000"), products, plain);
+    assert.notEqual(r.type, "label");
+  });
+});

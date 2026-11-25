@@ -1,5 +1,6 @@
 import { parseAuraPlu } from "../../../inventory/kretz/aura-plu";
-import { auraMaySetBranchConfig, planAuraSync, summarizeAuraPlan, type AuraSyncItem } from "../../../inventory/kretz/aura-sync";
+import { AURA_BARCODE_CONFIG_22, auraMaySetBranchConfig, planAuraSync, summarizeAuraPlan, type AuraSyncItem } from "../../../inventory/kretz/aura-sync";
+import { AURA_PREFIX_22_BRANCHES } from "../weight-barcode";
 import { getStoredModelId, saveModelId } from "../../../inventory/kretz/models";
 import { isNetPort } from "../../../inventory/kretz/net-port";
 import { KRETZ_PLU5_WEIGHT_CONFIG } from "../../../sale/scan-resolve";
@@ -220,7 +221,7 @@ export class KretzSession implements ScaleSession {
     if (!st || !prepared.canWrite || prepared.blocker) throw new Error("primero hay que leer la balanza");
     if (st.kind === "aura") {
       const plan = opts.allowReplace ? planAuraSync(st.records, st.products, { replaceConflicts: true }) : st.plan;
-      const r = await this.io.runAuraSync(plan, (t) => onProgress("sincronizar", "Mandando tus productos a la balanza…", ...progressNumbers(t)), () => false, true);
+      const r = await this.io.runAuraSync(plan, (t) => onProgress("sincronizar", "Mandando tus productos a la balanza…", ...progressNumbers(t)), () => false, true, this.ctx.branchId && AURA_PREFIX_22_BRANCHES.has(this.ctx.branchId) ? AURA_BARCODE_CONFIG_22 : undefined);
       if (r.verdict !== "ok") {
         const at = r.stoppedAt;
         const product = at ? st.products.find((p) => Number(p.code) === at.plu) : undefined;

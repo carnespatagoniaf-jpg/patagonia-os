@@ -353,6 +353,18 @@ describe("[SIMULADO] Mi balanza con una Kretz Aura (mismo plan y envío que el p
     assert.deepEqual(saved, []);
   });
 
+  it("El Abastero 25/11: la Aura de esa sucursal recibe el formato con inicio 22 (2202205); las demás el de siempre", async () => {
+    const { io } = auraIO();
+    const sent: (string | undefined)[] = [];
+    const run = io.runAuraSync;
+    const spy = (async (...args: Parameters<KretzIO["runAuraSync"]>) => { sent.push(args[4]); return run(...args); }) as KretzIO["runAuraSync"];
+    const abastero = new KretzSession("kretz-aura", { ...ctx(products), branchId: "b92aa128-3062-43ea-91f0-97f99469a173" }, "datos", { ...io, runAuraSync: spy });
+    await abastero.sync(await abastero.prepare(noop), noop);
+    const other = new KretzSession("kretz-aura", ctx(products), "datos", { ...io, runAuraSync: spy });
+    await other.sync(await other.prepare(noop), noop);
+    assert.deepEqual(sent, ["2202205", undefined]);
+  });
+
   it("si no se puede leer el formato de la sucursal, la Aura no lo toca y la sincronización sigue", async () => {
     const { io } = auraIO();
     const saved: string[] = [];

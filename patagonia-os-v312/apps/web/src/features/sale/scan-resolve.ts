@@ -168,6 +168,26 @@ export function pesosLabelWithCents(amount: number, kg: number, price: number): 
 
 const fmtQty =(q: number, unit: string) => (unit === "kg" ? `${q.toLocaleString("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg` : `${q} u.`);
 
+/** Formato de la Aura con inicio "22": producto (3) + importe en centavos (7); producto 998 = TOTAL del ticket. */
+export const AURA_22_CONFIG: ScaleConfig = { prefixLength: 2, pluLength: 3, weightLength: 7, weightDivisor: 100, totalLength: 13, payloadType: "amount" };
+
+function resolveAura22(raw: string, products: Product[]): ScanResolution {
+  // TOTAL del ticket (código suma 998). Va primero: con inicio "22" el lector de Systel lo tomaría como su TOTAL.
+  if (raw.slice(2, 5) === "998") {
+    const value = raw.slice(5, 12);
+    if (/^(0+|9+)$/.test(value)) {
+      return { type: "ticket_without_amount", message: "Este ticket de la Aura no trae el importe en el código de barras (pasa de $99.999,99). Cargá el TOTAL impreso con \"Vender algo sin código\"." };
+    }
+    return { type: "ticket_total", amount: parseInt(value, 10) / 100, key: `ticket-${raw}` };
+  }
+  const r = resolveScan(raw, products, AURA_22_CONFIG);
+  if (r.type === "systel_total" || r.type === "search") {
+    const plu = String(parseInt(raw.slice(2, 5), 10));
+    return { type: "error", message: `La etiqueta de la Aura es del producto N.º ${plu}, y en Patagonia no hay ningún producto con ese código. No se agregó nada.` };
+  }
+  return r;
+}
+
 export function resolveScan(rawInput: string, products: Product[], config: ScaleConfig): ScanResolution {
   const raw = rawInput.trim();
   if (!raw) return { type: "search" };
@@ -176,6 +196,9 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
   // 1. Código exacto de un producto.
   const exact = active.find((p) => p.code === raw);
   if (exact) return { type: "product", product: exact };
+
+  // Aura con inicio "22" en un local que tiene además otra balanza (AURA_PREFIX_22_BRANCHES, El Abastero 25/11/2026).
+  if (config.auraPrefix22 && /^22\d{11}$/.test(raw) && validEan13(raw)) return resolveAura22(raw, products);
 
   // 2. Ticket de total.
   // El formato guardado de la sucursal manda sobre los de fábrica (El Abastero: 1-6-5 en pesos, no 2-5-5 en centavos).
