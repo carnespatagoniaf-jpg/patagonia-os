@@ -258,7 +258,8 @@ export interface ShiftOutflow {
   createdAt: string;
 }
 
-export type SalaryPeriod = "daily" | "weekly" | "biweekly" | "monthly";
+/** "hourly": baseSalary es el valor de la hora y las horas se cargan al liquidar (migración 212). */
+export type SalaryPeriod = "daily" | "weekly" | "biweekly" | "monthly" | "hourly";
 
 export interface Employee {
   id: string;
@@ -301,6 +302,8 @@ export interface PayrollLiquidation {
   adjustmentsTotal: Money;
   vouchersTotal: Money;
   netAmount: Money;
+  /** Solo en las de empleados por hora. */
+  hoursWorked?: number;
   accountId?: string;
   accountName?: string;
   payments: PayrollLiquidationPayment[];

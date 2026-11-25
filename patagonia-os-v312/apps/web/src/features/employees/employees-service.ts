@@ -337,6 +337,7 @@ interface PayrollLiquidationRow {
   adjustments_total: number;
   vouchers_total: number;
   net_amount: number;
+  hours_worked: number | null;
   account_id: string | null;
   treasury_accounts: { name: string } | { name: string }[] | null;
   payroll_liquidation_payments: PayrollLiquidationPaymentRow[] | null;
@@ -355,6 +356,7 @@ function mapLiquidation(row: PayrollLiquidationRow): PayrollLiquidation {
     adjustmentsTotal: Number(row.adjustments_total),
     vouchersTotal: Number(row.vouchers_total),
     netAmount: Number(row.net_amount),
+    hoursWorked: row.hours_worked == null ? undefined : Number(row.hours_worked),
     accountId: row.account_id ?? undefined,
     accountName: account?.name,
     payments: (row.payroll_liquidation_payments ?? []).map(mapLiquidationPayment),
@@ -368,7 +370,7 @@ export async function listPayrollLiquidations(employeeId: string): Promise<Payro
   const { data, error } = await supabase
     .from("payroll_liquidations")
     .select(
-      "id,employee_id,branch_id,period_start,period_end,base_salary,adjustments_total,vouchers_total,net_amount,account_id,treasury_accounts(name),created_at,payroll_liquidation_payments(id,account_id,amount,treasury_accounts(name))"
+      "id,employee_id,branch_id,period_start,period_end,base_salary,adjustments_total,vouchers_total,net_amount,hours_worked,account_id,treasury_accounts(name),created_at,payroll_liquidation_payments(id,account_id,amount,treasury_accounts(name))"
     )
     .eq("employee_id", employeeId)
     .order("period_start", { ascending: false });
@@ -388,6 +390,8 @@ export interface ClosePayrollLiquidationInput {
   periodStart: string;
   periodEnd: string;
   payments: ClosePayrollLiquidationPaymentInput[];
+  /** Horas trabajadas: solo para empleados por hora. */
+  hours?: number;
 }
 
 export async function closePayrollLiquidation(input: ClosePayrollLiquidationInput): Promise<PayrollLiquidation> {
@@ -398,7 +402,8 @@ export async function closePayrollLiquidation(input: ClosePayrollLiquidationInpu
     p_employee_id: input.employeeId,
     p_period_start: input.periodStart,
     p_period_end: input.periodEnd,
-    p_payments: input.payments.map((p) => ({ account_id: p.accountId, amount: p.amount }))
+    p_payments: input.payments.map((p) => ({ account_id: p.accountId, amount: p.amount })),
+    p_hours: input.hours ?? null
   });
 
   if (error) throw toError(error);
@@ -412,6 +417,7 @@ export async function closePayrollLiquidation(input: ClosePayrollLiquidationInpu
     adjustmentsTotal: Number(data.adjustments_total),
     vouchersTotal: Number(data.vouchers_total),
     netAmount: Number(data.net_amount),
+    hoursWorked: data.hours_worked == null ? undefined : Number(data.hours_worked),
     payments: input.payments.map((p, i) => ({ id: `pending-${i}`, accountId: p.accountId, amount: p.amount })),
     createdAt: new Date().toISOString()
   };
