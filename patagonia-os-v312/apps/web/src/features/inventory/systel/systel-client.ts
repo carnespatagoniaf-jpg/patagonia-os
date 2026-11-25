@@ -196,8 +196,10 @@ export class SystelClient {
     const want = address === 0 ? null : address;
     // Respuestas largas que terminan en "F" (lista 31, reporte 72): un tramo cortado puede dar el XOR
     // bien por casualidad (1 en 256), así que además tiene que terminar en "F" (o ser un error/ACK corto).
+    // Real GRANJAVIER 25/11/2026: la Cuora hizo la pausa de antes de la "F" justo después de "N2525V1" y ese "1" era
+    // el XOR de todo lo anterior; la 31 no pedía la "F", se cortó ahí y la balanza quedó frenada como "otra".
     const endsWithF = (bytes: Uint8Array) => bytes.length >= 2 && (bytes[bytes.length - 2] === 0x46 || bytes.length <= 6);
-    const rx = await this.link.exchange(frame, { timeoutMs, isComplete: (b) => findSystelReplies(b, want, fn).length > 0 && (fn !== 72 || endsWithF(b)) });
+    const rx = await this.link.exchange(frame, { timeoutMs, isComplete: (b) => findSystelReplies(b, want, fn).length > 0 && ((fn !== 31 && fn !== 72) || endsWithF(b)) });
     const candidates = rx ? findSystelReplies(rx, want, fn) : [];
     const reply = candidates.length === 1 ? candidates[0].reply : null;
     const loose = rx ? parseSystelReply(rx) : null;
