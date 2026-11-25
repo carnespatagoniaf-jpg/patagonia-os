@@ -495,34 +495,19 @@ describe("El Abastero 25/11: Aura con inicio 22 en el mismo local que la Report 
   });
 });
 
-describe("REAL El Abastero 25/11: la Aura no aceptó el inicio 22 y sigue con 20; se lee después de la Report", () => {
+describe("REAL El Abastero 25/11: la Aura imprime con 22 y la Nalga vuelve al 1", () => {
   const ABASTERO = { prefixLength: 1, pluLength: 6, weightLength: 5, weightDivisor: 1, totalLength: 13, payloadType: "amount" as const, auraPrefix22: true };
-  const products = [product("6", "CUADRIL XKG", "kg", 18333), product("9", "BIFE ANGOSTO XKG", "kg", 18333), product("121", "BOLSA NUGGETS 900GRS", "unit", 9000), product("127", "CAJA FORMITA", "unit", 42000), product("147", "NALGA XKG", "kg", 18333)];
+  const products = [product("1", "NALGA XKG", "kg", 18333), product("6", "CUADRIL XKG", "kg", 18333), product("127", "CAJA FORMITA", "unit", 42000)];
 
-  it("Pre-Empaque de la Aura con 20: CUADRIL 1,165 kg $21.357 (ticket T.0022)", () => {
-    const r = resolveScan("2000621357000", products, ABASTERO);
-    assert.equal(r.type, "label");
-    if (r.type === "label") {
-      assert.equal(r.product.code, "6");
-      assert.equal(r.quantity, 1.165);
-      assert.equal(r.amount, 21357);
-    }
+  it("Pre-Empaque de la Aura: 22 001 2126600 4 = NALGA 1,160 kg $21.266 (ticket T.0028)", () => {
+    const r = resolveScan("2200121266004", products, ABASTERO);
+    assert.ok(r.type === "label" && r.product.code === "1" && r.quantity === 1.16 && r.amount === 21266);
   });
 
-  it("las etiquetas de la Report se siguen leyendo como Report", () => {
-    const bife = resolveScan("2000009278668", products, ABASTERO);
-    assert.ok(bife.type === "label" && bife.product.code === "9" && bife.amount === 27866.16);
+  it("una etiqueta de la Report de un producto 1xx no se lee como Nalga de la Aura", () => {
     const caja = resolveScan("2000127420000", products, ABASTERO);
     assert.ok(caja.type === "label" && caja.product.code === "127" && caja.amount === 42000);
-  });
-
-  it("el TOTAL de la Aura con 20 sigue siendo un total (T.0019 $2.411)", () => {
-    const r = resolveScan("2099802411006", products, ABASTERO);
-    assert.ok(r.type === "ticket_total" && r.amount === 2411);
-  });
-
-  it("una etiqueta que no es de ninguna de las dos: error, no se agrega", () => {
-    const r = resolveScan(withCheck("200500112345"), products, ABASTERO);
-    assert.equal(r.type, "error");
+    const missing = resolveScan(withCheck("200014742000"), products, ABASTERO);
+    assert.notEqual(missing.type, "label", "producto 147 inexistente en la Report: no se agrega nada (antes podía dar NALGA)");
   });
 });

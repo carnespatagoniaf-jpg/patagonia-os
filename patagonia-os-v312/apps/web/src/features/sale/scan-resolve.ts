@@ -199,16 +199,8 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
 
   // Aura con inicio "22" en un local que tiene además otra balanza (AURA_PREFIX_22_BRANCHES, El Abastero 25/11/2026).
   if (config.auraPrefix22 && /^22\d{11}$/.test(raw) && validEan13(raw)) return resolveAura22(raw, products);
-  // La misma Aura imprimiendo con "20" (REAL El Abastero 25/11/2026: no aceptó el inicio 22; "20 006 2135700 0" = CUADRIL
-  // $21.357,00). Primero se lee como la Report (formato de la sucursal); si no da un producto, como la Aura (2-3-7 en
-  // centavos). Con los códigos de ese local (2 a 199) las dos lecturas no se cruzan: una etiqueta de la Aura leída como
-  // Report da un número de 200 o más, y una de la Report leída como Aura da 0 o 1 (por eso la Nalga pasó del 1 al 147).
-  if (config.auraPrefix22 && /^20\d{11}$/.test(raw) && validEan13(raw)) {
-    const primary = resolveScan(raw, products, { ...config, auraPrefix22: false });
-    if (primary.type === "label" || primary.type === "ticket_total" || primary.type === "ticket_without_amount" || primary.type === "product") return primary;
-    const aura = resolveScan(raw, products, AURA_22_CONFIG);
-    return aura.type === "label" ? aura : primary;
-  }
+  // Sin lectura doble de los "20": la Aura de El Abastero ya imprime con "22" (REAL 25/11/2026, "22 001 2126600 4" =
+  // NALGA $21.266). Probar un "20" también como Aura podía cruzarse con la Report (su Nalga es el 1). Un "20" es de la Report.
 
   // 2. Ticket de total.
   // El formato guardado de la sucursal manda sobre los de fábrica (El Abastero: 1-6-5 en pesos, no 2-5-5 en centavos).
