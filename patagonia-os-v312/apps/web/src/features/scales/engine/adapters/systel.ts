@@ -29,10 +29,23 @@ import { EMPTY_SCALE_MESSAGE, emptyScaleTemplates } from "./systel-empty-templat
 /** Firma y formato de la Cuora Max comprobada en una balanza real (Los gringos, 14/10/2026). */
 export const SYSTEL_VERIFIED = [{ protocolVersion: "0060", layout: "max60" as SystelLayout }];
 
-/** Límites de número de producto: en la Cuora 2, además, los que informa la balanza (V4.0: "0001 a 4000 por ejemplo"). */
+/**
+ * Límites de número de producto: los del formato y la cantidad de PLU que informa la firma de la balanza (Cuora 2 V4.0:
+ * "0001 a 4000 por ejemplo"). REAL GRANJAVIER 22/11/2026, Cuora Max "P08000": el 9521 daba E6 (fuera de límites) al
+ * leerlo y al escribirlo, y frenaba todo el envío. Ninguna Cuora Max real tiene números por encima de su firma.
+ */
 function layoutLimits(layout: SystelLayout, pluCapacity: number): { maxPlu: number; maxCode: number } {
   const info = LAYOUT_INFO[layout];
-  return layout === "cuora2" && pluCapacity > 0 ? { maxPlu: Math.min(info.maxPlu, pluCapacity), maxCode: info.maxCode } : info;
+  const cap = topPluNumber(layout, pluCapacity);
+  return cap > 0 ? { maxPlu: Math.min(info.maxPlu, cap), maxCode: info.maxCode } : info;
+}
+
+/**
+ * La cantidad de PLU de la firma es el número más alto SOLO en la Cuora 2 y en la Max 6.0. En la Max 7.0 no: REAL
+ * El Dorado (firma "P03000") tiene y acepta los productos 4001, 6008 y 7014. 0 = no se sabe (manda el formato).
+ */
+export function topPluNumber(layout: SystelLayout, pluCapacity: number): number {
+  return (layout === "cuora2" || layout === "max60") && pluCapacity > 0 ? pluCapacity : 0;
 }
 
 export const PRODUCT_BACKUP_KEY = "patagonia-systel-product-backup";
@@ -340,7 +353,7 @@ export class SystelSession implements ScaleSession {
       : null;
     const readyIds = new Set((check?.ready ?? []).map((p) => p.id));
     const products = this.pushProducts().filter((p) => readyIds.has(p.id));
-    const plan = layout ? planSystelPush(backup.plus, layout, backup.signature?.priceDecimals ?? 0, products, { templates }) : [];
+    const plan = layout ? planSystelPush(backup.plus, layout, backup.signature?.priceDecimals ?? 0, products, { templates, pluCapacity: topPluNumber(layout, backup.signature?.pluCapacity ?? 0) }) : [];
     this.state = { backup, products, plan, setup, templates };
 
     const count = (a: string) => plan.filter((x) => x.action === a).length;
@@ -403,7 +416,7 @@ export class SystelSession implements ScaleSession {
     // Avisado en las notas antes de confirmar "Sincronizar productos".
     if (this.startupWaitOn) await this.ensureNoStartupWait(st.backup.config);
     const layout = st.backup.layout;
-    const plan = opts.allowReplace ? planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: true, templates: st.templates }) : st.plan;
+    const plan = opts.allowReplace ? planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: true, templates: st.templates, pluCapacity: topPluNumber(layout, st.backup.signature?.pluCapacity ?? 0) }) : st.plan;
     const toWrite = plan.filter((x) => x.action === "crear" || x.action === "actualizar" || x.action === "reemplazar");
 
     let written: { number: number }[] = [];
@@ -421,7 +434,7 @@ export class SystelSession implements ScaleSession {
         mode = this.proof.mode;
         saveWriteProof(st.backup, this.number, mode);
       }
-      const modePlan = mode === "ascii" ? plan : planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: !!opts.allowReplace, mode, templates: st.templates });
+      const modePlan = mode === "ascii" ? plan : planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: !!opts.allowReplace, mode, templates: st.templates, pluCapacity: topPluNumber(layout, st.backup.signature?.pluCapacity ?? 0) });
       // Balanza vacía: el sector de los modelos tiene que existir (si lo borraron, cada producto da E7).
       if (st.templates.length > 0) {
         onProgress("sincronizar", "Revisando los sectores de tu balanza…");

@@ -49,6 +49,11 @@ export class FakeCuora implements SystelLink {
   /** Lista de sectores vacía: contesta E7 ("el dato pedido no existe") en vez de una lista vacía. */
   noSectorsReplyE7 = false;
 
+  /** Cantidad de PLU de la firma digital ("P08000"): también el número más alto que acepta. */
+  capacity(): number {
+    return this.options.capacity ?? (this.layout === "cuora2" ? 4000 : 8000);
+  }
+
   constructor(
     readonly layout: SystelLayout,
     readonly options: { address?: number; decimals?: number; capacity?: number; writeChecksum?: boolean; typeByteAccepted?: "binario" | "ascii"; typeHighBits?: number; loteNulOnWrite?: boolean; loteZerosOnWrite?: boolean; protocol?: string; /** Solo pruebas: no atiende pedidos hechos a su número (sí al general 0). Caso a cubrir: balanza nueva de Los gringos, 19/10. */ deafToOwnNumber?: boolean } = {}
@@ -86,7 +91,7 @@ export class FakeCuora implements SystelLink {
     const pd = info.pluDigits;
     switch (fn) {
       case 2: {
-        const cap = String(this.options.capacity ?? (this.layout === "cuora2" ? 4000 : 8000)).padStart(5, "0");
+        const cap = String(this.capacity()).padStart(5, "0");
         return this.reply(fn, `F0001C031000S${this.options.protocol ?? "0040"}P${cap}A060D${this.options.decimals ?? 0}`);
       }
       case 28:
@@ -127,6 +132,7 @@ export class FakeCuora implements SystelLink {
       case 62: {
         if (fn !== info.readFn) return this.reply(fn, "E4");
         if (data.length !== pd || !/^\d+$/.test(data)) return this.reply(fn, "E5");
+        if (this.layout === "max60" && Number(data) > this.capacity()) return this.reply(fn, "E6");
         const rec = this.plus.get(Number(data));
         return rec ? this.reply(fn, rec) : this.reply(fn, "E7");
       }
@@ -151,6 +157,9 @@ export class FakeCuora implements SystelLink {
       case 61: {
         if (fn !== info.writeFn) return this.reply(fn, "E4");
         const n = Number(data.slice(0, pd));
+        // REAL GRANJAVIER 22/11/2026 (Cuora Max 6.0 "P08000"): el 9521 da E6 (fuera de límites) al leer y al escribir.
+        // En la 7.0 no (El Dorado "P03000" acepta el 7014).
+        if (this.layout === "max60" && n > this.capacity()) return this.reply(fn, "E6");
         let rec: string;
         if (this.layout === "cuora2") {
           // Escritura: …tara(6) + N/M + ingredientes. Lectura: lo mismo sin la letra N/M.

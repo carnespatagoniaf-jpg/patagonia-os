@@ -142,8 +142,10 @@ function restoreData(layout: SystelLayout, read: string, mode: TypeByteMode): st
 }
 
 /** `templates`: modelos para armar productos nuevos cuando la balanza no tiene ninguno (systel-empty-template.ts). */
-export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDecimals: number, products: PushProduct[], opts: { replace?: boolean; mode?: TypeByteMode; templates?: SystelPlu[] } = {}): PushItem[] {
+export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDecimals: number, products: PushProduct[], opts: { replace?: boolean; mode?: TypeByteMode; templates?: SystelPlu[]; pluCapacity?: number } = {}): PushItem[] {
   const info = LAYOUT_INFO[layout];
+  // El número más alto que acepta ESTA balanza (topPluNumber en systel.ts: firma "P08000" de una Max 6.0); 0 = el del formato.
+  const top = Math.min(info.maxPlu, info.maxCode, (opts.pluCapacity ?? 0) > 0 ? opts.pluCapacity! : Infinity);
   const byNumber = new Map(plus.map((p) => [p.number, p]));
   const models = plus.length > 0 ? plus : (opts.templates ?? []);
   const seen = new Map<number, string>();
@@ -151,7 +153,8 @@ export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDec
     const base = { product, current: null as string | null, data: null as string | null };
     const code = product.code.trim();
     const number = /^\d+$/.test(code) ? Number(code) : NaN;
-    if (!Number.isInteger(number) || number < 1 || number > Math.min(info.maxPlu, info.maxCode)) return { ...base, number: null, action: "omitir", reason: "su código no sirve como número de balanza" };
+    if (Number.isInteger(number) && number > top) return { ...base, number: null, action: "omitir", reason: `su código (${number}) es más alto que ${top.toLocaleString("es-AR")}, el último número que acepta esta balanza: cambiale el código en Stock por uno libre de 1 a ${top.toLocaleString("es-AR")}` };
+    if (!Number.isInteger(number) || number < 1) return { ...base, number: null, action: "omitir", reason: "su código no sirve como número de balanza" };
     if (seen.has(number)) return { ...base, number, action: "omitir", reason: `el código ${number} está repetido en Patagonia` };
     seen.set(number, product.id);
     if (!(product.price > 0)) return { ...base, number, action: "omitir", reason: "no tiene precio en Patagonia" };
