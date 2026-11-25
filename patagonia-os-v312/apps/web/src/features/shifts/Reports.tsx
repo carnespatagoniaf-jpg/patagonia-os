@@ -7,6 +7,7 @@ import { listPosSalesByDay, listSalesByProduct, type MostradorSaleEntry } from "
 import { ReportsActivity } from "./ReportsActivity";
 import { useAuth } from "../auth/AuthProvider";
 import { can } from "../auth/permissions";
+import { DaySalesPanel } from "./DaySalesPanel";
 import { ReportsResult } from "./ReportsResult";
 import { ReportsStockValue } from "./ReportsStockValue";
 import { changePct, groupSalesByCategory, marginOnCost, previousPeriod, type ProductSalesRow } from "./sales-by-category";
@@ -169,6 +170,8 @@ export function Reports() {
       </section>
 
       {seesResult && <ReportsStockValue branchId={branchId} />}
+
+      {branchId && <DaySalesPanel branchId={branchId} />}
 
       {ranOnce && !loading && (
         <>

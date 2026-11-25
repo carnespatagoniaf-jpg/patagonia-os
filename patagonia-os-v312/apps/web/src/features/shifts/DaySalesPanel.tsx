@@ -1,15 +1,15 @@
 import { Fragment, useCallback, useEffect, useState } from "react";
 import { formatQuantity } from "../../lib/quantity-format";
-import { formatMoney, localDateIso } from "../shifts/format";
-import { listPosSalesOfDay, type DaySale } from "./pos-shift-service";
-import { UNIT_LABELS } from "./sale-model";
+import { listPosSalesOfDay, type DaySale } from "../sale/pos-shift-service";
+import { UNIT_LABELS } from "../sale/sale-model";
+import { formatMoney, localDateIso } from "./format";
 
 /**
- * Mostrador → "Ventas del día" (pedido de una clienta, 25/11/2026): cada venta del día, de todos los turnos (también
- * el de la cajera anterior si se cerró la caja para cambiar de cajero), con hora, quién atendía, cómo pagó y, tocando
- * la fila, qué productos llevó. Solo lectura: anular sigue en "Ver ventas (anular)" del turno abierto.
+ * Reportes → "Ventas del día" (pedido de una clienta, 25/11/2026): cada venta de Mostrador del día, de todos los turnos
+ * (también el de la cajera anterior si se cerró la caja para cambiar de cajero), con hora, quién atendía, cómo pagó y,
+ * tocando la fila, qué productos llevó. En Reportes y no en Mostrador para que no lo vean los cajeros. Solo lectura.
  */
-export function DaySalesPanel({ branchId, refreshKey }: { branchId: string; refreshKey: number }) {
+export function DaySalesPanel({ branchId }: { branchId: string }) {
   const [open, setOpen] = useState(false);
   const [date, setDate] = useState(() => localDateIso());
   const [sales, setSales] = useState<DaySale[]>([]);
@@ -31,7 +31,7 @@ export function DaySalesPanel({ branchId, refreshKey }: { branchId: string; refr
 
   useEffect(() => {
     if (open) void reload();
-  }, [open, reload, refreshKey]);
+  }, [open, reload]);
 
   function toggle(id: string) {
     setExpanded((current) => {
@@ -49,7 +49,7 @@ export function DaySalesPanel({ branchId, refreshKey }: { branchId: string; refr
   return (
     <section className="panel" style={{ marginTop: 18 }}>
       <div className="panel-title">
-        <h2>Ventas del día</h2>
+        <h2>Ventas del día, una por una</h2>
         <button className="secondary" onClick={() => setOpen((v) => !v)}>{open ? "Ocultar" : "Ver cada venta"}</button>
       </div>
       {!open ? (
