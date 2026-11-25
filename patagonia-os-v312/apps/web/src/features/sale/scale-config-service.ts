@@ -1,6 +1,7 @@
 import { supabase } from "../../lib/supabase";
 import { toError } from "../../lib/supabase-error";
 import { DEFAULT_SCALE_CONFIG, type ScaleConfig, type ScalePayloadType } from "./scale-barcode";
+import { AURA_PREFIX_22_BRANCHES } from "../scales/engine/weight-barcode";
 
 export * from "./scale-barcode";
 
@@ -34,7 +35,9 @@ export async function getBranchScaleConfig(branchId: string): Promise<ScaleConfi
     .maybeSingle();
 
   if (error) throw toError(error);
-  return data ? mapConfig(data) : null;
+  if (!data) return null;
+  const config = mapConfig(data);
+  return AURA_PREFIX_22_BRANCHES.has(branchId) ? { ...config, auraPrefix22: true } : config;
 }
 
 export async function saveBranchScaleConfig(branchId: string, config: ScaleConfig): Promise<void> {

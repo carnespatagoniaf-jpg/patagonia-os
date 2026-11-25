@@ -37,6 +37,14 @@ import type { ScaleConfig } from "../../sale/scale-barcode";
 export const AURA_BARCODE_CONFIG = "2002005";
 
 /**
+ * Igual que AURA_BARCODE_CONFIG pero con inicio "22" (pesables y unitarios): para un local que tiene además una Report
+ * con etiquetas "20" en pesos (El Abastero 25/11/2026). Así una etiqueta de Pre-Empaque de la Aura ("22" + producto 3 +
+ * importe en centavos 7) nunca se confunde con una de la Report ("20" + producto 5 + pesos 5). Mostrador la lee con
+ * ScaleConfig.auraPrefix22.
+ */
+export const AURA_BARCODE_CONFIG_22 = "2202205";
+
+/**
  * Código de barras INDIVIDUAL por producto en el ticket de suma (comando 1080, Multiprotocolo
  * Report NX §4.18: un dato, "1" = sí, "0" = no). Pedido del dueño 2026-10-08: la clienta quiere
  * que Mostrador sepa productos y kilos, no solo el total del ticket.
@@ -227,7 +235,7 @@ export async function runAuraSync(
   port: SerialPort,
   responder: KretzResponder,
   plan: AuraSyncItem[],
-  options: { timeoutMs?: number; onProgress?: (text: string) => void; shouldStop?: () => boolean; configureBarcode?: boolean } = {}
+  options: { timeoutMs?: number; onProgress?: (text: string) => void; shouldStop?: () => boolean; configureBarcode?: boolean; barcodeConfig?: string } = {}
 ): Promise<AuraSyncResult> {
   const timeout = options.timeoutMs ?? 1500;
   const progress = options.onProgress ?? (() => {});
@@ -305,7 +313,7 @@ export async function runAuraSync(
     if (changed.length) return finish("otros_cambiaron", `cambiaron productos que no estaban en el envío: ${changed.slice(0, 20).join(", ")}`);
     if (options.configureBarcode) {
       progress("Ajustando el código de barras de los tickets…");
-      const frame = buildKretzFrame(deviceType, equipmentId, "1070", AURA_BARCODE_CONFIG);
+      const frame = buildKretzFrame(deviceType, equipmentId, "1070", options.barcodeConfig ?? AURA_BARCODE_CONFIG);
       const writer = port.writable!.getWriter();
       const t0 = Date.now();
       try {

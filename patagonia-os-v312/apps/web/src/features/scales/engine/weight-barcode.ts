@@ -17,3 +17,12 @@ export const REPORT_WEIGHT_BARCODE_COMPANIES = new Set<string>([
 export const REPORT_PESOS_BARCODE_COMPANIES = new Set<string>([
   "b3269949-1e03-4509-bc35-2608e6ec4bfc" // El Abastero
 ]);
+
+/**
+ * Sucursales cuya Kretz Aura imprime con inicio "22" (1070 "2202205") porque comparten local con una Report de
+ * etiquetas "20": El Abastero, 25/11/2026. La sincronización de la Aura manda ese formato y Mostrador lee los "22…" como
+ * Aura (producto 3 + importe en centavos 7; producto 998 = TOTAL del ticket). Ver ScaleConfig.auraPrefix22.
+ */
+export const AURA_PREFIX_22_BRANCHES = new Set<string>([
+  "b92aa128-3062-43ea-91f0-97f99469a173" // El Abastero (sucursal EL ABASTERO)
+]);
