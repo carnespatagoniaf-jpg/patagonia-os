@@ -1,5 +1,6 @@
 import qrcode from "qrcode-generator";
 import { formatMoney } from "../shifts/format";
+import { consumerLegendLines } from "../../lib/consumer-legend";
 import {
   CUSTOMER_CONDITION_LABEL,
   VOUCHER_NAME,
@@ -90,6 +91,7 @@ export function InvoicePaperFooter({ invoice }: { invoice: InvoicePrint }) {
         <div><strong>CAE {invoice.cae}</strong></div>
         <div>Vto. CAE {arDateLabel(invoice.caeDue)}</div>
         <div>Comprobante autorizado por ARCA</div>
+        {consumerLegendLines().length > 0 && <div><strong>{consumerLegendLines().join(" ")}</strong></div>}
       </div>
     </div>
   );

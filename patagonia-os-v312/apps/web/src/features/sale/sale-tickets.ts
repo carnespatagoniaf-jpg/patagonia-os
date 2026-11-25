@@ -3,6 +3,7 @@ import type { PosShiftVale } from "../employees/employees-service";
 import type { CloseShiftResult, PosShiftAdjustment, PosShiftSupplierPayment } from "./pos-shift-service";
 import { formatMoney } from "../shifts/format";
 import { getThermalPrintSettings, TicketBuilder } from "./thermal-printer";
+import { consumerLegendLines } from "../../lib/consumer-legend";
 import { UNIT_LABELS, type MovementReceiptState, type ReceiptState } from "./sale-model";
 import {
   CUSTOMER_CONDITION_LABEL,
@@ -57,6 +58,12 @@ export function buildReceiptTicket(receiptToPrint: ReceiptState, branchName?: st
     t.line(`Recibido: ${formatMoney(receiptToPrint.amountTendered)}  Vuelto: ${formatMoney(Math.max(receiptToPrint.change ?? 0, 0))}`);
   }
   if (receiptToPrint.invoice) invoiceFooter(t, receiptToPrint.invoice, settings.lineWidth);
+  const legend = consumerLegendLines();
+  if (legend.length > 0) {
+    t.feed(1).align("center").bold(true);
+    for (const l of legend) t.line(l);
+    t.bold(false);
+  }
   t.feed(1).align("center").line("Gracias por su compra");
   t.bodySize(settings, false);
   t.cut();

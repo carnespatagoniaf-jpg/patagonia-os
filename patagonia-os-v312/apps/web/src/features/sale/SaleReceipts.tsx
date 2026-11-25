@@ -11,6 +11,7 @@ import { compareScaleControl } from "./scale-control";
 import type { ScaleControlState } from "./scale-control-service";
 import { ScaleControlResult } from "./ScaleControl";
 import { InvoicePaperFooter, InvoicePaperHeader } from "../invoicing/InvoicePaper";
+import { consumerLegendLines } from "../../lib/consumer-legend";
 
 // Comprobantes que se muestran (y se imprimen) debajo de Mostrador: el último
 // comprobante de venta, el de un movimiento de caja/pago/vale y el detalle del
@@ -77,6 +78,7 @@ export function ReceiptView({ receipt, branchName, thermalPrintBusy, onPrint, on
         </p>
       )}
       {receipt.invoice && <InvoicePaperFooter invoice={receipt.invoice} />}
+      {!receipt.invoice && consumerLegendLines().length > 0 && <p className="ticket-footer print-only-header"><strong>{consumerLegendLines().join(" ")}</strong></p>}
       <p className="ticket-footer print-only-header">Gracias por su compra</p>
     </section>
   );

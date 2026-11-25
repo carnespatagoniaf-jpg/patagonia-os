@@ -3,6 +3,7 @@ import type { Session, User } from "@supabase/supabase-js";
 import { isSupabaseConfigured, supabase } from "../../lib/supabase";
 import { clearStoredPosReceipt } from "../../lib/pos-receipt-storage";
 import { toError } from "../../lib/supabase-error";
+import { setCompanyProvince } from "../../lib/consumer-legend";
 
 export interface UserProfile {
   id: string;
@@ -84,7 +85,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const PROFILE_COLUMNS = "id,company_id,branch_id,full_name,role,active,denied_permissions";
     let { data, error } = await supabase
       .from("profiles")
-      .select(`${PROFILE_COLUMNS},companies(active,plan,features)`)
+      .select(`${PROFILE_COLUMNS},companies(active,plan,features,province)`)
       .eq("id", userId)
       .maybeSingle();
     // Base todavía sin la migración 143 (companies.features): entrar igual, sin pantallas extra.
@@ -128,7 +129,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
 
     if (!data.active) throw new DefinitiveProfileError("El usuario está desactivado.");
-    type CompanyRow = { active: boolean; plan?: UserProfile["plan"]; features?: string[] | null };
+    type CompanyRow = { active: boolean; plan?: UserProfile["plan"]; features?: string[] | null; province?: string | null };
     const companyRaw = data.companies as unknown as CompanyRow | CompanyRow[] | null;
     const company = Array.isArray(companyRaw) ? companyRaw[0] : companyRaw;
     // Desde la 176b la base no le muestra nada a una empresa dada de baja: si la ficha de la empresa no llega, se toma
@@ -136,6 +137,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const companyActive = data.company_id ? company?.active === true : true;
     if (!companyActive) throw new DefinitiveProfileError("Esta empresa está desactivada.");
     setIsPlatformAdmin(false);
+    // Leyenda de Orientación al Consumidor en las boletas (Ley 13.987, Provincia de Buenos Aires).
+    setCompanyProvince(company?.province);
     // Locales a cargo (plan Empresa, migración 191). Si la consulta falla (base sin la migración), solo su local.
     let extraBranchIds: string[] = [];
     if ((company?.plan === "empresa" || company?.plan === "planta") && data.role !== "owner" && data.role !== "admin") {
