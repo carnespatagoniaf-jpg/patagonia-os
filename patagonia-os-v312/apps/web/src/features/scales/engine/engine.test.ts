@@ -743,3 +743,21 @@ describe("[SIMULADO] Report: formato de etiqueta de la balanza (real Lauda 18/11
     assert.equal(prep.ready, 1);
   });
 });
+
+describe("[SIMULADO, REAL GRANJAVIER 22/11/2026] Systel: un código más alto que la capacidad de la balanza no frena el envío", () => {
+  it("el 9521 en una Cuora Max \"P08000\" se omite con el motivo y los demás se mandan", async () => {
+    const f = new FakeCuora("max60", { address: 20, protocol: "0060", typeByteAccepted: "ascii", loteNulOnWrite: true });
+    for (const [n, raw] of GRINGOS) f.plus.set(n, raw);
+    const { deps } = fakeDb();
+    const products = [P("p4", "4", "POLLO ENTEROxKG", "kg", 5400), P("p9521", "9521", "Chorizo de Cerdo", "kg", 10000), P("p78", "78", "ARABES", "unit", 1000)];
+    const s = new SystelSession(f, 20, ctx(products), deps);
+    const prep = await s.prepare(noop);
+    assert.equal(prep.canWrite, true);
+    const out = await s.sync(prep, noop);
+    assert.equal(out.ok, true, out.message);
+    assert.equal(f.plus.has(9521), false, "no se intentó escribir el 9521");
+    assert.equal(f.plus.get(4)!.slice(23, 29), "005400", "los demás sí se mandaron");
+    assert.equal(f.plus.get(78)!.slice(5, 23), "ARABES            ");
+    assert.match(JSON.stringify(prep), /9521.*(8\.000|último número)/);
+  });
+});

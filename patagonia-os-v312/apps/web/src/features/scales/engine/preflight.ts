@@ -69,7 +69,7 @@ export function productProblem(p: EngineProduct, limits: ModelLimits): string | 
   if (n > limits.maxCode) {
     return code.length >= 8
       ? "es un código de barras de fábrica: se vende escaneando su propio código, no va a la balanza"
-      : `el código ${n} es más largo de lo que guarda la balanza (hasta ${limits.maxCode})`;
+      : `el código ${n} es más alto que ${limits.maxCode.toLocaleString("es-AR")}, el último número que acepta esta balanza: cambiale el código en Stock por uno libre de 1 a ${limits.maxCode.toLocaleString("es-AR")}`;
   }
   if (limits.labelMaxCode !== null && n > limits.labelMaxCode) {
     const digits = String(limits.labelMaxCode).length;
