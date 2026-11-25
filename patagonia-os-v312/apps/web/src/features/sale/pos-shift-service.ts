@@ -585,22 +585,76 @@ export async function listPosSalesByDay(branchId: string, fromDate: string, toDa
   }));
 }
 
+const SHIFT_SALE_COLUMNS =
+  "id,created_at,discount_amount,surcharge_amount,total,voided_at," +
+  "pos_sale_payments(id,account_id,amount,reference,treasury_accounts(name))," +
+  "pos_sale_items(quantity,unit_price,discount_amount,line_total,description,product_id)";
+
 export async function listPosShiftSales(shiftId: string): Promise<PosShiftSale[]> {
   if (!supabase) return [];
 
   const { data, error } = await supabase
     .from("pos_sales")
-    .select(
-      "id,created_at,discount_amount,surcharge_amount,total,voided_at," +
-        "pos_sale_payments(id,account_id,amount,reference,treasury_accounts(name))," +
-        "pos_sale_items(quantity,unit_price,discount_amount,line_total,description,product_id)"
-    )
+    .select(SHIFT_SALE_COLUMNS)
     .eq("pos_shift_id", shiftId)
     .order("created_at");
 
   if (error) throw toError(error);
-  const rows = (data ?? []) as unknown as PosShiftSaleRow[];
+  return mapShiftSaleRows((data ?? []) as unknown as PosShiftSaleRow[]);
+}
 
+export interface DaySale extends PosShiftSale {
+  /** Quién atendía la caja en el turno de esa venta (cajera con PIN o el nombre escrito al abrir). */
+  cashierName: string | null;
+}
+
+/**
+ * Ventas de Mostrador de un día (hora local) en una sucursal, de todos los turnos, con su detalle: para "Ventas del
+ * día" (pedido de una clienta el 25/11: ver qué llevó cada venta, también las de un turno ya cerrado al cambiar de
+ * cajera). Incluye las anuladas, marcadas.
+ */
+export async function listPosSalesOfDay(branchId: string, date: string): Promise<DaySale[]> {
+  if (!supabase) return [];
+  const fromIso = new Date(`${date}T00:00:00`).toISOString();
+  const toIso = new Date(`${date}T23:59:59.999`).toISOString();
+  const PAGE_SIZE = 500;
+  const rows: (PosShiftSaleRow & { pos_shift_id: string | null })[] = [];
+  for (let start = 0; ; start += PAGE_SIZE) {
+    const { data, error } = await supabase
+      .from("pos_sales")
+      .select(`${SHIFT_SALE_COLUMNS},pos_shift_id`)
+      .eq("branch_id", branchId)
+      .gte("created_at", fromIso)
+      .lte("created_at", toIso)
+      .order("created_at")
+      .order("id")
+      .range(start, start + PAGE_SIZE - 1);
+    if (error) throw toError(error);
+    const page = (data ?? []) as unknown as (PosShiftSaleRow & { pos_shift_id: string | null })[];
+    rows.push(...page);
+    if (page.length < PAGE_SIZE) break;
+  }
+
+  // Quién atendía cada turno: cashier_name (172) o la cajera con PIN (por RPC: un plan sin Empleados lee la tabla vacía).
+  const shiftIds = [...new Set(rows.map((r) => r.pos_shift_id).filter((id): id is string => !!id))];
+  const cashierByShift = new Map<string, string | null>();
+  if (shiftIds.length > 0) {
+    const shifts = await supabase.from("pos_shifts").select("id,cashier_employee_id,cashier_name").in("id", shiftIds);
+    if (shifts.error) throw toError(shifts.error);
+    const shiftRows = (shifts.data ?? []) as { id: string; cashier_employee_id: string | null; cashier_name?: string | null }[];
+    const cashiers = shiftRows.some((s) => s.cashier_employee_id) ? await listPosCashiers(branchId).catch(() => []) : [];
+    for (const s of shiftRows) {
+      const byPin = s.cashier_employee_id ? cashiers.find((c) => c.employeeId === s.cashier_employee_id)?.fullName : null;
+      cashierByShift.set(s.id, byPin ?? (s.cashier_name?.trim() || null));
+    }
+  }
+
+  const sales = await mapShiftSaleRows(rows);
+  return sales.map((sale, i) => ({ ...sale, cashierName: cashierByShift.get(rows[i].pos_shift_id ?? "") ?? null }));
+}
+
+async function mapShiftSaleRows(rows: PosShiftSaleRow[]): Promise<PosShiftSale[]> {
+  if (!supabase) return [];
   // El nombre/unidad del producto NO se embebe (products(name,unit)): desde
   // 051_hide_cost_from_cashiers.sql el rol authenticated no tiene SELECT
   // sobre products, y ese embed hacía fallar TODA esta consulta con 403 --
