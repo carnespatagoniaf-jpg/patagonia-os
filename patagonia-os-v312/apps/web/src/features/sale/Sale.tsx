@@ -24,6 +24,7 @@ import { InvoiceRequestFields } from "../invoicing/InvoiceRequestFields";
 import { addPendingSale, getPendingSales, isRetryableError, isShiftClosedError, markPendingSaleError, removePendingSale, resetPendingSaleErrors, updatePendingSale, type PendingSale } from "./offline-queue";
 import { closePosShift, deletePosShiftAdjustment, getOpenPosShift, listPosCashiers, listPosShiftAdjustments, listPosShiftSupplierPayments, type PosShiftSupplierPayment, listPosShiftSales, openPosShift, voidPosSale, hasPosVoidPin, type CloseShiftResult, type PosCashier, type PosShift, type PosShiftAdjustment, type PosShiftSale, type SafeDepositResult } from "./pos-shift-service";
 import { CashControlPanel } from "./CashControlPanel";
+import { DaySalesPanel } from "./DaySalesPanel";
 import { formatMoney } from "../shifts/format";
 import { parseAmount } from "../../lib/money";
 import { matchOrderItems, takeOrderToCharge, type OrderToCharge } from "../orders/order-to-charge";
@@ -1403,6 +1404,10 @@ Cancelar = es el mismo papel: no cobrar.`)) {
             publishReceipt={publishMovementReceipt}
           />
         </div>
+      )}
+
+      {canSeeShiftTotals && isSupabaseConfigured && branchId && (
+        <DaySalesPanel branchId={branchId} refreshKey={shiftSales.length * 1000 + (shiftSales.length - activeShiftSales.length)} />
       )}
 
       {canSeeShiftTotals && isSupabaseConfigured && branchId && (
