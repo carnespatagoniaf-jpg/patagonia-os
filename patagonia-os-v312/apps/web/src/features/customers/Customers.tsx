@@ -34,6 +34,10 @@ import { receiveCustomerCheque } from "../cheques/cheques-service";
 import { cleanCuit } from "../cheques/cheque-logic";
 import { listPriceLists, setCustomerPriceList } from "../pricing/price-lists-service";
 import { activeList, productPrice, sellingLists, type PriceList } from "../pricing/price-lists";
+import { DEFAULT_SCALE_CONFIG, getBranchScaleConfig, type ScaleConfig } from "../sale/scale-config-service";
+import { cachedScaleConfig, scaleConfigLoaded, scaleConfigOnError } from "../sale/scale-config-cache";
+import { useBoxLabelFormats } from "../sale/box-label-service";
+import { resolveChargeScan } from "./charge-scan";
 
 /** Valor del selector "Entra a…" para cobrar con cheque (migración 150). */
 const CHEQUE_OPTION = "__cheque";
@@ -154,6 +158,18 @@ export function Customers() {
   const [newPriceListId, setNewPriceListId] = useState("");
   const [editPriceListId, setEditPriceListId] = useState("");
 
+  // Lectura de códigos de barra como en Mostrador: formato de etiquetas de la balanza de la sucursal (si falla la
+  // carga, el último guardado en esta PC; si no hay, no se leen etiquetas, solo códigos exactos de producto).
+  const [scaleConfig, setScaleConfig] = useState<ScaleConfig>(DEFAULT_SCALE_CONFIG);
+  useEffect(() => {
+    if (!branchId) return;
+    const cached = cachedScaleConfig(branchId);
+    if (cached) setScaleConfig(cached.config);
+    void getBranchScaleConfig(branchId)
+      .then((config) => setScaleConfig(scaleConfigLoaded(branchId, config).config))
+      .catch(() => setScaleConfig(scaleConfigOnError(branchId).config));
+  }, [branchId]);
+
   useEffect(() => {
     if (!branchId) return;
     void listProductsForBranch(branchId).then(setProducts);
@@ -178,20 +194,56 @@ export function Customers() {
   }, [charges]);
 
   const chargeMatches = chargeSearch.trim()
-    ? products.filter((p) => (p.active ?? true) && p.name.toLowerCase().includes(chargeSearch.toLowerCase())).slice(0, 8)
+    ? products
+        .filter((p) => {
+          const q = chargeSearch.trim().toLowerCase();
+          return (p.active ?? true) && (p.name.toLowerCase().includes(q) || p.code.toLowerCase() === q);
+        })
+        .slice(0, 8)
     : [];
 
-  function addProductToCharge(product: Product) {
+  /** Enter en el buscador (la pistola de códigos manda el código + Enter): igual que Mostrador. */
+  function handleChargeSearchEnter() {
+    const raw = chargeSearch.trim();
+    if (!raw) return;
+    const scan = resolveChargeScan(raw, products, scaleConfig, boxFormats);
+    if (scan.type === "error") {
+      setMessage(scan.message);
+      setChargeSearch("");
+      return;
+    }
+    if (scan.type === "add") {
+      if (scan.confirm && !window.confirm(scan.confirm)) {
+        setChargeSearch("");
+        return;
+      }
+      addProductToCharge(scan.product, scan.quantity);
+      setMessage(`Agregado: ${scan.detail}.`);
+      return;
+    }
+    if (chargeMatches.length === 1) {
+      addProductToCharge(chargeMatches[0]);
+      return;
+    }
+    if (chargeMatches.length === 0) {
+      // Se limpia para que el próximo escaneo no se pegue atrás del código que no se encontró.
+      setMessage(`No se encontró ningún producto con el código o nombre "${raw}".`);
+      setChargeSearch("");
+    }
+  }
+
+  function addProductToCharge(product: Product, scannedQty?: number) {
     setChargeCart((current) => {
       // Por kilo, cada vez es un renglón nuevo con su propio peso (ej. dos
       // medias reses de 106 y 98 kg en la misma venta, real Martinez 19/10):
       // sumarle 1 kg al renglón que ya estaba hacía imposible cargar la segunda.
+      const qty = scannedQty ?? 1;
       const existing = product.unit === "kg" ? undefined : current.find((l) => l.productId === product.id);
       if (existing) {
-        return current.map((l) => (l.key === existing.key ? { ...l, quantity: l.quantity + 1 } : l));
+        return current.map((l) => (l.key === existing.key ? { ...l, quantity: l.quantity + qty } : l));
       }
       const key = current.some((l) => l.key === product.id) ? `${product.id}-${Date.now()}` : product.id;
-      return [...current, { key, productId: product.id, name: product.name, unit: product.unit, quantity: 1, unitPrice: productPrice(product, customerList?.id) }];
+      return [...current, { key, productId: product.id, name: product.name, unit: product.unit, quantity: qty, unitPrice: productPrice(product, customerList?.id) }];
     });
     setChargeSearch("");
   }
@@ -234,6 +286,8 @@ export function Customers() {
   // Remito R con CAI (migración 147): plan Full y un CAI cargado en Facturas.
   const remitoR = useRemitoREnabled(planAllows(profile, "full"));
   const salesDetail = Boolean(profile?.features?.includes("ventas_detalle"));
+  // Cajas con etiqueta del frigorífico (migración 198): se leen igual que en Mostrador si la empresa las usa.
+  const { formats: boxFormats } = useBoxLabelFormats(Boolean(profile?.features?.includes("etiquetas_caja")));
   const canCheques = isSupabaseConfigured && canAccessPage(profile, "cheques");
   // Sin "customers.payments" (ej. la cajera): carga ventas a cuenta, pero no registra, edita ni borra pagos.
   const canPayments = can(profile, "customers.payments");
@@ -976,7 +1030,20 @@ export function Customers() {
                     <label className="ws-field">Fecha<input type="date" value={chargeDate} onChange={(e) => setChargeDate(e.target.value)} /></label>
                     <div className="pos-search-wrap ws-grow">
                       <label className="ws-field-label">Producto</label>
-                      <input type="text" className="pos-search" placeholder="Buscá el producto que le vendés…" value={chargeSearch} onChange={(e) => setChargeSearch(e.target.value)} />
+                      <input
+                        type="text"
+                        className="pos-search"
+                        placeholder="Escaneá o buscá el producto que le vendés…"
+                        autoComplete="off"
+                        value={chargeSearch}
+                        onChange={(e) => setChargeSearch(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            handleChargeSearchEnter();
+                          }
+                        }}
+                      />
                       {chargeMatches.length > 0 && (
                         <div className="pos-dropdown">
                           {chargeMatches.map((product) => (
