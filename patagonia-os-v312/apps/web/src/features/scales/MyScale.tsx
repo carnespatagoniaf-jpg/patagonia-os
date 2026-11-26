@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CheckCircle2, Plus, Scale, TriangleAlert } from "lucide-react";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
-import { REPORT_PESOS_BARCODE_COMPANIES, REPORT_WEIGHT_BARCODE_COMPANIES } from "./engine/weight-barcode";
+import { REPORT_PESOS_BARCODE_COMPANIES, REPORT_PLU5_WEIGHT_COMPANIES, REPORT_WEIGHT_BARCODE_COMPANIES } from "./engine/weight-barcode";
 import { releaseSerialEverywhere } from "../inventory/kretz/serial-tabs";
 import { connectBranchScale, type BranchConnectResult } from "./engine/connect-branch";
 import { isPhoneOrTablet, PHONE_OR_TABLET_MESSAGE } from "./engine/device";
@@ -57,6 +57,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
   const canManage = profile?.role === "owner" || profile?.role === "admin";
   const weightBarcode = REPORT_WEIGHT_BARCODE_COMPANIES.has(profile?.company_id ?? "");
   const pesosBarcode = REPORT_PESOS_BARCODE_COMPANIES.has(profile?.company_id ?? "");
+  const plu5Barcode = REPORT_PLU5_WEIGHT_COMPANIES.has(profile?.company_id ?? "");
   // "Traer productos de la balanza": solo empresas que lo pidieron (companies.features, migración 173).
   const canImport = canManage && !!profile?.features?.includes("traer_balanza") && !!branchId && isSupabaseConfigured;
   const [scales, setScales] = useState<BranchScale[]>([]);
@@ -207,7 +208,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     const remembered = loadRememberedScale();
     try {
       const result = await connectBranchScale(
-        { branchId, products, online: isSupabaseConfigured, canManageLinks: canManage, diag, allowSystelRelease, weightBarcode, pesosBarcode },
+        { branchId, products, online: isSupabaseConfigured, canManageLinks: canManage, diag, allowSystelRelease, weightBarcode, pesosBarcode, plu5Barcode },
         progress,
         { target: isLegacy ? { ...target!, identity: {} } : target, known: scales, pick },
         {

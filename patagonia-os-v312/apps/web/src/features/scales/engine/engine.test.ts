@@ -519,6 +519,24 @@ describe("[SIMULADO] Mi balanza con una Kretz Report", () => {
     assert.deepEqual(saved, [{ prefixLength: 1, pluLength: 6, weightLength: 5, weightDivisor: 1, totalLength: 13, payloadType: "amount" }]);
   });
 
+  it("REAL Oliem 25/11: la Report por USB imprime igual que la de red (2112001), manda el ASADO 6000 y Mostrador lee 2-5-5", async () => {
+    localStorage.clear();
+    const asado = P("s", "6000", "ASADO", "kg", 22000);
+    const { io } = reportIO({});
+    const sent: (string | undefined)[] = [];
+    const saved: unknown[] = [];
+    io.configureReportBarcode = async (config?: string) => { sent.push(config); return "ok"; };
+    io.saveItemConfig = async (_b: string, config?: unknown) => { saved.push(config); };
+    const s = new KretzSession("kretz-report-lt", { ...ctx([asado]), scaleKey: "ol", plu5Barcode: true }, "datos", io);
+    const prep = await s.prepare(noop);
+    assert.deepEqual(prep.skipped, [], "el código de 4 cifras entra en la etiqueta de 5");
+    assert.equal(prep.writes, 1);
+    const out = await s.sync(prep, noop);
+    assert.equal(out.ok, true, out.message);
+    assert.deepEqual(sent, ["2112001"]);
+    assert.deepEqual(saved, [{ prefixLength: 2, pluLength: 5, weightLength: 5, weightDivisor: 1000, totalLength: 13, payloadType: "weight" }]);
+  });
+
   it("código de barras SIEMPRE: con los productos ya iguales igual se configura, y va antes que los productos", async () => {
     localStorage.clear();
     const vacio = P("a", "10", "Vacio", "kg", 15000);

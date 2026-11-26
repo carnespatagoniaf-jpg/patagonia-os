@@ -151,6 +151,8 @@ export interface EngineContext {
   weightBarcode?: boolean;
   /** Report por USB/Bluetooth: 2-5-5 con importe en pesos enteros (REPORT_PESOS_BARCODE_COMPANIES, El Abastero 24/11/2026). */
   pesosBarcode?: boolean;
+  /** Report por USB/Bluetooth: el mismo 2-5-5 con peso que la Report por red (REPORT_PLU5_WEIGHT_COMPANIES, Oliem 25/11/2026). */
+  plu5Barcode?: boolean;
 }
 
 export interface ScaleAdapter {

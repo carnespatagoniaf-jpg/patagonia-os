@@ -19,6 +19,17 @@ export const REPORT_PESOS_BARCODE_COMPANIES = new Set<string>([
 ]);
 
 /**
+ * Empresas cuya Kretz Report por USB/Bluetooth imprime IGUAL que la Report por red: "21" + producto de 5 + gramos de 5
+ * (1070 "2112001"), y la sucursal lee ese formato (KRETZ_PLU5_WEIGHT_CONFIG). REAL Oliem 25/11/2026: tiene una Report
+ * por red y otra por USB en el mismo local, y productos por kilo con código 6000-6xxx (asado, vacío, matambre). Con el
+ * 2-3-7 de la USB esos códigos no entraban ("inexistente" en esa balanza) y cada sincronización de una balanza le
+ * cambiaba a Mostrador el formato de la otra.
+ */
+export const REPORT_PLU5_WEIGHT_COMPANIES = new Set<string>([
+  "9c810ff0-e945-41d7-9c0c-921626a83694" // Oliem minimarket
+]);
+
+/**
  * Sucursales cuya Kretz Aura imprime con inicio "22" (1070 "2202205") porque comparten local con una Report de
  * etiquetas "20": El Abastero, 25/11/2026. La sincronización de la Aura manda ese formato y Mostrador lee los "22…" como
  * Aura (producto 3 + importe en centavos 7; producto 998 = TOTAL del ticket). Ver ScaleConfig.auraPrefix22.
