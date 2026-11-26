@@ -71,3 +71,14 @@ export function productWithCode<P extends { id: string; code: string }>(products
   if (!wanted) return undefined;
   return products.find((p) => p.id !== exceptId && p.code.trim() === wanted);
 }
+
+/**
+ * Casillero "Stock" de Editar: viene precargado con el stock actual. Solo cuenta si la persona lo cambió
+ * (null = no tocar el stock). Antes se mandaba siempre: un stock negativo (vender sin cargar stock) trababa
+ * cambiar el precio, y una venta hecha con la ficha abierta se deshacía al guardar (real 26/11).
+ */
+export function editedStockText(prefilled: string, typed: string): string | null {
+  const text = typed.trim();
+  if (!text || text === prefilled.trim()) return null;
+  return text;
+}
