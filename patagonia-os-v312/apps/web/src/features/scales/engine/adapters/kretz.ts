@@ -291,8 +291,9 @@ export class KretzSession implements ScaleSession {
     onProgress("sincronizar", "Configurando el código de barras de las etiquetas…");
     try {
       // Por red (Report NX/NX2): el formato que traía la balanza (21 + producto de 5 + peso). Con el 2-3-7 la NX2 de
-      // Lauda dejó de imprimir el código de barras (real 18/11). Por USB/Bluetooth (Report LT) sigue el 2-3-7.
-      const net = this.diagnostic.red === true;
+      // Lauda dejó de imprimir el código de barras (real 18/11). Por USB/Bluetooth (Report LT) sigue el 2-3-7, salvo las
+      // empresas que imprimen igual que por red (REPORT_PLU5_WEIGHT_COMPANIES, Oliem).
+      const net = this.plu5();
       const pesos = !net && !this.ctx.weightBarcode && this.ctx.pesosBarcode === true;
       const r = await this.io.configureReportBarcode(net ? REPORT_NET_BARCODE_CONFIG : this.ctx.weightBarcode ? REPORT_WEIGHT_BARCODE_CONFIG : pesos ? REPORT_PESOS_BARCODE_CONFIG : undefined);
       if (r === "ok") {
@@ -305,6 +306,11 @@ export class KretzSession implements ScaleSession {
     }
   }
 
+  /** Etiqueta "21" + producto de 5 + peso: la Report por red, o una por USB de una empresa que imprime igual (Oliem). */
+  private plu5(): boolean {
+    return this.diagnostic.red === true || this.ctx.plu5Barcode === true;
+  }
+
   /** Revisión previa con los límites del modelo (capabilities.ts). Un modelo sin límites conocidos no manda nada. */
   private preflight(): PreflightResult {
     const limits = MODEL_LIMITS[this.model];
@@ -313,14 +319,14 @@ export class KretzSession implements ScaleSession {
     // lo lee así (KRETZ_PLU5_WEIGHT_CONFIG): el límite de 3 cifras del 2-3-7 no corre. REAL Oliem 25/11/2026: con ese
     // límite, sus 24 productos por kilo con código 6000-6xxx (asado, vacío…) nunca se mandaban, y los que estaban
     // cargados a mano en la balanza salían con código 0 y otro precio.
-    if (this.model === "kretz-report-lt" && this.diagnostic.red === true) return preflightProducts(this.ctx.products, { ...limits, labelMaxCode: REPORT_NET_LABEL_MAX_CODE });
+    if (this.model === "kretz-report-lt" && this.plu5()) return preflightProducts(this.ctx.products, { ...limits, labelMaxCode: REPORT_NET_LABEL_MAX_CODE });
     return preflightProducts(this.ctx.products, limits);
   }
 
   private barcodeKey(): string {
     const id = this.identity();
     // Por red se marca aparte: así una NX que ya recibió el 2-3-7 vuelve a recibir su formato.
-    return `${this.ctx.scaleKey ?? ""}|${String(id.letter ?? "")}${String(id.equipment ?? "")}${this.diagnostic.red === true ? `|${REPORT_NET_BARCODE_CONFIG}` : this.ctx.weightBarcode ? `|${REPORT_WEIGHT_BARCODE_CONFIG}` : this.ctx.pesosBarcode ? `|${REPORT_PESOS_BARCODE_CONFIG}` : ""}`;
+    return `${this.ctx.scaleKey ?? ""}|${String(id.letter ?? "")}${String(id.equipment ?? "")}${this.plu5() ? `|${REPORT_NET_BARCODE_CONFIG}` : this.ctx.weightBarcode ? `|${REPORT_WEIGHT_BARCODE_CONFIG}` : this.ctx.pesosBarcode ? `|${REPORT_PESOS_BARCODE_CONFIG}` : ""}`;
   }
 
   async close(): Promise<void> {
