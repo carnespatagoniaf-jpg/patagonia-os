@@ -21,7 +21,7 @@ import {
   type ProductCategory
 } from "./product-categories-service";
 import { amountInputText, parseAmount } from "../../lib/money";
-import { marginToInput, moneyToInput, onCostOrMargin, onPrice, productWithCode } from "./product-pricing";
+import { editedStockText, marginToInput, moneyToInput, onCostOrMargin, onPrice, productWithCode } from "./product-pricing";
 import { downloadScaleExportCsv } from "./scale-export";
 import { ScaleSyncPanel } from "./ScaleSyncPanel";
 import { SystelPanel } from "./systel/SystelPanel";
@@ -158,6 +158,8 @@ export function Inventory() {
 
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editDraft, setEditDraft] = useState<DraftProduct>(emptyDraft());
+  // Stock con el que se abrió Editar (ver editedStockText).
+  const editStartStock = useRef("");
   const [editLink, setEditLink] = useState<DraftLink>({ linked: false, sourceId: "", factor: "1", moveStock: true });
 
   // Panel "Presentaciones" de un producto principal.
@@ -642,7 +644,9 @@ export function Inventory() {
 
   function startEdit(product: Product) {
     setEditingId(product.id);
-    setEditDraft({ ...draftFromProduct(product), vatRate: vatSelectValue(vatRates[product.id]) });
+    const draft = draftFromProduct(product);
+    editStartStock.current = draft.stock;
+    setEditDraft({ ...draft, vatRate: vatSelectValue(vatRates[product.id]) });
     setEditLink(draftLinkFromProduct(product));
   }
 
@@ -668,7 +672,8 @@ export function Inventory() {
         throw new Error(`Indicá cuántos ${UNIT_LABELS[wantedSource!.unit]} descuenta cada ${UNIT_LABELS[editDraft.unit]}.`);
       }
       // Stock escrito en Editar (antes solo había "Mínimo" y lo usaban como stock; real M2 26/10).
-      const wantedStock = !original?.stockSourceId && !editLink.linked && editDraft.stock.trim() ? typedCount(editDraft.unit, editDraft.stock) : null;
+      const stockText = editedStockText(editStartStock.current, editDraft.stock);
+      const wantedStock = stockText !== null && !original?.stockSourceId && !editLink.linked ? typedCount(editDraft.unit, stockText) : null;
       if (wantedStock !== null && (!Number.isFinite(wantedStock) || wantedStock < 0)) throw new Error("El stock no puede ser negativo.");
       const linkChanged =
         wantedSourceId !== (original?.stockSourceId ?? null) ||

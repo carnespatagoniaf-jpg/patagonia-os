@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { moneyToInput, onCostOrMargin, onPrice, parseMargin, productWithCode } from "./product-pricing";
+import { editedStockText, moneyToInput, onCostOrMargin, onPrice, parseMargin, productWithCode } from "./product-pricing";
 import { parseAmount } from "../../lib/money";
 
 const empty = { cost: "", margin: "", priceRetail: "" };
@@ -78,5 +78,21 @@ describe("código de barras repetido", () => {
   });
   it("vacío no coincide con nada", () => {
     assert.equal(productWithCode(products, ""), undefined);
+  });
+});
+
+describe("Editar: casillero Stock precargado", () => {
+  it("stock negativo sin tocar: no se ajusta (antes trababa cambiar el precio)", () => {
+    assert.equal(editedStockText("-12.5", "-12.5"), null);
+  });
+  it("sin tocar aunque haya espacios: no se ajusta", () => {
+    assert.equal(editedStockText("30", " 30 "), null);
+  });
+  it("vacío: no se ajusta", () => {
+    assert.equal(editedStockText("30", ""), null);
+  });
+  it("la persona escribió otro stock: se ajusta a eso", () => {
+    assert.equal(editedStockText("-12.5", "20"), "20");
+    assert.equal(editedStockText("30", "0"), "0");
   });
 });
