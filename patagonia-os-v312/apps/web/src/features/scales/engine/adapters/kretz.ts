@@ -72,6 +72,9 @@ export const KRETZ_IO: KretzIO = {
  */
 export const REPORT_NET_BARCODE_CONFIG = "2112001";
 
+/** Código más alto que entra en esa etiqueta (5 cifras del 2-5-5). */
+export const REPORT_NET_LABEL_MAX_CODE = 99999;
+
 /**
  * 1070 para la Report por USB/Bluetooth con etiqueta por peso (ctx.weightBarcode): inicio pesable "21" + peso (1) +
  * inicio no pesable "20" + importe (0) + formato 5 (2-3-7). Los no pesables y las etiquetas viejas siguen "20" + importe,
@@ -306,6 +309,11 @@ export class KretzSession implements ScaleSession {
   private preflight(): PreflightResult {
     const limits = MODEL_LIMITS[this.model];
     if (!limits) return { ready: [], problems: [], warnings: [] };
+    // Por red (Report NX/NX2) la etiqueta lleva el código de 5 cifras (REPORT_NET_BARCODE_CONFIG, 2-5-5) y Mostrador
+    // lo lee así (KRETZ_PLU5_WEIGHT_CONFIG): el límite de 3 cifras del 2-3-7 no corre. REAL Oliem 25/11/2026: con ese
+    // límite, sus 24 productos por kilo con código 6000-6xxx (asado, vacío…) nunca se mandaban, y los que estaban
+    // cargados a mano en la balanza salían con código 0 y otro precio.
+    if (this.model === "kretz-report-lt" && this.diagnostic.red === true) return preflightProducts(this.ctx.products, { ...limits, labelMaxCode: REPORT_NET_LABEL_MAX_CODE });
     return preflightProducts(this.ctx.products, limits);
   }
 

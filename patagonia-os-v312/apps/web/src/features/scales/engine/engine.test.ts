@@ -754,6 +754,29 @@ describe("[SIMULADO] Report: formato de etiqueta de la balanza (real Lauda 18/11
     assert.equal(getReportLabelCode(), "01");
     assert.equal(prep.ready, 1);
   });
+
+  // REAL Oliem 25/11/2026 (Report NX por red): ASADO 6000 y VACIO 6001 se salteaban por "más de 3 cifras", y en la
+  // balanza quedaban los cargados a mano (código 0 en la etiqueta, $2.000 y $4.500 en vez de $22.000 y $24.500).
+  const asado = { id: "s", code: "6000", name: "ASADO", unit: "kg" as const, priceRetail: 22000 };
+  it("por red la etiqueta lleva 5 cifras: un producto con código 6000 se manda", async () => {
+    const { io: x, scale } = io([{ plu: 3, name: "ASADO", label: "01" }]);
+    scale.set("6000", { ...expectedReportProduct(asado), price: 2000, code: 0 });
+    const s = new KretzSession("kretz-report-lt", ctx([vacio, asado]), "datos", x, { red: true });
+    const prep = await s.prepare(noop);
+    assert.deepEqual(prep.skipped, []);
+    assert.equal(prep.writes, 1, "el ASADO cargado a mano ($2.000, código 0) se reemplaza por el de Patagonia");
+    const out = await s.sync(prep, noop);
+    assert.equal(out.verified, 1);
+    assert.equal(scale.get("6000")?.price, 22000);
+    assert.equal(scale.get("6000")?.code, 6000);
+  });
+
+  it("por USB (etiqueta 2-3-7) el código 6000 sigue sin mandarse, con el motivo", async () => {
+    const { io: x } = io([{ plu: 3, name: "ASADO", label: "01" }]);
+    const prep = await new KretzSession("kretz-report-lt", ctx([vacio, asado]), "datos", x).prepare(noop);
+    assert.equal(prep.skipped?.length, 1);
+    assert.match(prep.skipped![0].reason, /más de 3 cifras/);
+  });
 });
 
 describe("[SIMULADO, REAL GRANJAVIER 22/11/2026] Systel: un código más alto que la capacidad de la balanza no frena el envío", () => {
