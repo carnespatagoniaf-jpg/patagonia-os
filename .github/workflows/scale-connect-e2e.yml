@@ -159,6 +159,14 @@ jobs:
           $body = "csrf=$([uri]::EscapeDataString($csrf))&code=$([uri]::EscapeDataString($code))&name=$([uri]::EscapeDataString($name))"
           $r = Invoke-WebRequest -Method Post -Uri 'http://127.0.0.1:9120/vincular' -Headers @{ Origin = 'http://127.0.0.1:9120' } -ContentType 'application/x-www-form-urlencoded' -Body $body -UseBasicParsing
           Save-Evidence 'vincular-respuesta.html' $r.Content
+          if ($r.Content -match 'name="force_new"') {
+            # La nube ya vio esta huella (nombre del equipo + MachineGuid): las máquinas de Actions salen de la misma
+            # imagen, como una PC clonada en un local. La página pregunta "¿Es Caja 1?"; esta es otra PC: "No, es otra".
+            Assert-Check 'Vinculación' 'Huella ya conocida: pregunta si es la misma PC' $true 'imagen clonada (mismo MachineGuid que otra corrida)'
+            $body = "csrf=$([uri]::EscapeDataString($csrf))&code=$([uri]::EscapeDataString($code))&force_new=1&name=$([uri]::EscapeDataString($name))"
+            $r = Invoke-WebRequest -Method Post -Uri 'http://127.0.0.1:9120/vincular' -Headers @{ Origin = 'http://127.0.0.1:9120' } -ContentType 'application/x-www-form-urlencoded' -Body $body -UseBasicParsing
+            Save-Evidence 'vincular-respuesta-2.html' $r.Content
+          }
           Assert-Check 'Vinculación' 'Vinculada con el código' ($r.StatusCode -eq 200 -and $r.Content -match 'quedó vinculada') "como `"$name`""
           $secs = Wait-Until { $s = Get-Status; $s.cloud.paired -and $s.cloud.state -eq 'en_linea' } 120 'en línea con staging'
           $s = Get-Status
