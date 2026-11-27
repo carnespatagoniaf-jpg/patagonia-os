@@ -15,7 +15,7 @@ import { listProductCategories, type ProductCategory } from "../inventory/produc
 import { useTreasury } from "../shifts/useTreasury";
 import { useSuppliers } from "../purchases/useSuppliers";
 import { useEmployees } from "../employees/useEmployees";
-import { EmployeeValeCheckout, type MerchandiseValeDone } from "./EmployeeValeCheckout";
+import { EmployeeValePanel, type MerchandiseValeDone } from "./EmployeeValeCheckout";
 import { valeReceiptDetail } from "./merchandise-vale";
 import { deletePosShiftOutflow, getEmployeeDiscount, listPosShiftVales, type PosShiftVale } from "../employees/employees-service";
 import { createPosSale, noteOfflineSaleMoved, type CreatePosSaleInput } from "./sale-service";
@@ -65,6 +65,8 @@ export function Sale() {
   const { employees } = useEmployees();
   // Descuento para empleados en los vales de mercadería (migración 215).
   const [employeeDiscount, setEmployeeDiscountState] = useState(0);
+  /** Forma de pago "Empleado (vale)" elegida: el panel del vale reemplaza al cobro. */
+  const [valeMode, setValeMode] = useState(false);
   useEffect(() => {
     if (!profile?.company_id || !isSupabaseConfigured) return;
     void getEmployeeDiscount(profile.company_id).then(setEmployeeDiscountState);
@@ -217,6 +219,17 @@ export function Sale() {
   useEffect(() => {
     if (chargingOrder && ticket.cart.length === 0 && !busy) setChargingOrder(null);
   }, [ticket.cart.length, chargingOrder, busy]);
+  // Ticket vacío (cobrado, cancelado o vale dado): vuelve a las formas de pago de siempre.
+  useEffect(() => {
+    if (ticket.cart.length === 0) setValeMode(false);
+  }, [ticket.cart.length]);
+  // F1..F9 eligen un medio de pago (useSaleTicket): si estaba "Empleado (vale)", se vuelve a cobrar con ese medio.
+  useEffect(() => {
+    if (!valeMode) return;
+    const onKey = (e: KeyboardEvent) => { if (/^F[1-9]$/.test(e.key)) setValeMode(false); };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [valeMode]);
   const {
     cart,
     itemDiscounts,
@@ -508,6 +521,7 @@ export function Sale() {
    * si corresponde, lo imprime solo. */
   /** Vale de mercadería (migración 215): el ticket no se cobra, se lo lleva un empleado. Papelito para que firme. */
   async function giveMerchandiseVale(done: MerchandiseValeDone) {
+    setValeMode(false);
     clearTicket();
     setMessage(`Vale de mercadería de ${done.employeeName} por ${formatMoney(done.amount)}: bajó el stock y se le descuenta del sueldo. No entró plata a la caja.`);
     await publishMovementReceipt({
@@ -1360,17 +1374,23 @@ Cancelar = es el mismo papel: no cobrar.`)) {
                 </>
               ) : null
             }
-            valeSlot={
-              planAllows(profile, "estandar") && shift && cart.length > 0 ? (
-                <EmployeeValeCheckout
-                  cart={cart}
-                  employees={employees}
-                  shiftId={shift.id}
-                  discountPct={employeeDiscount}
-                  disabled={busy}
-                  onDone={giveMerchandiseVale}
-                />
-              ) : null
+            vale={
+              planAllows(profile, "estandar") && shift && employees.some((e) => e.active !== false)
+                ? {
+                    active: valeMode,
+                    onToggle: setValeMode,
+                    panel: (
+                      <EmployeeValePanel
+                        cart={cart}
+                        employees={employees}
+                        shiftId={shift.id}
+                        discountPct={employeeDiscount}
+                        disabled={busy}
+                        onDone={giveMerchandiseVale}
+                      />
+                    )
+                  }
+                : undefined
             }
             invoiceSlot={
               fiscal?.enabled && cart.length > 0 ? (
