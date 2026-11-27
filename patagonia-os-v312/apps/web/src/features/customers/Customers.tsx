@@ -41,6 +41,7 @@ import { chargeScanFromChoice, resolveChargeScan, type ChargeScan } from "./char
 import { ScaleLabelChoice } from "../sale/ScaleLabelChoice";
 import type { LabelChoiceOption } from "../sale/scale-label-choice";
 import { loadScaleSetups, type ScaleSetup } from "../scales/sale/scale-sale-service";
+import { useScaleLabelProfiles } from "../scales/useScaleLabelProfiles";
 
 /** Valor del selector "Entra a…" para cobrar con cheque (migración 150). */
 const CHEQUE_OPTION = "__cheque";
@@ -253,7 +254,7 @@ export function Customers() {
     const raw = chargeSearch.trim();
     if (!raw) return;
     setChargeLabelChoice(null);
-    const scan = resolveChargeScan(raw, products, scaleConfig, boxFormats, { calibrated: scaleCalibrated, setups: scaleSetups, zoneListId: branchZone?.id ?? null, configStatus: scaleConfigStatus });
+    const scan = resolveChargeScan(raw, products, scaleConfig, boxFormats, { calibrated: scaleCalibrated, setups: scaleSetups, zoneListId: branchZone?.id ?? null, configStatus: scaleConfigStatus, labelProfiles });
     applyChargeScan(scan);
   }
 
@@ -342,6 +343,8 @@ export function Customers() {
   const [message, setMessage] = useState("");
   const [pdfBusy, setPdfBusy] = useState(false);
   const { profile } = useAuth();
+  // 'balanzas_v2': el mismo lector por balanza que Mostrador (perfiles de cada balanza, con copia en esta PC).
+  const labelProfiles = useScaleLabelProfiles(branchId ?? null, Boolean(profile?.features?.includes("balanzas_v2")));
   // Remito R con CAI (migración 147): plan Full y un CAI cargado en Facturas.
   const remitoR = useRemitoREnabled(planAllows(profile, "full"));
   const salesDetail = Boolean(profile?.features?.includes("ventas_detalle"));

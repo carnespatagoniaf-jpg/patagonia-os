@@ -159,7 +159,8 @@ function restoreData(layout: SystelLayout, read: string, mode: TypeByteMode): st
 }
 
 /** `templates`: modelos para armar productos nuevos cuando la balanza no tiene ninguno (systel-empty-template.ts). */
-export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDecimals: number, products: PushProduct[], opts: { replace?: boolean; mode?: TypeByteMode; templates?: SystelPlu[]; pluCapacity?: number } = {}): PushItem[] {
+/** `ticketCodes` ('balanzas_v2'): el código propio de ESTA balanza (su inicio); sin esto, 20PPPPCCCCCC / 21PPPPCCCCCC. */
+export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDecimals: number, products: PushProduct[], opts: { replace?: boolean; mode?: TypeByteMode; templates?: SystelPlu[]; pluCapacity?: number; ticketCodes?: { weighed: string; unit: string } } = {}): PushItem[] {
   const info = LAYOUT_INFO[layout];
   // El número más alto que acepta ESTA balanza (topPluNumber en systel.ts: firma "P08000" de una Max 6.0); 0 = el del formato.
   const top = Math.min(info.maxPlu, info.maxCode, (opts.pluCapacity ?? 0) > 0 ? opts.pluCapacity! : Infinity);
@@ -184,7 +185,7 @@ export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDec
       return { ...base, number, action: "omitir", reason: `precio fuera de lo que admite la balanza (máximo ${priceDecimals === 2 ? "$9.999,99" : "$999.999"})` };
     }
     const cur = byNumber.get(number) ?? null;
-    const target = targetCodeFor(product.byWeight ? "P" : "U")!;
+    const target = opts.ticketCodes ? (product.byWeight ? opts.ticketCodes.weighed : opts.ticketCodes.unit) : targetCodeFor(product.byWeight ? "P" : "U")!;
     const template = cur ? null : (models.find((p) => (p.saleType === "P" || p.saleType === "C") === product.byWeight) ?? models[0])?.raw ?? null;
     const fresh = !cur || !namesEquivalent(cur.name, product.name);
     const read = desiredRead(layout, number, product, priceRaw, cur?.raw ?? null, template, fresh);

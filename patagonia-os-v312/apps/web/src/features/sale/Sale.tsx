@@ -32,6 +32,7 @@ import { notifyOrdersChanged } from "../orders/useOrdersToday";
 import { buildTestTicket, getThermalPrintSettings, isThermalPrinterPaired, printBytes } from "./thermal-printer";
 import { pingPrintAgent } from "./printer-agent";
 import { DEFAULT_SCALE_CONFIG, getBranchScaleConfig, type ScaleConfig } from "./scale-config-service";
+import { useScaleLabelProfiles } from "../scales/useScaleLabelProfiles";
 import { CloseSummaryView, MovementReceiptView, ReceiptView } from "./SaleReceipts";
 import { ShiftPanel } from "./ShiftPanel";
 import { SaleConfigPanel } from "./SaleConfigPanel";
@@ -191,7 +192,9 @@ export function Sale() {
       cancelled = true;
     };
   }, [branchId]);
-  const ticket = useSaleTicket({ products, categories, scaleConfig, scaleCalibrated: scaleConfigCalibrated, scaleConfigStatus, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot: SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? ""), scaleBranchId: branchId ?? null, zoneListId, boxLabels: Boolean(profile?.features?.includes("etiquetas_caja")), freezer: Boolean(profile?.features?.includes("freezer")) });
+  // 'balanzas_v2': cada etiqueta se le pregunta a cada balanza de la sucursal (perfiles, con copia en esta PC).
+  const labelProfiles = useScaleLabelProfiles(branchId ?? null, Boolean(profile?.features?.includes("balanzas_v2")));
+  const ticket = useSaleTicket({ products, categories, scaleConfig, scaleCalibrated: scaleConfigCalibrated, scaleConfigStatus, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot: SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? ""), scaleBranchId: branchId ?? null, zoneListId, boxLabels: Boolean(profile?.features?.includes("etiquetas_caja")), freezer: Boolean(profile?.features?.includes("freezer")), labelProfiles });
 
   // Pedido que se cobra (Pedidos → "Cobrar en Mostrador", migración 196): se cargan sus productos una sola vez, con la
   // lista de productos ya cargada, y al cobrar queda entregado.

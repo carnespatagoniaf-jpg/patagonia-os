@@ -1,6 +1,8 @@
 import { parseAuraPlu } from "../../../inventory/kretz/aura-plu";
 import { AURA_BARCODE_CONFIG, AURA_BARCODE_CONFIG_22, AURA_ITEM_SCALE_CONFIG, auraMaySetBranchConfig, planAuraSync, summarizeAuraPlan, type AuraSyncItem } from "../../../inventory/kretz/aura-sync";
 import { AURA_PREFIX_22_BRANCHES } from "../weight-barcode";
+import { kretz1070ForSpec, readKey, specFromKretz1070, specPrefixes, type LabelSpec } from "../../label-spec";
+import type { PrefixAllocation } from "../../label-spec-service";
 import { getStoredModelId, saveModelId } from "../../../inventory/kretz/models";
 import { isNetPort } from "../../../inventory/kretz/net-port";
 import { KRETZ_PLU5_WEIGHT_CONFIG } from "../../../sale/scan-resolve";
@@ -63,7 +65,17 @@ export interface KretzIO {
   setLabelCode?: (code: string) => void;
   /** Report: cierra el puerto al terminar (C21); `forget` = además olvidarlo (fin de la sesión). */
   releasePort?: (options?: { forget?: boolean }) => Promise<void>;
+  /** 'balanzas_v2': inicio propio de ESTA balanza (la que ya tiene el suyo lo conserva). Sin esto, no se asigna. */
+  allocatePrefix?: (branchId: string, scaleKey: string) => Promise<PrefixAllocation | null>;
+  /** 'balanzas_v2': guarda el perfil de ESTA balanza (la base rechaza un inicio que usa otra del local). */
+  saveLabelSpec?: (branchId: string, scaleKey: string, spec: LabelSpec) => Promise<unknown>;
 }
+
+/** 'balanzas_v2': no se cambió cómo imprime las etiquetas esta balanza (inicio ocupado, sin conexión, Report por red). */
+export const LABEL_SPEC_PROTECTED = "Los productos quedaron bien en la balanza, pero no se cambió cómo imprime las etiquetas (su perfil de etiqueta no se pudo guardar). Avisamos a soporte.";
+
+/** 'balanzas_v2', Aura: no se mandó nada porque su perfil de etiqueta no se pudo guardar. */
+export const LABEL_SPEC_NOT_SENT = "No se mandó nada a la balanza: no se pudo guardar cómo imprime sus etiquetas (su perfil de etiqueta). Avisamos a soporte.";
 
 export const KRETZ_IO: KretzIO = {
   diagnose: diagnoseScaleLink,
@@ -124,6 +136,8 @@ export class KretzSession implements ScaleSession {
   private state: ReportState | AuraState | null = null;
   /** C1: el formato de la sucursal no se cambió porque el local tiene otra balanza (dato para soporte). */
   private protectedConfig: Record<string, unknown> | null = null;
+  /** 'balanzas_v2': el 1070 que corresponde a esta balanza (después de asignarle el inicio). */
+  private v2Code: string | null = null;
 
   constructor(
     readonly model: ScaleModelId,
@@ -268,7 +282,13 @@ export class KretzSession implements ScaleSession {
     if (!st || !prepared.canWrite || prepared.blocker) throw new Error("primero hay que leer la balanza");
     if (st.kind === "aura") {
       const plan = opts.allowReplace ? planAuraSync(st.records, st.products, { replaceConflicts: true }) : st.plan;
-      const r = await this.io.runAuraSync(plan, (t) => onProgress("sincronizar", "Mandando tus productos a la balanza…", ...progressNumbers(t)), () => false, true, this.auraBarcodeConfig() === AURA_BARCODE_CONFIG_22 ? AURA_BARCODE_CONFIG_22 : undefined);
+      // 'balanzas_v2': primero el perfil de ESTA Aura (inicio propio), después el 1070 de ese perfil.
+      if (this.ctx.balanzasV2) {
+        const v2 = await this.v2Barcode();
+        if (!v2.ok) return { ok: false, verified: 0, message: LABEL_SPEC_NOT_SENT, pending: prepared.pending, support: v2.support };
+      }
+      const barcodeConfig = this.ctx.balanzasV2 ? this.v2Code! : this.auraBarcodeConfig() === AURA_BARCODE_CONFIG_22 ? AURA_BARCODE_CONFIG_22 : undefined;
+      const r = await this.io.runAuraSync(plan, (t) => onProgress("sincronizar", "Mandando tus productos a la balanza…", ...progressNumbers(t)), () => false, true, barcodeConfig);
       if (r.verdict !== "ok") {
         const at = r.stoppedAt;
         const product = at ? st.products.find((p) => Number(p.code) === at.plu) : undefined;
@@ -288,7 +308,8 @@ export class KretzSession implements ScaleSession {
       }
       markBarcodeConfigured(this.auraBarcodeKey());
       let protectedSupport: Record<string, unknown> | null = null;
-      if (this.ctx.online && this.ctx.branchId && this.io.saveItemConfig && this.io.loadBranchConfig) {
+      // Con 'balanzas_v2' el formato de la sucursal no se toca nunca: Mostrador lee el perfil de cada balanza.
+      if (!this.ctx.balanzasV2 && this.ctx.online && this.ctx.branchId && this.io.saveItemConfig && this.io.loadBranchConfig) {
         try {
           const existing = await this.io.loadBranchConfig(this.ctx.branchId);
           if (auraMaySetBranchConfig(existing)) {
@@ -348,7 +369,8 @@ export class KretzSession implements ScaleSession {
       return { ok: false, verified, message: failedMessage(verified, failures.length), pending: prepared.pending, failures, support };
     }
     if (barcode === "protegido") {
-      return { ok: false, verified, message: `Los productos quedaron bien en la balanza. ${BRANCH_CONFIG_PROTECTED}`, pending: opts.allowReplace ? [] : prepared.pending, support };
+      const message = this.ctx.balanzasV2 ? LABEL_SPEC_PROTECTED : `Los productos quedaron bien en la balanza. ${BRANCH_CONFIG_PROTECTED}`;
+      return { ok: false, verified, message, pending: opts.allowReplace ? [] : prepared.pending, support };
     }
     if (barcode !== "ok") {
       return { ok: false, verified, message: BARCODE_FAILED, pending: prepared.pending, support };
@@ -361,6 +383,7 @@ export class KretzSession implements ScaleSession {
   private async configureBarcode(onProgress: ProgressFn): Promise<"ok" | "rechazada" | "sin_respuesta" | "error" | "protegido"> {
     if (!this.io.configureReportBarcode) return "ok";
     onProgress("sincronizar", "Configurando el código de barras de las etiquetas…");
+    if (this.ctx.balanzasV2) return this.configureBarcodeV2();
     try {
       // Por red (Report NX/NX2): el formato que traía la balanza (21 + producto de 5 + peso). Con el 2-3-7 la NX2 de
       // Lauda dejó de imprimir el código de barras (real 18/11). Por USB/Bluetooth (Report LT) sigue el 2-3-7, salvo las
@@ -388,6 +411,63 @@ export class KretzSession implements ScaleSession {
     }
   }
 
+  /** 'balanzas_v2': el 1070 del perfil de ESTA balanza; nunca el formato de la sucursal. */
+  private async configureBarcodeV2(): Promise<"ok" | "rechazada" | "sin_respuesta" | "error" | "protegido"> {
+    try {
+      const v2 = await this.v2Barcode();
+      if (!v2.ok) {
+        this.protectedConfig = v2.support;
+        return "protegido";
+      }
+      const r = await this.io.configureReportBarcode!(v2.code);
+      if (r === "ok") markBarcodeConfigured(this.barcodeKey());
+      return r;
+    } catch {
+      return "error";
+    }
+  }
+
+  /**
+   * 'balanzas_v2': perfil de ESTA balanza y su 1070. Primero el inicio (allocate_scale_prefix: si el suyo lo usa otra
+   * balanza del local, recibe uno libre); después, si el 1070 que se va a mandar no es el del perfil guardado (perfil
+   * cargado de la sucursal, o Report sin 1070 elegido), se guarda el perfil de ese 1070 ANTES de mandarlo (el anterior
+   * queda vigente 7 días). Si algo de eso no se puede, no se manda nada.
+   */
+  private async v2Barcode(): Promise<{ ok: true; code: string } | { ok: false; support: Record<string, unknown> }> {
+    if (this.v2Code) return { ok: true, code: this.v2Code };
+    const ctx = this.ctx;
+    const fail = (motivo: string, extra: Record<string, unknown> = {}) => ({ ok: false as const, support: { etapa: "perfil_etiqueta_protegido", motivo, ...extra } });
+    let spec = ctx.labelSpec ?? null;
+    const online = ctx.online && !!ctx.branchId && !!ctx.scaleKey;
+    if (online && this.io.allocatePrefix) {
+      try {
+        const a = await this.io.allocatePrefix(ctx.branchId!, ctx.scaleKey!);
+        if (a) spec = a.spec;
+      } catch (err) {
+        return fail("no se pudo asignar el inicio de etiqueta", { detalle: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    const aura = this.model === "kretz-aura";
+    const net = this.diagnostic.red === true;
+    // Sin 1070 en el perfil (Report cargada desde la sucursal): el de hoy según la conexión.
+    const code = (spec && kretz1070ForSpec(spec)) ?? (aura ? AURA_BARCODE_CONFIG : net ? REPORT_NET_BARCODE_CONFIG : AURA_BARCODE_CONFIG);
+    const target = specFromKretz1070(code);
+    if (!target) return fail("1070 sin lectura conocida", { codigo: code });
+    // Report por red con el 2-3-7: la NX2 de Lauda dejó de imprimir el código de barras (real 18/11). No sin probarlo.
+    if (net && !aura && target.layout.code !== 5) return fail("Report por red con un perfil 2-3-7 (sin probar por red)", { codigo: code });
+    const same = !!spec && readKey(spec) === readKey(target) && kretz1070ForSpec(spec) === code && specPrefixes(spec).join() === specPrefixes(target).join();
+    if (!same) {
+      if (!online || !this.io.saveLabelSpec) return fail("sin conexión para guardar el perfil de la balanza", { codigo: code });
+      try {
+        await this.io.saveLabelSpec(ctx.branchId!, ctx.scaleKey!, target);
+      } catch (err) {
+        return fail("no se pudo guardar el perfil de la balanza", { codigo: code, detalle: err instanceof Error ? err.message : String(err) });
+      }
+    }
+    this.v2Code = code;
+    return { ok: true, code };
+  }
+
   /**
    * C1: ¿se puede guardar `next` como formato de etiqueta de la sucursal? Lista de balanzas: la del contexto, o la de la
    * base (si no se puede leer, no se guarda). Sin forma de pedirla (pruebas, demo) se guarda como antes.
@@ -409,6 +489,11 @@ export class KretzSession implements ScaleSession {
 
   /** Etiqueta "21" + producto de 5 + peso: la Report por red, o una por USB de una empresa que imprime igual (Oliem). */
   private plu5(): boolean {
+    // 'balanzas_v2': lo dice el perfil de la balanza (2-5-5), no una lista de empresas.
+    if (this.ctx.balanzasV2) {
+      const code = this.ctx.labelSpec ? kretz1070ForSpec(this.ctx.labelSpec) : null;
+      return code ? code.endsWith("1") : this.diagnostic.red === true;
+    }
     return this.diagnostic.red === true || this.ctx.plu5Barcode === true;
   }
 
@@ -426,6 +511,7 @@ export class KretzSession implements ScaleSession {
 
   /** Formato del código de barras (1070) que recibe esta Aura: con inicio 22 en los locales que lo tienen. */
   private auraBarcodeConfig(): string {
+    if (this.ctx.balanzasV2) return this.v2Code ?? (this.ctx.labelSpec && kretz1070ForSpec(this.ctx.labelSpec)) ?? AURA_BARCODE_CONFIG;
     return this.ctx.branchId && AURA_PREFIX_22_BRANCHES.has(this.ctx.branchId) ? AURA_BARCODE_CONFIG_22 : AURA_BARCODE_CONFIG;
   }
 
@@ -438,6 +524,7 @@ export class KretzSession implements ScaleSession {
   private barcodeKey(): string {
     const id = this.identity();
     // Por red se marca aparte: así una NX que ya recibió el 2-3-7 vuelve a recibir su formato.
+    if (this.ctx.balanzasV2) return `${this.ctx.scaleKey ?? ""}|${String(id.letter ?? "")}${String(id.equipment ?? "")}|v2:${this.v2Code ?? (this.ctx.labelSpec && kretz1070ForSpec(this.ctx.labelSpec)) ?? ""}`;
     return `${this.ctx.scaleKey ?? ""}|${String(id.letter ?? "")}${String(id.equipment ?? "")}${this.plu5() ? `|${REPORT_NET_BARCODE_CONFIG}` : this.ctx.weightBarcode ? `|${REPORT_WEIGHT_BARCODE_CONFIG}` : this.ctx.pesosBarcode ? `|${REPORT_PESOS_BARCODE_CONFIG}` : ""}`;
   }
 

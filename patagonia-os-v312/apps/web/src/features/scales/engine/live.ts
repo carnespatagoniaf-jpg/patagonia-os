@@ -3,6 +3,7 @@ import { listBranchScaleRefs } from "../../inventory/kretz/branch-scale-guard-se
 import type { ScaleConfig } from "../../sale/scale-barcode";
 import { getBranchScaleConfig, saveBranchScaleConfig } from "../../sale/scale-config-service";
 import { KRETZ_IO, makeKretzAdapter } from "./adapters/kretz";
+import { allocateScalePrefix, saveScaleLabelSpec } from "../label-spec-service";
 import { systelAdapter } from "./adapters/systel-live";
 import { searchPlan, type ScaleChoice } from "./choice";
 import type { ScaleAdapter } from "./types";
@@ -10,7 +11,8 @@ import type { ScaleAdapter } from "./types";
 /** Kretz con la base real: al sincronizar una Aura, Mostrador queda leyendo sus códigos por producto (Pre-Empaque). */
 const kretzSaveItemConfig = (branchId: string, config: ScaleConfig = AURA_ITEM_SCALE_CONFIG) => saveBranchScaleConfig(branchId, config);
 // Con las balanzas de la sucursal: si hay más de una, el formato de etiqueta solo se cambia si queda igual (C1).
-const KRETZ_LIVE_IO = { ...KRETZ_IO, saveItemConfig: kretzSaveItemConfig, loadBranchConfig: getBranchScaleConfig, listBranchScales: listBranchScaleRefs };
+// 'balanzas_v2': el inicio y el perfil de etiqueta de cada balanza (migración 222).
+const KRETZ_LIVE_IO = { ...KRETZ_IO, saveItemConfig: kretzSaveItemConfig, loadBranchConfig: getBranchScaleConfig, listBranchScales: listBranchScaleRefs, allocatePrefix: allocateScalePrefix, saveLabelSpec: saveScaleLabelSpec };
 const kretzAdapter = makeKretzAdapter(KRETZ_LIVE_IO);
 
 /** Las marcas que conoce "Mi balanza", con la base real. Agregar una marca = un adaptador más acá. */

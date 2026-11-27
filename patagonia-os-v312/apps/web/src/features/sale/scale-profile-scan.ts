@@ -48,7 +48,7 @@ function cobrables(r: ScanResolution): ScanChoice[] {
 }
 
 function sameChoice(a: ScanChoice, b: ScanChoice): boolean {
-  if (a.type === "ticket_total" || b.type === "ticket_total") return a.type === b.type && Math.abs(a.amount - (b as typeof a).amount) < 0.005;
+  if (a.type === "ticket_total" || b.type === "ticket_total") return a.type === "ticket_total" && b.type === "ticket_total" && Math.abs(a.amount - b.amount) < 0.005;
   return a.product.id === b.product.id && Math.abs(a.quantity - b.quantity) < SAME_KG && (a.amount ?? null) === (b.amount ?? null);
 }
 
