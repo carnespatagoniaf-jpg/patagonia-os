@@ -361,7 +361,7 @@ export class SystelSession implements ScaleSession {
       const dec = backup.signature?.priceDecimals ?? 0;
       saveSystelPluBarcodes(
         Object.fromEntries(backup.plus.map((p) => {
-          const ean = pluEanSetting(p.raw);
+          const ean = pluEanSetting(p.raw, backup.layout ?? undefined);
           return [String(p.code), { type: ean.type, config: ean.config, p1: rawToPesos(p.prices[0] ?? 0, dec), p2: rawToPesos(p.prices[1] ?? 0, dec), name: p.name.trim(), saleType: p.saleType }];
         })),
         true

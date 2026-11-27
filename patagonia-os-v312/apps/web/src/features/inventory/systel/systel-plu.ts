@@ -302,7 +302,10 @@ export interface PluEan {
  * REAL (Los gringos, 14/10): PLU 2 → tipo byte 0x01 (no el carácter "1") + "000000000000" (por eso el ticket
  * imprime "0 000000 000000"); PLU 13 → 0x01 + "20PPPPCCCCCC" (su propio formato, distinto del general).
  */
-export function pluEanSetting(raw: string): PluEan {
+export function pluEanSetting(raw: string, layout?: SystelLayout): PluEan {
+  // E14: la Cuora 2 no tiene código de barras por producto (V4.0: después de la tara solo vienen los ingredientes):
+  // siempre imprime con el formato general. Leer "el tipo" ahí agarraba el primer dígito del sector (sector ≥ 40 = null).
+  if (layout === "cuora2") return { type: 0, config: null };
   let end = raw.length;
   if (raw[end - 1] === "N") end -= 1;
   else if (raw.length >= 101 && raw[raw.length - 101] === "S") end -= 101;

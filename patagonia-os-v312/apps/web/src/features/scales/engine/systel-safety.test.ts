@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { installFakeLocalStorage } from "../test-fake-storage";
 import { FakeCuora, fakeReadRecord } from "../../inventory/systel/systel-fake";
 import { SystelClient } from "../../inventory/systel/systel-client";
-import { parsePluAs } from "../../inventory/systel/systel-plu";
+import { parsePluAs, pluEanSetting } from "../../inventory/systel/systel-plu";
+import { takeProductBackup, verifyBackup } from "../../inventory/systel/systel-product-barcode";
 import { SerialSystelLink } from "../../inventory/systel/systel-serial";
 import { ensureSystelSectors, planSystelPush, runSystelPush } from "./adapters/systel-push";
 import { loadProductBackupLocally, loadWriteProof, saveProductBackupLocally, saveWriteProof, SystelSession, type SystelDeps } from "./adapters/systel";
@@ -422,5 +423,34 @@ describe("E12: al reabrir el puerto después de un corte se vuelven a poner las 
     await link.exchange(Uint8Array.from([20, 2, 22]), { timeoutMs: 30 });
     assert.deepEqual(port.log.filter((l) => l.startsWith("tx")), ["tx 20/2"]);
     await link.close();
+  });
+});
+
+describe("E14: Cuora 2 con sector 40 o más (no tiene código de barras por producto)", () => {
+  // Registro REAL de La cosa es con carne (17/11) con el sector cambiado a 45.
+  const BOLA = "00171bola lomo         02050000000000017450000P000000N";
+
+  it("el código de barras de un producto de Cuora 2 es siempre el general (tipo 0), sea cual sea el sector", () => {
+    assert.deepEqual(pluEanSetting(BOLA, "cuora2"), { type: 0, config: null });
+  });
+
+  it("el respaldo de productos no lo marca como faltante", async () => {
+    const f = new FakeCuora("cuora2", { address: 20, protocol: "0040", capacity: 4000 });
+    f.plus.set(17, BOLA);
+    const { backup, missing } = await takeProductBackup(new SystelClient(f, { address: 20, busyRetryMs: [] }), "cuora2", [17]);
+    assert.deepEqual(missing, []);
+    assert.equal(backup.records.length, 1);
+    assert.equal(verifyBackup(backup).ok, true);
+  });
+
+  it("el envío ya no frena como 'no contesta': cambia el precio y lo relee", async () => {
+    const f = new FakeCuora("cuora2", { address: 20, protocol: "0040", capacity: 4000 });
+    f.plus.set(17, BOLA);
+    const { deps } = fakeDb();
+    const s = new SystelSession(f, 20, ctx([P("p17", "17", "BOLA LOMO", "kg", 21000)]), deps);
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, true, out.message);
+    assert.equal(parsePluAs("cuora2", f.plus.get(17)!)!.prices[0], 21000);
+    assert.equal(parsePluAs("cuora2", f.plus.get(17)!)!.sector, 45, "el sector no se toca");
   });
 });
