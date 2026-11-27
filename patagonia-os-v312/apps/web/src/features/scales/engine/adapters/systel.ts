@@ -16,6 +16,7 @@ import { ensureSystelSectors, planSystelPush, PROOF_NAME, proveSystelWrite, runS
 import type { TypeByteMode } from "../../../inventory/systel/systel-product-barcode";
 import type { SystelPlu } from "../../../inventory/systel/systel-plu";
 import { EMPTY_SCALE_MESSAGE, emptyScaleTemplates } from "./systel-empty-template";
+import { readSystelScoped, systelScopedKey, writeSystelScoped } from "../../../inventory/systel/systel-local-keys";
 
 /**
  * Systel (Cuora Max y familia), Patagonia → balanza. Reutiliza, sin cambiarlos:
@@ -83,23 +84,26 @@ function proofKey(b: Pick<SystelBackup, "signature" | "layout">, number: number)
   return `${b.signature?.protocolVersion ?? "?"}/${b.layout ?? "?"}/${number}`;
 }
 
-export function loadWriteProof(b: Pick<SystelBackup, "signature" | "layout">, number: number): TypeByteMode | null {
+function readProofs(key: string): Record<string, TypeByteMode> {
   try {
-    const all = JSON.parse(localStorage.getItem(WRITE_PROOF_KEY) ?? "{}") as Record<string, TypeByteMode>;
-    return all[proofKey(b, number)] ?? null;
+    return JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, TypeByteMode>;
   } catch {
-    return null;
+    return {};
   }
 }
 
-function saveWriteProof(b: Pick<SystelBackup, "signature" | "layout">, number: number, mode: TypeByteMode): void {
-  try {
-    const all = JSON.parse(localStorage.getItem(WRITE_PROOF_KEY) ?? "{}") as Record<string, TypeByteMode>;
-    all[proofKey(b, number)] = mode;
-    localStorage.setItem(WRITE_PROOF_KEY, JSON.stringify(all));
-  } catch {
-    // sin localStorage: la próxima vez se repite la prueba, sobre el mismo producto de prueba
-  }
+/** Por balanza (C24); una prueba guardada antes con la clave global de la PC se sigue respetando. */
+export function loadWriteProof(b: Pick<SystelBackup, "signature" | "layout">, number: number, scaleKey?: string): TypeByteMode | null {
+  const k = proofKey(b, number);
+  return readProofs(systelScopedKey(WRITE_PROOF_KEY, scaleKey))[k] ?? readProofs(WRITE_PROOF_KEY)[k] ?? null;
+}
+
+export function saveWriteProof(b: Pick<SystelBackup, "signature" | "layout">, number: number, mode: TypeByteMode, scaleKey?: string): void {
+  const key = systelScopedKey(WRITE_PROOF_KEY, scaleKey);
+  const all = readProofs(key);
+  all[proofKey(b, number)] = mode;
+  // sin localStorage: la próxima vez se repite la prueba, sobre el mismo producto de prueba
+  writeSystelScoped(WRITE_PROOF_KEY, scaleKey, JSON.stringify(all));
 }
 
 export interface SystelDeps {
@@ -107,7 +111,8 @@ export interface SystelDeps {
   saveCatalog: (branchId: string, profile: Omit<ScaleSaleProfile, "catalog"> & { model?: string }, catalog: ScaleCatalogItem[]) => Promise<unknown>;
   setLinks: (branchId: string, scaleKey: string, links: ScaleLink[]) => Promise<unknown>;
   setActive: (branchId: string, scaleKey: string, active: boolean) => Promise<unknown>;
-  saveLocalBackup: (backup: unknown) => void;
+  /** `scaleKey`: de qué balanza es la copia (cada Systel de la PC tiene la suya). */
+  saveLocalBackup: (backup: unknown, scaleKey?: string) => void;
   /** Solo laboratorio y pruebas: permite escribir aunque el envío de productos no esté comprobado en una balanza real. */
   forceWritable?: boolean;
   /** Guardar con la conexión de esta computadora las señales y el número con los que atendió la balanza. */
@@ -115,11 +120,18 @@ export interface SystelDeps {
 }
 
 /** Copia local del respaldo de productos (la misma que usa "Restaurar desde el respaldo" en el panel de soporte). */
-export function saveProductBackupLocally(backup: unknown): void {
+export function saveProductBackupLocally(backup: unknown, scaleKey?: string): void {
+  // sin localStorage: el respaldo igual va en el resultado para soporte
+  writeSystelScoped(PRODUCT_BACKUP_KEY, scaleKey, JSON.stringify(backup));
+}
+
+/** La copia de esa balanza; si no tiene, la que quedó con la clave global de antes (C24). */
+export function loadProductBackupLocally(scaleKey?: string): unknown {
+  const raw = readSystelScoped(PRODUCT_BACKUP_KEY, scaleKey);
   try {
-    localStorage.setItem(PRODUCT_BACKUP_KEY, JSON.stringify(backup));
+    return raw ? (JSON.parse(raw) as unknown) : null;
   } catch {
-    // sin localStorage: el respaldo igual va en el resultado para soporte
+    return null;
   }
 }
 
@@ -382,7 +394,7 @@ export class SystelSession implements ScaleSession {
     const extra = scaleOnly(backup.plus, this.pushProducts()).length;
     const notes: string[] = [];
     if (this.startupWaitOn) notes.push("La balanza está configurada para esperar a la PC cada vez que se prende. Al sincronizar, Patagonia además la deja en \"iniciar sin esperar\" (comando oficial de Systel, función 35) y lo comprueba releyendo su configuración.");
-    if (this.model === "systel-cuora-max" && !systelVerified(backup) && !loadWriteProof(backup, this.number)) {
+    if (this.model === "systel-cuora-max" && !systelVerified(backup) && !loadWriteProof(backup, this.number, this.scaleKey)) {
       notes.push(`Es la primera vez que Patagonia le manda productos a este modelo (${layout ? LAYOUT_INFO[layout].label : "Cuora Max"}). Antes de tocar tus productos, Patagonia crea un producto de prueba, "${PROOF_NAME}" a $1, en un número libre de la balanza, lo relee y lo compara. Si algo no coincide, frena sin tocar tus productos. Ese producto de prueba queda en la balanza: lo podés borrar desde la balanza.`);
     }
     if (!backup.complete) notes.push("No se pudo leer toda la balanza. Probá de nuevo; si sigue, avisá a soporte.");
@@ -445,15 +457,15 @@ export class SystelSession implements ScaleSession {
       onProgress("sincronizar", "Guardando una copia de tu balanza antes de cambiar nada…");
       const writer = this.client(true);
       // Firmware sin comprobar (6.2 / 7.0): primero la prueba en un número libre; sin ella no se toca nada del cliente.
-      let mode: TypeByteMode = systelVerified(st.backup) ? "ascii" : loadWriteProof(st.backup, this.number) ?? "ascii";
-      if (!systelVerified(st.backup) && !loadWriteProof(st.backup, this.number)) {
+      let mode: TypeByteMode = systelVerified(st.backup) ? "ascii" : loadWriteProof(st.backup, this.number, this.scaleKey) ?? "ascii";
+      if (!systelVerified(st.backup) && !loadWriteProof(st.backup, this.number, this.scaleKey)) {
         onProgress("sincronizar", "Probando tu balanza con un producto de prueba…");
         this.proof = await proveSystelWrite(writer, layout, st.backup.plus, st.backup.signature?.priceDecimals ?? 0, st.backup.signature?.pluCapacity ?? 0);
         if (!this.proof.ok || !this.proof.mode) {
           return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, support: { etapa: "prueba", prueba: this.proof } };
         }
         mode = this.proof.mode;
-        saveWriteProof(st.backup, this.number, mode);
+        saveWriteProof(st.backup, this.number, mode, this.scaleKey);
       }
       const modePlan = mode === "ascii" ? plan : planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: !!opts.allowReplace, mode, templates: st.templates, pluCapacity: topPluNumber(layout, st.backup.signature?.pluCapacity ?? 0) });
       // Balanza vacía: el sector de los modelos tiene que existir (si lo borraron, cada producto da E7).
@@ -466,7 +478,7 @@ export class SystelSession implements ScaleSession {
       if (existing.length) {
         const { backup, missing } = await takeProductBackup(writer, layout, existing);
         if (missing.length) return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.no_contesta, pending: prepared.pending, support: { etapa: "copia", missing } };
-        this.deps.saveLocalBackup(backup);
+        this.deps.saveLocalBackup(backup, this.scaleKey);
       }
       const r = await runSystelPush(writer, layout, modePlan, (d, t) => onProgress("sincronizar", "Mandando tus productos a la balanza…", d, t), mode);
       written = r.done;

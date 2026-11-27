@@ -5,7 +5,8 @@ import { FakeCuora, fakeReadRecord } from "../../inventory/systel/systel-fake";
 import { SystelClient } from "../../inventory/systel/systel-client";
 import { parsePluAs } from "../../inventory/systel/systel-plu";
 import { ensureSystelSectors, planSystelPush, runSystelPush } from "./adapters/systel-push";
-import { SystelSession, type SystelDeps } from "./adapters/systel";
+import { loadProductBackupLocally, loadWriteProof, saveProductBackupLocally, saveWriteProof, SystelSession, type SystelDeps } from "./adapters/systel";
+import { loadLocalBackup, saveBackupLocally, type SystelBackup } from "../../inventory/systel/systel-backup";
 import type { EngineContext, EngineProduct } from "./types";
 import type { ScaleLink } from "../sale/profile";
 
@@ -314,5 +315,56 @@ describe("C16: sectores y 'no esperar al encender' (35 N) se comprueban antes de
     assert.equal(out.ok, true, out.message);
     assert.doesNotMatch(out.message, /esperar a la PC/);
     assert.match(f.config!, /Sinc=0/);
+  });
+});
+
+describe("C24: respaldos y prueba de escritura, uno por balanza (3 Systel en la misma PC)", () => {
+  const SIG = { signature: { productType: "0001", capacityGrams: 31000, protocolVersion: "0070", pluCapacity: 3000, shortcuts: 60, priceDecimals: 0 }, layout: "max7" as const };
+
+  it("el respaldo de productos de una balanza no pisa el de otra", () => {
+    saveProductBackupLocally({ de: "A" }, "systel-a");
+    saveProductBackupLocally({ de: "B" }, "systel-b");
+    assert.deepEqual(loadProductBackupLocally("systel-a"), { de: "A" });
+    assert.deepEqual(loadProductBackupLocally("systel-b"), { de: "B" });
+  });
+
+  it("lo guardado antes con la clave global se sigue leyendo (no se pierde)", () => {
+    localStorage.setItem("patagonia-systel-product-backup", JSON.stringify({ viejo: true }));
+    assert.deepEqual(loadProductBackupLocally("systel-c"), { viejo: true });
+    saveProductBackupLocally({ nuevo: true }, "systel-c");
+    assert.deepEqual(loadProductBackupLocally("systel-c"), { nuevo: true });
+    assert.equal(localStorage.getItem("patagonia-systel-product-backup"), JSON.stringify({ viejo: true }), "la global no se toca");
+  });
+
+  it("la prueba de escritura de una balanza no habilita a otra del mismo modelo con el mismo número", () => {
+    saveWriteProof(SIG, 20, "binario", "systel-a");
+    assert.equal(loadWriteProof(SIG, 20, "systel-a"), "binario");
+    assert.equal(loadWriteProof(SIG, 20, "systel-b"), null);
+  });
+
+  it("una prueba vieja (clave global) se sigue respetando", () => {
+    localStorage.setItem("patagonia-systel-write-proof", JSON.stringify({ "0070/max7/20": "ascii" }));
+    assert.equal(loadWriteProof(SIG, 20, "systel-a"), "ascii");
+  });
+
+  it("el último respaldo completo (panel de soporte) también va por balanza, con la global como respaldo", () => {
+    const b = (n: number) => ({ takenAt: "", address: n, signature: null, ping: null, config: null, layout: null, list: [], plus: [], unreadable: [], complete: true, detail: "" }) as unknown as SystelBackup;
+    localStorage.setItem("patagonia-systel-last-backup", JSON.stringify(b(9)));
+    saveBackupLocally(b(1), "systel-a");
+    saveBackupLocally(b(2), "systel-b");
+    assert.equal(loadLocalBackup("systel-a")!.address, 1);
+    assert.equal(loadLocalBackup("systel-b")!.address, 2);
+    assert.equal(loadLocalBackup("systel-c")!.address, 9);
+  });
+
+  it("el envío guarda la copia de productos con la clave de ESA balanza", async () => {
+    const f = cuora();
+    const { deps } = fakeDb();
+    const keys: (string | undefined)[] = [];
+    deps.saveLocalBackup = (_b, key) => void keys.push(key);
+    const s = new SystelSession(f, 20, ctx([P("p4", "4", "POLLO ENTEROxKG", "kg", 5400)], "systel-b"), deps);
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, true, out.message);
+    assert.deepEqual(keys, ["systel-b"]);
   });
 });
