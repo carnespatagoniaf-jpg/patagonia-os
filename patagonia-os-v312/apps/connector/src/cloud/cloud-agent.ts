@@ -42,6 +42,13 @@ export interface CloudAgentOptions {
    * misma esperan en la cola de esa balanza). Por omisión, 4.
    */
   maxConcurrentJobs?: number;
+  /**
+   * true = no tomar trabajos nuevos (el actualizador va a instalar una versión nueva y espera a que no haya trabajos en
+   * curso; ver update/update-signals.ts). Los que ya corren terminan normalmente.
+   */
+  claimsPaused?: () => boolean | Promise<boolean>;
+  /** Cada cuánto se vuelve a mirar si sigue la pausa. */
+  pausePollMs?: number;
 }
 
 export interface PairInput {
@@ -289,6 +296,11 @@ export class CloudAgent {
       // Lleno: espera a que termine alguno antes de pedir otro.
       if (running.size >= this.maxConcurrentJobs) {
         await Promise.race(running);
+        continue;
+      }
+      // Pausa pedida por el actualizador: no se pide nada nuevo (lo encolado queda en la nube para después).
+      if (this.options.claimsPaused && (await Promise.resolve(this.options.claimsPaused()).catch(() => false))) {
+        await sleep(this.options.pausePollMs ?? 5_000, signal);
         continue;
       }
       const started = Date.now();

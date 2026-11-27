@@ -10,6 +10,7 @@ import { build } from "esbuild";
 import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { keyIdOf, loadPublicKey } from "./lib/update-manifest.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -33,6 +34,16 @@ const protocolSource = protocols.outputFiles[0].text;
 const forbidden = Object.keys(protocols.metafile.inputs).filter((f) => /node_modules|lib\/supabase|\.tsx$/.test(f));
 if (forbidden.length) throw new Error(`Los protocolos de la web arrastran código que no corre en el servicio: ${forbidden.join(", ")}`);
 
+// Si viene una clave, tiene que ser una pública Ed25519 válida: mejor frenar el build que publicar un programa que
+// nunca se va a poder actualizar.
+const updatePublicKey = (process.env.SCALE_CONNECT_UPDATE_PUBKEY ?? "").trim();
+if (updatePublicKey) {
+  loadPublicKey(updatePublicKey);
+  console.log(`Actualización automática: prendida (keyId ${keyIdOf(loadPublicKey(updatePublicKey))})`);
+} else {
+  console.log("Actualización automática: APAGADA (falta SCALE_CONNECT_UPDATE_PUBKEY)");
+}
+
 const result = await build({
   entryPoints: [path.join(root, "src", "main.ts")],
   outfile: path.join(root, "dist", "scale-connect.cjs"),
@@ -45,7 +56,13 @@ const result = await build({
   sourcemap: "linked",
   legalComments: "none",
   metafile: true,
-  define: { __CONNECTOR_VERSION__: JSON.stringify(pkg.version), __WEB_PROTOCOLS_SOURCE__: JSON.stringify(protocolSource) },
+  // __SCALE_CONNECT_UPDATE_PUBKEY__: clave PÚBLICA Ed25519 de los manifiestos (variable SCALE_CONNECT_UPDATE_PUBKEY; en el
+  // CI, la variable del repo). Vacía = la actualización automática queda apagada (src/update/update-key.ts).
+  define: {
+    __CONNECTOR_VERSION__: JSON.stringify(pkg.version),
+    __WEB_PROTOCOLS_SOURCE__: JSON.stringify(protocolSource),
+    __SCALE_CONNECT_UPDATE_PUBKEY__: JSON.stringify(updatePublicKey),
+  },
   // web-runtime.ts usa import.meta.url solo en desarrollo (cuando no hay __WEB_PROTOCOLS_SOURCE__).
   logOverride: { "empty-import-meta": "silent" },
   banner: { js: `/* Patagonia Scale Connect ${pkg.version} */` },

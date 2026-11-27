@@ -221,8 +221,64 @@ SCALE_CONNECT_UPDATE_KEY=… npm run update-manifest -w @patagonia/connector -- 
 node scripts/make-update-manifest.mjs verify --manifest dist/installer/latest.json --public-key publica.pem
 ```
 
-`verifyManifest` es la misma verificación que hará el servicio. Las pruebas
-(`scripts/lib/*.test.mjs`) corren con `npm run test -w @patagonia/connector`.
+`verifyManifest` es la misma verificación que hace el actualizador. Las pruebas
+(`scripts/lib/*.test.mjs`) corren con `npm run test -w @patagonia/connector`. Para las claves de verdad no usar
+`keygen` (deja la privada en un archivo): usar `scripts/preparar-claves-actualizacion.ps1` (abajo).
+
+## Actualización automática (`src/update/`, migración 229)
+
+El servicio corre como `NT SERVICE\PatagoniaScaleConnect` (no es administrador): **no instala**. Instala una tarea
+programada como SYSTEM, "\Patagonia\Actualizador de Patagonia Scale Connect" (`packaging/updater-task.ps1`, la registra
+el instalador), que corre `scale-connect.exe --update` al arrancar Windows y cada 15 minutos.
+
+1. **Cuándo revisa:** cada 6 h, al arrancar Windows, o antes si el servicio dejó `<datos>\update\pedido.json` (lo deja
+   cuando `/config` de la nube trae una versión más nueva). El lanzador se copia a
+   `ScaleConnect-Updater\bin\scale-connect-updater-<versión>.exe` y corre esa copia (así el instalador puede reemplazar
+   `scale-connect.exe` y su `taskkill` no lo mata).
+2. **Pide la oferta** a `scale-connect-api/update` con la credencial de la PC: la base elige por canal de la empresa
+   (`stable` | `pilot`) y porcentaje de despliegue (balde = SHA-256 del id del conector, módulo 100).
+3. **Verifica** con la clave pública **embebida** (define de esbuild desde `SCALE_CONNECT_UPDATE_PUBKEY`): firma
+   Ed25519, canal firmado, versión mínima, nunca bajar ni repetir versión; baja el instalador con tope de tamaño y
+   compara tamaño y SHA-256 (también en el disco). **Sin clave embebida, apagada** (falla cerrada; `/status` → `update`
+   lo dice). Un servidor de Patagonia comprometido no puede hacer instalar nada que no esté firmado.
+4. **Espera** hasta 30 min a que `/status` no tenga trabajos (`cloud.currentJobs` + `jobs.running`); mientras tanto
+   `avisos\pausa.json` hace que el servicio no tome trabajos nuevos (como mucho 1 h aunque el archivo quede). Si no se
+   vacía, "ocupado" y reintenta después.
+5. **Instala** `/VERYSILENT /SUPPRESSMSGBOXES /NORESTART` (sin `/NUBE=`: datos y nube quedan) y **comprueba** en 2 min que
+   `/status` responde con la versión nueva y (si estaba en línea) con un latido posterior.
+6. **Si falla**, reinstala `instaladores\anterior.exe` (verificado con el SHA-256 anotado), bloquea esa versión en esta PC
+   y lo informa (`/update-report` → `scale_connectors.update_status` y `audit_log`; también `avisos\resultado.json`).
+
+Carpetas: `C:\ProgramData\Patagonia\ScaleConnect-Updater` es **solo SYSTEM y Administradores** (sin herencia); el
+servicio solo puede LEER `avisos\`. El actualizador nunca escribe ni borra en la carpeta de datos del servicio y no lee
+nada de ahí a través de enlaces (junction): el servicio no puede llevar a SYSTEM a escribir en otro lado. Cada
+instalación guarda su propio `.exe` como `instaladores\actual.exe` (para volver atrás). Desinstalar saca la tarea y la
+carpeta. Pruebas: `src/update/*.test.ts` (instalador falso `src/update/testing/fake-installer.mjs` en un proceso aparte;
+nunca uno real) y `scripts/lib/updater-acl.test.mjs` (permisos del `.iss` y de la tarea).
+
+### Lo que tiene que hacer el dueño (una vez)
+
+```powershell
+powershell -ExecutionPolicy Bypass -File apps\connector\scripts\preparar-claves-actualizacion.ps1 -SupabaseProyecto <ref de producción> -ConStorage
+```
+
+Genera el par Ed25519 **sin mostrar la privada ni guardarla en un archivo**: va directo al secreto
+`SCALE_CONNECT_UPDATE_KEY` (por stdin de `gh secret set`); la pública queda en la variable `SCALE_CONNECT_UPDATE_PUBKEY`.
+Con `-SupabaseProyecto` carga la variable `SCALE_CONNECT_STORAGE_URL`; con `-ConStorage` pide sin mostrarla la clave de
+servicio de Supabase (secreto `SCALE_CONNECT_STORAGE_KEY`). El bucket público `scale-connect` lo crea la migración 229.
+Opcional: variable `SCALE_CONNECT_MIN_VERSION` (por omisión 0.1.0). Si el secreto ya existe se niega: cambiar la clave
+deja a las PC ya instaladas sin poder actualizarse solas (hay que reinstalarlas).
+
+### Publicar una versión
+
+1. Tag `scale-connect-vX.Y.Z`. El CI arma el ejecutable con la clave pública y, en el job `publicar`
+   (`scripts/publish-release.mjs`), firma `latest.json`, lo verifica contra la pública, sube instalador y manifiesto a
+   `scale-connect/X.Y.Z/` (nunca pisa uno distinto) y crea el Release de GitHub con `publicar-X.Y.Z.sql`. Sin los
+   secretos, avisa y saltea.
+2. Un administrador de plataforma corre `publicar-X.Y.Z.sql` en el editor SQL (piloto al 0 %), después
+   `set_scale_connect_release(id, true, 10)` → 50 → 100, y para el canal estable `publish_scale_connect_release(...,
+   'stable', N)`. Frenar: `set_scale_connect_release(id, false)`. Canal de una empresa:
+   `set_company_scale_connect_channel(empresa, 'pilot')`. Ver cómo va: `list_scale_connect_releases()`.
 
 ## De punta a punta con la nube (`src/scales/`, migración 227)
 
@@ -252,8 +308,8 @@ una que se desconecta).
 - Confirmar en el banco que la cuenta virtual abre los COM de cada adaptador (FTDI, CH340,
   PL2303, CP210x).
 - Avisos de licencia de terceros (Node, WinSW, serialport) junto al programa.
-- **Actualizador** dentro del servicio (lee `latest.json`, verifica firma y hash, instala al
-  lado y vuelve atrás solo) y dónde se publica el manifiesto.
+- **Actualización automática:** probarla en una PC limpia (la e2e todavía no cubre la tarea programada ni un instalador
+  real), pantalla en el panel de plataforma para publicar/frenar (hoy por SQL) y correr el script de claves.
 - **Protocolos** Kretz y Systel: pasan a `packages/scale-protocols` y hablan con `ByteLink`.
   Hoy no hay nada de protocolo acá.
 - **Protocolos** Kretz y Systel: pasan a `packages/scale-protocols` y hablan con `ByteLink`.

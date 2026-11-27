@@ -13,6 +13,13 @@ async function main(): Promise<void> {
     process.stdout.write(`${CONNECTOR_VERSION}\n`);
     return;
   }
+  // `scale-connect.exe --update`: actualización automática (la corre la tarea programada como SYSTEM; update/updater-run.ts).
+  // No arranca el servicio ni toca puertos.
+  if (process.argv.includes("--update") || process.argv.includes("--update-run")) {
+    const { runUpdateCommand } = await import("./update/updater-run");
+    process.exitCode = await runUpdateCommand(process.argv.slice(2));
+    return;
+  }
   const dev = process.argv.includes("--dev");
   const paths = resolvePaths({ dev, env: process.env, cwd: process.cwd() });
 

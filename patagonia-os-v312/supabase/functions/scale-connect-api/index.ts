@@ -14,6 +14,12 @@
 //                                                          trabajo EN CURSO (migración 227): leer el formato y el catálogo
 //                                                          de la sucursal del trabajo, y escribir por las mismas RPC de la
 //                                                          web en nombre de quien encoló el trabajo
+//   /update     {current_version}                      la versión que le toca a esta PC (migración 229: canal de la empresa
+//                                                          + porcentaje de despliegue) con su manifiesto FIRMADO. La PC
+//                                                          verifica la firma con su clave embebida: desde acá no se puede
+//                                                          hacer instalar nada que no haya firmado Patagonia.
+//   /update-report {result, from, to, message}         lo que pasó con la actualización (instalada, revertida…)
+//   /config además devuelve `update: {version} | null` (la misma oferta, solo la versión).
 //
 // Cada llamada a la base vuelve a validar la credencial (id + SHA-256 del secreto): revocar corta en el próximo
 // pedido, incluso a mitad de una consulta larga. La base limita a 240 pedidos por minuto por conector y nunca
@@ -34,6 +40,8 @@ import {
   parseFinishRequest,
   parseHeartbeatRequest,
   parseProgressRequest,
+  parseUpdateReport,
+  parseUpdateRequest,
   readJsonLimited,
   rpcErrorBody,
   rpcErrorStatus,
@@ -120,8 +128,28 @@ Deno.serve(async (req) => {
       return error ? fail(error) : json({ ok: true, ...(data ?? {}) });
     }
 
+    if (route === "update") {
+      const parsed = parseUpdateRequest(body.value);
+      if (!parsed.ok) return json(parsed, 400);
+      const { data, error } = await admin.rpc("scale_connector_update_offer", { ...auth, p_current_version: parsed.value.currentVersion });
+      return error ? fail(error) : json({ ok: true, ...(data ?? {}) });
+    }
+
+    if (route === "update-report") {
+      const parsed = parseUpdateReport(body.value);
+      if (!parsed.ok) return json(parsed, 400);
+      const { error } = await admin.rpc("scale_connector_report_update", { ...auth, p_report: parsed.value });
+      return error ? fail(error) : json({ ok: true });
+    }
+
     const { data, error } = await admin.rpc("scale_connector_config", auth);
-    return error ? fail(error) : json({ ok: true, ...(data ?? {}) });
+    if (error) return fail(error);
+    // La versión que le toca a esta PC (migración 229), para que el servicio despierte al actualizador. Si la 229
+    // todavía no está, o falla, la configuración sale igual sin ella.
+    let update: { version: string } | null = null;
+    const offer = await admin.rpc("scale_connector_update_offer", { ...auth, p_current_version: null });
+    if (!offer.error && offer.data?.offer?.version) update = { version: String(offer.data.offer.version) };
+    return json({ ok: true, ...(data ?? {}), update });
   } catch (e) {
     console.error("scale-connect-api", route, e instanceof Error ? e.message : String(e));
     return json({ ok: false, error: "error_interno" }, 500);

@@ -20,6 +20,9 @@ import type { ScaleProtocolHost } from "./protocols/scale-jobs";
 import { createCloudModule, type CloudModule, type CloudModuleOverrides } from "./cloud/cloud-module";
 import { ScaleFleet } from "./scales/scale-fleet";
 import { ScaleJobExecutor } from "./scales/scale-executor";
+import { UpdateSignals } from "./update/update-signals";
+import { resolveUpdaterPaths, updateSignalPaths } from "./update/update-paths";
+import { embeddedUpdateKey } from "./update/update-key";
 
 export interface ServiceOptions {
   paths: ConnectorPaths;
@@ -38,6 +41,8 @@ export interface ServiceOptions {
   /** Para pruebas: nube simulada (fetch, credencial en memoria, ejecutor falso). */
   cloud?: CloudModuleOverrides;
   env?: Record<string, string | undefined>;
+  /** Para pruebas: prender o apagar la actualización sin clave embebida (en producción sale de update-key.ts). */
+  updateEnabled?: boolean;
 }
 
 export interface RunningService {
@@ -52,6 +57,7 @@ export interface RunningService {
   fleet: ScaleFleet;
   server: LocalServer;
   cloud: CloudModule;
+  update: UpdateSignals;
   port: number;
   status(): Record<string, unknown>;
   stop(): Promise<void>;
@@ -144,6 +150,17 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
     config.discoveryIntervalMs > 0 ? setInterval(() => void refreshPorts(), config.discoveryIntervalMs) : null;
   discoveryTimer?.unref();
 
+  // Actualización automática: el servicio solo avisa y hace pausa; instala la tarea programada (update/updater.ts).
+  const updateKey = embeddedUpdateKey();
+  const update = new UpdateSignals({
+    paths: updateSignalPaths(paths.root, resolveUpdaterPaths({ dev: options.dev, env: options.env ?? process.env, cwd: process.cwd() }).root),
+    currentVersion: CONNECTOR_VERSION,
+    enabled: options.updateEnabled ?? updateKey.key !== null,
+    disabledReason: updateKey.disabledReason,
+    logger,
+  });
+  await update.refreshResult();
+
   const status = () => ({
     service: SERVICE_NAME,
     version: CONNECTOR_VERSION,
@@ -158,6 +175,7 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
     },
     problems: [...loaded.errors, ...registry.problems.map((p) => `${p.deviceId}: ${p.message}`)],
     cloud: cloud.status(),
+    update: update.status(),
   });
 
   // Nube (vinculación, latido y trabajos). Cada balanza se informa con su huella física y con el scale_key que le
@@ -171,7 +189,12 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
     logger,
     seenScales: () => fleet.seenScales(),
     overrides: { ...options.cloud, executor },
-    onConfig: (cfg) => fleet.applyConfig(cfg),
+    onConfig: async (cfg) => {
+      await fleet.applyConfig(cfg);
+      await update.onOffer(cfg.updateVersion ?? null);
+      await update.refreshResult();
+    },
+    claimsPaused: () => update.claimsPaused(),
   });
   notifyChange = () => {
     syncScales();
@@ -203,6 +226,7 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
     fleet,
     server,
     cloud,
+    update,
     port: address.port,
     status,
     stop: async () => {

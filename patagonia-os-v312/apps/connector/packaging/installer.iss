@@ -15,6 +15,8 @@
 ;   - A qué Patagonia se conecta: parámetro /NUBE=produccion (por omisión) | pruebas | https://…/functions/v1.
 ;     Se escribe SOLO "cloud.url" en config.json (scale-connect.exe --set-cloud). Sin /NUBE= y con una dirección ya
 ;     guardada (actualización), se mantiene la que estaba: nunca cambia de sistema sola.
+;   - Actualización automática: carpeta C:\ProgramData\Patagonia\ScaleConnect-Updater (solo SYSTEM y Administradores),
+;     guarda este instalador ahí (para volver atrás) y registra la tarea programada como SYSTEM (updater-task.ps1).
 ;   - Al terminar abre http://127.0.0.1:9120/vincular (que dice a qué sistema se vincula).
 ;   - Desinstalar saca el servicio y deja los datos, salvo que se elija borrarlos
 ;     (silencioso: parámetro /BORRARDATOS).
@@ -42,6 +44,9 @@
 #define VirtualAccount "NT SERVICE\PatagoniaScaleConnect"
 #define FallbackAccount "NT AUTHORITY\LocalService"
 #define LinkUrl "http://127.0.0.1:9120/vincular"
+; Carpeta del actualizador automático (tarea programada como SYSTEM): SOLO SYSTEM y Administradores. Ahí quedan el
+; instalador de la versión instalada (para volver atrás) y la copia del ejecutable que corre como SYSTEM.
+#define UpdaterSubdir "Patagonia\ScaleConnect-Updater"
 
 [Setup]
 ; AppId fijo: es lo que hace que una versión nueva se instale ENCIMA de la anterior. No cambiarlo nunca.
@@ -99,6 +104,7 @@ Source: "{#SourceDir}\scale-connect.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\PatagoniaScaleConnect.exe"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\PatagoniaScaleConnect.xml"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\build-info.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\updater-task.ps1"; DestDir: "{app}"; Flags: ignoreversion
 Source: "{#SourceDir}\node_modules\*"; DestDir: "{app}\node_modules"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Run]
@@ -118,6 +124,11 @@ end;
 function DataDir: String;
 begin
   Result := ExpandConstant('{commonappdata}\Patagonia\ScaleConnect');
+end;
+
+function UpdaterDir: String;
+begin
+  Result := ExpandConstant('{commonappdata}\{#UpdaterSubdir}');
 end;
 
 function Run(const FileName, Params: String; var Code: Integer): Boolean;
@@ -253,10 +264,56 @@ begin
   Sleep(1500);
 end;
 
+function PowerShell: String;
+begin
+  Result := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+end;
+
+// Actualización automática (README, "Actualización automática"). El servicio NO es administrador y no puede instalar:
+// lo hace una tarea programada como SYSTEM que corre {app}\scale-connect.exe --update. Acá:
+//   a) la carpeta del actualizador queda SOLO para SYSTEM y Administradores (el servicio no la puede ni leer ni
+//      escribir: ahí está el instalador con el que se vuelve atrás y la copia del ejecutable que corre como SYSTEM);
+//   b) se guarda ESTE instalador como el de la versión instalada (para volver atrás si la próxima falla);
+//   c) se registra la tarea (updater-task.ps1). Si algo falla, el servicio queda igual y la actualización no corre.
+procedure SetupUpdater;
+var
+  Code: Integer;
+  Src, Dest: String;
+begin
+  ForceDirectories(UpdaterDir + '\instaladores');
+  if not RunOk(ExpandConstant('{sys}\icacls.exe'), '"' + UpdaterDir + '" /setowner *S-1-5-32-544 /T /C /Q') then
+  begin
+    Log('ERROR: no se pudo poner el dueño de la carpeta del actualizador; no se registra la tarea.');
+    exit;
+  end;
+  if not RunOk(ExpandConstant('{sys}\icacls.exe'), '"' + UpdaterDir + '" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F /T /C /Q') then
+  begin
+    Log('ERROR: no se pudieron cerrar los permisos de la carpeta del actualizador; no se registra la tarea.');
+    exit;
+  end;
+  RunOk(ExpandConstant('{sys}\icacls.exe'), '"' + UpdaterDir + '\*" /reset /T /C /Q');
+  // avisos\ (pausa.json, resultado.json): lo único que el servicio puede LEER. Escribir, nunca.
+  ForceDirectories(UpdaterDir + '\avisos');
+  if ServiceAccountUsed <> '' then
+    RunOk(ExpandConstant('{sys}\icacls.exe'), '"' + UpdaterDir + '\avisos" /grant "' + ServiceAccountUsed + ':(OI)(CI)RX" /T /C /Q');
+
+  Src := ExpandConstant('{srcexe}');
+  Dest := UpdaterDir + '\instaladores\actual.exe';
+  if CompareText(Src, Dest) <> 0 then
+    if not FileCopy(Src, Dest, False) then
+      Log('No se pudo guardar el instalador para volver atrás: ' + Dest);
+
+  if not (Run(PowerShell, '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\updater-task.ps1') + '" -Exe "' + ExpandConstant('{app}\scale-connect.exe') + '"', Code) and (Code = 0)) then
+    Log(Format('ERROR: no se pudo registrar la tarea del actualizador (código %d).', [Code]));
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
   if CurStep = ssPostInstall then
+  begin
     RegisterAndStartService;
+    SetupUpdater;
+  end;
 end;
 
 function HasParam(const Name: String): Boolean;
@@ -275,6 +332,9 @@ var
 begin
   if CurUninstallStep = usUninstall then
   begin
+    // La tarea del actualizador se va con el programa.
+    if FileExists(ExpandConstant('{app}\updater-task.ps1')) then
+      Run(PowerShell, '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\updater-task.ps1') + '" -Remove', Code);
     // Antes de borrar archivos: frenar y dar de baja el servicio.
     if ServiceExists then
     begin
@@ -286,6 +346,8 @@ begin
 
   if CurUninstallStep = usPostUninstall then
   begin
+    // Lo del actualizador no son datos del cliente (instaladores guardados, copia del ejecutable): siempre se borra.
+    DelTree(UpdaterDir, True, True, True);
     if UninstallSilent then
       DeleteData := HasParam('/BORRARDATOS')
     else

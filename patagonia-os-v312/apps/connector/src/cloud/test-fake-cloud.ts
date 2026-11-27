@@ -69,6 +69,11 @@ export class FakeCloud {
   readonly catalogs = new Map<string, Obj>();
   readonly links = new Map<string, Obj[]>();
   readonly reports: Obj[] = [];
+  /** Oferta de actualización (migración 229): {version, manifest} o null. */
+  updateOffer: { version: string; manifest: Obj } | null = null;
+  updateChannel: "pilot" | "stable" = "stable";
+  readonly updateReports: Obj[] = [];
+  readonly updateRequests: Obj[] = [];
 
   constructor() {
     this.server = http.createServer((req, res) => void this.handle(req, res));
@@ -190,8 +195,21 @@ export class FakeCloud {
         const scales = this.scales.length
           ? this.scales.map((s) => ({ key: s.key, name: s.name, family: s.family, brand: s.family, model: s.model, identity: s.identity, active: s.active, device: s.connectorId === conn.id ? s.device : null }))
           : [{ key: "kretz-1", name: "Report" }];
-        return this.send(res, 200, { ok: true, connector: { id: conn.id, name: conn.name, branch_id: "b1" }, company_name: `Carnicería ${conn.company}`, branch_name: "Centro", scales });
+        return this.send(res, 200, {
+          ok: true,
+          connector: { id: conn.id, name: conn.name, branch_id: "b1" },
+          company_name: `Carnicería ${conn.company}`,
+          branch_name: "Centro",
+          scales,
+          update: this.updateOffer ? { version: this.updateOffer.version } : null,
+        });
       }
+      case "update":
+        this.updateRequests.push(body);
+        return this.send(res, 200, { ok: true, channel: this.updateChannel, offer: this.updateOffer });
+      case "update-report":
+        this.updateReports.push(body);
+        return this.send(res, 200, { ok: true });
       case "engine":
         return this.engine(conn, body, res);
       default:

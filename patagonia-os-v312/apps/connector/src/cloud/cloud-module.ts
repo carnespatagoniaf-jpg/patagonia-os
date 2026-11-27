@@ -33,6 +33,8 @@ export interface CloudModuleOptions {
   overrides?: CloudModuleOverrides;
   /** Cada vez que se trae la configuración de la nube (al conectar y con cada latido): qué balanza está en qué puerto. */
   onConfig?: (config: CloudConfig) => void | Promise<void>;
+  /** El actualizador pidió no tomar trabajos nuevos (update/update-signals.ts). */
+  claimsPaused?: () => boolean | Promise<boolean>;
 }
 
 export interface CloudModule {
@@ -66,6 +68,7 @@ export function createCloudModule(options: CloudModuleOptions): CloudModule {
     backoffMs: o.backoffMs,
     minPollGapMs: o.minPollGapMs,
     onConfig: options.onConfig,
+    claimsPaused: options.claimsPaused,
   });
   return {
     agent,

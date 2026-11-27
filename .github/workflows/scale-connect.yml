@@ -8,6 +8,14 @@
 #     apps/connector/package.json).
 # No corre en cada push ni en los PR a propósito: tarda y no hace falta.
 #
+# Actualización automática (apps/connector/README.md, "Actualización automática"):
+#   - El ejecutable lleva embebida la clave PÚBLICA de la variable SCALE_CONNECT_UPDATE_PUBKEY. Sin ella sale con la
+#     actualización apagada (falla cerrada) y el build igual pasa.
+#   - Con un tag, el job "publicar" firma latest.json con el secreto SCALE_CONNECT_UPDATE_KEY, sube instalador y
+#     manifiesto al bucket público "scale-connect" de Supabase (SCALE_CONNECT_STORAGE_URL + secreto
+#     SCALE_CONNECT_STORAGE_KEY) y crea el Release de GitHub. Sin esos secretos se saltea con un aviso.
+#     NO publica la versión en la base: eso lo hace un administrador de plataforma con publicar-<versión>.sql.
+#
 # El repo vive un nivel arriba de la carpeta del proyecto (patagonia-os-v312).
 name: Scale Connect (instalador)
 
@@ -68,7 +76,12 @@ jobs:
       # build (esbuild) + Node SEA + firma de node.exe quitada + postject + serialport
       # + WinSW con SHA-256 fijo. Deja apps/connector/dist/PatagoniaScaleConnect/.
       - name: Armar el ejecutable
-        run: npm run package -w @patagonia/connector
+        env:
+          # Clave PÚBLICA (no es secreta): va dentro del ejecutable. Vacía = actualización automática apagada.
+          SCALE_CONNECT_UPDATE_PUBKEY: ${{ vars.SCALE_CONNECT_UPDATE_PUBKEY }}
+        run: |
+          if (-not $env:SCALE_CONNECT_UPDATE_PUBKEY) { Write-Output "::warning::Sin la variable SCALE_CONNECT_UPDATE_PUBKEY: este build sale con la actualización automática APAGADA (ver scripts/preparar-claves-actualizacion.ps1)." }
+          npm run package -w @patagonia/connector
 
       - name: Probar el ejecutable (--version y /status)
         run: npm run smoke -w @patagonia/connector
@@ -131,3 +144,69 @@ jobs:
             patagonia-os-v312/apps/connector/dist/PatagoniaScaleConnect/build-info.json
           if-no-files-found: error
           retention-days: 30
+
+  # Solo con un tag: firmar el manifiesto, subir al bucket público y crear el Release. Job aparte para que el permiso
+  # de escribir Releases (contents: write) no lo tenga el job que corre npm ci y arma el ejecutable.
+  publicar:
+    name: Firmar y publicar la actualización
+    needs: instalador
+    if: startsWith(github.ref, 'refs/tags/scale-connect-v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+    defaults:
+      run:
+        working-directory: patagonia-os-v312
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Bajar el instalador del job anterior
+        uses: actions/download-artifact@v4
+        with:
+          name: PatagoniaScaleConnect-instalador-sin-firmar
+          path: artefacto
+
+      # Sin npm ci: el script usa solo módulos de Node. La clave privada vive solo en la memoria de este paso.
+      - name: Firmar latest.json y subir al bucket (si están los secretos)
+        id: firmar
+        env:
+          SCALE_CONNECT_UPDATE_KEY: ${{ secrets.SCALE_CONNECT_UPDATE_KEY }}
+          SCALE_CONNECT_UPDATE_PUBKEY: ${{ vars.SCALE_CONNECT_UPDATE_PUBKEY }}
+          SCALE_CONNECT_STORAGE_URL: ${{ vars.SCALE_CONNECT_STORAGE_URL }}
+          SCALE_CONNECT_STORAGE_KEY: ${{ secrets.SCALE_CONNECT_STORAGE_KEY }}
+          SCALE_CONNECT_MIN_VERSION: ${{ vars.SCALE_CONNECT_MIN_VERSION }}
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#scale-connect-v}"
+          exe="$(find ../artefacto -name "PatagoniaScaleConnect-Setup-${version}.exe" | head -1)"
+          if [ -z "$exe" ]; then echo "::error::No está el instalador de la ${version} en el artefacto"; exit 1; fi
+          node apps/connector/scripts/publish-release.mjs --file "$exe" --version "$version" | tee publicar.log
+          if [ -f "$(dirname "$exe")/latest.json" ]; then
+            echo "publicado=si" >> "$GITHUB_OUTPUT"
+            echo "dir=$(cd "$(dirname "$exe")" && pwd)" >> "$GITHUB_OUTPUT"
+          else
+            echo "publicado=no" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Release de GitHub (instalador + manifiesto firmado)
+        if: steps.firmar.outputs.publicado == 'si'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          dir="${{ steps.firmar.outputs.dir }}"
+          version="${GITHUB_REF_NAME#scale-connect-v}"
+          gh release create "$GITHUB_REF_NAME" \
+            "$dir/PatagoniaScaleConnect-Setup-${version}.exe" \
+            "$dir/PatagoniaScaleConnect-Setup-${version}.exe.sha256" \
+            "$dir/latest.json" \
+            "$dir/publicar-${version}.sql" \
+            --title "Patagonia Scale Connect ${version}" \
+            --notes "Instalador SIN firma de código. latest.json firmado con Ed25519. Para ofrecerla a las PC: correr publicar-${version}.sql como administrador de plataforma (empieza en piloto al 0 %)." \
+            --verify-tag

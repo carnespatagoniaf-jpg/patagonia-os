@@ -102,6 +102,14 @@ export interface CloudConfig {
   companyName: string | null;
   branchName: string | null;
   scales: CloudScaleConfig[];
+  /** Versión que la nube le ofrece a esta PC (migración 229), o null. Solo despierta al actualizador: él verifica todo. */
+  updateVersion?: string | null;
+}
+
+/** Oferta de actualización (ruta /update, migración 229). Del servidor solo sirve el manifiesto firmado. */
+export interface UpdateOffer {
+  channel: "pilot" | "stable";
+  offer: { version: string; manifest: unknown } | null;
 }
 
 export interface CloudClientOptions {
@@ -305,6 +313,23 @@ export class CloudClient {
         active: typeof s.active === "boolean" ? s.active : null,
         device: parseDevice(s.device),
       })),
+      updateVersion: isObj(r.update) ? str(r.update.version) : null,
     };
+  }
+
+  /** Qué versión le toca a esta PC (canal de la empresa + porcentaje de despliegue). La llama el actualizador. */
+  async updateOffer(credential: Credential, currentVersion: string, signal?: AbortSignal): Promise<UpdateOffer> {
+    const r = await this.api("update", credential, { current_version: currentVersion }, { signal });
+    const offer = isObj(r.offer) ? r.offer : null;
+    const version = offer ? str(offer.version) : null;
+    return {
+      channel: r.channel === "pilot" ? "pilot" : "stable",
+      offer: offer && version && isObj(offer.manifest) ? { version, manifest: offer.manifest } : null,
+    };
+  }
+
+  /** Resultado de una actualización (instalada, revertida, rechazada…). */
+  async reportUpdate(credential: Credential, report: Obj, signal?: AbortSignal): Promise<void> {
+    await this.api("update-report", credential, report, { signal });
   }
 }

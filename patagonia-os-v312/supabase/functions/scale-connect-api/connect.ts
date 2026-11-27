@@ -210,8 +210,8 @@ export function pairStatus(result: { ok?: boolean; error?: string }): number {
 }
 
 // ------------------------------------------------------------------------------------------------ api
-export type ApiRoute = "claim" | "progress" | "finish" | "heartbeat" | "config" | "engine";
-const ROUTES: readonly ApiRoute[] = ["claim", "progress", "finish", "heartbeat", "config", "engine"];
+export type ApiRoute = "claim" | "progress" | "finish" | "heartbeat" | "config" | "engine" | "update" | "update-report";
+const ROUTES: readonly ApiRoute[] = ["claim", "progress", "finish", "heartbeat", "config", "engine", "update", "update-report"];
 
 /** ".../functions/v1/scale-connect-api/claim" → "claim". */
 export function apiRoute(pathname: string): ApiRoute | null {
@@ -386,6 +386,42 @@ export function parseEngineRequest(body: unknown): Parsed<EngineRequest> {
   const args = body.args === undefined || body.args === null ? {} : body.args;
   if (!isObj(args)) return bad("datos_invalidos");
   return { ok: true, value: { jobId: body.job_id.toLowerCase(), action: body.action as EngineAction, args } };
+}
+
+// ------------------------------------------------------------------------------------------------ actualización (229)
+const SEMVER = /^\d{1,4}\.\d{1,4}\.\d{1,6}(?:-[0-9A-Za-z.-]{1,30})?$/;
+
+/** /update {current_version}: qué versión le toca a esta PC. La PC verifica la firma: acá solo se acota el pedido. */
+export function parseUpdateRequest(body: unknown): Parsed<{ currentVersion: string | null }> {
+  if (body !== undefined && body !== null && !isObj(body)) return bad("datos_invalidos");
+  const raw = isObj(body) ? shortText(body.current_version, 40) : null;
+  return { ok: true, value: { currentVersion: raw && SEMVER.test(raw) ? raw : null } };
+}
+
+export const UPDATE_RESULTS = [
+  "rechazada", "bloqueada", "sin_respaldo", "ocupado", "instalada", "revertida", "fallo_reversion", "error",
+] as const;
+export type UpdateReportResult = (typeof UPDATE_RESULTS)[number];
+
+export interface UpdateReport {
+  result: UpdateReportResult;
+  from: string | null;
+  to: string | null;
+  message: string | null;
+}
+
+/** /update-report {result, from, to, message}: lo que pasó con una actualización en esta PC. */
+export function parseUpdateReport(body: unknown): Parsed<UpdateReport> {
+  if (!isObj(body)) return bad("datos_invalidos");
+  if (typeof body.result !== "string" || !(UPDATE_RESULTS as readonly string[]).includes(body.result)) return bad("resultado_invalido");
+  const version = (v: unknown) => {
+    const t = shortText(v, 40);
+    return t && SEMVER.test(t) ? t : null;
+  };
+  return {
+    ok: true,
+    value: { result: body.result as UpdateReportResult, from: version(body.from), to: version(body.to), message: shortText(body.message, 300) },
+  };
 }
 
 // ------------------------------------------------------------------------------------------------ errores

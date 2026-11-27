@@ -102,6 +102,8 @@ const winsw = await downloadVerified({
 });
 await copyFile(winsw, path.join(out, "PatagoniaScaleConnect.exe"));
 await copyFile(path.join(root, "packaging", "PatagoniaScaleConnect.xml"), path.join(out, "PatagoniaScaleConnect.xml"));
+// La tarea programada del actualizador (la registra el instalador como administrador).
+await copyFile(path.join(root, "packaging", "updater-task.ps1"), path.join(out, "updater-task.ps1"));
 console.log(`WinSW ${WINSW.version} verificado.`);
 
 // build-info.json: qué se armó y con qué (lo lee soporte y el CI).
