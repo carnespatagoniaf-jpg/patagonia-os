@@ -1,6 +1,6 @@
 {
   // Núcleo del conector: sin tipos del navegador y sin variables sin usar. Quedan
-  // afuera los protocolos y lo que los importa (service.ts, main.ts): esos los revisa
+  // afuera los protocolos y lo que los importa (scales/, service.ts, main.ts): esos los revisa
   // tsconfig.json.
   "extends": "./tsconfig.json",
   "compilerOptions": {
@@ -9,5 +9,5 @@
     "noUnusedParameters": true
   },
   "include": ["src"],
-  "exclude": ["src/protocols/**", "src/service.ts", "src/service.test.ts", "src/main.ts"]
+  "exclude": ["src/protocols/**", "src/scales/**", "src/service.ts", "src/service.test.ts", "src/main.ts"]
 }

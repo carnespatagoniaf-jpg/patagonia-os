@@ -1,6 +1,8 @@
 // Costura entre la nube y los protocolos. El canal con la nube (cloud-agent.ts) toma un trabajo y se lo da a un
-// JobExecutor; quién habla con la balanza (Kretz, Systel) lo implementa otro lote sobre packages/scale-protocols.
-// Acá solo están los tipos y un ejecutor que dice "todavía no sé hacerlo" para no dejar trabajos colgados.
+// JobExecutor. El de verdad es ScaleJobExecutor (src/scales/scale-executor.ts, sobre ScaleProtocolHost); acá están los
+// tipos y un ejecutor que dice "todavía no sé hacerlo" (sin protocolos) para no dejar trabajos colgados.
+
+import type { CloudConfig } from "./cloud-client";
 
 /** Un trabajo tal como lo entrega scale-connect-api /claim (migración 226). */
 export interface CloudJob {
@@ -43,11 +45,21 @@ export interface JobOutcome {
   errorCode?: string | null;
 }
 
+/** Lo que el trabajo puede pedirle a la nube con la credencial de esta PC (sin verla). */
+export interface JobCloud {
+  /** scale-connect-api/engine con este trabajo (migración 227). Rechaza si la nube dice que no. */
+  engine(action: string, args?: Record<string, unknown>): Promise<Record<string, unknown>>;
+  /** Las balanzas de la sucursal y en qué puerto de esta PC está cada una. */
+  config(): Promise<CloudConfig>;
+}
+
 export interface JobContext {
   /** Se dispara si el servicio se apaga o la PC fue desvinculada: hay que cortar prolijo y devolver lo hecho. */
   signal: AbortSignal;
   /** Informa avance. Nunca rechaza: si la nube no contesta, los productos viajan con el cierre. */
   progress(update: JobProgress): Promise<void>;
+  /** Puede faltar (pruebas): entonces el ejecutor trabaja sin la nube. */
+  cloud?: JobCloud;
 }
 
 export interface JobExecutor {

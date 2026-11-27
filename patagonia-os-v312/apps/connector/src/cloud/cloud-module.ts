@@ -6,11 +6,12 @@ import { isValidCloudUrl } from "../config/config";
 import type { Logger } from "../log/logger";
 import type { LocalRoute } from "../server/local-server";
 import { CloudAgent } from "./cloud-agent";
-import { CloudClient, type SeenScale } from "./cloud-client";
+import { CloudClient, type CloudConfig, type SeenScale } from "./cloud-client";
 import { createCredentialStore, type CredentialStore } from "./credential-store";
 import { computeFingerprint } from "./fingerprint";
 import { UnavailableExecutor, type JobExecutor } from "./job-executor";
 import { createPairingRoute } from "./pairing-page";
+import { describeCloud } from "./cloud-targets";
 
 export interface CloudModuleOverrides {
   fetch?: typeof fetch;
@@ -30,6 +31,8 @@ export interface CloudModuleOptions {
   logger: Logger;
   seenScales: () => SeenScale[];
   overrides?: CloudModuleOverrides;
+  /** Cada vez que se trae la configuración de la nube (al conectar y con cada latido): qué balanza está en qué puerto. */
+  onConfig?: (config: CloudConfig) => void | Promise<void>;
 }
 
 export interface CloudModule {
@@ -62,12 +65,13 @@ export function createCloudModule(options: CloudModuleOptions): CloudModule {
     pollWaitSec: options.settings.pollWaitSec,
     backoffMs: o.backoffMs,
     minPollGapMs: o.minPollGapMs,
+    onConfig: options.onConfig,
   });
   return {
     agent,
-    routes: [createPairingRoute({ agent, csrfToken: o.csrfToken })],
+    routes: [createPairingRoute({ agent, csrfToken: o.csrfToken, target: url ? describeCloud(url) : null })],
     start: () => agent.start(),
     stop: () => agent.stop(),
-    status: () => ({ ...agent.status(), url }),
+    status: () => ({ ...agent.status(), url, target: url ? describeCloud(url).kind : null }),
   };
 }

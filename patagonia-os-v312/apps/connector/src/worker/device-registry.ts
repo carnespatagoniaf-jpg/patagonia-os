@@ -35,6 +35,14 @@ export class DeviceRegistry {
     }
   }
 
+  /** Saca un trabajador (lo frena y libera su puerto). Para los puertos que se probaron y no tenían balanza. */
+  async remove(id: string): Promise<void> {
+    const worker = this.workers.get(id);
+    if (!worker) return;
+    this.workers.delete(id);
+    await worker.stop();
+  }
+
   get(id: string): DeviceWorker | undefined {
     return this.workers.get(id);
   }

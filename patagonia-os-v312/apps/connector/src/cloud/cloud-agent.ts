@@ -8,9 +8,9 @@
 
 import { backoffDelay, DEFAULT_BACKOFF_MS } from "../worker/backoff";
 import { silentLogger, type Logger } from "../log/logger";
-import { CloudError, type CloudClient, type Credential, type PairResult, type SeenScale } from "./cloud-client";
+import { CloudError, type CloudClient, type CloudConfig, type Credential, type PairResult, type SeenScale } from "./cloud-client";
 import type { CredentialStore, StoredCredential } from "./credential-store";
-import type { CloudJob, JobExecutor, JobItemResult, JobOutcome, JobProgress } from "./job-executor";
+import type { CloudJob, JobCloud, JobExecutor, JobItemResult, JobOutcome, JobProgress } from "./job-executor";
 
 export type CloudState =
   | "sin_configurar" // falta la dirección de la nube en config.json
@@ -35,6 +35,13 @@ export interface CloudAgentOptions {
   minPollGapMs?: number;
   /** Reintentos del cierre de un trabajo. */
   finishAttempts?: number;
+  /** Se le pasa la configuración de la nube después de cada latido que anduvo (balanzas y en qué puerto está cada una). */
+  onConfig?: (config: CloudConfig) => void | Promise<void>;
+  /**
+   * Trabajos a la vez (cada balanza tiene su propio trabajador: dos envíos a dos balanzas corren en paralelo; dos a la
+   * misma esperan en la cola de esa balanza). Por omisión, 4.
+   */
+  maxConcurrentJobs?: number;
 }
 
 export interface PairInput {
@@ -74,7 +81,9 @@ export class CloudAgent {
   private pairing = false;
   private lastHeartbeatAt: string | null = null;
   private lastError: { kind: string; message: string; at: string } | null = null;
-  private currentJob: { id: string; kind: string; scaleKey: string; startedAt: string } | null = null;
+  private readonly maxConcurrentJobs: number;
+  private readonly currentJobs = new Map<string, { id: string; kind: string; scaleKey: string; startedAt: string }>();
+  private wakeHeartbeat: (() => void) | null = null;
   private reconnectAttempt = 0;
   private jobsDone = 0;
   private jobsFailed = 0;
@@ -86,6 +95,12 @@ export class CloudAgent {
     this.backoffMs = options.backoffMs ?? DEFAULT_BACKOFF_MS;
     this.minPollGapMs = options.minPollGapMs ?? 1000;
     this.finishAttempts = options.finishAttempts ?? 10;
+    this.maxConcurrentJobs = Math.max(1, options.maxConcurrentJobs ?? 4);
+  }
+
+  /** Late ya (por ejemplo, después de identificar balanzas), sin esperar el minuto. */
+  heartbeatNow(): void {
+    this.wakeHeartbeat?.();
   }
 
   get isPaired(): boolean {
@@ -178,7 +193,8 @@ export class CloudAgent {
       lastHeartbeatAt: this.lastHeartbeatAt,
       lastError: this.lastError,
       reconnectAttempt: this.reconnectAttempt,
-      currentJob: this.currentJob,
+      currentJob: [...this.currentJobs.values()][0] ?? null,
+      currentJobs: [...this.currentJobs.values()],
       jobsDone: this.jobsDone,
       jobsFailed: this.jobsFailed,
     };
@@ -235,19 +251,46 @@ export class CloudAgent {
         this.lastHeartbeatAt = new Date().toISOString();
         if (r.name && this.credential) this.credential.name = r.name;
         this.markOnline();
+        if (this.options.onConfig) {
+          // Qué balanza de Patagonia está en qué puerto (la web la pudo vincular recién). Si falla, sigue igual.
+          try {
+            await this.options.onConfig(await client.config(cred, signal));
+          } catch (error) {
+            if (error instanceof CloudError && error.needsPairing) return this.needsPairing(error, cred);
+            this.log.debug("No se pudo traer la configuración", { error });
+          }
+        }
       } catch (error) {
         if (signal.aborted) break;
         if (error instanceof CloudError && error.needsPairing) return this.needsPairing(error, cred);
         this.markOffline(error);
       }
-      await sleep(this.heartbeatMs, signal);
+      const wake = new AbortController();
+      this.wakeHeartbeat = () => wake.abort();
+      await sleep(this.heartbeatMs, AbortSignal.any([signal, wake.signal]));
+      this.wakeHeartbeat = null;
     }
   }
 
   private async jobLoop(cred: Credential, signal: AbortSignal): Promise<void> {
+    const running = new Set<Promise<void>>();
+    try {
+      await this.claimLoop(cred, signal, running);
+    } finally {
+      // Al apagar: los trabajos en curso terminan (cortados por la señal) y cierran en la nube.
+      await Promise.allSettled([...running]);
+    }
+  }
+
+  private async claimLoop(cred: Credential, signal: AbortSignal, running: Set<Promise<void>>): Promise<void> {
     const client = this.options.client!;
     let attempt = 0;
     while (!signal.aborted) {
+      // Lleno: espera a que termine alguno antes de pedir otro.
+      if (running.size >= this.maxConcurrentJobs) {
+        await Promise.race(running);
+        continue;
+      }
       const started = Date.now();
       let job: CloudJob | null;
       try {
@@ -264,7 +307,8 @@ export class CloudAgent {
         continue;
       }
       if (job) {
-        await this.runJob(cred, job, signal);
+        const p: Promise<void> = this.runJob(cred, job, signal).finally(() => running.delete(p));
+        running.add(p);
         continue;
       }
       const gap = this.minPollGapMs - (Date.now() - started);
@@ -276,7 +320,7 @@ export class CloudAgent {
     const client = this.options.client!;
     const log = this.log.child({ job: job.id, scale: job.scaleKey });
     log.info("Trabajo recibido", { kind: job.kind, requested: job.requested });
-    this.currentJob = { id: job.id, kind: job.kind, scaleKey: job.scaleKey, startedAt: new Date().toISOString() };
+    this.currentJobs.set(job.id, { id: job.id, kind: job.kind, scaleKey: job.scaleKey, startedAt: new Date().toISOString() });
 
     // El trabajo se corta si el servicio se apaga, si la PC se desvincula o si la nube ya lo dio por cerrado.
     const jobAbort = new AbortController();
@@ -321,9 +365,13 @@ export class CloudAgent {
       unsent.push(...items);
     };
 
+    const cloud: JobCloud = {
+      engine: (action, args) => client.engine(cred, { jobId: job.id, action, args }, jobAbort.signal),
+      config: () => client.config(cred, jobAbort.signal),
+    };
     let outcome: JobOutcome;
     try {
-      outcome = await this.options.executor.execute(job, { signal: jobAbort.signal, progress });
+      outcome = await this.options.executor.execute(job, { signal: jobAbort.signal, progress, cloud });
     } catch (error) {
       log.error("El ejecutor falló", { error });
       outcome = { status: "failed", errorCode: "error_conector", items: [] };
@@ -363,6 +411,6 @@ export class CloudAgent {
         await sleep(backoffDelay(attempt, this.backoffMs), signal);
       }
     }
-    this.currentJob = null;
+    this.currentJobs.delete(job.id);
   }
 }

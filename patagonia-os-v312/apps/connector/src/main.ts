@@ -4,6 +4,7 @@
 import { resolvePaths } from "./config/paths";
 import { startService } from "./service";
 import { CONNECTOR_VERSION } from "./version";
+import { cloudUrlFor, describeCloud, setCloudInConfig } from "./cloud/cloud-targets";
 
 async function main(): Promise<void> {
   // `scale-connect.exe --version`: lo usan el instalador, el CI y soporte. No toca datos ni puertos.
@@ -13,6 +14,25 @@ async function main(): Promise<void> {
   }
   const dev = process.argv.includes("--dev");
   const paths = resolvePaths({ dev, env: process.env, cwd: process.cwd() });
+
+  // `scale-connect.exe --set-cloud produccion|pruebas|https://… [--if-missing]`: lo corre el instalador (/NUBE=).
+  // Escribe solo cloud.url en config.json y sale. No arranca el servicio ni toca puertos.
+  const setCloud = process.argv.indexOf("--set-cloud");
+  if (setCloud >= 0) {
+    const value = process.argv[setCloud + 1] ?? "";
+    const url = cloudUrlFor(value);
+    if (!url) {
+      process.stderr.write(`Nube inválida: "${value}". Usá produccion, pruebas o una dirección https://…/functions/v1
+`);
+      process.exitCode = 2;
+      return;
+    }
+    const r = await setCloudInConfig(paths.configFile, url, { ifMissing: process.argv.includes("--if-missing") });
+    process.stdout.write(`${r.reason}: ${r.url} (${describeCloud(r.url).label}) en ${paths.configFile}
+`);
+    return;
+  }
+
   const service = await startService({ paths, dev });
 
   let shuttingDown = false;

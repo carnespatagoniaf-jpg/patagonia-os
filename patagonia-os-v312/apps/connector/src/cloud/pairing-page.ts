@@ -15,6 +15,7 @@ import os from "node:os";
 import type http from "node:http";
 import type { LocalRoute } from "../server/local-server";
 import type { AgentPairResult, CloudAgent } from "./cloud-agent";
+import type { CloudTarget } from "./cloud-targets";
 
 export const PAIRING_PATH = "/vincular";
 const MAX_FORM_BYTES = 4096;
@@ -23,6 +24,16 @@ export interface PairingPageOptions {
   agent: CloudAgent;
   /** Para pruebas: token fijo. */
   csrfToken?: string;
+  /** A qué Patagonia se vincula (producción, pruebas u otra dirección): se dice en la página. */
+  target?: CloudTarget | null;
+}
+
+/** "Te estás vinculando con: …" (en pruebas, bien visible para no vincular una PC de un local al sistema de pruebas). */
+export function targetLine(target: CloudTarget | null | undefined, paired = false): string {
+  if (!target) return "";
+  const verb = paired ? "Vinculada con" : "Te estás vinculando con";
+  const cls = target.kind === "produccion" ? "muted" : "error";
+  return `<p class="${cls}" data-nube="${escapeHtml(target.kind)}">${verb}: <b>${escapeHtml(target.label)}</b></p>`;
 }
 
 const ERRORS: Record<string, string> = {
@@ -85,10 +96,11 @@ function hidden(name: string, value: string): string {
   return `<input type="hidden" name="${escapeHtml(name)}" value="${escapeHtml(value)}">`;
 }
 
-export function renderForm(input: { csrf: string; code?: string; name?: string; error?: string | null; notice?: string | null }): string {
+export function renderForm(input: { csrf: string; code?: string; name?: string; error?: string | null; notice?: string | null; target?: CloudTarget | null }): string {
   return page(
     "Vincular",
     `<h1>Vincular esta computadora</h1>
+${targetLine(input.target)}
 <p class="muted">En Patagonia entrá a <b>Mis balanzas → Computadoras con Scale Connect → Agregar esta computadora</b> y escribí acá el código que aparece.</p>
 ${input.notice ? `<p class="error">${escapeHtml(input.notice)}</p>` : ""}
 ${input.error ? `<p class="error">${escapeHtml(errorText(input.error))}</p>` : ""}
@@ -122,11 +134,12 @@ ${options}
   );
 }
 
-export function renderPaired(input: { name: string; recovered?: boolean }): string {
+export function renderPaired(input: { name: string; recovered?: boolean; target?: CloudTarget | null }): string {
   return page(
     "Vinculada",
     `<h1>${input.recovered ? "Computadora recuperada" : "¡Listo!"}</h1>
 <p class="ok">Esta computadora quedó vinculada como <b>${escapeHtml(input.name)}</b>.</p>
+${targetLine(input.target, true)}
 <p class="muted">Ya podés cerrar esta ventana. En Patagonia → Mis balanzas la vas a ver "En línea" en menos de un minuto.</p>`,
   );
 }
@@ -153,6 +166,7 @@ function sameToken(a: string, b: string): boolean {
 export function createPairingRoute(options: PairingPageOptions): LocalRoute {
   const csrf = options.csrfToken ?? randomBytes(24).toString("base64url");
   const agent = options.agent;
+  const target = options.target ?? null;
 
   return async ({ req, res, url, origin, port }) => {
     if (url.pathname !== PAIRING_PATH) return false;
@@ -160,12 +174,12 @@ export function createPairingRoute(options: PairingPageOptions): LocalRoute {
     if (req.method === "GET" || req.method === "HEAD") {
       const status = agent.status();
       if (agent.isPaired) {
-        sendHtml(res, 200, renderPaired({ name: String(status.name ?? "") }));
+        sendHtml(res, 200, renderPaired({ name: String(status.name ?? ""), target }));
       } else if (!agent.configured) {
         sendHtml(res, 200, page("Vincular", `<h1>Vincular esta computadora</h1><p class="error">${escapeHtml(errorText("no_configurado"))}</p>`));
       } else {
         const notice = status.state === "desvinculada" ? "Esta computadora fue desvinculada desde Patagonia. Para volver a usarla, pedí un código nuevo." : null;
-        sendHtml(res, 200, renderForm({ csrf, name: os.hostname().slice(0, 40), notice }));
+        sendHtml(res, 200, renderForm({ csrf, name: os.hostname().slice(0, 40), notice, target }));
       }
       return true;
     }
@@ -183,11 +197,11 @@ export function createPairingRoute(options: PairingPageOptions): LocalRoute {
     }
     const form = await readForm(req);
     if (!form || !sameToken(form.get("csrf") ?? "", csrf)) {
-      sendHtml(res, 403, renderForm({ csrf, error: "pedido_invalido" }));
+      sendHtml(res, 403, renderForm({ csrf, error: "pedido_invalido", target }));
       return true;
     }
     if (agent.isPaired) {
-      sendHtml(res, 409, renderPaired({ name: String(agent.status().name ?? "") }));
+      sendHtml(res, 409, renderPaired({ name: String(agent.status().name ?? ""), target }));
       return true;
     }
 
@@ -197,9 +211,9 @@ export function createPairingRoute(options: PairingPageOptions): LocalRoute {
     const forceNew = form.get("force_new") === "1";
     const result: AgentPairResult = await agent.pair({ code, name, recoverId: recoverId || null, forceNew });
 
-    if (result.kind === "paired") sendHtml(res, 200, renderPaired({ name: result.name, recovered: result.recovered }));
+    if (result.kind === "paired") sendHtml(res, 200, renderPaired({ name: result.name, recovered: result.recovered, target }));
     else if (result.kind === "choose") sendHtml(res, 200, renderChoice({ csrf, code, name, candidates: result.candidates }));
-    else sendHtml(res, 400, renderForm({ csrf, code, name, error: result.error }));
+    else sendHtml(res, 400, renderForm({ csrf, code, name, error: result.error, target }));
     return true;
   };
 }

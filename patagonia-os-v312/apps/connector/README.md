@@ -6,7 +6,7 @@ conexiones de las balanzas de una PC. Diseño: `docs/PLAN_BALANZAS_V2.md`, secci
 
 Base: enlaces de bytes, descubridor, gestor de puertos, trabajadores, diario, canal local,
 configuración, bitácora y empaquetado. **Protocolos Kretz y Systel: los de la web, sin
-reescribirlos** (`src/protocols/`). Todavía sin nube.
+reescribirlos** (`src/protocols/`). Con la nube de punta a punta (migraciones 226 y 227, `src/scales/`).
 
 ## Correr
 
@@ -27,7 +27,9 @@ Para probar balanzas en el banco, cargalas en `.data/config.json` (`devices`):
 Lo inválido se informa en `/status` (`problems`) y en la bitácora; el servicio arranca igual.
 
 Para la nube, `config.json` lleva `"cloud": { "url": "https://<proyecto>.supabase.co/functions/v1" }` (o la variable
-`PATAGONIA_CLOUD_URL`, que va a poner el instalador). Sin eso, Scale Connect trabaja solo en la PC y `/vincular` lo
+`PATAGONIA_CLOUD_URL`, que gana). El instalador la escribe con `/NUBE=produccion` (por omisión) | `pruebas` | una
+dirección https, vía `scale-connect.exe --set-cloud <valor> [--if-missing]`: solo toca `cloud.url`, y sin `/NUBE=` una
+actualización mantiene la que había. `/vincular` dice a qué sistema se vincula (en pruebas, en rojo). Sin eso, Scale Connect trabaja solo en la PC y `/vincular` lo
 avisa. Vincular: abrir `http://127.0.0.1:9120/vincular` y escribir el código de Patagonia → Mis balanzas →
 "Agregar esta computadora". El POST de esa página solo se acepta desde la misma página (Origin exacto + token).
 
@@ -51,7 +53,8 @@ No está en los `test`/`build`/`typecheck` de la raíz a propósito: esos siguen
 | `journal/` | Diario de trabajos con escritura atómica (temporal + `fsync` + renombrar). Al reiniciar, lo que estaba en curso queda `interrupted`/`resumable`; nunca se reenvía solo. `JournalStorage` es la costura para pasar a SQLite. |
 | `server/` | `127.0.0.1:9120`, solo `GET /status` (y preflight). Revisa Host (DNS rebinding) y Origin (`https://*.patagoniasystem.com.ar`, `http://localhost`), igual que `apps/web/public/patagonia-print-agent.ps1`. Sin endpoints de escritura. |
 | `protocols/` | Corre el motor de "Mi balanza" de la web **tal cual** (ver abajo). Trabajos `identify`, `test` y `send` por balanza. |
-| `cloud/` | Canal con la nube (migración 226). `CloudClient` (HTTPS a `scale-connect-pair` / `scale-connect-api`, encabezado `x-scale-connector: <id>.<secreto>`), `CloudAgent` (latido cada 60 s, consulta larga a `/claim`, espera creciente sin conexión, avance y cierre; si la nube dice 401/403 corta todo y borra la credencial), `JobExecutor` (costura con los protocolos: hoy `UnavailableExecutor` cierra como `sin_protocolo`), credencial en `credential.json` cifrada con DPAPI de **máquina** (ProtectedData vía PowerShell, el secreto por stdin), huella = SHA-256 de nombre del equipo + MachineGuid, y la página `GET/POST /vincular`. |
+| `cloud/` | Canal con la nube (migración 226). `CloudClient` (HTTPS a `scale-connect-pair` / `scale-connect-api`, encabezado `x-scale-connector: <id>.<secreto>`), `CloudAgent` (latido cada 60 s, consulta larga a `/claim`, espera creciente sin conexión, avance y cierre; si la nube dice 401/403 corta todo y borra la credencial), `JobExecutor` (costura con los protocolos; el real es `ScaleJobExecutor` de `scales/`), hasta 4 trabajos a la vez
+(uno por balanza; dos a la misma esperan en su cola), configuración de la nube después de cada latido, credencial en `credential.json` cifrada con DPAPI de **máquina** (ProtectedData vía PowerShell, el secreto por stdin), huella = SHA-256 de nombre del equipo + MachineGuid, y la página `GET/POST /vincular`. |
 | `config/`, `log/` | `%ProgramData%\Patagonia\ScaleConnect\` (`config.json`, `logs\connector.log` rotada, `journal\jobs.json`). En desarrollo `.data/`; se fuerza con `PATAGONIA_CONNECT_HOME`. La bitácora borra secretos (por nombre de campo y por patrón). |
 
 ## Protocolos (`src/protocols/`)
@@ -64,7 +67,7 @@ El conector **importa** el código de `apps/web/src/features/...` (adaptadores K
 | `web-runtime.ts` | Empaqueta `web-entry.ts` (esbuild, IIFE) y lo evalúa **una vez por balanza** con `new Function`, pasándole su `localStorage`, su `navigator.serial` y `window`/`BroadcastChannel` = `undefined`. Cada balanza tiene sus variables de módulo (puerto elegido, formato de etiqueta) como una pestaña aparte, y nada se instala en el `globalThis` del servicio. En el `.cjs` el texto va adentro (`__WEB_PROTOCOLS_SOURCE__`); en desarrollo se empaqueta al vuelo. |
 | `web-serial-shim.ts` | `WebSerialPortShim`: forma de `SerialPort` de Web Serial (`open`, `readable`/`writable` como streams web, `setSignals`, `getInfo`, `close`, evento `disconnect`) sobre el `ByteLink` que presta el trabajo. Otra velocidad o bits de stop = reabrir el **mismo** puerto (`SerialLineControl.reconfigure`). Fuera de un trabajo no abre. Un corte lo deja "perdido" hasta el próximo trabajo. Cada byte recibido cuenta como avance para el vigía. |
 | `scale-state-store.ts` | `localStorage` de cada balanza en `protocols\<id>.json` (escritura atómica). |
-| `engine-backend.ts` | `EngineBackend`: lo que el motor le pide a Patagonia (formato de etiqueta, balanzas de la sucursal, catálogo/vínculos Systel, reporte a soporte). Hoy `MemoryEngineBackend`; la nube la implementa otro lote. |
+| `engine-backend.ts` | `EngineBackend`: lo que el motor le pide a Patagonia (formato de etiqueta, balanzas de la sucursal, catálogo/vínculos Systel, reporte a soporte). `MemoryEngineBackend` fuera de los trabajos de la nube (banco); en un trabajo de la nube va `CloudEngineBackend` (`scales/`), que se pasa por envío (`SendInput.backend`). |
 | `scale-jobs.ts` | `ScaleProtocolHost` (uno por balanza, en `service.scales`): `identify` (solo lectura), `test` y `send` (identify → `prepare` relee → `sync`). Resultado por producto: `confirmado` / `fallado` + motivo / `salteado` + motivo. Confirmar = la misma comparación de la web (`reportDifferences`, `planAuraSync`, lo que Systel guarda para Mostrador); cada confirmado va al diario (`producto:<código>`). Un envío interrumpido nunca se reenvía solo: el próximo relee la balanza y escribe solo lo que falta. |
 | `testing/` | Simuladores: Report a nivel de bytes (servidor TCP local), `FakeAuraDevice` y `FakeCuora` de la web detrás de un `FakeByteLink`. |
 
@@ -200,6 +203,19 @@ node scripts/make-update-manifest.mjs verify --manifest dist/installer/latest.js
 `verifyManifest` es la misma verificación que hará el servicio. Las pruebas
 (`scripts/lib/*.test.mjs`) corren con `npm run test -w @patagonia/connector`.
 
+## De punta a punta con la nube (`src/scales/`, migración 227)
+
+| Pieza | Qué hace |
+|---|---|
+| `scale-fleet.ts` | `ScaleFleet`: las balanzas de ESTA PC (las de `config.json` y las identificadas, guardadas en `scales.json`), cada una con su trabajador y su `ScaleProtocolHost`. Huella física: serie real del adaptador USB o su ubicación, el COM, o IP:puerto; el id local sale de la huella (si Windows cambia el COM, sigue siendo la misma). `identifyAll` prueba SOLO LEYENDO los puertos conocidos, los nuevos (USB, Bluetooth saliente, COM; nunca virtuales ni Bluetooth entrante) y las IP pedidas; los puertos sin balanza se sueltan. `applyConfig` arma scale_key → puerto con lo que vinculó la web. `seenScales` es lo que va en el latido (scale_key, o `dev:<id>` si todavía no está vinculada). |
+| `scale-executor.ts` | `ScaleJobExecutor`: `send` (scale_key → puerto; si no lo sabe, pide la configuración; corre en el trabajador de esa balanza; avance = cuántos quedaron comprobados, como mucho uno por segundo; cierre = resultado de CADA producto y el mensaje para la persona en el último avance), `read` con `{"mode":"identify"}` (balanzas encontradas como productos del trabajo: `sent` = huella, `read_back` = marca, modelo, identidad) y `test`. |
+| `cloud-engine-backend.ts` | `EngineBackend` contra `scale-connect-api/engine`: lee el formato y el catálogo de la sucursal del trabajo y escribe por las MISMAS RPC de la web en nombre de quien encoló (roles y auditoría iguales). |
+
+La web (`apps/web/src/features/scales/connect/`) encola con `queue_scale_job`, consulta cada 2 s y muestra el resultado
+con los mismos textos que el envío por cable. Prueba de punta a punta: `scales/end-to-end.test.ts` (nube simulada +
+servicio completo + Report por TCP y Cuora por serie simulada + la lógica de la web: agregar, dos envíos en paralelo,
+una que se desconecta).
+
 ## Qué falta
 
 - **Protocolos en hardware real**: hasta ahora solo contra simuladores (ver `protocols/`).
@@ -219,11 +235,10 @@ node scripts/make-update-manifest.mjs verify --manifest dist/installer/latest.js
   lado y vuelve atrás solo) y dónde se publica el manifiesto.
 - **Protocolos** Kretz y Systel: pasan a `packages/scale-protocols` y hablan con `ByteLink`.
   Hoy no hay nada de protocolo acá.
-- **Vinculación** (código de 8 caracteres, credencial con DPAPI) y **canal con la nube**
-  (Edge Function, trabajos, latido).
 - **Protocolos** Kretz y Systel: pasan a `packages/scale-protocols` y hablan con `ByteLink`.
   Hoy no hay nada de protocolo acá.
-- Ejecutor real de trabajos de la nube (`JobExecutor` sobre los protocolos) y diario local por trabajo de la nube.
+- Probar en staging con una PC real (migración 227 + función `scale-connect-api` con la ruta `/engine` + instalador con `/NUBE=pruebas`).
+- Cancelar un envío en cola desde la web (hoy, si la PC está apagada, el envío queda en cola hasta que vuelve o vence al día).
 - "Reemplaza a Caja 1" en una PC nueva (hoy solo se recupera con la misma huella).
 - Descubrimiento de **balanzas de red** (subredes, 169.254.x, puertos 1001/10001, ARP).
 - Peso en vivo para Mostrador (WebSocket local).
