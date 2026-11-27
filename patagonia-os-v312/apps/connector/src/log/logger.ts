@@ -18,7 +18,7 @@ export interface Logger {
 
 const LEVELS: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 };
 
-const SECRET_KEY = /pass(word)?|secret|token|credential|authorization|api[-_]?key|cookie|private[-_]?key|^pin$|^pin[-_]|[-_]pin$|dpapi/i;
+const SECRET_KEY = /pass(word)?|secret|token|credential|authorization|api[-_]?key|cookie|private[-_]?key|^pin$|^pin[-_]|[-_]pin$|dpapi|scale-connector|^protected$/i;
 const REDACTED = "[oculto]";
 const MAX_DEPTH = 6;
 const MAX_STRING = 4000;
@@ -31,7 +31,9 @@ export function redactText(text: string): string {
       /\b(password|passwd|pwd|token|secret|api[_-]?key|access[_-]?key|credential|pin)(\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s&,;]+)/gi,
       `$1$2${REDACTED}`,
     )
-    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, REDACTED);
+    .replace(/-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g, REDACTED)
+    // Credencial de la PC tal como viaja (encabezado x-scale-connector: <id>.<secreto>): queda el id, nunca el secreto.
+    .replace(/\b([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\.[A-Za-z0-9_-]{20,}/gi, `$1.${REDACTED}`);
 }
 
 /** Copia el valor borrando campos con nombre de secreto. */

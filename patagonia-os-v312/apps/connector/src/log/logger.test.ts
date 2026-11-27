@@ -73,6 +73,21 @@ test("si no se puede escribir la bitácora, no tira excepción", () => {
   assert.doesNotThrow(() => log.error("igual sigue"));
 });
 
+test("la credencial de la PC (id.secreto) nunca queda en la bitácora: solo el id", () => {
+  const id = "3f2b8c1e-9a4d-4e2b-8f1a-0c9d8e7f6a5b";
+  const secret = "Zx8_kQ2-vT9mN4pL7rS1wY6uB3eH0jA5cF2gD8iK4oM";
+  const text = redactText(`fetch falló con x-scale-connector: ${id}.${secret} en el encabezado`);
+  assert.ok(!text.includes(secret), text);
+  assert.ok(text.includes(id), "el id sirve para soporte");
+  const fields = redact({ headers: { "x-scale-connector": `${id}.${secret}` }, protected: "AQAAANCMnd8BFdERjHoAwE", connectorId: id }) as Record<string, any>;
+  assert.equal(fields.headers["x-scale-connector"], "[oculto]");
+  assert.equal(fields.protected, "[oculto]");
+  assert.equal(fields.connectorId, id);
+  const log = createMemoryLogger();
+  log.warn("No se pudo vincular", { error: new Error(`401 con ${id}.${secret}`) });
+  assert.ok(!JSON.stringify(log.entries).includes(secret));
+});
+
 test("bitácora en memoria para pruebas", () => {
   const log = createMemoryLogger();
   log.child({ device: "b1" }).info("hola", { secret: "s" });
