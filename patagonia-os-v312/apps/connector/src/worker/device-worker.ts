@@ -52,6 +52,12 @@ export interface JobContext {
   readonly deviceId: string;
   /** Se activa si el vigía aborta el trabajo o se apaga el servicio. */
   readonly signal: AbortSignal;
+  /**
+   * El enlace de la balanza, para los protocolos que manejan sus propias
+   * lecturas (el shim de Web Serial). Quien lo use directo avisa el avance con
+   * `heartbeat()`; `command`/`read` lo hacen solos.
+   */
+  readonly link: ByteLink;
   /** Escribe y espera la respuesta, con tiempo de espera por comando. */
   command(data: Uint8Array, options?: CommandOptions): Promise<Uint8Array>;
   write(data: Uint8Array): Promise<void>;
@@ -386,6 +392,7 @@ export class DeviceWorker {
       jobId,
       deviceId: this.id,
       signal,
+      link,
       write: async (data) => {
         alive();
         await link.write(data);
@@ -477,6 +484,9 @@ export class DeviceWorker {
     }
     if (isLinkError(error, "timeout")) return { status: "failed", error: { code: "timeout", message: error.message } };
     if (isLinkError(error)) return { status: "failed", error: { code: error.code, message: error.message } };
+    // Un trabajo puede traer su propio código estable (por ejemplo los de protocolos: "no_contesta").
+    const coded = (error as { jobErrorCode?: unknown } | null)?.jobErrorCode;
+    if (typeof coded === "string" && coded) return { status: "failed", error: { code: coded, message: messageOf(error) } };
     return { status: "failed", error: { code: "job_error", message: messageOf(error) } };
   }
 

@@ -40,6 +40,50 @@ export interface ByteLink {
   onDisconnect(listener: (error: LinkError) => void): () => void;
 }
 
+/** El enlace se perdió porque no volvió a abrir al cambiarle la configuración (no por un corte). */
+export class LinkReopenError extends LinkError {
+  constructor(message: string, options?: { cause?: unknown }) {
+    super("closed", message, options);
+  }
+}
+
+/** Configuración de la línea serie (velocidad, bits, paridad). */
+export interface LineSettings {
+  baudRate: number;
+  dataBits: 5 | 6 | 7 | 8;
+  stopBits: 1 | 1.5 | 2;
+  parity: "none" | "even" | "odd" | "mark" | "space";
+}
+
+/** Señales de control del puerto serie (DTR y RTS). */
+export interface LineSignals {
+  dataTerminalReady?: boolean;
+  requestToSend?: boolean;
+}
+
+/**
+ * Enlace serie que se puede reconfigurar sin soltar el puerto: cambiar la velocidad
+ * o los bits de stop (cierra y reabre el MISMO puerto, sin pasar por el gestor) y las
+ * señales DTR/RTS. Lo usan los protocolos que prueban varias configuraciones (la
+ * búsqueda Kretz y Systel). TCP no lo implementa: en la red no hay velocidad.
+ */
+export interface SerialLineControl {
+  readonly lineSettings: LineSettings;
+  reconfigure(next: LineSettings): Promise<void>;
+  setSignals(signals: LineSignals): Promise<void>;
+  /** Fabricante y producto del adaptador USB, si se conocen. */
+  readonly usbInfo?: { usbVendorId?: number; usbProductId?: number };
+}
+
+export function isSerialLineControl(link: ByteLink): link is ByteLink & SerialLineControl {
+  const l = link as Partial<SerialLineControl>;
+  return typeof l.reconfigure === "function" && typeof l.setSignals === "function" && !!l.lineSettings;
+}
+
+export function sameLineSettings(a: LineSettings, b: LineSettings): boolean {
+  return a.baudRate === b.baudRate && a.dataBits === b.dataBits && a.stopBits === b.stopBits && a.parity === b.parity;
+}
+
 interface PendingRead {
   until: (received: Uint8Array) => boolean;
   resolve: (data: Uint8Array) => void;
@@ -158,6 +202,27 @@ export abstract class BaseByteLink implements ByteLink {
     this.opened = false;
     const error = new LinkError("closed", `Se cortó la conexión con ${this.label}.`, { cause });
     this.settle(null, error);
+    this.announceLost(error);
+    void this.safeDoClose();
+  }
+
+  /**
+   * Cierra y vuelve a abrir el mismo puerto con otra configuración (la aplica
+   * `apply`). Si no vuelve a abrir, avisa una desconexión: así el trabajador
+   * suelta el puerto y reconecta con la configuración de siempre.
+   */
+  protected async reopen(apply: () => void): Promise<void> {
+    await this.close();
+    apply();
+    try {
+      await this.open();
+    } catch (error) {
+      this.announceLost(new LinkReopenError(`No se pudo reabrir ${this.label} con otra configuración.`, { cause: error }));
+      throw error;
+    }
+  }
+
+  private announceLost(error: LinkError): void {
     for (const listener of [...this.disconnectListeners]) {
       try {
         listener(error);
@@ -165,7 +230,6 @@ export abstract class BaseByteLink implements ByteLink {
         // Un oyente que falla no puede tumbar al enlace ni a los demás oyentes.
       }
     }
-    void this.safeDoClose();
   }
 
   private takeInbox(): Uint8Array {

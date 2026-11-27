@@ -3,6 +3,7 @@
 // poder probarlo entero sin hardware.
 
 import os from "node:os";
+import path from "node:path";
 import { loadConfig, type ConnectorConfig, type DeviceConfig } from "./config/config";
 import type { ConnectorPaths } from "./config/paths";
 import { JsonFileJournalStorage, StoredJobJournal, type JobJournal } from "./journal/job-journal";
@@ -15,6 +16,8 @@ import { DeviceRegistry } from "./worker/device-registry";
 import { SerialportLister, discoverPorts, type DiscoveryResult, type PortLister } from "./discovery/port-lister";
 import { createLocalServer, type LocalServer } from "./server/local-server";
 import { CONNECTOR_VERSION, SERVICE_NAME } from "./version";
+import { MemoryEngineBackend, type EngineBackend } from "./protocols/engine-backend";
+import { ScaleProtocolHost, protocolDeviceFor } from "./protocols/scale-jobs";
 
 export interface ServiceOptions {
   paths: ConnectorPaths;
@@ -25,6 +28,8 @@ export interface ServiceOptions {
   createLink?: (device: DeviceConfig) => ByteLink;
   /** Para pruebas: puerto HTTP (0 = cualquiera libre). */
   httpPort?: number;
+  /** Lo que el motor de balanzas le pide a Patagonia. Hasta que exista el canal con la nube, en memoria. */
+  backend?: EngineBackend;
   logger?: Logger;
 }
 
@@ -34,6 +39,8 @@ export interface RunningService {
   journal: JobJournal;
   registry: DeviceRegistry;
   portManager: PortManager;
+  /** Trabajos de protocolos (identify / test / send) de cada balanza, por id. */
+  scales: Map<string, ScaleProtocolHost>;
   server: LocalServer;
   port: number;
   status(): Record<string, unknown>;
@@ -108,6 +115,24 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
   };
   await refreshPorts();
   logger.info("Puertos encontrados", { count: discovery.ports.length, ports: discovery.ports.map((p) => `${p.path} ${p.chipLabel}`) });
+  // Protocolos Kretz/Systel de la web, uno por balanza (src/protocols).
+  const backend = options.backend ?? new MemoryEngineBackend();
+  const scales = new Map<string, ScaleProtocolHost>();
+  for (const device of config.devices) {
+    const worker = registry.get(device.id);
+    if (!worker) continue;
+    scales.set(
+      device.id,
+      new ScaleProtocolHost({
+        device: protocolDeviceFor(device, discovery.ports),
+        worker,
+        backend,
+        journal,
+        logger,
+        stateFile: path.join(paths.root, "protocols", `${device.id}.json`),
+      }),
+    );
+  }
   const discoveryTimer =
     config.discoveryIntervalMs > 0 ? setInterval(() => void refreshPorts(), config.discoveryIntervalMs) : null;
   discoveryTimer?.unref();
@@ -147,6 +172,7 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
     journal,
     registry,
     portManager,
+    scales,
     server,
     port: address.port,
     status,
