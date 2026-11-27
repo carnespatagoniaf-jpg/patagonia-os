@@ -31,7 +31,8 @@ export type Permission =
   | "orders.view"
   | "orders.manage"
   | "transfers.manage"
-  | "planta.manage";
+  | "planta.manage"
+  | "freezer.manage";
 
 // "owner" es interno nuestro (el equipo de Patagonia OS): ve todo, incluidas
 // herramientas todavía en prueba (Auditoría) antes de decidir si pasan a
@@ -97,18 +98,20 @@ export const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> 
     "frigo.manage",
     "transfers.manage",
     "planta.manage",
+    // freezer.manage (migración 214): la pantalla solo existe si la empresa tiene 'freezer'.
+    "freezer.manage",
     // Pedidos: solo en empresas con 'pedidos_tienda' (196); sin eso PAGE_ONLY_ROLES se los sigue sacando.
     "orders.view",
     "orders.manage"
   ],
   // frigo.manage: el encargado carga DT, faena y salidas (la pantalla solo existe si la empresa tiene 'frigorifico').
   // transfers.manage (migración 190, plan Empresa): pedir, preparar, despachar y recibir mercadería, solo de su local.
-  manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view", "frigo.manage", "orders.view", "orders.manage", "transfers.manage", "planta.manage"],
+  manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view", "frigo.manage", "orders.view", "orders.manage", "transfers.manage", "planta.manage", "freezer.manage"],
   // "route.sell": vendedor de un camión (venta en ruta, migración 161); la pantalla además pide companies.features "venta_ruta".
   // Pedidos (migración 187): el cajero los carga y los entrega, solo en su sucursal (la base lo exige).
-  cashier: ["pos.sell", "products.view", "sales.create", "pos.treasury", "route.sell", "orders.view", "orders.manage", "transfers.manage"],
+  cashier: ["pos.sell", "products.view", "sales.create", "pos.treasury", "route.sell", "orders.view", "orders.manage", "transfers.manage", "freezer.manage"],
   // planta.manage (migración 194, plan Planta): envasar, imprimir etiquetas y despachar paquetes, solo en su local.
-  production: ["dashboard.view", "inventory.view", "inventory.adjust", "transfers.manage", "planta.manage"],
+  production: ["dashboard.view", "inventory.view", "inventory.adjust", "transfers.manage", "planta.manage", "freezer.manage"],
   readonly: ["dashboard.view", "inventory.view", "reports.view"],
   // El contador (migración 155): solo la pantalla Contable. La base le corta toda escritura.
   accountant: ["accounting.view"]
@@ -147,7 +150,8 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   "orders.view": "Pedidos (ver)",
   "orders.manage": "Pedidos (cargar, entregar y cancelar)",
   "transfers.manage": "Mercadería entre locales (pedir, despachar y recibir)",
-  "planta.manage": "Planta (envasar, etiquetas y despachar paquetes)"
+  "planta.manage": "Planta (envasar, etiquetas y despachar paquetes)",
+  "freezer.manage": "Freezer (guardar y sacar paquetes)"
 };
 
 /** Planes que se venden (migración 101). El plan de la empresa se chequea
@@ -282,13 +286,15 @@ export const PAGE_PERMISSIONS = {
   // como pestaña de Sucursales (PAGE_ONLY_ROLES).
   transfers: "transfers.manage",
   // Planta (migración 194, plan Planta): envasar con etiqueta, paquetes y despachar escaneando.
-  planta: "planta.manage"
+  planta: "planta.manage",
+  // Freezer (migración 214, a pedido): qué hay guardado en el freezer del local; sale solo al venderlo en Mostrador.
+  freezer: "freezer.manage"
 } as const satisfies Record<string, Permission>;
 
 export type Page = keyof typeof PAGE_PERMISSIONS;
 
 /** Pantallas que solo ve una empresa que las pidió (companies.features, migración 143). Hoy: Martínez, La primera (venta en ruta) y los frigoríficos (migración 169). */
-const PAGE_REQUIRED_FEATURE: Partial<Record<string, string>> = { accounts: "cuentas", expenses: "gastos", sales_report: "reporte_ventas", route: "venta_ruta", route_trucks: "venta_ruta", frigorifico: "frigorifico", orders: "pedidos" };
+const PAGE_REQUIRED_FEATURE: Partial<Record<string, string>> = { accounts: "cuentas", expenses: "gastos", sales_report: "reporte_ventas", route: "venta_ruta", route_trucks: "venta_ruta", frigorifico: "frigorifico", orders: "pedidos", freezer: "freezer" };
 
 /** Pantallas que son solo del local, no de la administración: ni el dueño ("*") ni el administrador las ven.
  * Pedidos (migración 187) es el cuaderno de cada sucursal: solo cajero y encargado (la base exige lo mismo). */

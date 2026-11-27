@@ -36,7 +36,7 @@ export const navGroups: Array<{ heading: string | null; items: NavItem[] }> = [
     heading: "Producto y stock",
     items: [
       { page: "products", label: "Productos", icon: Tag },
-      { page: "inventory", label: "Stock", icon: Boxes, tabs: [{ page: "inventory", label: "Stock" }, { page: "recipes", label: "Recetas" }] },
+      { page: "inventory", label: "Stock", icon: Boxes, tabs: [{ page: "inventory", label: "Stock" }, { page: "freezer", label: "Freezer" }, { page: "recipes", label: "Recetas" }] },
       { page: "purchases", label: "Compras", icon: PackagePlus },
       // Plan Empresa (migración 190): encargado, cajero y producción. El dueño lo ve en Sucursales.
       { page: "transfers", label: "Entre locales", icon: ArrowLeftRight },
