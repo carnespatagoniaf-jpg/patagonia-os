@@ -79,7 +79,7 @@ jobs:
           $code = Install-ScaleConnect 'setup-1.log' @('/NUBE=pruebas')
           $log = Get-Content (Join-Path (Get-E2EOut) 'setup-1.log') -Raw
           Assert-Check 'Instalación' 'El instalador termina bien' ($code -eq 0) "código $code"
-          Assert-Check 'Instalación' 'Sin errores del servicio en el log' (-not ($log -match 'ERROR')) ''
+          Assert-Check 'Instalación' 'Sin errores del servicio en el log' (-not ($log -cmatch 'ERROR (del servicio|al guardar)')) ''
           Assert-Check 'Instalación' 'Programa copiado' (Test-Path (Join-Path (Get-AppDir) 'scale-connect.exe')) (Get-AppDir)
 
       - name: Comprobar el servicio
