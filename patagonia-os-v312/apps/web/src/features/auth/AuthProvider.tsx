@@ -5,6 +5,12 @@ import { clearStoredPosReceipt } from "../../lib/pos-receipt-storage";
 import { toError } from "../../lib/supabase-error";
 import { setCompanyProvince } from "../../lib/consumer-legend";
 
+// Salir cierra la sesión SOLO en este navegador. El signOut() de Supabase por defecto es "global": revoca la
+// sesión de esa cuenta en todos los equipos. Como en los locales varias cajas/PC/celulares comparten el mismo
+// usuario, tocar "Salir" en una dejaba afuera a las demás al renovar el token ("Invalid Refresh Token: Refresh
+// Token Not Found" en los registros de producción, 26/11/2026). Lo mismo al rechazar un perfil desactivado.
+const LOCAL_SIGN_OUT = { scope: "local" } as const;
+
 export interface UserProfile {
   id: string;
   company_id: string;
@@ -184,7 +190,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         // clave anónima (sin la sesión, todavía no aplicada), daba 401 y
         // cerraba la sesión del admin de plataforma al poco de entrar
         // (visto en los registros de producción).
-        if (err instanceof DefinitiveProfileError && supabase) await supabase.auth.signOut();
+        if (err instanceof DefinitiveProfileError && supabase) await supabase.auth.signOut(LOCAL_SIGN_OUT);
       }
       setLoading(false);
     }
@@ -232,7 +238,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       try {
         await loadProfile(data.user.id);
       } catch (err) {
-        if (err instanceof DefinitiveProfileError) await supabase.auth.signOut();
+        if (err instanceof DefinitiveProfileError) await supabase.auth.signOut(LOCAL_SIGN_OUT);
         throw err;
       }
     } finally {
@@ -241,7 +247,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }
 
   async function signOut() {
-    if (supabase) await supabase.auth.signOut();
+    if (supabase) await supabase.auth.signOut(LOCAL_SIGN_OUT);
     setSession(null);
     setProfile(null);
     loadedProfileUserIdRef.current = null;
