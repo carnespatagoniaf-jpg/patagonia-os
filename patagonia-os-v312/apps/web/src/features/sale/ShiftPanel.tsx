@@ -7,10 +7,11 @@ import { registerSupplierPaymentFromPosShift } from "../purchases/purchases-serv
 import type { useSuppliers } from "../purchases/useSuppliers";
 import type { useEmployees } from "../employees/useEmployees";
 import type { useTreasury } from "../shifts/useTreasury";
-import { registerEmployeeValeFromPosShift, type PosShiftVale } from "../employees/employees-service";
+import { registerEmployeeMerchandiseVale, registerEmployeeValeFromPosShift, type PosShiftVale } from "../employees/employees-service";
 import { listPosShiftWithdrawals, registerPosSafeDeposit, registerPosShiftExpense, registerPosShiftTransfer, voidPosCashWithdrawal, type PosShiftWithdrawal, type PosCashier, type PosShift, type PosShiftAdjustment, type PosShiftSale, type SafeDepositResult } from "./pos-shift-service";
 import { BlindCloseForm } from "./BlindCloseForm";
-import { formatShiftStart, type MovementReceiptState } from "./sale-model";
+import { formatShiftStart, type MovementReceiptState, type TicketLine } from "./sale-model";
+import { valeItemsFromCart, valeTotal, type MerchandiseValeDone } from "./merchandise-vale";
 import type { Product } from "@patagonia/domain";
 import type { ScaleConfig } from "./scale-barcode";
 import { ScaleCloseControl, ScaleVoidForm } from "./ScaleControl";
@@ -410,23 +411,56 @@ function SupplierPaymentForm({ visible, shift, accounts, suppliers, onCreateSupp
   );
 }
 
-function EmployeeValeForm({ visible, shift, accounts, employees, onMessage, publishReceipt, onMovementsChanged, onClose }: FormCommon & {
+const MERCADERIA = "mercaderia";
+
+function EmployeeValeForm({ visible, shift, accounts, employees, onMessage, publishReceipt, onMovementsChanged, onClose, valeCart, employeeDiscount, onMerchandiseVale }: FormCommon & {
   employees: Employees;
   onMovementsChanged: () => Promise<void>;
+  /** Vale de mercadería (migración 215): lo que está en el ticket de Mostrador es lo que se lleva. */
+  valeCart: TicketLine[];
+  employeeDiscount: number;
+  onMerchandiseVale: (done: MerchandiseValeDone) => Promise<void>;
 }) {
   const cash = cashAccountsOf(accounts);
   const [employeeId, setEmployeeId] = useState("");
   const [pickedAccountId, setAccountId] = useState("");
+  // "¿De dónde sale?": una caja (plata) o "mercaderia". Con una sola caja, esa por defecto.
   const accountId = pickedAccountId || (cash.length === 1 ? cash[0].id : "");
+  const isMerchandise = accountId === MERCADERIA;
   const [amountInput, setAmountInput] = useState("");
   const [detail, setDetail] = useState("");
+  const [pin, setPin] = useState("");
+  const [needsPin, setNeedsPin] = useState(false);
   const [busy, setBusy] = useState(false);
+  const lines = valeItemsFromCart(valeCart);
+  const merchandiseTotal = valeTotal(valeCart, employeeDiscount);
+
+  async function handleMerchandiseVale() {
+    if (!shift) { onMessage("No hay un turno abierto."); return; }
+    if (!lines.ok) { onMessage(lines.problem); return; }
+    setBusy(true);
+    try {
+      const r = await registerEmployeeMerchandiseVale({ posShiftId: shift.id, employeeId, items: lines.items, pin, detail });
+      const cart = valeCart;
+      setEmployeeId(""); setAccountId(""); setDetail(""); setPin(""); setNeedsPin(false);
+      onClose();
+      await onMerchandiseVale({ employeeName: r.employee, amount: r.amount, discountPct: r.discountPct, cart });
+      await onMovementsChanged();
+    } catch (err) {
+      const msg = errorDetail(err);
+      if (/PIN/i.test(msg)) setNeedsPin(true);
+      onMessage(`No se pudo dar el vale. ${msg}`);
+    } finally {
+      setBusy(false);
+    }
+  }
 
   async function handleEmployeeVale() {
     onMessage("");
     if (!shift) { onMessage("No hay un turno abierto."); return; }
     if (!employeeId) { onMessage("Elegí un empleado."); return; }
-    if (!accountId) { onMessage("Elegí de qué caja sale la plata."); return; }
+    if (!accountId) { onMessage("Elegí de dónde sale: de qué caja, o mercadería."); return; }
+    if (isMerchandise) { await handleMerchandiseVale(); return; }
     const amount = parseAmount(amountInput || "0") || 0;
     if (!(amount > 0)) { onMessage("El monto debe ser mayor que cero."); return; }
     setBusy(true);
@@ -466,35 +500,49 @@ function EmployeeValeForm({ visible, shift, accounts, employees, onMessage, publ
   if (!visible) return null;
   return (
     <div style={{ display: "grid", gap: 8 }}>
-      <select value={employeeId} onChange={(e) => setEmployeeId(e.target.value)}>
+      <select value={employeeId} onChange={(e) => { setEmployeeId(e.target.value); setNeedsPin(false); setPin(""); }}>
         <option value="">¿A qué empleado?</option>
         {employees.map((e) => (
           <option key={e.id} value={e.id}>{e.fullName}</option>
         ))}
       </select>
-      {cash.length > 1 && (
-        <select value={pickedAccountId} onChange={(e) => setAccountId(e.target.value)}>
-          <option value="">¿De qué caja sale?</option>
-          {cash.map((a) => (
-            <option key={a.id} value={a.id}>{a.name}</option>
-          ))}
-        </select>
+      <select value={accountId} onChange={(e) => setAccountId(e.target.value)} aria-label="De dónde sale">
+        {cash.length !== 1 && <option value="">¿De dónde sale?</option>}
+        {cash.map((a) => (
+          <option key={a.id} value={a.id}>{a.name}</option>
+        ))}
+        <option value={MERCADERIA}>Mercadería</option>
+      </select>
+      {isMerchandise ? (
+        valeCart.length === 0 ? (
+          <p className="muted" style={{ margin: 0, fontSize: 13 }}>Cargá en el ticket lo que se lleva (escaneando o buscando) y volvé acá.</p>
+        ) : (
+          <p style={{ margin: 0, fontSize: 13 }}>
+            Se lleva lo del ticket: {valeCart.map((l) => l.name).join(", ")}.{" "}
+            <strong>Se le descuenta {formatMoney(merchandiseTotal)}</strong>
+            {employeeDiscount > 0 ? ` (con ${employeeDiscount.toLocaleString("es-AR")} % de descuento)` : ""}. No sale plata de la caja.
+          </p>
+        )
+      ) : (
+        <input
+          type="text"
+          inputMode="decimal"
+          placeholder="Monto $"
+          value={amountInput}
+          onChange={(e) => setAmountInput(e.target.value)}
+          style={{ fontSize: 18 }}
+        />
       )}
-      <input
-        type="text"
-        inputMode="decimal"
-        placeholder="Monto $"
-        value={amountInput}
-        onChange={(e) => setAmountInput(e.target.value)}
-        style={{ fontSize: 18 }}
-      />
+      {isMerchandise && needsPin && (
+        <input type="password" inputMode="numeric" autoComplete="off" placeholder="PIN del empleado" value={pin} onChange={(e) => setPin(e.target.value)} />
+      )}
       <input
         placeholder="Detalle (opcional)"
         value={detail}
         onChange={(e) => setDetail(e.target.value)}
       />
       <p className="muted" style={{ margin: 0, fontSize: 12 }}>Se descuenta de la próxima liquidación de sueldo del empleado.</p>
-      <button disabled={busy} onClick={handleEmployeeVale}>{busy ? "Guardando…" : "Dar el vale"}</button>
+      <button disabled={busy || (isMerchandise && valeCart.length === 0)} onClick={handleEmployeeVale}>{busy ? "Guardando…" : "Dar el vale"}</button>
     </div>
   );
 }
@@ -695,6 +743,10 @@ export interface ShiftPanelProps {
 
   onMessage: (message: string) => void;
   publishReceipt: (data: MovementReceiptState) => Promise<void>;
+  /** Vale de mercadería (migración 215): el ticket de Mostrador, el descuento para empleados y qué hacer al darlo. */
+  valeCart: TicketLine[];
+  employeeDiscount: number;
+  onMerchandiseVale: (done: MerchandiseValeDone) => Promise<void>;
 }
 
 export function ShiftPanel(p: ShiftPanelProps) {
@@ -797,7 +849,7 @@ export function ShiftPanel(p: ShiftPanelProps) {
               <SupplierPaymentForm {...form} visible suppliers={p.suppliers} onCreateSupplier={p.onCreateSupplier} onClose={() => setCashOut(null)} />
             )}
             {cashOut === "vale" && (
-              <EmployeeValeForm {...form} visible employees={p.employees} onMovementsChanged={movementsChanged} onClose={() => setCashOut(null)} />
+              <EmployeeValeForm {...form} visible employees={p.employees} onMovementsChanged={movementsChanged} onClose={() => setCashOut(null)} valeCart={p.valeCart} employeeDiscount={p.employeeDiscount} onMerchandiseVale={p.onMerchandiseVale} />
             )}
             {cashOut === "gasto" && (
               <ExpenseForm shift={shift} onMessage={p.onMessage} publishReceipt={p.publishReceipt} onMovementsChanged={movementsChanged} onClose={() => setCashOut(null)} />

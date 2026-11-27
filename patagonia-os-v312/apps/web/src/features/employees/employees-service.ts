@@ -260,6 +260,42 @@ export async function registerEmployeeValeFromPosShift(input: RegisterEmployeeVa
   return { id: data.id };
 }
 
+/** Vale de mercadería desde Mostrador (migración 215): baja stock, no toca la caja y se descuenta del sueldo. */
+export async function registerEmployeeMerchandiseVale(input: {
+  posShiftId: string;
+  employeeId: string;
+  items: { product_id: string; quantity: number; price_list_id?: string }[];
+  pin?: string;
+  detail?: string;
+}): Promise<{ id: string; amount: number; lines: number; discountPct: number; employee: string }> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { data, error } = await supabase.rpc("register_employee_merchandise_vale", {
+    p_pos_shift_id: input.posShiftId,
+    p_employee_id: input.employeeId,
+    p_items: input.items,
+    p_pin: input.pin?.trim() || null,
+    p_detail: input.detail?.trim() || null
+  });
+  if (error) throw toError(error);
+  const r = data as { id: string; amount: number | string; lines: number; discount_pct: number | string; employee: string };
+  return { id: r.id, amount: Number(r.amount), lines: r.lines, discountPct: Number(r.discount_pct), employee: r.employee };
+}
+
+/** Descuento para empleados en los vales de mercadería (companies.employee_discount_pct, migración 215). 0 sin la migración. */
+export async function getEmployeeDiscount(companyId: string): Promise<number> {
+  if (!supabase) return 0;
+  const { data, error } = await supabase.from("companies").select("employee_discount_pct").eq("id", companyId).maybeSingle();
+  if (error) return 0;
+  return Number((data as { employee_discount_pct?: number | string } | null)?.employee_discount_pct ?? 0);
+}
+
+export async function setEmployeeDiscount(pct: number): Promise<number> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { data, error } = await supabase.rpc("set_employee_discount", { p_pct: pct });
+  if (error) throw toError(error);
+  return Number(data);
+}
+
 export interface PosShiftVale {
   id: string;
   employeeName: string;
