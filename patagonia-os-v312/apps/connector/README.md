@@ -133,8 +133,10 @@ Cómo se arma (`scripts/package-sea.mjs`):
   hasta que el servicio existe; está explicado en el XML), así que el instalador la asigna con
   `sc.exe config … obj=` justo después de instalar y antes del primer inicio. Si Windows no la
   acepta, usa `NT AUTHORITY\LocalService` (tampoco es administrador). Las dos pueden abrir los
-  puertos COM, igual que cualquier usuario. Después da permiso de escritura en los datos
-  (`icacls … (OI)(CI)M /T`) y de lectura en el programa, e inicia el servicio.
+  puertos COM, igual que cualquier usuario. Después cierra la carpeta de datos (dueño
+  Administradores, sin la herencia de ProgramData: solo SYSTEM, Administradores y el servicio la
+  pueden leer, porque ahí está la credencial cifrada con DPAPI de máquina), da permiso de lectura
+  en el programa e inicia el servicio.
 - **Actualizar** = instalar la versión nueva encima (mismo `AppId`): frena el servicio,
   reemplaza los archivos (borra `node_modules` viejo), `refresh` de WinSW y vuelve a iniciar.
   Los datos quedan.
