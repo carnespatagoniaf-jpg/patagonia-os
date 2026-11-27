@@ -106,7 +106,7 @@ jobs:
           $secs = Wait-Until { Get-Status } 60 '/status responde'
           $s = Get-Status
           Save-Evidence 'status-1.json' $s
-          Assert-Check 'Servicio' '/status responde' ($s.service -eq 'PatagoniaScaleConnect') "en $secs s, versión $($s.version)"
+          Assert-Check 'Servicio' '/status responde' ($s.service -eq 'patagonia-scale-connect') "en $secs s, versión $($s.version)"
           $cfg = Get-Content (Join-Path (Get-DataDir) 'config.json') -Raw | ConvertFrom-Json
           Assert-Check 'Instalación' 'config.json con la nube de staging' ($cfg.cloud.url -eq (Get-StagingUrl)) $cfg.cloud.url
           Assert-Check 'Instalación' '/status: nube de pruebas, sin vincular' ($s.cloud.target -eq 'pruebas' -and $s.cloud.state -eq 'sin_vincular') "$($s.cloud.target) / $($s.cloud.state)"
