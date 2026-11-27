@@ -291,10 +291,19 @@ export class KretzSession implements ScaleSession {
       const r = await this.io.runAuraSync(plan, (t) => onProgress("sincronizar", "Mandando tus productos a la balanza…", ...progressNumbers(t)), () => false, true, barcodeConfig);
       if (r.verdict !== "ok") {
         const at = r.stoppedAt;
-        const product = at ? st.products.find((p) => Number(p.code) === at.plu) : undefined;
-        const failures: ProductProblem[] = at
-          ? [{ code: String(at.plu), name: product?.name ?? "", reason: at.readBack === null ? "la balanza no lo devolvió al releerlo" : "al releerlo en la balanza no quedó igual a Patagonia" }]
-          : [];
+        // Cada producto pedido que no quedó releído igual, con su motivo: el que frenó el envío y los que no se llegaron a
+        // mandar (envios-fallas.test.ts). Antes solo se informaba el primero y el historial decía "1 fallado" de 200.
+        const writtenPlus = new Set(r.written.map((w) => w.plu));
+        const failures: ProductProblem[] = plan
+          .filter((x) => x.plu !== null && x.record && (x.action === "crear" || x.action === "actualizar" || x.action === "reemplazar") && !writtenPlus.has(x.plu))
+          .map((x) => {
+            const product = st.products.find((p) => Number(p.code) === x.plu);
+            const reason =
+              at && at.plu === x.plu
+                ? at.readBack === null ? "la balanza no lo devolvió al releerlo" : "al releerlo en la balanza no quedó igual a Patagonia"
+                : "no quedó comprobado en la balanza: el envío se frenó antes";
+            return { code: product?.code ?? String(x.plu), name: product?.name ?? x.name, reason };
+          });
         const nothingWritten = r.verdict === "lectura_incompleta" && r.written.length === 0;
         return { ok: false, verified: r.written.length, message: nothingWritten ? READ_INCOMPLETE : FRIENDLY_MESSAGES.frenado, pending: prepared.pending, failures, support: { verdict: r.verdict, detail: r.detail, stoppedAt: r.stoppedAt } };
       }
@@ -358,7 +367,15 @@ export class KretzSession implements ScaleSession {
     const toCheck = list.filter((p) => !failures.some((f) => f.code === p.code));
     for (const [i, p] of toCheck.entries()) {
       onProgress("verificar", "Comprobando lo que quedó en la balanza…", i + 1, toCheck.length);
-      const back = await this.io.readReport(p.code);
+      let back: ReportProductFields | null;
+      try {
+        back = await this.io.readReport(p.code);
+      } catch (err) {
+        // Sin poder releerlo no está comprobado, pero los demás sí: antes este error cortaba todo y se perdía qué quedó
+        // confirmado (el historial decía 0 de N). Ahora es un producto fallado más (envios-fallas.test.ts).
+        failures.push(problem(p, `no se pudo releer para comprobarlo (${err instanceof Error ? err.message : String(err)})`));
+        continue;
+      }
       const diffs = back ? reportDifferences(back, expectedReportProduct(p)) : ["al releerlo, el número está vacío en la balanza"];
       if (diffs.length === 0) verified++;
       else failures.push(problem(p, diffs.join("; ")));

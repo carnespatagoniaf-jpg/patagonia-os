@@ -11,7 +11,7 @@ import type { ScaleSetup } from "../../sale/scale-sale-service";
 import { canWrite, SCALE_CAPABILITIES, systelLimits, type ScaleModelId } from "../capabilities";
 import { preflightProducts, type PreflightResult } from "../preflight";
 import { FRIENDLY_MESSAGES, FriendlyError, SENT_AND_CHECKED } from "../friendly";
-import type { EngineContext, PendingItem, PreparedSync, ProgressFn, ScaleAdapter, ScaleCatalogEntry, ScaleSession, SyncOutcome } from "../types";
+import type { EngineContext, PendingItem, PreparedSync, ProductProblem, ProgressFn, ScaleAdapter, ScaleCatalogEntry, ScaleSession, SyncOutcome } from "../types";
 import { ensureSystelSectors, planSystelPush, PROOF_NAME, proveSystelWrite, runSystelPush, scaleOnly, type PushItem, type PushProduct, type WriteProofResult } from "./systel-push";
 import type { TypeByteMode } from "../../../inventory/systel/systel-product-barcode";
 import type { SystelPlu } from "../../../inventory/systel/systel-plu";
@@ -380,7 +380,9 @@ export class SystelSession implements ScaleSession {
     // 'balanzas_v2': el inicio de ESTA balanza (si el 20/21 lo usa otra del local, recibe uno libre) y su código propio.
     if (this.ctx.balanzasV2) {
       let spec = this.ctx.labelSpec ?? null;
-      if (this.ctx.online && this.ctx.branchId && this.ctx.scaleKey && this.deps.allocatePrefix) {
+      // La Cuora 2 no lleva código por producto: imprime con su formato general (E_P/E_U), que Patagonia no le escribe.
+      // Asignarle un inicio propio dejaba su perfil con un inicio que nunca imprime (envios-matriz.test.ts).
+      if (backup.layout !== "cuora2" && this.ctx.online && this.ctx.branchId && this.ctx.scaleKey && this.deps.allocatePrefix) {
         const a = await this.deps.allocatePrefix(this.ctx.branchId, this.ctx.scaleKey).catch(() => null);
         if (a) spec = a.spec;
       }
@@ -458,9 +460,15 @@ export class SystelSession implements ScaleSession {
     const st = this.state;
     if (!st || !st.backup.layout || prepared.blocker || !prepared.canWrite) throw new Error("primero hay que leer la balanza");
     // Avisado en las notas antes de confirmar "Sincronizar productos".
+    // Cada producto pedido que no quedó grabado y releído igual, con su motivo (envios-fallas.test.ts). Antes un envío
+    // frenado no informaba ninguno y el historial decía "1 fallado" aunque faltaran todos.
+    const notDone = (items: PushItem[], done: { number: number }[], stoppedAt: number | null, detail: string): ProductProblem[] =>
+      items
+        .filter((x) => x.number !== null && (x.action === "crear" || x.action === "actualizar" || x.action === "reemplazar") && !done.some((w) => w.number === x.number))
+        .map((x) => ({ code: x.product.code, name: x.product.name, reason: x.number === stoppedAt ? `no quedó comprobado en la balanza (${detail})` : "no se mandó: el envío se frenó antes de llegar a este producto" }));
     const startup = this.startupWaitOn ? await this.ensureNoStartupWait(st.backup.config) : "ok";
     if (startup === "frenar") {
-      return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, support: { etapa: "35 N", detail: "después de la función 35 N no se pudo comprobar la configuración (función 39)" } };
+      return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, failures: notDone(st.plan, [], null, ""), support: { etapa: "35 N", detail: "después de la función 35 N no se pudo comprobar la configuración (función 39)" } };
     }
     const startupNote = startup === "sigue" ? " Ojo: la balanza no aceptó dejar de esperar a la PC cada vez que se prende; si al prenderla se queda trabada, avisá a soporte." : "";
     const layout = st.backup.layout;
@@ -477,7 +485,7 @@ export class SystelSession implements ScaleSession {
         onProgress("sincronizar", "Probando tu balanza con un producto de prueba…");
         this.proof = await proveSystelWrite(writer, layout, st.backup.plus, st.backup.signature?.priceDecimals ?? 0, st.backup.signature?.pluCapacity ?? 0);
         if (!this.proof.ok || !this.proof.mode) {
-          return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, support: { etapa: "prueba", prueba: this.proof } };
+          return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, failures: notDone(toWrite, [], null, ""), support: { etapa: "prueba", prueba: this.proof } };
         }
         mode = this.proof.mode;
         saveWriteProof(st.backup, this.number, mode, this.scaleKey);
@@ -487,12 +495,12 @@ export class SystelSession implements ScaleSession {
       if (st.templates.length > 0) {
         onProgress("sincronizar", "Revisando los sectores de tu balanza…");
         const sectors = await ensureSystelSectors(writer, st.templates.map((t) => t.sector));
-        if (!sectors.ok) return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, support: { etapa: "sector", detail: sectors.detail } };
+        if (!sectors.ok) return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, failures: notDone(toWrite, [], null, ""), support: { etapa: "sector", detail: sectors.detail } };
       }
       const existing = toWrite.filter((x) => x.current).map((x) => x.number!);
       if (existing.length) {
         const { backup, missing } = await takeProductBackup(writer, layout, existing);
-        if (missing.length) return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.no_contesta, pending: prepared.pending, support: { etapa: "copia", missing } };
+        if (missing.length) return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.no_contesta, pending: prepared.pending, failures: notDone(toWrite, [], null, ""), support: { etapa: "copia", missing } };
         this.deps.saveLocalBackup(backup, this.scaleKey);
       }
       const r = await runSystelPush(writer, layout, modePlan, (d, t) => onProgress("sincronizar", "Mandando tus productos a la balanza…", d, t), mode);
@@ -506,7 +514,7 @@ export class SystelSession implements ScaleSession {
         if (sentNow.length > 0) await this.saveForMostrador(st, layout, sentNow, { keepPrevious: true, unknown });
         const total = toWrite.length;
         const partial = written.length > 0 ? ` Quedaron grabados ${written.length} de ${total} productos, y Mostrador ya los reconoce.` : "";
-        return { ok: false, verified: r.done.length, message: FRIENDLY_MESSAGES.frenado + partial, pending: prepared.pending, support: { etapa: "envio", stoppedAt: r.stoppedAt, detail: r.detail, restored: r.restored, grabados: written.length, total } };
+        return { ok: false, verified: r.done.length, message: FRIENDLY_MESSAGES.frenado + partial, pending: prepared.pending, failures: notDone(toWrite, written, r.stoppedAt, r.detail), support: { etapa: "envio", stoppedAt: r.stoppedAt, detail: r.detail, restored: r.restored, grabados: written.length, total } };
       }
     }
 
