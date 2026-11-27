@@ -89,6 +89,16 @@ export function formatPairingCode(code: string): string {
 }
 
 // ------------------------------------------------------------------------------------------------ cuerpos
+/**
+ * Solo `Content-Type: application/json` (el conector siempre lo manda). Un navegador no puede mandar ese tipo a otro
+ * dominio sin pasar la consulta previa de CORS, que estas funciones no contestan: así una página cualquiera no puede
+ * usar los navegadores de sus visitas para probar códigos de vinculación desde miles de direcciones.
+ */
+export function isJsonRequest(headers: { get(name: string): string | null }): boolean {
+  const type = (headers.get("content-type") ?? "").split(";")[0].trim().toLowerCase();
+  return type === "application/json";
+}
+
 /** Lee el cuerpo con tope: corta por Content-Length y por lo que llega de verdad. */
 export async function readJsonLimited(req: Request, max: number): Promise<Parsed<unknown>> {
   const declared = Number(req.headers.get("content-length") ?? "0");
