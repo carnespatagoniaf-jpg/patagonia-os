@@ -73,4 +73,15 @@ describe("códigos que Mostrador lee como TOTAL del ticket (auditoría 29/10)", 
     assert.equal(isTicketTotalCode(99998, 5), true);
     assert.equal(isTicketTotalCode(1, 3), false);
   });
+
+  it("solo en las Kretz: en una Systel el 9998 y el 9999 son productos comunes (su TOTAL es \"22…\")", () => {
+    const systel = systelLimits({ maxPlu: 9999, maxCode: 99997 }, 0, ["20PPPPCCCCCC", "21PPPPCCCCCC"]);
+    const r = preflightProducts([P("9998", "Bolsa", 100, "unit"), P("9999", "Varios", 100, "unit")], systel);
+    assert.deepEqual(r.ready.map((p) => p.code), ["9998", "9999"]);
+    const kretz = preflightProducts([P("998", "Pechito", 100), P("999", "Bolsa", 100, "unit")], MODEL_LIMITS["kretz-aura"]!);
+    assert.equal(kretz.ready.length, 0, "en la Kretz siguen frenados");
+    assert.ok(kretz.problems.every((p) => /TOTAL del ticket/.test(p.reason)));
+    const marked = preflightProducts([P("9998", "Bolsa", 100, "unit")], { ...systel, family: "kretz" });
+    assert.equal(marked.ready.length, 0, "con la marca explícita de Kretz se frena");
+  });
 });

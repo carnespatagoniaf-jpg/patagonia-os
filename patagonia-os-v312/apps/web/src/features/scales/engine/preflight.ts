@@ -21,6 +21,21 @@ export interface ModelLimits {
   maxPriceRaw: number;
   /** Letras del nombre que muestra e imprime la balanza. */
   nameLength: number;
+  /**
+   * Marca de la balanza. El código suma 998/999/9998/9999/99998 (TOTAL del ticket) es solo de las Kretz: en una Systel
+   * el TOTAL es "22…" y esos números son productos comunes. Sin el dato se deduce (ver `kretzTotalRuleApplies`).
+   */
+  family?: "kretz" | "systel";
+}
+
+/**
+ * ¿Hay que frenar los códigos que una Kretz usa para el TOTAL? Con `family` se sabe. Sin ella (los límites que arman
+ * capabilities.ts no la traen todavía): las etiquetas Kretz llevan el producto en 3, 5 o 6 cifras (2-3-7, 2-5-5,
+ * 1-6-5) y la Systel en 4 ("20PPPPCCCCCC"), así que con 4 cifras no se aplica.
+ */
+export function kretzTotalRuleApplies(limits: ModelLimits): boolean {
+  if (limits.family) return limits.family === "kretz";
+  return limits.labelMaxCode !== null && String(limits.labelMaxCode).length !== 4;
 }
 
 export interface PreflightResult {
@@ -53,7 +68,7 @@ function fmtMoney(n: number): string {
 /**
  * ¿Ese código, en una etiqueta de `digits` cifras, se lee como el TOTAL de un ticket (código suma 99998 de las Kretz)?
  * Mostrador lo prueba antes que el producto (parseAuraSumTicket): 3 cifras → 998 y 999, 4 → 9998 y 9999, 5 → 99998.
- * Auditoría 29/10/2026: un producto con ese número se cobraba sin bajar stock.
+ * Auditoría 29/10/2026: un producto con ese número se cobraba sin bajar stock. Solo para Kretz (26/11).
  */
 export function isTicketTotalCode(n: number, digits: number): boolean {
   const field = String(n).padStart(digits, "0");
@@ -75,7 +90,7 @@ export function productProblem(p: EngineProduct, limits: ModelLimits): string | 
     const digits = String(limits.labelMaxCode).length;
     return `el código ${n} tiene más de ${digits} cifras y la etiqueta lleva ${digits}: Mostrador leería otro producto. Poné un código de 1 a ${limits.labelMaxCode} en Stock`;
   }
-  if (limits.labelMaxCode !== null && isTicketTotalCode(n, String(limits.labelMaxCode).length)) {
+  if (limits.labelMaxCode !== null && kretzTotalRuleApplies(limits) && isTicketTotalCode(n, String(limits.labelMaxCode).length)) {
     return `el código ${n} es el que la balanza usa para el TOTAL del ticket: Mostrador cobraría el importe sin el producto ni el stock. Cambialo por otro código en Stock`;
   }
   if (!scaleName(p.name, limits.nameLength)) return "no tiene nombre: ponele uno en Stock";
