@@ -1,4 +1,4 @@
--- Pruebas de la migración 225 (Scale Connect: vinculación y cola de trabajos en la nube). Se deshace al final.
+-- Pruebas de la migración 226 (Scale Connect: vinculación y cola de trabajos en la nube). Se deshace al final.
 \set ON_ERROR_STOP 1
 begin;
 
@@ -66,7 +66,7 @@ begin
   if has_table_privilege('authenticated', 'public.scale_connector_pair_failures', 'select') then raise exception 'se leen los intentos'; end if;
   if not exists (select 1 from pg_trigger where tgname = 'zz_accountant_readonly' and tgrelid = 'public.scale_connectors'::regclass) then raise exception 'falta zz_accountant_readonly'; end if;
   if not exists (select 1 from pg_trigger where tgname = 'zz_accountant_readonly' and tgrelid = 'public.scale_connector_pairings'::regclass) then raise exception 'falta zz_accountant_readonly'; end if;
-  if not exists (select 1 from public.schema_migrations where version = '225_scale_connect') then raise exception 'falta schema_migrations'; end if;
+  if not exists (select 1 from public.schema_migrations where version = '226_scale_connect') then raise exception 'falta schema_migrations'; end if;
 end $$;
 
 -- 0b. El código: 8 caracteres sin 0/O/1/I.

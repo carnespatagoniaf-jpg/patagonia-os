@@ -1,4 +1,4 @@
--- 225: Patagonia Scale Connect en la nube — vinculación segura de cada PC y cola de trabajos (plan balanzas v2,
+-- 226: Patagonia Scale Connect en la nube — vinculación segura de cada PC y cola de trabajos (plan balanzas v2,
 -- secciones 5.4 y 5.7). 27/11/2026.
 --
 -- Por qué: Scale Connect (apps/connector, servicio de Windows) va a ser el dueño de los puertos de las balanzas de
@@ -38,7 +38,7 @@
 --   100 trabajos en cola por empresa, 300 envíos por sucursal por día (igual que la 220).
 --
 -- La web y el conector ignoran en silencio si esta migración todavía no está.
--- Vuelta atrás: 225_scale_connect.rollback.sql.
+-- Vuelta atrás: 226_scale_connect.rollback.sql.
 
 -- ------------------------------------------------------------------------------------------------- utilidades
 create or replace function public.scale_connect_sha256(p_text text)
@@ -833,4 +833,4 @@ grant execute on function public.scale_connector_job_progress(uuid, text, uuid, 
 grant execute on function public.scale_connector_finish_job(uuid, text, uuid, text, jsonb, jsonb, text) to service_role;
 grant execute on function public.scale_connector_config(uuid, text) to service_role;
 
-insert into public.schema_migrations (version) values ('225_scale_connect') on conflict do nothing;
+insert into public.schema_migrations (version) values ('226_scale_connect') on conflict do nothing;

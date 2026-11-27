@@ -5,7 +5,7 @@
 // - Credencial del conector: encabezado `x-scale-connector: <id>.<secreto>`. El secreto (32 bytes al azar en
 //   base64url) lo genera scale-connect-pair, lo devuelve UNA vez y a la base solo va su SHA-256.
 // - Validar y acotar cada pedido antes de llamar a la base (tamaño, campos, listas).
-// - Traducir los errores de la base (SQLSTATE PTxxx de la migración 225) a códigos HTTP.
+// - Traducir los errores de la base (SQLSTATE PTxxx de la migración 226) a códigos HTTP.
 
 export const CONNECTOR_HEADER = "x-scale-connector";
 
@@ -281,7 +281,7 @@ export function parseFinishRequest(body: unknown): Parsed<FinishRequest> {
 }
 
 // ------------------------------------------------------------------------------------------------ errores
-/** SQLSTATE de la base → HTTP. PTxxx = los de la migración 225; P0001 = validación (raise exception común). */
+/** SQLSTATE de la base → HTTP. PTxxx = los de la migración 226; P0001 = validación (raise exception común). */
 export function rpcErrorStatus(code: string | undefined | null): number {
   const m = /^PT(\d{3})$/.exec(code ?? "");
   if (m) return Number(m[1]);

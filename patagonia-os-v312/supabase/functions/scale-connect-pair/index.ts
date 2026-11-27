@@ -1,4 +1,4 @@
-// Vinculación de Patagonia Scale Connect (migración 225, plan balanzas v2 §5.4 y §5.7).
+// Vinculación de Patagonia Scale Connect (migración 226, plan balanzas v2 §5.4 y §5.7).
 //
 // La llama el servicio de Windows desde su página local (127.0.0.1:9120/vincular) con el código de 8 caracteres
 // que el dueño o un administrador ve en Mis balanzas → "Agregar esta computadora". No hay sesión de usuario: el

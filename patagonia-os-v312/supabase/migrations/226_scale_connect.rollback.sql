@@ -1,7 +1,7 @@
--- VUELTA ATRÁS de 225_scale_connect.sql. Borra la vinculación de Scale Connect y la cola de trabajos en la nube.
+-- VUELTA ATRÁS de 226_scale_connect.sql. Borra la vinculación de Scale Connect y la cola de trabajos en la nube.
 -- scale_jobs (220) vuelve a como estaba: los trabajos que quedaron en cola pasan a fallidos ('sin_scale_connect')
 -- para cumplir los checks de la 220, y se pierden payload/connector_id/claimed_at/progreso.
--- Ojo: todas las PC vinculadas quedan desvinculadas (hay que volver a vincularlas si se reaplica la 225).
+-- Ojo: todas las PC vinculadas quedan desvinculadas (hay que volver a vincularlas si se reaplica la 226).
 
 update public.scale_jobs set status = 'failed', finished_at = now(), error_code = 'sin_scale_connect'
  where status = 'queued';
@@ -44,4 +44,4 @@ drop function if exists public.scale_connect_normalize_code(text);
 drop function if exists public.scale_connect_new_code();
 drop function if exists public.scale_connect_sha256(text);
 
-delete from public.schema_migrations where version = '225_scale_connect';
+delete from public.schema_migrations where version = '226_scale_connect';

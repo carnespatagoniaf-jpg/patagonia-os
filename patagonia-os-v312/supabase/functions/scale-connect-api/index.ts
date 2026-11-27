@@ -1,4 +1,4 @@
-// Canal de Patagonia Scale Connect con la nube (migración 225, plan balanzas v2 §5.4).
+// Canal de Patagonia Scale Connect con la nube (migración 226, plan balanzas v2 §5.4).
 //
 // Lo llama SOLO el servicio de Windows de cada PC vinculada, con el encabezado
 // `x-scale-connector: <id>.<secreto>` (lo entregó scale-connect-pair una vez). No usa la sesión de un usuario:
