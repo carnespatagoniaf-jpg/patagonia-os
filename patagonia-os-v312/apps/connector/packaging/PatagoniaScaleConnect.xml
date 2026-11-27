@@ -39,7 +39,9 @@
     Por eso WinSW instala con la cuenta por omisión y el instalador (packaging/installer.iss)
     corre enseguida, antes del primer inicio:
       sc.exe config PatagoniaScaleConnect obj= "NT SERVICE\PatagoniaScaleConnect"
-      icacls "%ProgramData%\Patagonia\ScaleConnect" /grant "NT SERVICE\PatagoniaScaleConnect:(OI)(CI)M" /T
+      icacls "%ProgramData%\Patagonia\ScaleConnect" /setowner *S-1-5-32-544 /T
+      icacls "%ProgramData%\Patagonia\ScaleConnect" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F "NT SERVICE\PatagoniaScaleConnect:(OI)(CI)M" /T
+    (la carpeta de datos queda SOLO para SYSTEM, Administradores y el servicio: ahí está la credencial de la PC)
     `PatagoniaScaleConnect.exe refresh` (actualizaciones) no cambia la cuenta.
   -->
 

@@ -227,13 +227,24 @@ begin
   // 2b. A qué Patagonia se conecta (config.json → cloud.url). Antes de los permisos, así el archivo nuevo los hereda.
   ConfigureCloud;
 
-  // 3. Permisos: escribir en los datos (incluye lo que WinSW ya creó como administrador)
-  //    y leer/ejecutar el programa.
-  if not RunOk(ExpandConstant('{sys}\icacls.exe'), '"' + DataDir + '" /grant "' + ServiceAccountUsed + ':(OI)(CI)M" /T /C /Q') then
+  // 3. Permisos de los datos. ProgramData por defecto deja LEER a cualquier usuario de la PC (y crear archivos):
+  //    la credencial va cifrada con DPAPI de MÁQUINA, que cualquier usuario de esta PC puede descifrar si lee el
+  //    archivo. Por eso la carpeta queda SOLO para SYSTEM, Administradores y la cuenta del servicio:
+  //    a) dueño = Administradores (si alguien creó la carpeta o un archivo antes de instalar, deja de ser suyo);
+  //    b) sin herencia de ProgramData (afuera "Usuarios" y "CREATOR OWNER") y con permisos propios.
+  //    Por SID (S-1-5-18 SYSTEM, S-1-5-32-544 Administradores): en un Windows en castellano los nombres cambian.
+  if not RunOk(ExpandConstant('{sys}\icacls.exe'), '"' + DataDir + '" /setowner *S-1-5-32-544 /T /C /Q') then
+  begin
+    ServiceError('dueño de la carpeta de datos', -1);
+    exit;
+  end;
+  if not RunOk(ExpandConstant('{sys}\icacls.exe'), '"' + DataDir + '" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F "' + ServiceAccountUsed + ':(OI)(CI)M" /T /C /Q') then
   begin
     ServiceError('permisos de datos', -1);
     exit;
   end;
+  // Lo que ya existía adentro (bitácoras de WinSW, config.json, una instalación vieja) pasa a heredar de la carpeta.
+  RunOk(ExpandConstant('{sys}\icacls.exe'), '"' + DataDir + '\*" /reset /T /C /Q');
   RunOk(ExpandConstant('{sys}\icacls.exe'), '"' + ExpandConstant('{app}') + '" /grant "' + ServiceAccountUsed + ':(OI)(CI)RX" /T /C /Q');
 
   // 4. Inicio. WinSW espera a que el servicio quede corriendo.

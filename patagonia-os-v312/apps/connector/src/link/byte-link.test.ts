@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { FakeByteLink } from "./fake-byte-link";
+import { MAX_INBOX_BYTES } from "./byte-link";
 import { LinkError, classifyOpenError, isLinkError } from "./link-error";
 
 const bytes = (s: string) => Buffer.from(s, "latin1");
@@ -115,4 +116,28 @@ test("classifyOpenError: errores de red", () => {
   assert.equal(classifyOpenError(new Error("algo raro"), "x").code, "io");
   const already = new LinkError("in_use_here", "ya");
   assert.equal(classifyOpenError(already, "x"), already);
+});
+
+test("una 'balanza' que manda bytes sin parar no llena la memoria: pasado el tope, el enlace se da por perdido", async () => {
+  const link = new FakeByteLink({ label: "192.168.0.50:1001" });
+  await link.open();
+  const events: LinkError[] = [];
+  link.onDisconnect((e) => events.push(e));
+  const chunk = new Uint8Array(64 * 1024).fill(0x41);
+  for (let sent = 0; sent < MAX_INBOX_BYTES; sent += chunk.length) link.inject(chunk);
+  assert.equal(link.isOpen, true, "justo en el tope todavía sigue");
+  link.inject("X");
+  assert.equal(link.isOpen, false);
+  assert.equal(events.length, 1);
+  assert.match((events[0].cause as Error).message, /demasiados datos/);
+  assert.equal(link.discardInput(), 0, "el búfer se vació");
+});
+
+test("con una lectura esperando, el tope también corta (la lectura falla en vez de quedar colgada)", async () => {
+  const link = new FakeByteLink();
+  await link.open();
+  const reading = link.read({ timeoutMs: 5000, until: (b) => b.includes(0x04) });
+  link.inject(new Uint8Array(MAX_INBOX_BYTES + 1).fill(0x41));
+  await assert.rejects(reading, (e) => isLinkError(e));
+  assert.equal(link.isOpen, false);
 });

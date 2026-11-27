@@ -24,6 +24,7 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import {
   apiRoute,
   CONNECTOR_HEADER,
+  isJsonRequest,
   json,
   LONG_POLL_STEP_MS,
   maxBodyFor,
@@ -56,6 +57,7 @@ Deno.serve(async (req) => {
   const route = apiRoute(new URL(req.url).pathname);
   if (!route) return json({ ok: false, error: "no_existe" }, 404);
 
+  if (!isJsonRequest(req.headers)) return json({ ok: false, error: "tipo_no_soportado" }, 415);
   const credential = parseConnectorCredential(req.headers.get(CONNECTOR_HEADER));
   if (!credential) return json({ ok: false, error: "credencial_invalida" }, 401);
   const body = await readJsonLimited(req, maxBodyFor(route));

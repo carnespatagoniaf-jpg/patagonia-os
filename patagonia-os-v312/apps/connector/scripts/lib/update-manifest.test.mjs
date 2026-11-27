@@ -1,13 +1,15 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { generateKeyPairSync } from "node:crypto";
+import { createHash, generateKeyPairSync } from "node:crypto";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import {
+  checkUpdateOffer,
   compareVersions,
+  verifyInstaller,
   createSignedManifest,
   keyIdOf,
   loadPrivateKey,
@@ -96,6 +98,38 @@ test("rechaza campos inválidos al armar", () => {
   assert.throws(() => createSignedManifest({ ...fields, minVersion: "0.3.0" }, privateKey), /minVersion/);
   assert.throws(() => createSignedManifest({ ...fields, version: "dos" }, privateKey), /version/);
   assert.deepEqual(validateManifest({ ...createSignedManifest(fields, privateKey), extra: 1 }), ["Campo desconocido: extra"]);
+});
+
+test("anti-bajada: un manifiesto viejo firmado de verdad no hace bajar ni reinstalar la misma versión", () => {
+  const m = createSignedManifest(fields, privateKey); // 0.2.0, piloto, minVersion 0.1.0
+  const now = new Date("2026-11-27T13:00:00.000Z");
+  assert.deepEqual(checkUpdateOffer(m, publicKey, { currentVersion: "0.1.5", channel: "piloto", now }), { ok: true });
+  assert.match(checkUpdateOffer(m, publicKey, { currentVersion: "0.2.0", channel: "piloto", now }).reason, /nunca se baja/);
+  assert.match(checkUpdateOffer(m, publicKey, { currentVersion: "0.3.0", channel: "piloto", now }).reason, /nunca se baja/);
+  assert.match(checkUpdateOffer(m, publicKey, { currentVersion: "0.10.0", channel: "piloto", now }).reason, /nunca se baja/);
+});
+
+test("ofertas: canal, minVersion, fecha y firma", () => {
+  const m = createSignedManifest(fields, privateKey);
+  const now = new Date("2026-11-27T13:00:00.000Z");
+  assert.match(checkUpdateOffer(m, publicKey, { currentVersion: "0.1.5", channel: "general", now }).reason, /canal piloto/);
+  assert.equal(checkUpdateOffer(m, publicKey, { currentVersion: "0.1.5", channel: "interno", now }).ok, true);
+  assert.equal(checkUpdateOffer(m, publicKey, { currentVersion: "0.1.5", channel: "raro", now }).ok, false);
+  const strict = createSignedManifest({ ...fields, minVersion: "0.1.5" }, privateKey);
+  assert.match(checkUpdateOffer(strict, publicKey, { currentVersion: "0.1.0", channel: "piloto", now }).reason, /reinstalar/);
+  const future = createSignedManifest({ ...fields, publishedAt: "2027-01-01T00:00:00.000Z" }, privateKey);
+  assert.match(checkUpdateOffer(future, publicKey, { currentVersion: "0.1.5", channel: "piloto", now }).reason, /futuro/);
+  // Cambiar la versión de un manifiesto viejo para "subirla" rompe la firma.
+  assert.match(checkUpdateOffer({ ...m, version: "9.9.9" }, publicKey, { currentVersion: "0.2.0", channel: "piloto", now }).reason, /no coincide/);
+  assert.equal(checkUpdateOffer(m, publicKey, { currentVersion: "x", channel: "piloto", now }).ok, false);
+});
+
+test("el instalador bajado tiene que ser exactamente el del manifiesto", () => {
+  const data = Buffer.from("instalador de prueba");
+  const m = createSignedManifest({ ...fields, sha256: createHash("sha256").update(data).digest("hex"), size: data.length }, privateKey);
+  assert.deepEqual(verifyInstaller(data, m), { ok: true });
+  assert.match(verifyInstaller(Buffer.from("instalador de pruebX"), m).reason, /SHA-256/);
+  assert.match(verifyInstaller(Buffer.concat([data, Buffer.from("!")]), m).reason, /Pesa/);
 });
 
 test("compareVersions", () => {

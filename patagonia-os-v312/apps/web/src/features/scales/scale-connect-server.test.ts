@@ -8,6 +8,7 @@ import {
   formatConnectorCredential,
   formatPairingCode,
   generateSecret,
+  isJsonRequest,
   isPairingCodeFormat,
   maxBodyFor,
   MAX_FINISH_BODY,
@@ -90,6 +91,16 @@ describe("código de vinculación", () => {
     assert.equal(clientAddress(h({ "x-forwarded-for": "200.1.2.3, 10.0.0.1" })), "200.1.2.3");
     assert.equal(clientAddress(h({ "x-real-ip": "200.9.9.9" })), "200.9.9.9");
     assert.equal(clientAddress(h({})), "desconocido");
+  });
+
+  it("solo JSON: un navegador no puede mandarlo desde otra página sin la consulta previa de CORS", () => {
+    const h = (type?: string) => ({ get: (k: string) => (k === "content-type" ? type ?? null : null) });
+    assert.equal(isJsonRequest(h("application/json")), true);
+    assert.equal(isJsonRequest(h("Application/JSON; charset=utf-8")), true);
+    // Los tres tipos "simples" que un formulario o fetch sin CORS puede mandar, y sin tipo.
+    for (const t of ["text/plain", "application/x-www-form-urlencoded", "multipart/form-data; boundary=x", undefined, "application/jsonx"]) {
+      assert.equal(isJsonRequest(h(t)), false, String(t));
+    }
   });
 });
 

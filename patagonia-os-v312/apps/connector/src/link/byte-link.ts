@@ -95,6 +95,14 @@ interface PendingRead {
 const atLeastOneByte = (received: Uint8Array) => received.length > 0;
 
 /**
+ * Tope del búfer de entrada. Ninguna respuesta de una balanza (Kretz, Systel) pasa de unos pocos KB: una "balanza"
+ * de la red que manda bytes sin parar (otro equipo con esa IP, alguien que se hace pasar por la balanza) no puede
+ * llenar la memoria del servicio. Al pasarlo, el enlace se da por perdido (como un cable cortado): el trabajo
+ * termina con error y el trabajador vuelve a conectar.
+ */
+export const MAX_INBOX_BYTES = 1024 * 1024;
+
+/**
  * Base común: búfer de entrada, lectura con tiempo de espera, cancelación y
  * aviso de desconexión. Cada transporte implementa solo doOpen/doWrite/doClose
  * y llama a `receive()` y `lost()`.
@@ -191,6 +199,11 @@ export abstract class BaseByteLink implements ByteLink {
   /** El transporte llama esto con cada pedazo de bytes que llega. */
   protected receive(chunk: Uint8Array): void {
     if (!this.opened || chunk.length === 0) return;
+    if (this.inbox.length + chunk.length > MAX_INBOX_BYTES) {
+      this.inbox = Buffer.alloc(0);
+      this.lost(new LinkError("io", `${this.label} mandó demasiados datos sin que se le pidieran (más de ${MAX_INBOX_BYTES} bytes).`));
+      return;
+    }
     this.inbox = Buffer.concat([this.inbox, chunk]);
     const pending = this.pending;
     if (pending && pending.until(this.inbox)) this.settle(this.takeInbox(), null);
