@@ -17,13 +17,14 @@ import { adaptersForChoice } from "./engine/live";
 import { ALREADY_SAME, friendlyKind, friendlyMessage } from "./engine/friendly";
 import { choiceLabel, SCALE_CHOICES, type ScaleChoice } from "./engine/choice";
 import { loadRememberedScale, rememberScale } from "./engine/memory";
-import { emptyDiag, type ConnectDiag, type EngineProduct, type EngineStep, type PendingItem, type PreparedSync, type ProductProblem, type ScaleSession } from "./engine/types";
+import { emptyDiag, type ConnectDiag, type EngineProduct, type EngineStep, type PendingItem, type PreparedSync, type ProductProblem, type ScaleSession, type SyncOutcome } from "./engine/types";
 import { checkScaleFormats, choiceForScale, defaultScaleName, listBranchScales, registerBranchScale, removeBranchScale, renameBranchScale, saveScaleInstall, scaleStatus, type BranchScale } from "./registry/branch-scales";
-import { installSteps, installSummary, localInstall, newestInstall, saveLocalInstall, type InstallRecord } from "./install-status";
+import { clearedInstallError, installSteps, installSummary, localInstall, newestInstall, saveLocalInstall, type InstallRecord } from "./install-status";
+import { buildSendJobResult, finishScaleJob, jobDetail, startScaleJob } from "./job-log";
 import { bindingFor, forgetBinding, saveBinding } from "./registry/local-bindings";
 import { setScaleLinks } from "./sale/scale-sale-service";
 import { compactSupportLog } from "./support-compact";
-import { submitScaleSupportReport } from "./support-service";
+import { scaleJobRpc, submitScaleSupportReport } from "./support-service";
 import { planScaleImport } from "./engine/scale-import";
 import { importProducts } from "../import/import-service";
 
@@ -234,7 +235,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
         detectedAt: at,
         communicationAt: at,
         // "Ya está igual" sale de releer cada producto de la balanza: cuenta como enviado y comprobado.
-        ...(prepared.upToDate ? { sentAt: at, sentCount: prepared.ready, verifiedAt: at, verifiedCount: prepared.ready, failedCount: 0 } : {})
+        ...(prepared.upToDate ? { sentAt: at, sentCount: prepared.ready, verifiedAt: at, verifiedCount: prepared.ready, failedCount: 0, ...clearedInstallError(at) } : {})
       });
       // Mismo número y mismo cable que otra (real Los gringos): si imprime distinto que la tarjeta elegida, no es esa.
       const realTarget = target && target.key !== LOCAL_KEY ? target : null;
@@ -318,8 +319,14 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     }
     const progress = (step: EngineStep, text: string, done?: number, total?: number) => setPhase({ kind: "trabajando", stage: "sincronizar", step, text, done, total });
     progress("sincronizar", "Preparando…");
+    // Historial de envíos (215): se abre en paralelo y se cierra al terminar; nunca frena ni demora el envío.
+    const job = branchId ? startScaleJob(isSupabaseConfigured ? scaleJobRpc : null, { branchId, scaleKey: activeKey ?? LOCAL_KEY, kind: "send", requested: writes, appVersion: typeof __APP_BUILD__ === "string" ? __APP_BUILD__ : null, detail: jobDetail(prepared, null, { reemplazar: replace }) }) : null;
+    const logJob = (outcome: SyncOutcome | null, error?: string) => {
+      if (job) void finishScaleJob(isSupabaseConfigured ? scaleJobRpc : null, job, buildSendJobResult({ prepared, outcome, products, requested: writes, replace, error }));
+    };
     try {
       const out = await s.sync(prepared, progress, { allowReplace: replace });
+      logJob(out);
       const at = new Date().toISOString();
       if (!out.ok) {
         recordInstall(activeKey, { sentAt: at, sentCount: prepared.ready + out.verified, verifiedAt: at, verifiedCount: prepared.ready + out.verified, failedCount: Math.max(out.failures?.length ?? 0, 1), lastError: out.message.slice(0, 200), lastErrorAt: at });
@@ -328,10 +335,11 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
         return;
       }
       markSynced();
-      recordInstall(activeKey, { sentAt: at, sentCount: prepared.ready + out.verified, verifiedAt: at, verifiedCount: prepared.ready + out.verified, failedCount: 0 });
+      recordInstall(activeKey, { sentAt: at, sentCount: prepared.ready + out.verified, verifiedAt: at, verifiedCount: prepared.ready + out.verified, failedCount: 0, ...clearedInstallError(at) });
       setPhase({ kind: "listo", message: out.message, pending: out.pending, model: prepared.label, skipped: prepared.skipped });
       void reload();
     } catch (err) {
+      logJob(null, friendlyKind(err));
       setPhase({ kind: "error", message: friendlyMessage(err), canPick: false });
       reportAndShow("sincronizar", err, ctxRef.current?.diag ?? null);
     }
