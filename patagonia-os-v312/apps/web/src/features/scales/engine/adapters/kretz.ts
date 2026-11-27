@@ -1,10 +1,11 @@
 import { parseAuraPlu } from "../../../inventory/kretz/aura-plu";
-import { AURA_BARCODE_CONFIG_22, auraMaySetBranchConfig, planAuraSync, summarizeAuraPlan, type AuraSyncItem } from "../../../inventory/kretz/aura-sync";
+import { AURA_BARCODE_CONFIG_22, AURA_ITEM_SCALE_CONFIG, auraMaySetBranchConfig, planAuraSync, summarizeAuraPlan, type AuraSyncItem } from "../../../inventory/kretz/aura-sync";
 import { AURA_PREFIX_22_BRANCHES } from "../weight-barcode";
 import { getStoredModelId, saveModelId } from "../../../inventory/kretz/models";
 import { isNetPort } from "../../../inventory/kretz/net-port";
 import { KRETZ_PLU5_WEIGHT_CONFIG } from "../../../sale/scan-resolve";
 import type { ScaleConfig } from "../../../sale/scale-barcode";
+import { BRANCH_CONFIG_PROTECTED, branchConfigSupport, mayWriteBranchScaleConfig, type BranchConfigDecision, type BranchScaleRef } from "../../../inventory/kretz/branch-scale-guard";
 import { chooseReportLabel, describeLabelSamples, type ReportLabelSample } from "../../../inventory/kretz/report-label";
 import {
   configureReportBarcode,
@@ -48,6 +49,11 @@ export interface KretzIO {
   saveItemConfig?: (branchId: string, config?: ScaleConfig) => Promise<void>;
   /** Formato de etiqueta que la sucursal ya tiene guardado (null = ninguno). Sin esto, la Aura no cambia el formato. */
   loadBranchConfig?: (branchId: string) => Promise<ScaleConfig | null>;
+  /**
+   * Las balanzas registradas de la sucursal (scale_profiles). Sin esto (pruebas, demo) el formato se guarda como antes.
+   * Con más de una activa, el formato de la sucursal solo se cambia si queda igual (mayWriteBranchScaleConfig, C1).
+   */
+  listBranchScales?: (branchId: string) => Promise<BranchScaleRef[]>;
   /** Report: manda el formato del código de barras de las etiquetas (1070). */
   configureReportBarcode?: (config?: string) => Promise<"ok" | "rechazada" | "sin_respuesta">;
   /** Report: primeros productos de la balanza con su formato de etiqueta (solo lectura). */
@@ -103,12 +109,17 @@ const toSyncable = (p: EngineProduct): ScaleSyncableProduct => ({ id: p.id, code
 const sameReport = (a: ReportProductFields, b: ReportProductFields) => reportDifferences(a, b).length === 0;
 const problem = (p: ScaleSyncableProduct, reason: string): ProductProblem => ({ code: p.code, name: p.name, reason });
 
+/** El contexto puede traer la lista de balanzas de la sucursal (la que ya tiene Mi balanza); si no, se pide a la base. */
+export type KretzContext = EngineContext & { branchScales?: BranchScaleRef[] };
+
 type ReportState = { kind: "report"; create: ScaleSyncableProduct[]; update: ScaleSyncableProduct[]; occupied: { product: ScaleSyncableProduct; current: ReportProductFields }[] };
 type AuraState = { kind: "aura"; records: string[]; products: { code: string; name: string; byWeight: boolean; price: number }[]; plan: AuraSyncItem[] };
 
 export class KretzSession implements ScaleSession {
   label: string;
   private state: ReportState | AuraState | null = null;
+  /** C1: el formato de la sucursal no se cambió porque el local tiene otra balanza (dato para soporte). */
+  private protectedConfig: Record<string, unknown> | null = null;
 
   constructor(
     readonly model: ScaleModelId,
@@ -254,12 +265,22 @@ export class KretzSession implements ScaleSession {
       // del ticket de suma no existe: real Pollo y mar 15/10). En Pre-Empaque (ALT + 7) imprime un ticket por producto
       // con su código 2-3-7 + importe: Mostrador de la sucursal queda leyendo ese formato, salvo que la sucursal ya
       // tenga otro guardado (el de otra balanza del local: auraMaySetBranchConfig). Si no se puede leer, no se toca.
+      let protectedSupport: Record<string, unknown> | null = null;
       if (r.barcode === "ok" && this.ctx.online && this.ctx.branchId && this.io.saveItemConfig && this.io.loadBranchConfig) {
         try {
-          if (auraMaySetBranchConfig(await this.io.loadBranchConfig(this.ctx.branchId))) await this.io.saveItemConfig(this.ctx.branchId);
+          const existing = await this.io.loadBranchConfig(this.ctx.branchId);
+          if (auraMaySetBranchConfig(existing)) {
+            // Y además, si el local tiene otra balanza, solo si el formato no cambia (C1).
+            const g = await this.branchConfigDecision(AURA_ITEM_SCALE_CONFIG, existing);
+            if (g.decision.allowed) await this.io.saveItemConfig(this.ctx.branchId);
+            else protectedSupport = g.support;
+          }
         } catch {
           // sin esto, Mostrador sigue leyendo el TOTAL (detalle a mano); no frena la sincronización
         }
+      }
+      if (protectedSupport) {
+        return { ok: false, verified: r.written.length, message: `Los productos quedaron bien en la balanza. ${BRANCH_CONFIG_PROTECTED}`, pending: opts.allowReplace ? [] : prepared.pending, support: protectedSupport };
       }
       return { ok: true, verified: r.written.length, message: done(opts.allowReplace ? [] : prepared.pending), pending: opts.allowReplace ? [] : prepared.pending };
     }
@@ -291,9 +312,13 @@ export class KretzSession implements ScaleSession {
       if (diffs.length === 0) verified++;
       else failures.push(problem(p, diffs.join("; ")));
     }
+    if (this.protectedConfig) Object.assign(support, this.protectedConfig);
     if (failures.length) {
       support.verificacion = failures;
       return { ok: false, verified, message: failedMessage(verified, failures.length), pending: prepared.pending, failures, support };
+    }
+    if (barcode === "protegido") {
+      return { ok: false, verified, message: `Los productos quedaron bien en la balanza. ${BRANCH_CONFIG_PROTECTED}`, pending: opts.allowReplace ? [] : prepared.pending, support };
     }
     if (barcode !== "ok") {
       return { ok: false, verified, message: BARCODE_FAILED, pending: prepared.pending, support };
@@ -303,7 +328,7 @@ export class KretzSession implements ScaleSession {
   }
 
   /** Report: formato del código de barras (1070) + Mostrador leyendo ese formato. "ok" solo si la balanza lo aceptó. */
-  private async configureBarcode(onProgress: ProgressFn): Promise<"ok" | "rechazada" | "sin_respuesta" | "error"> {
+  private async configureBarcode(onProgress: ProgressFn): Promise<"ok" | "rechazada" | "sin_respuesta" | "error" | "protegido"> {
     if (!this.io.configureReportBarcode) return "ok";
     onProgress("sincronizar", "Configurando el código de barras de las etiquetas…");
     try {
@@ -312,15 +337,44 @@ export class KretzSession implements ScaleSession {
       // empresas que imprimen igual que por red (REPORT_PLU5_WEIGHT_COMPANIES, Oliem).
       const net = this.plu5();
       const pesos = !net && !this.ctx.weightBarcode && this.ctx.pesosBarcode === true;
+      const saveBranch = this.ctx.online && this.ctx.branchId && this.io.saveItemConfig ? this.io.saveItemConfig : null;
+      if (saveBranch) {
+        // C1: con otra balanza en el local y un formato distinto, no se toca nada: ni el de la sucursal ni el de esta
+        // balanza (si la balanza cambiara su etiqueta y Mostrador no, sus etiquetas se cobrarían mal).
+        const g = await this.branchConfigDecision(net ? KRETZ_PLU5_WEIGHT_CONFIG : pesos ? REPORT_PESOS_SCALE_CONFIG : AURA_ITEM_SCALE_CONFIG);
+        if (!g.decision.allowed) {
+          this.protectedConfig = g.support;
+          return "protegido";
+        }
+      }
       const r = await this.io.configureReportBarcode(net ? REPORT_NET_BARCODE_CONFIG : this.ctx.weightBarcode ? REPORT_WEIGHT_BARCODE_CONFIG : pesos ? REPORT_PESOS_BARCODE_CONFIG : undefined);
       if (r === "ok") {
-        if (this.ctx.online && this.ctx.branchId && this.io.saveItemConfig) await this.io.saveItemConfig(this.ctx.branchId, net ? KRETZ_PLU5_WEIGHT_CONFIG : pesos ? REPORT_PESOS_SCALE_CONFIG : undefined);
+        if (saveBranch) await saveBranch(this.ctx.branchId!, net ? KRETZ_PLU5_WEIGHT_CONFIG : pesos ? REPORT_PESOS_SCALE_CONFIG : undefined);
         markBarcodeConfigured(this.barcodeKey());
       }
       return r;
     } catch {
       return "error";
     }
+  }
+
+  /**
+   * C1: ¿se puede guardar `next` como formato de etiqueta de la sucursal? Lista de balanzas: la del contexto, o la de la
+   * base (si no se puede leer, no se guarda). Sin forma de pedirla (pruebas, demo) se guarda como antes.
+   */
+  private async branchConfigDecision(next: ScaleConfig, known?: ScaleConfig | null): Promise<{ decision: BranchConfigDecision; support: Record<string, unknown> }> {
+    const ctx = this.ctx as KretzContext;
+    let scales: BranchScaleRef[] | null = [];
+    if (ctx.branchScales) scales = ctx.branchScales;
+    else if (this.io.listBranchScales && ctx.branchId) scales = await this.io.listBranchScales(ctx.branchId).catch(() => null);
+    let existing: ScaleConfig | null | undefined = known;
+    let decision = mayWriteBranchScaleConfig({ scales, currentKey: ctx.scaleKey ?? null, existing, next });
+    // El formato guardado solo hace falta si hay otra balanza: se lee recién ahí.
+    if (!decision.allowed && existing === undefined && this.io.loadBranchConfig && ctx.branchId) {
+      existing = await this.io.loadBranchConfig(ctx.branchId).catch(() => undefined);
+      decision = mayWriteBranchScaleConfig({ scales, currentKey: ctx.scaleKey ?? null, existing, next });
+    }
+    return { decision, support: branchConfigSupport(decision, next, existing, scales) };
   }
 
   /** Etiqueta "21" + producto de 5 + peso: la Report por red, o una por USB de una empresa que imprime igual (Oliem). */

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { parseAmount } from "../../lib/money";
-import { deleteBranchScaleConfig, detectScaleConfig, saveBranchScaleConfig, type ScaleConfig, type ScalePayloadType } from "./scale-config-service";
+import { deleteBranchScaleConfig, detectScaleConfig, type ScaleConfig, type ScalePayloadType } from "./scale-config-service";
+import { saveBranchScaleConfigGuarded } from "../inventory/kretz/branch-scale-guard-service";
 import { ScaleWeightSettings } from "./ScaleWeightSettings";
 import { setMostradorPin } from "./company-settings-service";
 import { isThermalPrintSupported } from "./thermal-printer";
@@ -72,7 +73,12 @@ export function SaleConfigPanel({
         setScaleWizardResult("not_found");
         return;
       }
-      await saveBranchScaleConfig(branchId, detected);
+      // C1: con más de una balanza en el local, la calibración no cambia el formato que ya lee la otra.
+      const g = await saveBranchScaleConfigGuarded(branchId, detected);
+      if (!g.saved) {
+        onMessage(g.message);
+        return;
+      }
       onScaleConfigChange(detected);
       setScaleWizardResult("success");
       setScaleWizardCode("");

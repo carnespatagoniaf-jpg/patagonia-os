@@ -40,7 +40,7 @@ import { auraPriceCandidates, parseAuraPlu } from "./kretz/aura-plu";
 import { AURA_TEST_PLUS, AURA_TEST_PRODUCTS, getLastAuraWriteTest, type AuraWriteTestResult } from "./kretz/aura-write-test";
 import { analyzeModelProbe, getLastModelProbe, type ModelProbeResult } from "./kretz/aura-model-probe";
 import { AURA_ITEM_SCALE_CONFIG, planAuraSync, summarizeAuraPlan, type AuraSyncAction } from "./kretz/aura-sync";
-import { saveBranchScaleConfig } from "../sale/scale-config-service";
+import { saveBranchScaleConfigGuarded } from "./kretz/branch-scale-guard-service";
 import { SettingSection } from "../../components/SettingSection";
 
 /** El botón de diagnóstico de la Aura no se muestra todavía (decisión del dueño). */
@@ -346,8 +346,9 @@ export function ScaleSyncPanel({ products, onDownloadCsv }: { products: ScaleSyn
       // La Report LT no cambia de formato (no se manda el 1070): Mostrador sigue con la calibración que ya lee sus etiquetas.
       if (r.verdict === "ok" && enable && branchId && !report_lt) {
         try {
-          await saveBranchScaleConfig(branchId, AURA_ITEM_SCALE_CONFIG);
-          mostradorText = " Mostrador de esta sucursal ya quedó preparado para leer esos códigos.";
+          // C1: si el local tiene otra balanza y el formato cambiaría, no se toca (lo leería mal).
+          const g = await saveBranchScaleConfigGuarded(branchId, AURA_ITEM_SCALE_CONFIG);
+          mostradorText = g.saved ? " Mostrador de esta sucursal ya quedó preparado para leer esos códigos." : ` ${g.message}`;
         } catch {
           mostradorText = " Pero no se pudo preparar Mostrador: avisale al equipo de Patagonia OS.";
         }

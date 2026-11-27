@@ -151,3 +151,114 @@ describe("C8: Aura: lista incompleta = no se escribe nada", () => {
     assert.equal(sent, 0);
   });
 });
+
+describe("C1: el formato de etiqueta de la sucursal no se pisa si hay otra balanza", () => {
+  const LT = { prefixLength: 1, pluLength: 6, weightLength: 5, weightDivisor: 1, totalLength: 13, payloadType: "amount" as const };
+  const ITEM = { prefixLength: 2, pluLength: 3, weightLength: 7, weightDivisor: 100, totalLength: 13, payloadType: "amount" as const };
+
+  it("regla pura: una balanza = se guarda; mismo formato = se guarda; otra balanza y formato distinto = no", async () => {
+    const { mayWriteBranchScaleConfig } = await import("../../inventory/kretz/branch-scale-guard");
+    const one = [{ key: "r1", active: true }];
+    const two = [{ key: "r1", active: true }, { key: "a1", active: true }];
+    assert.equal(mayWriteBranchScaleConfig({ scales: one, currentKey: "r1", existing: LT, next: ITEM }).allowed, true);
+    assert.equal(mayWriteBranchScaleConfig({ scales: [], currentKey: "r1", existing: null, next: ITEM }).allowed, true, "la primera balanza del local");
+    assert.equal(mayWriteBranchScaleConfig({ scales: two, currentKey: "r1", existing: ITEM, next: ITEM }).allowed, true);
+    assert.deepEqual(mayWriteBranchScaleConfig({ scales: two, currentKey: "r1", existing: LT, next: ITEM }), { allowed: false, reason: "otra_balanza" });
+    assert.equal(mayWriteBranchScaleConfig({ scales: two, currentKey: "r1", existing: null, next: ITEM }).allowed, false);
+    assert.equal(mayWriteBranchScaleConfig({ scales: [{ key: "r1", active: true }, { key: "vieja", active: false }], currentKey: "r1", existing: LT, next: ITEM }).allowed, true, "una dada de baja no cuenta");
+    assert.equal(mayWriteBranchScaleConfig({ scales: one, currentKey: "nueva", existing: LT, next: ITEM }).allowed, false, "la que se conecta y no está registrada cuenta como otra");
+    assert.equal(mayWriteBranchScaleConfig({ scales: null, currentKey: "r1", existing: LT, next: ITEM }).allowed, false, "sin datos no se toca");
+    assert.equal(mayWriteBranchScaleConfig({ scales: two, currentKey: "r1", existing: undefined, next: ITEM }).allowed, false, "sin el formato guardado no se puede comparar");
+  });
+
+  function reportScale() {
+    const scale = new FakeReport();
+    scale.records.set(10, reportRecord(10, "Vacio", 14000));
+    return scale;
+  }
+  const vacio = P("a", "10", "Vacio", "kg", 15000);
+  const online = { online: true, branchId: "suc-1", scaleKey: "r1" };
+
+  it("Report en un local con 2 balanzas: los productos se mandan, el formato de la sucursal no se cambia y se avisa", async () => {
+    localStorage.clear();
+    const scale = reportScale();
+    const saved: unknown[] = [];
+    const s = await reportSession(scale, [vacio], online, {
+      saveItemConfig: async (_b, c) => void saved.push(c ?? "default"),
+      loadBranchConfig: async () => LT,
+      listBranchScales: async () => [{ key: "r1", active: true }, { key: "a1", active: true }]
+    });
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.deepEqual(scale.writes, [10], "el producto sí se manda");
+    assert.equal(out.verified, 1);
+    assert.deepEqual(saved, [], "no se guardó el formato");
+    assert.ok(!scale.commands.includes("1070"), "tampoco se le cambia el formato a la balanza: Mostrador la seguiría leyendo mal");
+    assert.equal(out.ok, false);
+    assert.match(out.message, /más de una balanza: el formato de etiqueta no se cambió\. Avisamos a soporte/);
+    assert.equal((out.support as { etapa?: string }).etapa, "formato_sucursal_protegido");
+  });
+
+  it("Report en un local con una sola balanza: igual que siempre (1070 + formato guardado)", async () => {
+    localStorage.clear();
+    const scale = reportScale();
+    const saved: unknown[] = [];
+    const s = await reportSession(scale, [vacio], online, {
+      saveItemConfig: async (_b, c) => void saved.push(c ?? "default"),
+      loadBranchConfig: async () => LT,
+      listBranchScales: async () => [{ key: "r1", active: true }]
+    });
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, true, out.message);
+    assert.ok(scale.commands.includes("1070"));
+    assert.deepEqual(saved, ["default"]);
+  });
+
+  it("Report con 2 balanzas pero el mismo formato ya guardado: se configura normal", async () => {
+    localStorage.clear();
+    const scale = reportScale();
+    const saved: unknown[] = [];
+    const s = await reportSession(scale, [vacio], online, {
+      saveItemConfig: async (_b, c) => void saved.push(c ?? "default"),
+      loadBranchConfig: async () => ITEM,
+      listBranchScales: async () => [{ key: "r1", active: true }, { key: "a1", active: true }]
+    });
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, true, out.message);
+    assert.deepEqual(saved, ["default"]);
+  });
+
+  it("si la lista de balanzas viene en el contexto, se usa esa", async () => {
+    localStorage.clear();
+    const scale = reportScale();
+    const saved: unknown[] = [];
+    const s = await reportSession(scale, [vacio], { ...online, branchScales: [{ key: "r1", active: true }, { key: "s1", active: true }] } as Partial<EngineContext>, {
+      saveItemConfig: async (_b, c) => void saved.push(c ?? "default"),
+      loadBranchConfig: async () => LT
+    });
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, false);
+    assert.deepEqual(saved, []);
+  });
+
+  it("Aura en un local con otra balanza: los productos quedan, el formato no se guarda y se avisa", async () => {
+    const { KretzSession } = await import("./adapters/kretz");
+    const saved: unknown[] = [];
+    const io = {
+      diagnose: (async () => { throw new Error("no se usa"); }) as never,
+      readAuraList: (async () => ({ records: [], complete: true, detail: "", exchanges: [] })) as never,
+      runAuraSync: (async (plan: { plu: number | null; action: string }[]) => ({ verdict: "ok", detail: "", written: plan.filter((x) => x.action === "crear").map((x) => ({ plu: x.plu, action: x.action })), stoppedAt: null, barcode: "ok", before: [], after: [], exchanges: [], openLog: [], startedAt: "", finishedAt: "" })) as never,
+      readReport: (async () => null) as never,
+      sendReport: (async () => { throw new Error("no se usa"); }) as never,
+      saveItemConfig: async (_b: string, c?: unknown) => void saved.push(c ?? "default"),
+      loadBranchConfig: async () => null,
+      listBranchScales: async () => [{ key: "a1", active: true }, { key: "r1", active: true }]
+    };
+    const s = new KretzSession("kretz-aura", ctx([P("a", "2", "MILANESA", "kg", 900)], { online: true, branchId: "suc-1", scaleKey: "a1" }), "datos", io);
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.verified, 1);
+    assert.deepEqual(saved, []);
+    assert.equal(out.ok, false);
+    assert.match(out.message, /más de una balanza/);
+    assert.equal((out.support as { etapa?: string }).etapa, "formato_sucursal_protegido");
+  });
+});
