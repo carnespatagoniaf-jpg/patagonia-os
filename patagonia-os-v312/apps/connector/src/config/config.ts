@@ -24,6 +24,13 @@ export interface DeviceConfig {
   transport: SerialTransport | TcpTransport;
 }
 
+export interface CloudSettings {
+  /** Base de las Edge Functions (https://<proyecto>.supabase.co/functions/v1). null = sin nube. */
+  url: string | null;
+  heartbeatMs: number;
+  pollWaitSec: number;
+}
+
 export interface ConnectorConfig {
   version: 1;
   http: { port: number };
@@ -33,6 +40,7 @@ export interface ConnectorConfig {
   /** Cada cuánto se vuelven a listar los puertos (0 = solo al arrancar). */
   discoveryIntervalMs: number;
   log: { level: "debug" | "info" | "warn" | "error"; maxBytes: number; maxFiles: number };
+  cloud: CloudSettings;
   devices: DeviceConfig[];
 }
 
@@ -44,8 +52,20 @@ export const DEFAULT_CONFIG: ConnectorConfig = {
   backoffMs: [...DEFAULT_BACKOFF_MS],
   discoveryIntervalMs: 60_000,
   log: { level: "info", maxBytes: 5 * 1024 * 1024, maxFiles: 5 },
+  cloud: { url: null, heartbeatMs: 60_000, pollWaitSec: 25 },
   devices: [],
 };
+
+/** Solo https (o http a esta misma PC, para pruebas): el secreto de la PC nunca viaja sin cifrar. */
+export function isValidCloudUrl(value: string): boolean {
+  try {
+    const u = new URL(value);
+    if (u.username || u.password || u.search || u.hash) return false;
+    return u.protocol === "https:" || (u.protocol === "http:" && (u.hostname === "127.0.0.1" || u.hostname === "localhost"));
+  } catch {
+    return false;
+  }
+}
 
 /** Solo direcciones de red local: no se habla con balanzas fuera de la LAN. */
 export function isLocalNetworkIPv4(host: string): boolean {
@@ -124,6 +144,23 @@ export function parseConfig(raw: unknown): ParsedConfig {
       const maxFiles = raw.log.maxFiles === undefined ? config.log.maxFiles : posInt(raw.log.maxFiles, 1, 50);
       if (maxFiles === undefined) errors.push("log.maxFiles inválido (1-50).");
       else config.log.maxFiles = maxFiles;
+    }
+  }
+
+  if (raw.cloud !== undefined) {
+    if (!isObj(raw.cloud)) errors.push("cloud inválido.");
+    else {
+      const url = raw.cloud.url;
+      if (url !== undefined && url !== null) {
+        if (typeof url === "string" && isValidCloudUrl(url.trim())) config.cloud.url = url.trim().replace(/\/+$/, "");
+        else errors.push("cloud.url inválido (tiene que ser https://…/functions/v1).");
+      }
+      const hb = raw.cloud.heartbeatMs === undefined ? config.cloud.heartbeatMs : posInt(raw.cloud.heartbeatMs, 10_000, 600_000);
+      if (hb === undefined) errors.push("cloud.heartbeatMs inválido (10000-600000).");
+      else config.cloud.heartbeatMs = hb;
+      const wait = raw.cloud.pollWaitSec === undefined ? config.cloud.pollWaitSec : posInt(raw.cloud.pollWaitSec, 0, 25);
+      if (wait === undefined) errors.push("cloud.pollWaitSec inválido (0-25).");
+      else config.cloud.pollWaitSec = wait;
     }
   }
 

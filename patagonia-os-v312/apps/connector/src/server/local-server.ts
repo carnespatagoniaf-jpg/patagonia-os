@@ -1,17 +1,33 @@
 // Canal local en 127.0.0.1:9120. Solo lectura: informa versión, balanzas y
 // estado. No hay ningún endpoint que escriba en una balanza (plan 5.4: una
 // página maliciosa abierta en esta PC no puede mandarle productos).
+// Otras rutas (la página de vinculación, cloud/pairing-page.ts) se enchufan con
+// `routes`: corren DESPUÉS de las reglas de Host y Origin, y aplican las suyas.
 
 import http from "node:http";
 import type { AddressInfo } from "node:net";
 import { isAllowedHost, isAllowedOrigin, isLoopbackBindAddress } from "./security";
 import { silentLogger, type Logger } from "../log/logger";
 
+export interface LocalRouteContext {
+  req: http.IncomingMessage;
+  res: http.ServerResponse;
+  url: URL;
+  /** Origin del pedido (ya pasó isAllowedOrigin), si vino de un navegador. */
+  origin: string | undefined;
+  /** Puerto real donde escucha el canal (para comparar el Origin exacto). */
+  port: number;
+}
+
+/** Devuelve true si atendió el pedido. */
+export type LocalRoute = (context: LocalRouteContext) => boolean | Promise<boolean>;
+
 export interface LocalServerOptions {
   port: number;
   host?: string;
   getStatus: () => unknown;
   logger?: Logger;
+  routes?: LocalRoute[];
 }
 
 export interface LocalServer {
@@ -68,30 +84,48 @@ export function createLocalServer(options: LocalServerOptions): LocalServer {
 
       const url = new URL(req.url ?? "/", `http://${host}`);
 
-      if (req.method === "OPTIONS") {
-        if (!origin) return send(res, 403, { ok: false, error: "falta el origen" }, undefined);
-        return send(res, 204, null, origin, {
-          "Access-Control-Allow-Methods": "GET, OPTIONS",
-          "Access-Control-Allow-Headers": "content-type",
-          "Access-Control-Max-Age": "600",
+      if (options.routes?.length) {
+        void (async () => {
+          for (const route of options.routes ?? []) {
+            if (await route({ req, res, url, origin, port: boundPort })) return;
+          }
+          handleBuiltIn(req, res, url, origin);
+        })().catch((error) => {
+          log.error("Error atendiendo un pedido local", { error });
+          if (!res.headersSent) send(res, 500, { ok: false, error: "error interno" }, undefined);
+          else res.end();
         });
+        return;
       }
-
-      if (req.method !== "GET" && req.method !== "HEAD") {
-        return send(res, 405, { ok: false, error: "método no permitido" }, origin, { Allow: "GET, OPTIONS" });
-      }
-
-      if (url.pathname === "/status") {
-        return send(res, 200, { ok: true, ...(options.getStatus() as Record<string, unknown>) }, origin);
-      }
-
-      return send(res, 404, { ok: false, error: "no existe" }, origin);
+      handleBuiltIn(req, res, url, origin);
     } catch (error) {
       log.error("Error atendiendo un pedido local", { error });
       if (!res.headersSent) send(res, 500, { ok: false, error: "error interno" }, undefined);
       else res.end();
     }
   });
+
+  function handleBuiltIn(req: http.IncomingMessage, res: http.ServerResponse, url: URL, origin: string | undefined): void {
+    if (req.method === "OPTIONS") {
+      if (!origin) return send(res, 403, { ok: false, error: "falta el origen" }, undefined);
+      return send(res, 204, null, origin, {
+        "Access-Control-Allow-Methods": "GET, OPTIONS",
+        "Access-Control-Allow-Headers": "content-type",
+        "Access-Control-Max-Age": "600",
+      });
+    }
+
+    if (req.method !== "GET" && req.method !== "HEAD") {
+      return send(res, 405, { ok: false, error: "método no permitido" }, origin, { Allow: "GET, OPTIONS" });
+    }
+
+    if (url.pathname === "/status") {
+      return send(res, 200, { ok: true, ...(options.getStatus() as Record<string, unknown>) }, origin);
+    }
+
+    return send(res, 404, { ok: false, error: "no existe" }, origin);
+  }
+
   // Pedidos lentos o abiertos de más no pueden trabar el canal.
   server.requestTimeout = 10_000;
   server.headersTimeout = 5_000;

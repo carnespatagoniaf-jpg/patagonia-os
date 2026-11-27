@@ -12,6 +12,7 @@ import { NetQuickConnect } from "./network/NetQuickConnect";
 import { netWatchText, useNetScaleWatch } from "./network/net-watch";
 import { choiceForPort } from "./network/net-wizard";
 import { LabelTestBox } from "./LabelTestBox";
+import { ScaleConnectPanel } from "./ScaleConnectPanel";
 import type { Product } from "@patagonia/domain";
 import { adaptersForChoice } from "./engine/live";
 import { ALREADY_SAME, friendlyKind, friendlyMessage } from "./engine/friendly";
@@ -472,6 +473,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
           ) : (
             list.length === 0 && <p className="muted">Para agregar una balanza tiene que entrar el dueño o un administrador.</p>
           )}
+          <ScaleConnectPanel branchId={branchId} />
         </div>
       )}
 

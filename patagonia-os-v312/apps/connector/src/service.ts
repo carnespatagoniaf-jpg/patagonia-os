@@ -18,6 +18,7 @@ import { createLocalServer, type LocalServer } from "./server/local-server";
 import { CONNECTOR_VERSION, SERVICE_NAME } from "./version";
 import { MemoryEngineBackend, type EngineBackend } from "./protocols/engine-backend";
 import { ScaleProtocolHost, protocolDeviceFor } from "./protocols/scale-jobs";
+import { createCloudModule, type CloudModule, type CloudModuleOverrides } from "./cloud/cloud-module";
 
 export interface ServiceOptions {
   paths: ConnectorPaths;
@@ -31,6 +32,9 @@ export interface ServiceOptions {
   /** Lo que el motor de balanzas le pide a Patagonia. Hasta que exista el canal con la nube, en memoria. */
   backend?: EngineBackend;
   logger?: Logger;
+  /** Para pruebas: nube simulada (fetch, credencial en memoria, ejecutor falso). */
+  cloud?: CloudModuleOverrides;
+  env?: Record<string, string | undefined>;
 }
 
 export interface RunningService {
@@ -42,6 +46,7 @@ export interface RunningService {
   /** Trabajos de protocolos (identify / test / send) de cada balanza, por id. */
   scales: Map<string, ScaleProtocolHost>;
   server: LocalServer;
+  cloud: CloudModule;
   port: number;
   status(): Record<string, unknown>;
   stop(): Promise<void>;
@@ -150,9 +155,21 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
       interrupted: journal.list({ status: "interrupted" }).length,
     },
     problems: [...loaded.errors, ...registry.problems.map((p) => `${p.deviceId}: ${p.message}`)],
+    cloud: cloud.status(),
   });
 
-  const server = createLocalServer({ port: options.httpPort ?? config.http.port, getStatus: status, logger });
+  // Nube (vinculación, latido y trabajos): la balanza es "vista" con el id de config.json (= scale_key de la base).
+  const cloud = createCloudModule({
+    settings: config.cloud,
+    credentialFile: paths.credentialFile,
+    env: options.env ?? process.env,
+    version: CONNECTOR_VERSION,
+    logger,
+    seenScales: () => registry.statuses().map((s) => ({ key: s.id, name: s.name, online: s.state === "ready" || s.state === "busy" })),
+    overrides: options.cloud,
+  });
+
+  const server = createLocalServer({ port: options.httpPort ?? config.http.port, getStatus: status, logger, routes: cloud.routes });
   let address;
   try {
     address = await server.listen();
@@ -164,6 +181,7 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
     throw error;
   }
   logger.info("Canal local escuchando", { address: `${address.address}:${address.port}` });
+  await cloud.start();
 
   let stopped = false;
   return {
@@ -174,6 +192,7 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
     portManager,
     scales,
     server,
+    cloud,
     port: address.port,
     status,
     stop: async () => {
@@ -181,6 +200,7 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
       stopped = true;
       logger.info("Se apaga Patagonia Scale Connect");
       if (discoveryTimer) clearInterval(discoveryTimer);
+      await cloud.stop();
       await server.close();
       await registry.stopAll();
       await portManager.releaseAll();
