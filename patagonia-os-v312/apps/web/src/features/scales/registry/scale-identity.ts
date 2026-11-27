@@ -114,13 +114,25 @@ export function sameScaleCandidates(scales: BranchScale[], family: ScaleFamily, 
 }
 
 /** "usada hoy 10:15", "usada el 20/11 13:00" o "nunca se conectó". */
+/** Hora y día en Argentina (no la de la máquina: el CI y un servidor corren en UTC). */
+const AR_TZ = "America/Argentina/Buenos_Aires";
+export function arTime(d: Date): string {
+  return d.toLocaleTimeString("es-AR", { hour: "2-digit", hourCycle: "h23", minute: "2-digit", timeZone: AR_TZ });
+}
+export function arDay(d: Date): string {
+  return d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: AR_TZ });
+}
+export function arDayShort(d: Date): string {
+  return d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", timeZone: AR_TZ });
+}
+
 export function lastUseText(lastSeenAt: string | null, now = new Date()): string {
   if (!lastSeenAt) return "nunca se conectó";
   const at = new Date(lastSeenAt);
   if (Number.isNaN(at.getTime())) return "nunca se conectó";
-  const hh = at.toLocaleTimeString("es-AR", { hour: "2-digit", hourCycle: "h23", minute: "2-digit" });
-  if (at.toDateString() === now.toDateString()) return `usada hoy ${hh}`;
-  return `usada el ${at.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })} ${hh}`;
+  const hh = arTime(at);
+  if (arDay(at) === arDay(now)) return `usada hoy ${hh}`;
+  return `usada el ${arDayShort(at)} ${hh}`;
 }
 
 /** Nombre inicial que no se repita en la sucursal: "Systel Cuora Max", "Systel Cuora Max 2"… */

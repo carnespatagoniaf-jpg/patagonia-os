@@ -1,4 +1,5 @@
 import type { BranchScale } from "./registry/scale-identity";
+import { arDay, arDayShort, arTime } from "./registry/scale-identity";
 import type { InstallRecord } from "./install-status";
 
 /**
@@ -24,8 +25,8 @@ export function brandAndModel(s: Pick<BranchScale, "family" | "model">): string 
 export function lastSendText(install: InstallRecord | null | undefined, now = new Date()): string {
   const at = install?.sentAt ? new Date(install.sentAt) : null;
   if (!at || Number.isNaN(at.getTime())) return "Todavía no se le enviaron productos";
-  const hh = at.toLocaleTimeString("es-AR", { hour: "2-digit", hourCycle: "h23", minute: "2-digit" });
-  const when = at.toDateString() === now.toDateString() ? `hoy ${hh}` : `el ${at.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })} ${hh}`;
+  const hh = arTime(at);
+  const when = arDay(at) === arDay(now) ? `hoy ${hh}` : `el ${arDayShort(at)} ${hh}`;
   const n = typeof install?.verifiedCount === "number" ? install.verifiedCount : typeof install?.sentCount === "number" ? install.sentCount : null;
   return `Último envío: ${when}${n !== null ? ` (${n} ${n === 1 ? "producto" : "productos"})` : ""}`;
 }

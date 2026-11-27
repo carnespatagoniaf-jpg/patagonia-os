@@ -4,6 +4,7 @@ import { installFakeLocalStorage } from "../test-fake-storage";
 import { NetScalePort, netLockKeys, netTiming, resetNetAgentForTests, setNetAgentFetchForTests } from "../../inventory/kretz/net-port";
 import { fakeNetAgent } from "../../inventory/kretz/test-fake-net-agent";
 import { setScaleLocksForTests } from "../../inventory/kretz/scale-lock";
+import { fakeLockManager } from "../../inventory/kretz/test-fake-locks";
 
 /**
  * C19: dos balanzas por red en el mismo comercio. Con el programa de la PC versión 7 cada una tiene su conexión (id de
@@ -31,7 +32,8 @@ beforeEach(() => {
   netTiming.relocateEveryMs = 60000;
   netTiming.lockWaitMs = 2000;
   resetNetAgentForTests();
-  setScaleLocksForTests(undefined);
+  // Candado en memoria igual al de Chrome: Node 22 (el del CI) no trae navigator.locks.
+  setScaleLocksForTests(fakeLockManager());
 });
 afterEach(() => setNetAgentFetchForTests(null));
 

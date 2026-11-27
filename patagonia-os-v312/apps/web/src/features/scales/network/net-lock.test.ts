@@ -4,6 +4,7 @@ import { installFakeLocalStorage } from "../test-fake-storage";
 import { NetScalePort, netTiming, resetNetAgentForTests, setNetAgentFetchForTests } from "../../inventory/kretz/net-port";
 import { fakeNetAgent } from "../../inventory/kretz/test-fake-net-agent";
 import { acquireScaleLock, setScaleLocksForTests, withScaleLock } from "../../inventory/kretz/scale-lock";
+import { fakeLockManager } from "../../inventory/kretz/test-fake-locks";
 import { checkNetScale } from "./net-watch";
 
 /**
@@ -31,7 +32,8 @@ beforeEach(() => {
   netTiming.relocateEveryMs = 60000;
   netTiming.lockWaitMs = 200;
   resetNetAgentForTests();
-  setScaleLocksForTests(undefined);
+  // Candado en memoria igual al de Chrome: Node 22 (el del CI) no trae navigator.locks.
+  setScaleLocksForTests(fakeLockManager());
 });
 afterEach(() => {
   setNetAgentFetchForTests(null);
