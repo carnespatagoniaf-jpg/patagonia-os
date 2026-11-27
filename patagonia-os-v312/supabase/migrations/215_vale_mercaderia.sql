@@ -1,7 +1,7 @@
 -- 215: Vale de mercadería desde Mostrador (pedido del dueño, 27/11/2026). Es la "Fase 3" que dejó anunciada la 066.
 --
--- El empleado se lleva mercadería y se le descuenta del sueldo. En Mostrador la cajera arma el ticket como siempre y
--- elige "Vale de empleado" como forma de pago:
+-- El empleado se lleva mercadería y se le descuenta del sueldo. En Mostrador la cajera carga en el ticket lo que se lleva
+-- y en "Sacar plata del cajón" → "Vale a un empleado" elige "Mercadería" donde va la caja de la que sale:
 --   * El stock baja: un inventory_movements 'vale_mercaderia' por renglón (reference_type 'employee_vale',
 --     reference_id = el vale). Una presentación se pasa a su principal sola (trigger de la 111).
 --   * NO entra plata a la caja ni se toca Tesorería: no es una venta, así que el cierre de caja no la espera.

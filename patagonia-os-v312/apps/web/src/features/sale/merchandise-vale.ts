@@ -1,10 +1,17 @@
 // Vale de mercadería desde Mostrador (migración 215). Lógica pura (ver merchandise-vale.test.ts).
 //
-// La cajera arma el ticket como siempre y, en vez de cobrar, se lo da a un empleado como vale: baja el stock, no entra
-// plata y se le descuenta del sueldo. El precio lo calcula la base (el de la lista o la zona, como en una venta, menos el
+// En "Sacar plata del cajón" → "Vale a un empleado", "¿De dónde sale?" tiene la opción "Mercadería": lo que está en el
+// ticket de Mostrador se lo lleva el empleado. Baja el stock, no sale plata y se le descuenta del sueldo. El precio lo calcula la base (el de la lista o la zona, como en una venta, menos el
 // descuento para empleados); acá solo se arma lo que se manda y la cuenta que se muestra antes de confirmar.
 
 import { UNIT_LABELS, type TicketLine } from "./sale-model";
+
+export interface MerchandiseValeDone {
+  employeeName: string;
+  amount: number;
+  discountPct: number;
+  cart: TicketLine[];
+}
 
 export interface ValeItem {
   product_id: string;

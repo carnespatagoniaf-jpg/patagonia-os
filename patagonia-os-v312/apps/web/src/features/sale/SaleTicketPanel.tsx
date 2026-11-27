@@ -11,15 +11,13 @@ import type { SaleTicket } from "./useSaleTicket";
 // medios de pago y barra de cobro. Es solo vista: el estado vive en
 // useSaleTicket y el cobro (checkout) en Sale.tsx.
 
-export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlot, vale, priceSlot, priceLists = [] }: {
+export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlot, priceSlot, priceLists = [] }: {
   ticket: SaleTicket;
   accounts: TreasuryAccount[];
   busy: boolean;
   onCheckout: () => void;
   /** Opción "Factura" (solo si la factura electrónica está activa en el negocio). */
   invoiceSlot?: ReactNode;
-  /** Forma de pago "Empleado" (vale de mercadería, migración 215): con active, su panel reemplaza al cobro. */
-  vale?: { active: boolean; onToggle: (active: boolean) => void; panel: ReactNode };
   /** Botón Minorista / Mayorista (solo si la empresa tiene listas de precios). */
   priceSlot?: ReactNode;
   /** Listas que se eligen en Mostrador (sin zonas): cada renglón dice la suya y se puede cambiar. */
@@ -349,21 +347,15 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
                 <button
                   key={a.id}
                   type="button"
-                  className={`pos-payment-method-btn${payments[0]?.accountId === a.id && !vale?.active ? " active" : ""}`}
-                  onClick={() => { vale?.onToggle(false); selectSinglePaymentAccount(a); }}
+                  className={`pos-payment-method-btn${payments[0]?.accountId === a.id ? " active" : ""}`}
+                  onClick={() => selectSinglePaymentAccount(a)}
                 >
                   {i < 9 && <kbd>F{i + 1}</kbd>}
                   <span>{a.name}</span>
                 </button>
               ))}
-              {vale && (
-                <button type="button" className={`pos-payment-method-btn${vale.active ? " active" : ""}`} onClick={() => vale.onToggle(!vale.active)}>
-                  <span>Empleado (vale)</span>
-                </button>
-              )}
             </div>
           )}
-          {vale?.active ? vale.panel : (<>
           {!isSplit && singleAccount && singleAccount.paymentMethod !== "cash" && (
             <div className="pos-payment-row">
               <input
@@ -461,11 +453,10 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
               </>
             )}
           </div>
-          </>)}
         </div>
 
-        {!vale?.active && invoiceSlot}
-        {!vale?.active && confirmCharge && (
+        {invoiceSlot}
+        {confirmCharge && (
           <p className="pos-confirm-banner">
             Vas a cobrar {formatMoney(total)} con{" "}
             {isSplit
@@ -474,7 +465,7 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
             . Apretá Enter de nuevo (o tocá el botón) para confirmar -- Esc para elegir otro medio.
           </p>
         )}
-        {!vale?.active && <div className="pos-total-bar">
+        <div className="pos-total-bar">
           <div>
             <p className="pos-total-label">Total a cobrar</p>
             <strong className="pos-total-value">{formatMoney(total)}</strong>
@@ -489,7 +480,7 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
           >
             {busy ? "Cobrando…" : confirmCharge ? (<>Confirmar cobro <kbd>Enter</kbd></>) : (<>Cobrar <kbd>Enter</kbd></>)}
           </button>
-        </div>}
+        </div>
         </div>
       </>
     )}
