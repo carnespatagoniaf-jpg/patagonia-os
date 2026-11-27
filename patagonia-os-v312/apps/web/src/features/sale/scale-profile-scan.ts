@@ -30,12 +30,18 @@ export function claimLength(profile: ScaleLabelProfile, raw: string): number {
   return best;
 }
 
-/** Los perfiles que reconocen el código (los del inicio más largo), el actual antes que los anteriores. */
+/**
+ * Los perfiles que reconocen el código, el actual antes que los anteriores. El inicio más largo decide entre BALANZAS
+ * ("22" le gana a "2"); dentro de una balanza que lo reconoce cuentan todos sus perfiles vigentes (una etiqueta vieja
+ * con el formato anterior de esa misma balanza se sigue leyendo 7 días, con la regla de ambigüedad).
+ */
 export function claimingProfiles(profiles: ScaleLabelProfile[], raw: string): ScaleLabelProfile[] {
+  const byScale = new Map<string, number>();
   const scored = profiles.map((p) => ({ p, n: claimLength(p, raw) })).filter((x) => x.n > 0);
-  if (scored.length === 0) return [];
-  const best = Math.max(...scored.map((x) => x.n));
-  return scored.filter((x) => x.n === best).map((x) => x.p);
+  for (const x of scored) byScale.set(x.p.scaleKey, Math.max(byScale.get(x.p.scaleKey) ?? 0, x.n));
+  if (byScale.size === 0) return [];
+  const best = Math.max(...byScale.values());
+  return scored.filter((x) => byScale.get(x.p.scaleKey) === best).map((x) => x.p);
 }
 
 const SAME_KG = 0.0005;
