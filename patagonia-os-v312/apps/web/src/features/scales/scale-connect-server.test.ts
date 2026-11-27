@@ -10,6 +10,7 @@ import {
   generateSecret,
   isJsonRequest,
   isPairingCodeFormat,
+  longPollClaim,
   maxBodyFor,
   MAX_FINISH_BODY,
   MAX_SMALL_BODY,
@@ -213,5 +214,67 @@ describe("motor del conector y huella (migración 227)", () => {
       device: { id: "usb-1", kind: "serial", fingerprint: "serial:A1", path: "COM3" }
     });
     assert.deepEqual(r.value.scales[1], { key: "dev:2", name: "dev:2", online: false });
+  });
+});
+
+describe("scale-connect-api: consulta larga de /claim", () => {
+  const fakeClock = () => {
+    let t = 0;
+    return { now: () => t, sleep: async (ms: number) => void (t += ms) };
+  };
+
+  it("nunca toma un trabajo si el conector ya cortó el pedido (se reinició o se cayó la red)", async () => {
+    const clock = fakeClock();
+    let aborted = false;
+    let claims = 0;
+    const r = await longPollClaim({
+      claim: async () => {
+        claims += 1;
+        // Primer intento: no hay nada. Mientras espera, el conector corta; recién ahí aparece un trabajo.
+        if (claims === 1) {
+          aborted = true;
+          return { data: null, error: null };
+        }
+        return { data: { id: "j1" }, error: null };
+      },
+      waitSec: 25,
+      aborted: () => aborted,
+      sleep: clock.sleep,
+      now: clock.now
+    });
+    assert.equal(r.job, null);
+    assert.equal(claims, 1, "después del corte no se vuelve a tomar");
+  });
+
+  it("devuelve el trabajo apenas aparece y espera como mucho waitSec", async () => {
+    const clock = fakeClock();
+    let claims = 0;
+    const found = await longPollClaim({
+      claim: async () => ({ data: ++claims === 3 ? { id: "j2" } : null, error: null }),
+      waitSec: 25,
+      aborted: () => false,
+      sleep: clock.sleep,
+      now: clock.now
+    });
+    assert.deepEqual(found.job, { id: "j2" });
+    const clock2 = fakeClock();
+    let tries = 0;
+    const none = await longPollClaim({
+      claim: async () => {
+        tries += 1;
+        return { data: null, error: null };
+      },
+      waitSec: 25,
+      aborted: () => false,
+      sleep: clock2.sleep,
+      now: clock2.now
+    });
+    assert.equal(none.job, null);
+    assert.ok(clock2.now() <= 25_000 && tries === 11,`${tries} intentos en ${clock2.now()} ms`);
+  });
+
+  it("un error de la base corta la consulta", async () => {
+    const r = await longPollClaim({ claim: async () => ({ data: null, error: { code: "PT401" } }), waitSec: 25, aborted: () => false, sleep: async () => undefined });
+    assert.deepEqual(r.error, { code: "PT401" });
   });
 });

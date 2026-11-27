@@ -31,6 +31,15 @@
   <stoptimeout>15 sec</stoptimeout>
 
   <!--
+    Sin "autoRefresh": WinSW (por omisión) al arrancar como servicio compara la fecha de este XML con la del registro y,
+    si el XML es más nuevo, se reconfigura solo abriendo el servicio con TODOS los permisos. El servicio corre con una
+    cuenta que no es administrador (a propósito): eso da "Access is denied" y el servicio no arranca (error 1053,
+    visto en una PC limpia, prueba scale-connect-e2e). La configuración la aplica el instalador como administrador
+    (install, y refresh en cada actualización).
+  -->
+  <autoRefresh>false</autoRefresh>
+
+  <!--
     Cuenta del servicio: la cuenta virtual "NT SERVICE\PatagoniaScaleConnect" (sin contraseña,
     sin privilegios de administrador). NO va acá a propósito: WinSW v3.0.0-alpha.11, al
     instalar, busca el SID de la cuenta (LookupAccountName) para darle el derecho de "iniciar

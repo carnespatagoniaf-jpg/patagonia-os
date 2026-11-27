@@ -24,6 +24,8 @@ export class FakeReportDevice {
   /** PLU de cada 2005 recibido, en orden. */
   readonly writes: number[] = [];
   readonly commands: string[] = [];
+  /** Datos de cada 1070 recibido (formato del código de barras de las etiquetas), en orden. */
+  readonly barcodeConfigs: string[] = [];
   /** Colgada: recibe pero no contesta. */
   hung = false;
   /** Se llama con cada PLU grabado (para simular cortes a mitad). */
@@ -81,7 +83,10 @@ export class FakeReportDevice {
       const next = [...this.records.keys()].filter((k) => k > after).sort((a, b) => a - b)[0];
       return next === undefined ? this.reply("02") : this.reply("01", this.records.get(next)!);
     }
-    if (command === "1070") return this.reply("01");
+    if (command === "1070") {
+      this.barcodeConfigs.push(data);
+      return this.reply("01");
+    }
     return this.reply("02");
   }
 }

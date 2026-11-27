@@ -5,6 +5,7 @@ import { resolvePaths } from "./config/paths";
 import { startService } from "./service";
 import { CONNECTOR_VERSION } from "./version";
 import { cloudUrlFor, describeCloud, setCloudInConfig } from "./cloud/cloud-targets";
+import { shutdownExitCode, type ShutdownReason } from "./exit-code";
 
 async function main(): Promise<void> {
   // `scale-connect.exe --version`: lo usan el instalador, el CI y soporte. No toca datos ni puertos.
@@ -36,7 +37,7 @@ async function main(): Promise<void> {
   const service = await startService({ paths, dev });
 
   let shuttingDown = false;
-  const shutdown = (signal: string) => {
+  const shutdown = (signal: ShutdownReason) => {
     if (shuttingDown) return;
     shuttingDown = true;
     service.logger.info("Señal de apagado", { signal });
@@ -45,13 +46,13 @@ async function main(): Promise<void> {
     force.unref();
     service
       .stop()
-      .then(() => process.exit(0))
-      .catch(() => process.exit(1));
+      .then(() => process.exit(shutdownExitCode(signal, true)))
+      .catch(() => process.exit(shutdownExitCode(signal, false)));
   };
   // WinSW manda Ctrl+C (SIGINT); SIGBREAK es Ctrl+Break en Windows.
   for (const signal of ["SIGINT", "SIGTERM", "SIGBREAK"] as const) process.on(signal, () => shutdown(signal));
 
-  // Una falla inesperada se anota; el servicio se apaga prolijo y WinSW lo reinicia.
+  // Una falla inesperada se anota; el servicio se apaga prolijo y sale con error, así Windows lo reinicia.
   process.on("uncaughtException", (error) => {
     service.logger.error("Error no controlado", { error });
     shutdown("uncaughtException");

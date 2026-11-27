@@ -26,7 +26,7 @@ import {
   CONNECTOR_HEADER,
   isJsonRequest,
   json,
-  LONG_POLL_STEP_MS,
+  longPollClaim,
   maxBodyFor,
   parseClaimRequest,
   parseConnectorCredential,
@@ -71,14 +71,18 @@ Deno.serve(async (req) => {
     if (route === "claim") {
       const parsed = parseClaimRequest(body.value);
       if (!parsed.ok) return json(parsed, 400);
-      const deadline = Date.now() + parsed.value.waitSec * 1000;
-      for (;;) {
-        const { data, error } = await admin.rpc("scale_connector_claim_job", auth);
-        if (error) return fail(error);
-        if (data) return json({ ok: true, job: data });
-        if (Date.now() + LONG_POLL_STEP_MS > deadline || req.signal.aborted) return json({ ok: true, job: null });
-        await sleep(LONG_POLL_STEP_MS, req.signal);
-      }
+      // Si el conector cortó (se reinició, se cayó la red), no se toma nada a su nombre: ver longPollClaim.
+      const r = await longPollClaim({
+        claim: async () => {
+          const { data, error } = await admin.rpc("scale_connector_claim_job", auth);
+          return { data, error };
+        },
+        waitSec: parsed.value.waitSec,
+        aborted: () => req.signal.aborted,
+        sleep: (ms) => sleep(ms, req.signal),
+      });
+      if (r.error) return fail(r.error as { code?: string; message?: string });
+      return json({ ok: true, job: r.job });
     }
 
     if (route === "progress") {
