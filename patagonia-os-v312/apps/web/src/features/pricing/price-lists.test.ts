@@ -1,6 +1,20 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { activeList, productPrice, ruleLabel, rulePrice, scaleAmountForList } from "./price-lists";
+import { activeList, chargePriceListId, productPrice, ruleLabel, rulePrice, scaleAmountForList } from "./price-lists";
+
+describe("lista de la venta a cuenta (cliente → zona del local → minorista)", () => {
+  const lists = [
+    { id: "may", name: "Mayorista", base: "retail" as const, pct: -10, active: true },
+    { id: "vieja", name: "Vieja", base: "retail" as const, pct: -5, active: false },
+    { id: "zona", name: "Planta", base: "retail" as const, pct: -20, active: true, isZone: true }
+  ];
+  it("manda la lista del cliente", () => assert.equal(chargePriceListId(lists, "may", "zona"), "may"));
+  it("sin lista, la zona del local (Della Finca 26/11: Planta a $8.200, no el minorista)", () =>
+    assert.equal(chargePriceListId(lists, null, "zona"), "zona"));
+  it("lista desactivada: la zona", () => assert.equal(chargePriceListId(lists, "vieja", "zona"), "zona"));
+  it("local sin zona: minorista", () => assert.equal(chargePriceListId(lists, null, null), null));
+  it("la zona vale aunque no se hayan cargado las listas", () => assert.equal(chargePriceListId([], "may", "zona"), "zona"));
+});
 
 describe("regla de la lista", () => {
   it("minorista −10%: 8.100 → 7.290 (igual que la base de datos)", () => {
