@@ -1,3 +1,7 @@
+// TEMPORAL (plan balanzas v2): estas 4 listas ya están como DATO en la migración 223 (perfil de etiqueta de cada balanza)
+// y no se usan con 'balanzas_v2' encendido. Este archivo se BORRA, junto con su excepción en no-client-ids.test.ts, cuando
+// 'balanzas_v2' esté encendido para todos. No agregar empresas acá: un cliente nuevo va en el perfil de su balanza.
+
 /**
  * Empresas cuya Kretz Report imprime el PESO en el código de barras de los productos por kilo (no el importe):
  * Mostrador cobra kilos × precio de Patagonia del momento. Pedido de Carplat (18/11/2026): envasan con días de

@@ -2,7 +2,8 @@ import type { Product } from "@patagonia/domain";
 import { resolveBoxScan, type BoxLabelFormat } from "../sale/box-label";
 import type { ScaleConfig } from "../sale/scale-barcode";
 import { labelWeightProblem, resolveScan, type ScanResolution } from "../sale/scan-resolve";
-import { resolveScaleLabel } from "../sale/scale-label-resolver";
+import { resolveScaleLabel, type LabelContext } from "../sale/scale-label-resolver";
+import { resolveScanByProfiles } from "../sale/scale-profile-scan";
 import { scanChoiceOptions, type LabelChoiceOption } from "../sale/scale-label-choice";
 import type { ScaleSetup } from "../scales/sale/scale-sale-service";
 import type { ScaleConfigStatus } from "../sale/scale-config-cache";
@@ -39,6 +40,8 @@ export interface ChargeScaleContext {
   zoneListId?: string | null;
   /** C5: mientras no se conoce el formato de la balanza, no se lee ninguna etiqueta. */
   configStatus?: ScaleConfigStatus;
+  /** 'balanzas_v2': perfiles de etiqueta de cada balanza de la sucursal (mismo lector por balanza que Mostrador). */
+  labelProfiles?: LabelContext["labelProfiles"];
 }
 
 const TOTAL_TICKET_MESSAGE =
@@ -53,12 +56,14 @@ export function resolveChargeScan(rawInput: string, products: Product[], config:
   // (mismo orden que Mostrador).
   if (boxFormats.length > 0 && !active.some((p) => p.code === raw)) {
     const box = resolveBoxScan(raw, boxFormats, products);
-    if (box && resolveScan(raw, products, config).type !== "label") {
+    const lp = scale.labelProfiles;
+    const asScaleLabel = lp?.status === "ready" ? resolveScanByProfiles(raw, products, lp.profiles, config) : resolveScan(raw, products, config);
+    if (box && asScaleLabel.type !== "label") {
       return { type: "add", product: box.product, quantity: box.quantity, detail: box.detail };
     }
   }
 
-  const label = resolveScaleLabel(raw, { products, config, calibrated: scale.calibrated, branchFormatCompetes: scale.branchFormatCompetes, setups: scale.setups, zoneListId: scale.zoneListId ?? null, configStatus: scale.configStatus });
+  const label = resolveScaleLabel(raw, { products, config, calibrated: scale.calibrated, branchFormatCompetes: scale.branchFormatCompetes, setups: scale.setups, zoneListId: scale.zoneListId ?? null, configStatus: scale.configStatus, labelProfiles: scale.labelProfiles ?? null });
   if (label.type === "not_ready") return { type: "error", message: label.message };
   if (label.type === "ambiguous") return { type: "choose", options: label.options, ...(label.note ? { note: label.note } : {}) };
   if (label.type === "systel_message") return { type: "error", message: label.message };

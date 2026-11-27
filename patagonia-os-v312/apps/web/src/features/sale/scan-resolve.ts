@@ -193,19 +193,19 @@ const fmtQty =(q: number, unit: string) => (unit === "kg" ? `${q.toLocaleString(
 /** Formato de la Aura con inicio "22": producto (3) + importe en centavos (7); producto 998 = TOTAL del ticket. */
 export const AURA_22_CONFIG: ScaleConfig = { prefixLength: 2, pluLength: 3, weightLength: 7, weightDivisor: 100, totalLength: 13, payloadType: "amount" };
 
-function resolveAura22(raw: string, products: Product[]): ScanResolution {
+function resolveAura22(raw: string, products: Product[], who = "Aura"): ScanResolution {
   // TOTAL del ticket (código suma 998). Va primero: con inicio "22" el lector de Systel lo tomaría como su TOTAL.
   if (raw.slice(2, 5) === "998") {
     const value = raw.slice(5, 12);
     const sum: ScanResolution = /^(0+|9+)$/.test(value)
-      ? { type: "ticket_without_amount", message: "Este ticket de la Aura no trae el importe en el código de barras (pasa de $99.999,99). Cargá el TOTAL impreso con \"Vender algo sin código\"." }
+      ? { type: "ticket_without_amount", message: `Este ticket de la ${who} no trae el importe en el código de barras (pasa de $99.999,99). Cargá el TOTAL impreso con "Vender algo sin código".` }
       : { type: "ticket_total", amount: parseInt(value, 10) / 100, key: `ticket-${raw}` };
     return sumOrProduct(sum, raw, products, AURA_22_CONFIG);
   }
   const r = resolveScanCore(raw, products, AURA_22_CONFIG, false);
   if (r.type === "systel_total" || r.type === "search") {
     const plu = String(parseInt(raw.slice(2, 5), 10));
-    return { type: "error", message: `La etiqueta de la Aura es del producto N.º ${plu}, y en Patagonia no hay ningún producto con ese código. No se agregó nada.` };
+    return { type: "error", message: `La etiqueta de la ${who} es del producto N.º ${plu}, y en Patagonia no hay ningún producto con ese código. No se agregó nada.` };
   }
   return r;
 }
@@ -249,6 +249,10 @@ function resolveScanCore(rawInput: string, products: Product[], config: ScaleCon
 
   // Aura con inicio "22" en un local que tiene además otra balanza (AURA_PREFIX_22_BRANCHES, El Abastero 25/11/2026).
   if (config.auraPrefix22 && !ignoreSums && /^22\d{11}$/.test(raw) && validEan13(raw)) return resolveAura22(raw, products);
+  // Kretz con inicio propio 22-29 (perfil de la balanza, 'balanzas_v2'): igual que la Aura con inicio 22.
+  if (config.ownPrefix && !ignoreSums && raw.startsWith(config.ownPrefix) && /^\d{13}$/.test(raw) && validEan13(raw)) {
+    return resolveAura22(raw, products, config.ownPrefix === "22" ? "Aura" : "balanza");
+  }
   // Sin lectura doble de los "20": la Aura de El Abastero ya imprime con "22" (REAL 25/11/2026, "22 001 2126600 4" =
   // NALGA $21.266). Probar un "20" también como Aura podía cruzarse con la Report (su Nalga es el 1). Un "20" es de la Report.
 
@@ -342,7 +346,7 @@ function resolveScanCore(rawInput: string, products: Product[], config: ScaleCon
       // La balanza grabó el importe: la cantidad sale del precio de Patagonia (al gramo).
       quantity = p.unit === "kg" ? round3(label.amount / p.priceRetail) : label.amount / p.priceRetail;
     }
-    if (p.unit !== "kg" && label.kind === "weight" && config.prefixLength === 2 && raw.startsWith("21")) {
+    if (p.unit !== "kg" && label.kind === "weight" && config.prefixLength === 2 && raw.startsWith(config.unitPrefix ?? "21")) {
       // Systel venta por UNIDAD ("21PPPPCCCCCC", C = "cantidad (kg o unidades)" según el manual).
       // No hay todavía una etiqueta real por unidad: se aceptan las dos formas posibles, unidades
       // en milésimas (000002000 → 2, como los kilos) o enteras (000002 → 2). Otra cosa: error.

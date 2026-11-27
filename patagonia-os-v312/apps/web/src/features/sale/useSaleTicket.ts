@@ -37,6 +37,8 @@ import { isPackageCode, normalizePackageCode, saleScanProblem } from "../planta/
 import { findPackage } from "../planta/planta-service";
 import { freezerTicket, matchFreezerScan, type FreezerStored } from "../freezer/freezer-logic";
 import { cachedFreezerStored, loadFreezerStored } from "../freezer/freezer-service";
+import type { LabelProfilesState } from "../scales/label-spec-cache";
+import { resolveScanByProfiles } from "./scale-profile-scan";
 
 // Estado y acciones del ticket que se está armando en Mostrador: búsqueda,
 // carrito, descuentos y recargos, medios de pago y sus totales. Es la parte
@@ -67,9 +69,15 @@ export interface SaleTicketDeps {
   boxLabels?: boolean;
   /** Pantalla a pedido 'freezer' (migración 214): una etiqueta guardada en el freezer del local sale de ahí al venderla. */
   freezer?: boolean;
+  /**
+   * 'balanzas_v2' (interruptor por empresa): perfiles de etiqueta de cada balanza de la sucursal. Con esto, cada etiqueta
+   * se le pregunta a cada balanza (scale-profile-scan.ts) en vez del formato de la sucursal + listas por cliente.
+   * null = apagado: todo como antes.
+   */
+  labelProfiles?: LabelProfilesState | null;
 }
 
-export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrated = false, scaleConfigStatus = "ready", accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false, scaleBranchId = null, zoneListId = null, boxLabels = false, freezer = false }: SaleTicketDeps) {
+export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrated = false, scaleConfigStatus = "ready", accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false, scaleBranchId = null, zoneListId = null, boxLabels = false, freezer = false, labelProfiles = null }: SaleTicketDeps) {
   const [search, setSearch] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -464,7 +472,8 @@ export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrat
     // número de caja tiene producto (si no, null y sigue como siempre) y no es una etiqueta de la balanza de un
     // producto que existe (con los números del medio libres, una etiqueta "20…" también tiene forma de caja).
     const box = boxFormats.length > 0 && !products.some((p) => (p.active ?? true) && p.code === raw) ? resolveBoxScan(raw, boxFormats, products) : null;
-    if (box && resolveScan(raw, products, scaleConfig).type !== "label") {
+    const asScaleLabel = labelProfiles?.status === "ready" ? resolveScanByProfiles(raw, products, labelProfiles.profiles, scaleConfig) : resolveScan(raw, products, scaleConfig);
+    if (box && asScaleLabel.type !== "label") {
       setSearch("");
       setHighlightedIndex(-1);
       const key = `${box.product.id}|caja:${box.code}`;
@@ -492,7 +501,7 @@ export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrat
     // Con el formato de la balanza, un producto sin precio en Patagonia se carga con el precio de lista 1 de la
     // balanza (provisorio: el importe real sale del TOTAL del ticket).
     const scanProducts = systelTicketPilot && systelConfig ? withScalePrices(products, mergedPerPlu(systelTemplatesList())) : products;
-    const label = resolveScaleLabel(raw, { products: scanProducts, config: systelConfig ?? scaleConfig, calibrated: scaleCalibrated || !!systelConfig, setups: papers.setups, branchFormatCompetes: papers.otherBrand !== false, zoneListId, configStatus: systelConfig ? "ready" : scaleConfigStatus });
+    const label = resolveScaleLabel(raw, { products: scanProducts, config: systelConfig ?? scaleConfig, calibrated: scaleCalibrated || !!systelConfig, setups: papers.setups, branchFormatCompetes: papers.otherBrand !== false, zoneListId, configStatus: systelConfig ? "ready" : scaleConfigStatus, labelProfiles: systelConfig ? null : labelProfiles });
     if (label.type === "systel") {
       // La lee useScalePapers (avisos de etiqueta repetida, precio, carrito).
       papers.handleScan(raw);

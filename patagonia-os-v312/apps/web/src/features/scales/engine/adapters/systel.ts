@@ -17,6 +17,8 @@ import type { TypeByteMode } from "../../../inventory/systel/systel-product-barc
 import type { SystelPlu } from "../../../inventory/systel/systel-plu";
 import { EMPTY_SCALE_MESSAGE, emptyScaleTemplates } from "./systel-empty-template";
 import { readSystelScoped, systelScopedKey, writeSystelScoped } from "../../../inventory/systel/systel-local-keys";
+import { systelTicketCodes } from "../../label-spec";
+import type { PrefixAllocation } from "../../label-spec-service";
 
 /**
  * Systel (Cuora Max y familia), Patagonia → balanza. Reutiliza, sin cambiarlos:
@@ -107,6 +109,8 @@ export function saveWriteProof(b: Pick<SystelBackup, "signature" | "layout">, nu
 }
 
 export interface SystelDeps {
+  /** 'balanzas_v2': inicio propio de ESTA balanza (la que ya tiene el suyo lo conserva). Sin esto, el de siempre. */
+  allocatePrefix?: (branchId: string, scaleKey: string) => Promise<PrefixAllocation | null>;
   loadSetup: (branchId: string, scaleKey: string) => Promise<ScaleSetup | null>;
   saveCatalog: (branchId: string, profile: Omit<ScaleSaleProfile, "catalog"> & { model?: string }, catalog: ScaleCatalogItem[]) => Promise<unknown>;
   setLinks: (branchId: string, scaleKey: string, links: ScaleLink[]) => Promise<unknown>;
@@ -172,6 +176,8 @@ export class SystelSession implements ScaleSession {
   private startupWaitOn = false;
   /** Resultado de la prueba de escritura en esta balanza (solo firmware sin comprobar). */
   private proof: WriteProofResult | null = null;
+  /** Código propio que se escribe en cada producto: el de siempre, o el del perfil de ESTA balanza ('balanzas_v2'). */
+  private codes = { weighed: SYSTEL_WEIGHED_LABEL, unit: SYSTEL_UNIT_LABEL };
 
   constructor(
     private readonly link: SystelLink & { close?: () => Promise<void> },
@@ -371,18 +377,27 @@ export class SystelSession implements ScaleSession {
 
     onProgress("comparar", "Comparando con los productos de Patagonia…");
     const setup = this.ctx.online && this.ctx.branchId ? await this.deps.loadSetup(this.ctx.branchId, this.scaleKey) : null;
+    // 'balanzas_v2': el inicio de ESTA balanza (si el 20/21 lo usa otra del local, recibe uno libre) y su código propio.
+    if (this.ctx.balanzasV2) {
+      let spec = this.ctx.labelSpec ?? null;
+      if (this.ctx.online && this.ctx.branchId && this.ctx.scaleKey && this.deps.allocatePrefix) {
+        const a = await this.deps.allocatePrefix(this.ctx.branchId, this.ctx.scaleKey).catch(() => null);
+        if (a) spec = a.spec;
+      }
+      this.codes = systelTicketCodes(spec);
+    }
     const layout = backup.layout;
     // Etapa 1: revisión previa con los límites que informó ESTA balanza (layout, decimales y formato de etiqueta).
     const values = backup.config?.values ?? {};
     // C11: el tope del código sale del formato que se ESCRIBE en cada producto (20PPPPCCCCCC: 4 cifras), no del general.
     // La Cuora 2 no lleva código por producto: imprime con el general, así que ahí manda el general.
-    const labelFormats = layout === "cuora2" ? [values.E_P, values.E_U] : [SYSTEL_WEIGHED_LABEL, SYSTEL_UNIT_LABEL];
+    const labelFormats = layout === "cuora2" ? [values.E_P, values.E_U] : [this.codes.weighed, this.codes.unit];
     const check: PreflightResult | null = layout
       ? preflightProducts(this.ctx.products, systelLimits(layoutLimits(layout, backup.signature?.pluCapacity ?? 0), backup.signature?.priceDecimals ?? 0, labelFormats))
       : null;
     const readyIds = new Set((check?.ready ?? []).map((p) => p.id));
     const products = this.pushProducts().filter((p) => readyIds.has(p.id));
-    const plan = layout ? planSystelPush(backup.plus, layout, backup.signature?.priceDecimals ?? 0, products, { templates, pluCapacity: topPluNumber(layout, backup.signature?.pluCapacity ?? 0) }) : [];
+    const plan = layout ? planSystelPush(backup.plus, layout, backup.signature?.priceDecimals ?? 0, products, { templates, pluCapacity: topPluNumber(layout, backup.signature?.pluCapacity ?? 0), ticketCodes: this.codes }) : [];
     this.state = { backup, products, plan, setup, templates };
 
     const count = (a: string) => plan.filter((x) => x.action === a).length;
@@ -449,7 +464,7 @@ export class SystelSession implements ScaleSession {
     }
     const startupNote = startup === "sigue" ? " Ojo: la balanza no aceptó dejar de esperar a la PC cada vez que se prende; si al prenderla se queda trabada, avisá a soporte." : "";
     const layout = st.backup.layout;
-    const plan = opts.allowReplace ? planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: true, templates: st.templates, pluCapacity: topPluNumber(layout, st.backup.signature?.pluCapacity ?? 0) }) : st.plan;
+    const plan = opts.allowReplace ? planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: true, templates: st.templates, pluCapacity: topPluNumber(layout, st.backup.signature?.pluCapacity ?? 0), ticketCodes: this.codes }) : st.plan;
     const toWrite = plan.filter((x) => x.action === "crear" || x.action === "actualizar" || x.action === "reemplazar");
 
     let written: { number: number }[] = [];
@@ -467,7 +482,7 @@ export class SystelSession implements ScaleSession {
         mode = this.proof.mode;
         saveWriteProof(st.backup, this.number, mode, this.scaleKey);
       }
-      const modePlan = mode === "ascii" ? plan : planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: !!opts.allowReplace, mode, templates: st.templates, pluCapacity: topPluNumber(layout, st.backup.signature?.pluCapacity ?? 0) });
+      const modePlan = mode === "ascii" ? plan : planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: !!opts.allowReplace, mode, templates: st.templates, pluCapacity: topPluNumber(layout, st.backup.signature?.pluCapacity ?? 0), ticketCodes: this.codes });
       // Balanza vacía: el sector de los modelos tiene que existir (si lo borraron, cada producto da E7).
       if (st.templates.length > 0) {
         onProgress("sincronizar", "Revisando los sectores de tu balanza…");
@@ -518,7 +533,7 @@ export class SystelSession implements ScaleSession {
   private async saveForMostrador(st: State, layout: SystelLayout, sent: PushItem[], opts: { keepPrevious: boolean; unknown: number[] }): Promise<void> {
     let catalog: ScaleCatalogItem[] = sent.map((x) => {
       // La Cuora 2 no tiene código por producto: imprime con el formato general de la balanza (tipo 0).
-      const ean = layout === "cuora2" ? { type: 0, config: null } : { type: 1, config: x.product.byWeight ? SYSTEL_WEIGHED_LABEL : SYSTEL_UNIT_LABEL };
+      const ean = layout === "cuora2" ? { type: 0, config: null } : { type: 1, config: x.product.byWeight ? this.codes.weighed : this.codes.unit };
       return { code: x.number!, name: x.product.name.slice(0, 18), saleType: x.product.byWeight ? "P" : "U", prices: [x.product.price, 0], eanType: ean.type, eanConfig: ean.config };
     });
     let links: ScaleLink[] = sent.map((x) => ({ code: x.number!, kind: "product" as const, productId: x.product.id }));

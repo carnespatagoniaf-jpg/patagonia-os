@@ -3,6 +3,7 @@ import { CheckCircle2, Plus, Scale, TriangleAlert } from "lucide-react";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { useAuth } from "../auth/AuthProvider";
 import { REPORT_PESOS_BARCODE_COMPANIES, REPORT_PLU5_WEIGHT_COMPANIES, REPORT_WEIGHT_BARCODE_COMPANIES } from "./engine/weight-barcode";
+import { allocateScalePrefix } from "./label-spec-service";
 import { releaseSerialEverywhere } from "../inventory/kretz/serial-tabs";
 import { connectBranchScale, type BranchConnectResult } from "./engine/connect-branch";
 import { isPhoneOrTablet, PHONE_OR_TABLET_MESSAGE } from "./engine/device";
@@ -71,9 +72,11 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
   const canManage = profile?.role === "owner" || profile?.role === "admin";
   // scales.send (migración 224): sin él (solo lectura, o destildado en Usuarios) se ve el estado, sin enviar ni agregar.
   const canSend = can(profile, "scales.send");
-  const weightBarcode = REPORT_WEIGHT_BARCODE_COMPANIES.has(profile?.company_id ?? "");
-  const pesosBarcode = REPORT_PESOS_BARCODE_COMPANIES.has(profile?.company_id ?? "");
-  const plu5Barcode = REPORT_PLU5_WEIGHT_COMPANIES.has(profile?.company_id ?? "");
+  // 'balanzas_v2': cada balanza manda SU perfil de etiqueta (inicio propio); las listas por empresa no se usan.
+  const balanzasV2 = !!profile?.features?.includes("balanzas_v2");
+  const weightBarcode = !balanzasV2 && REPORT_WEIGHT_BARCODE_COMPANIES.has(profile?.company_id ?? "");
+  const pesosBarcode = !balanzasV2 && REPORT_PESOS_BARCODE_COMPANIES.has(profile?.company_id ?? "");
+  const plu5Barcode = !balanzasV2 && REPORT_PLU5_WEIGHT_COMPANIES.has(profile?.company_id ?? "");
   // "Traer productos de la balanza": solo empresas que lo pidieron (companies.features, migración 173).
   const canImport = canManage && !!profile?.features?.includes("traer_balanza") && !!branchId && isSupabaseConfigured;
   const [scales, setScales] = useState<BranchScale[]>([]);
@@ -229,7 +232,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     const remembered = loadRememberedScale();
     try {
       let result = await connectBranchScale(
-        { branchId, products, online: isSupabaseConfigured, canManageLinks: canManage, diag, allowSystelRelease, weightBarcode, pesosBarcode, plu5Barcode },
+        { branchId, products, online: isSupabaseConfigured, canManageLinks: canManage, diag, allowSystelRelease, weightBarcode, pesosBarcode, plu5Barcode, balanzasV2 },
         progress,
         { target: isLegacy ? { ...target!, identity: {} } : target, known: scales, pick },
         {
@@ -327,6 +330,19 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     if (key) {
       result.diag.steps.push(`registrada como ${key}`);
       result.ctx.scaleKey = key;
+      // 'balanzas_v2': su inicio de etiqueta. La que ya tiene el suyo lo conserva; una 2.ª balanza del local que choca
+      // recibe uno libre (se le manda al sincronizar).
+      if (balanzasV2 && branchId && isSupabaseConfigured) {
+        try {
+          const a = await allocateScalePrefix(branchId, key);
+          if (a) {
+            result.ctx.labelSpec = a.spec;
+            result.diag.steps.push(`inicio de etiqueta ${a.prefix}${a.changed ? " (nuevo)" : ""}`);
+          }
+        } catch (err) {
+          result.diag.steps.push(`inicio de etiqueta sin asignar: ${err instanceof Error ? err.message : String(err)}`);
+        }
+      }
     }
     if (branchId) saveBinding(key ?? `${LOCAL_KEY}-${result.family}`, { branchId, family: result.family, usb: result.usb });
     rememberScale({ model: result.session.model, label, family: result.family, usb: result.usb, connectedAt: new Date().toISOString(), syncedAt: null });

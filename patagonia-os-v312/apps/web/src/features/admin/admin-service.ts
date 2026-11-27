@@ -218,7 +218,8 @@ export const COMPANY_FEATURES: { key: string; label: string; short: string }[] =
   { key: "sin_carniceria", label: "No es carnicería: sin Despiece ni balanzas, productos por unidad y con variantes", short: "No es carnicería" },
   { key: "etiquetas_caja", label: "Etiquetas de cajas del frigorífico: Mostrador lee producto y kilos de la caja", short: "Etiquetas de cajas" },
   { key: "precios_excel", label: "Precios por local desde Excel (Sucursales → Precios por zona: bajar y subir la planilla)", short: "Precios por local en Excel" },
-  { key: "freezer", label: "Freezer: qué hay guardado en el freezer de cada local (con la etiqueta de la balanza; sale solo al venderlo)", short: "Freezer" }
+  { key: "freezer", label: "Freezer: qué hay guardado en el freezer de cada local (con la etiqueta de la balanza; sale solo al venderlo)", short: "Freezer" },
+  { key: "balanzas_v2", label: "Balanzas v2: cada balanza con su perfil de etiqueta; Mostrador le pregunta a cada balanza del local (migraciones 222/223)", short: "Balanzas v2" }
 ];
 
 export async function listCompanyFeatures(): Promise<Record<string, string[]>> {
