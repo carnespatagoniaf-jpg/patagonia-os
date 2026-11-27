@@ -217,7 +217,8 @@ export const COMPANY_FEATURES: { key: string; label: string; short: string }[] =
   { key: "pedidos_tienda", label: "Pedidos para venta online: el dueño también los carga y se cobran en Mostrador (junto con Pedidos)", short: "Pedidos del dueño" },
   { key: "sin_carniceria", label: "No es carnicería: sin Despiece ni balanzas, productos por unidad y con variantes", short: "No es carnicería" },
   { key: "etiquetas_caja", label: "Etiquetas de cajas del frigorífico: Mostrador lee producto y kilos de la caja", short: "Etiquetas de cajas" },
-  { key: "precios_excel", label: "Precios por local desde Excel (Sucursales → Precios por zona: bajar y subir la planilla)", short: "Precios por local en Excel" }
+  { key: "precios_excel", label: "Precios por local desde Excel (Sucursales → Precios por zona: bajar y subir la planilla)", short: "Precios por local en Excel" },
+  { key: "freezer", label: "Freezer: qué hay guardado en el freezer de cada local (con la etiqueta de la balanza; sale solo al venderlo)", short: "Freezer" }
 ];
 
 export async function listCompanyFeatures(): Promise<Record<string, string[]>> {

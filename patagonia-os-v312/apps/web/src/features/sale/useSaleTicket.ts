@@ -35,6 +35,8 @@ import { addDetailScan, scanTotal } from "./scale-total-detail";
 import { productPrice } from "../pricing/price-lists";
 import { isPackageCode, normalizePackageCode, saleScanProblem } from "../planta/planta-logic";
 import { findPackage } from "../planta/planta-service";
+import { freezerTicket, matchFreezerScan, type FreezerStored } from "../freezer/freezer-logic";
+import { cachedFreezerStored, loadFreezerStored } from "../freezer/freezer-service";
 
 // Estado y acciones del ticket que se está armando en Mostrador: búsqueda,
 // carrito, descuentos y recargos, medios de pago y sus totales. Es la parte
@@ -63,9 +65,11 @@ export interface SaleTicketDeps {
   zoneListId?: string | null;
   /** Pantalla a pedido 'etiquetas_caja' (migración 198): leer etiquetas de cajas del frigorífico. */
   boxLabels?: boolean;
+  /** Pantalla a pedido 'freezer' (migración 214): una etiqueta guardada en el freezer del local sale de ahí al venderla. */
+  freezer?: boolean;
 }
 
-export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrated = false, scaleConfigStatus = "ready", accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false, scaleBranchId = null, zoneListId = null, boxLabels = false }: SaleTicketDeps) {
+export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrated = false, scaleConfigStatus = "ready", accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false, scaleBranchId = null, zoneListId = null, boxLabels = false, freezer = false }: SaleTicketDeps) {
   const [search, setSearch] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -151,6 +155,29 @@ export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrat
   /** Etiquetas de balanza escaneadas en ESTA venta (para avisar si se escanea dos veces la misma). */
   const scannedLabels = useRef<Set<string>>(new Set());
   const { formats: boxFormats } = useBoxLabelFormats(boxLabels);
+  // Freezer (migración 214): las etiquetas guardadas en el freezer del local. Primero la última lista guardada (así
+  // anda sin conexión), después la de la base: al abrir, cada 2 minutos y cuando se vacía el ticket (después de cobrar).
+  const [freezerStored, setFreezerStored] = useState<FreezerStored[]>(() => (freezer && scaleBranchId ? cachedFreezerStored(scaleBranchId) : []));
+  const cartEmpty = baseCart.length === 0;
+  useEffect(() => {
+    if (!freezer || !scaleBranchId) {
+      setFreezerStored([]);
+      return;
+    }
+    let cancelled = false;
+    const load = () => void loadFreezerStored(scaleBranchId).then((list) => !cancelled && setFreezerStored(list)).catch(() => undefined);
+    setFreezerStored(cachedFreezerStored(scaleBranchId));
+    load();
+    const timer = window.setInterval(load, 2 * 60 * 1000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [freezer, scaleBranchId]);
+  useEffect(() => {
+    if (!cartEmpty || !freezer || !scaleBranchId) return;
+    void loadFreezerStored(scaleBranchId).then(setFreezerStored).catch(() => undefined);
+  }, [cartEmpty, freezer, scaleBranchId]);
   const [itemDiscounts, setItemDiscounts] = useState<Record<string, string>>({});
   const [saleDiscount, setSaleDiscount] = useState("");
   const [saleDiscountMode, setSaleDiscountMode] = useState<"amount" | "percent" | "final">("amount");
@@ -407,6 +434,29 @@ export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrat
       setHighlightedIndex(-1);
       void addPackage(normalizePackageCode(raw));
       return;
+    }
+
+    // Bolsa del freezer (migración 214): la etiqueta de la balanza que se escaneó al guardarla. Entra en su propia línea
+    // con los kilos que se guardaron, al precio de hoy, y viaja como scale_ticket "FRZ-" + código (sin importe): la base
+    // la saca del freezer. Cada escaneo de la misma etiqueta es otra bolsa (dos bolsas del mismo peso), hasta que no quedan.
+    if (freezerStored.length > 0 && !products.some((p) => (p.active ?? true) && p.code === raw)) {
+      const inCart = cart.filter((l) => l.packageCode === freezerTicket(raw)).length;
+      const bag = matchFreezerScan(raw, freezerStored, inCart);
+      const product = bag ? products.find((p) => p.id === bag.productId) : undefined;
+      if (bag && product) {
+        // Si la misma etiqueta se vuelve a escanear y ya no quedan bolsas iguales, el camino común pregunta si va de nuevo.
+        scannedLabels.current.add(raw);
+        setSearch("");
+        setHighlightedIndex(-1);
+        setCart((current) => [
+          ...current,
+          { key: `${product.id}|freezer:${raw}#${inCart}`, kind: "product", productId: product.id, name: product.name, unit: product.unit, quantity: bag.quantity, unitPrice: product.priceRetail, packageCode: freezerTicket(raw) }
+        ]);
+        const qty = product.unit === "kg" ? `${bag.quantity.toLocaleString("es-AR", { minimumFractionDigits: 3 })} kg` : `${bag.quantity} u.`;
+        setMessage(`Agregado: ${product.name} ${qty} (del freezer).`);
+        searchInputRef.current?.focus();
+        return;
+      }
     }
 
     // Caja envasada al vacío con etiqueta del frigorífico (migración 198): su producto con los kilos de la caja, en su

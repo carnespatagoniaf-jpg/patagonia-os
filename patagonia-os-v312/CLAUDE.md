@@ -228,6 +228,13 @@ Owner: a separate plan for a client (two butcher shops in Puerto Madryn) moving 
 - **Web**: `features/planta/` (`Planta.tsx` tabs Envasar / Paquetes / Mandar a un local; `PackageLabels.tsx` Code 39 labels, 60 × 40 mm one per page or A4, footer text in localStorage; pure `planta-logic.ts`, tested). Menu "Producto y stock" → Planta.
 - Tests: `tests/sql/194_plan_planta.sql`, passed on staging inside a rolled-back transaction (Management API). Not tried in a browser against real data, nor with a real label printer or scanner.
 
+## Freezer (migration 214, 2026-11-26; NOT published)
+
+Owner: "saber qué cosas tenemos guardadas en el freezer y cuando se venda se sale". Per-company feature `freezer` (platform panel "Pantallas a pedido"), page `freezer` = tab of Stock, permission `freezer.manage` (admin, manager, production, cashier; owner via `"*"`). Owner chose the scale's normal label, no extra printer.
+- `freezer_packages`: one row per bag (product, quantity, `code` = raw scale-label barcode or null if typed by hand), status `guardado → vendido | sacado`. Storing does NOT move stock (the freezer is WHERE the stock is). RLS company read + restrictive `freezer_enabled()`; writes only via `freezer_store`, `freezer_take_out` (reason required), `freezer_put_back` (only `sacado`), all through `freezer_caller` (role + feature + `my_branch_allowed`).
+- **Mostrador**: `useSaleTicket` keeps the branch's stored codes (`loadFreezerStored`, cached in localStorage for offline, refreshed every 2 min and when the ticket empties). A scanned code that matches is added BEFORE box/scale handling as its own line with the stored quantity at today's price, `packageCode = "FRZ-" + code` → `pos_sale_items.scale_ticket` without amount, so `create_pos_sale` was NOT touched. AFTER INSERT trigger `freezer_packages_on_sale` marks the OLDEST `guardado` bag with that code + product in the sale's branch as sold; voiding the sale returns it. Two bags of the same product and exact weight share a code: each scan is one bag (`matchFreezerScan`).
+- Web: `features/freezer/` (`Freezer.tsx`, pure `freezer-logic.ts` tested, `freezer-service.ts` with a localStorage demo mode). Tests: `tests/sql/214_freezer.sql`, passed on staging inside a rolled-back transaction.
+
 ## Pedidos de clientes (migration 187, 2026-11-01, feature flag `pedidos`; LIVE on prod)
 
 Owner request: cashiers note customer orders ("2 kg asado + 1 morcilla for Saturday 11:00") instead of paper slips that get lost. **Purely informative: nothing here reads or writes stock, `pos_*`, shifts or treasury** (tested in `tests/sql/187_customer_orders.sql` by counting those tables before/after). Total and deposit (`seña`) are just data on the order; the deposit money is charged in Mostrador as usual.
