@@ -37,6 +37,10 @@ import { DuplicateScalesNotice } from "./DuplicateScalesNotice";
 import { mergedRedirects } from "./registry/scale-merge";
 import { redirectMergedBindings } from "./registry/local-bindings";
 import { brandAndModel, lastSendText, sendSummary } from "./my-scale-text";
+// Patagonia Scale Connect: la balanza está en una PC con el servicio (connect/, migraciones 226-227).
+import { ConnectorAdd, ConnectorSend } from "./connect/ScaleConnectFlow";
+import { connectorFor, offlineMessage, type ConnectBinding, type ConnectStatus, type SendResultView } from "./connect/scale-connect-jobs";
+import { scaleConnectPort } from "./connect/scale-connect-jobs-service";
 
 /**
  * "Mis balanzas": la única pantalla de balanza que ve el cliente.
@@ -56,7 +60,9 @@ type Phase =
   | { kind: "listo_para_sincronizar"; prepared: PreparedSync }
   | { kind: "listo"; message: string; pending: PendingItem[]; model: string; skipped?: ProductProblem[]; summary?: SendSummary }
   | { kind: "bloqueado"; prepared: PreparedSync }
-  | { kind: "error"; message: string; canPick: boolean; canRelease?: boolean; failures?: ProductProblem[]; net?: NetAddress | null; summary?: SendSummary };
+  | { kind: "error"; message: string; canPick: boolean; canRelease?: boolean; failures?: ProductProblem[]; net?: NetAddress | null; summary?: SendSummary }
+  | { kind: "scale_connect_send"; scale: BranchScale; binding: ConnectBinding }
+  | { kind: "scale_connect_add" };
 
 /** Resultado final de un envío en palabras simples (my-scale-text.ts). */
 type SendSummary = ReturnType<typeof sendSummary>;
@@ -98,12 +104,15 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
   const netRef = useRef<NetAddress | null>(null);
   /** La balanza conectada va por cable de red: su dirección. */
   const [netConnected, setNetConnected] = useState<NetAddress | null>(null);
+  /** Computadoras con Scale Connect de la sucursal y qué balanza está en cuál (null = sin la migración 227). */
+  const [connect, setConnect] = useState<ConnectStatus | null>(null);
 
   const reload = useCallback(async () => {
     if (!branchId || !isSupabaseConfigured) {
       setLoaded(true);
       return;
     }
+    void scaleConnectPort.status(branchId).then(setConnect, () => {});
     try {
       const all = await listBranchScales(branchId);
       // Registros unidos (225): no se muestran, y lo que esta PC recordaba de ellos pasa al que quedó.
@@ -405,6 +414,23 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     }
   }
 
+  /** "Enviar productos": por Scale Connect si la balanza está en una PC con el servicio; si no, por cable como siempre. */
+  async function handleSend(s: BranchScale) {
+    const fresh = branchId ? await scaleConnectPort.status(branchId).catch(() => connect) : null;
+    if (fresh) setConnect(fresh);
+    const binding = connectorFor(fresh, s.key);
+    if (!binding) return void handleConnect(s, false);
+    setActiveKey(null);
+    setPhase(binding.online ? { kind: "scale_connect_send", scale: s, binding } : { kind: "error", message: offlineMessage(binding.connectorName), canPick: false });
+  }
+
+  function connectorSent(s: BranchScale, view: SendResultView) {
+    const at = new Date().toISOString();
+    const failed = view.failures.length;
+    recordInstall(s.key, { sentAt: at, sentCount: view.confirmed, verifiedAt: at, verifiedCount: view.confirmed, failedCount: failed, ...(view.ok ? clearedInstallError(at) : { lastError: view.message.slice(0, 200), lastErrorAt: at }) });
+    void reload();
+  }
+
   function backToList() {
     void closeSession();
     setActiveKey(null);
@@ -423,7 +449,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       <div className="my-scale-head">
         <div className="my-scale-icon"><Scale size={22} /></div>
         <div>
-          <h2>{showList ? "Mis balanzas" : active ? active.name : newChoice ? `Agregar ${choiceLabel(newChoice)}` : "Agregar balanza"}</h2>
+          <h2>{showList ? "Mis balanzas" : phase.kind === "scale_connect_send" ? phase.scale.name : active ? active.name : newChoice ? `Agregar ${choiceLabel(newChoice)}` : "Agregar balanza"}</h2>
           <p className="muted">{showList ? "Conectá cada balanza una vez y vendé escaneando el ticket." : "Seguí los pasos en pantalla."}</p>
         </div>
       </div>
@@ -455,7 +481,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
                       {netWatch[s.key] && <p className={`my-scale-item-status ${netWatchText(netWatch[s.key]).tone}`}>{netWatchText(netWatch[s.key]).text}</p>}
                     </div>
                     <div className="my-scale-actions">
-                      {canSend && <button className="my-scale-primary" onClick={() => void handleConnect(s, false)}>Enviar productos</button>}
+                      {canSend && <button className="my-scale-primary" onClick={() => void handleSend(s)}>Enviar productos</button>}
                       {canManage && s.key !== LOCAL_KEY && <button className="secondary" onClick={() => void handleRename(s)}>Cambiar nombre</button>}
                       {canManage && s.key !== LOCAL_KEY && <button className="secondary" onClick={() => void handleRemove(s)}>Quitar</button>}
                     </div>
@@ -487,6 +513,12 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
             <strong>Conectar balanza por cable de red</strong>
             <span>El cable es como el de internet (ancho, con traba) y va al router o a la computadora. Kretz Report NX, Systel Cuora Max y otras.</span>
           </button>
+          {connect && connect.connectors.length > 0 && branchId && (
+            <button className="my-scale-choice net-entry" onClick={() => setPhase({ kind: "scale_connect_add" })}>
+              <strong>En esta computadora con Scale Connect</strong>
+              <span>La balanza está conectada a una computadora que tiene instalado Patagonia Scale Connect. Ella la busca sola.</span>
+            </button>
+          )}
           <p className="muted">Por cable USB o Bluetooth, elegí la marca:</p>
           <div className="my-scale-choices">
             {SCALE_CHOICES.map((c) => (
@@ -521,6 +553,22 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
             handleConnectNew(choiceForPort(found.port));
           }}
         />
+      )}
+
+      {phase.kind === "scale_connect_send" && branchId && (
+        <ConnectorSend
+          port={scaleConnectPort}
+          branchId={branchId}
+          scale={phase.scale}
+          binding={phase.binding}
+          products={products}
+          options={{ allowReplace: false, canManageLinks: canManage, weightBarcode, pesosBarcode, plu5Barcode }}
+          onBack={backToList}
+          onFinished={(view) => connectorSent(phase.scale, view)}
+        />
+      )}
+      {phase.kind === "scale_connect_add" && branchId && connect && (
+        <ConnectorAdd port={scaleConnectPort} branchId={branchId} status={connect} known={scales} onBack={backToList} onAdded={() => void reload()} />
       )}
 
       {working && (
