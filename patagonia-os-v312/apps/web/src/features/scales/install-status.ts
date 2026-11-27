@@ -92,6 +92,14 @@ export function installSummary(r: InstallRecord, now = new Date()): { tone: "ok"
   return { tone: "warn", text: `${done} de 5 pasos · falta: ${next.label.charAt(0).toLowerCase()}${next.label.slice(1)}` };
 }
 
+/**
+ * Un envío bueno (o "ya está igual", releído) borra el error del intento anterior (C17). Va con la fecha del envío:
+ * así newestInstall lo prefiere al error viejo que pueda tener otra computadora o la ficha central.
+ */
+export function clearedInstallError(at: string): InstallRecord {
+  return { lastError: null, lastErrorAt: at };
+}
+
 export function mergeInstall(base: InstallRecord | null | undefined, patch: InstallRecord): InstallRecord {
   const out: InstallRecord = { ...(base ?? {}) };
   for (const [k, v] of Object.entries(patch)) if (v !== undefined) (out as Record<string, unknown>)[k] = v;
