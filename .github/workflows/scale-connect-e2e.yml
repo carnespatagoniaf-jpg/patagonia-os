@@ -179,10 +179,15 @@ jobs:
           $ip = Get-LanIp
           "LAN_IP=$ip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           $out = Get-E2EOut
-          $p = Start-Process -FilePath node -ArgumentList @('--import', 'tsx', 'e2e/simuladores.ts', '--host', $ip) -WorkingDirectory (Resolve-Path 'apps/connector') -RedirectStandardOutput (Join-Path $out 'simuladores.log') -RedirectStandardError (Join-Path $out 'simuladores.err.log') -PassThru -WindowStyle Hidden
-          "SIM_PID=$($p.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          # Actions mata lo que arranca un paso cuando el paso termina: los simuladores se arrancan por WMI (fuera de ese
+          # grupo de procesos) para que sigan vivos en los pasos siguientes.
+          $node = (Get-Command node).Source
+          $cmd = "cmd.exe /c `"`"$node`" --import tsx e2e/simuladores.ts --host $ip > `"$(Join-Path $out 'simuladores.log')`" 2> `"$(Join-Path $out 'simuladores.err.log')`"`""
+          $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd; CurrentDirectory = (Resolve-Path 'apps/connector').Path }
+          if ($r.ReturnValue -ne 0) { throw "No arrancaron los simuladores (Win32_Process.Create $($r.ReturnValue))" }
+          "SIM_PID=$($r.ProcessId)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Wait-Until { Invoke-Sim -Path '/estado' } 60 'simuladores arriba' | Out-Null
-          Assert-Check 'Balanzas' 'Simuladores escuchando en la red local' $true "Report $ip`:1001, Cuora $ip`:10001 (por red: en el runner no hay puertos COM)"
+          Assert-Check 'Balanzas' 'Simuladores escuchando en la red local' $true "Report $ip`:1001, Cuora $ip`:10001 (por red: el COM2 del runner es un puerto de la placa sin nada conectado y no hay pares COM virtuales)"
           # Las balanzas de esta PC (como en el banco de pruebas): config.json → devices. El resto de la configuración queda.
           Stop-Service PatagoniaScaleConnect
           $file = Join-Path (Get-DataDir) 'config.json'
@@ -203,6 +208,7 @@ jobs:
         timeout-minutes: 25
         run: |
           Import-Module ./apps/connector/e2e/e2e.psm1 -Force
+          Invoke-Sim -Path '/estado' | Out-Null
           Write-Host 'Esperando: un trabajo de identificar + dos envíos (los encola el conductor desde staging)…'
           $secs = Wait-Until { (Get-JobsCount) -ge 3 } 1380 'los 3 trabajos de la fase 1' 2000
           $st = Save-SimState 'simuladores-fase1.json'
@@ -323,7 +329,7 @@ jobs:
           Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Service Control Manager' } -MaxEvents 200 -ErrorAction SilentlyContinue |
             Where-Object { $_.Message -match 'Scale Connect|PatagoniaScaleConnect' } |
             Select-Object TimeCreated, Id, Message | ConvertTo-Json | Set-Content (Join-Path $out 'eventos-scm.json') -Encoding utf8
-          if ($env:SIM_PID) { Stop-Process -Id $env:SIM_PID -Force -ErrorAction SilentlyContinue }
+          Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match 'simuladores' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
           $tsv = Join-Path $out 'comprobaciones.tsv'
           if (Test-Path $tsv) {
             $rows = Get-Content $tsv | ForEach-Object { $c = $_ -split "`t"; "| $($c[0]) | $($c[1]) | $($c[2]) | $($c[3]) |" }
