@@ -4,6 +4,7 @@ import { installFakeLocalStorage } from "../test-fake-storage";
 import { FakeCuora, fakeReadRecord } from "../../inventory/systel/systel-fake";
 import { SystelClient } from "../../inventory/systel/systel-client";
 import { parsePluAs } from "../../inventory/systel/systel-plu";
+import { SerialSystelLink } from "../../inventory/systel/systel-serial";
 import { ensureSystelSectors, planSystelPush, runSystelPush } from "./adapters/systel-push";
 import { loadProductBackupLocally, loadWriteProof, saveProductBackupLocally, saveWriteProof, SystelSession, type SystelDeps } from "./adapters/systel";
 import { loadLocalBackup, saveBackupLocally, type SystelBackup } from "../../inventory/systel/systel-backup";
@@ -366,5 +367,60 @@ describe("C24: respaldos y prueba de escritura, uno por balanza (3 Systel en la 
     const out = await s.sync(await s.prepare(noop), noop);
     assert.equal(out.ok, true, out.message);
     assert.deepEqual(keys, ["systel-b"]);
+  });
+});
+
+/** Puerto de mentira: anota las señales y lo que se escribe; contesta lo que diga `answer` (o nada). */
+class RecordingPort {
+  readable: ReadableStream<Uint8Array> | null = null;
+  writable: WritableStream<Uint8Array> | null = null;
+  readonly log: string[] = [];
+  answer: ((frame: Uint8Array) => Uint8Array | null) | null = null;
+  async open() {
+    this.log.push("abrir");
+    let controller!: ReadableStreamDefaultController<Uint8Array>;
+    this.readable = new ReadableStream<Uint8Array>({ start: (c) => void (controller = c) });
+    this.writable = new WritableStream<Uint8Array>({
+      write: (frame) => {
+        this.log.push(`tx ${frame[0]}/${frame[1]}`);
+        const a = this.answer?.(frame);
+        if (a) setTimeout(() => controller.enqueue(a), 2);
+      }
+    });
+  }
+  async setSignals(s: { dataTerminalReady?: boolean; requestToSend?: boolean }) {
+    this.log.push(`señales DTR=${s.dataTerminalReady} RTS=${s.requestToSend}`);
+  }
+  async close() {
+    this.log.push("cerrar");
+    this.readable = null;
+    this.writable = null;
+  }
+}
+
+describe("E12: al reabrir el puerto después de un corte se vuelven a poner las señales y se despierta la balanza", () => {
+  it("reabre con las mismas señales DTR/RTS que tenía y manda el ping de arranque antes de la orden", async () => {
+    const port = new RecordingPort();
+    const link = new SerialSystelLink(port as unknown as SerialPort);
+    await link.connect();
+    await link.setLines(false, true);
+    await link.close();
+    port.log.length = 0;
+    await link.exchange(Uint8Array.from([20, 2, 22]), { timeoutMs: 30 });
+    const iOpen = port.log.indexOf("abrir");
+    const iSignals = port.log.indexOf("señales DTR=false RTS=true");
+    const iOrder = port.log.indexOf("tx 20/2");
+    assert.ok(iOpen >= 0 && iSignals > iOpen, `señales guardadas después de reabrir: ${port.log.join(" | ")}`);
+    assert.ok(port.log.indexOf("tx 1/23") > iSignals && port.log.indexOf("tx 0/23") > iSignals, "ping al 1 y general");
+    assert.ok(iOrder > port.log.indexOf("tx 0/23"), "la orden va después del arranque");
+  });
+
+  it("la primera vez que se abre no manda nada de más", async () => {
+    const port = new RecordingPort();
+    const link = new SerialSystelLink(port as unknown as SerialPort);
+    await link.connect();
+    await link.exchange(Uint8Array.from([20, 2, 22]), { timeoutMs: 30 });
+    assert.deepEqual(port.log.filter((l) => l.startsWith("tx")), ["tx 20/2"]);
+    await link.close();
   });
 });
