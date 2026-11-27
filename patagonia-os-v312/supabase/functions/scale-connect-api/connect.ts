@@ -173,8 +173,8 @@ export function pairStatus(result: { ok?: boolean; error?: string }): number {
 }
 
 // ------------------------------------------------------------------------------------------------ api
-export type ApiRoute = "claim" | "progress" | "finish" | "heartbeat" | "config";
-const ROUTES: readonly ApiRoute[] = ["claim", "progress", "finish", "heartbeat", "config"];
+export type ApiRoute = "claim" | "progress" | "finish" | "heartbeat" | "config" | "engine";
+const ROUTES: readonly ApiRoute[] = ["claim", "progress", "finish", "heartbeat", "config", "engine"];
 
 /** ".../functions/v1/scale-connect-api/claim" → "claim". */
 export function apiRoute(pathname: string): ApiRoute | null {
@@ -184,7 +184,7 @@ export function apiRoute(pathname: string): ApiRoute | null {
 
 export function maxBodyFor(route: ApiRoute): number {
   if (route === "finish") return MAX_FINISH_BODY;
-  if (route === "progress") return MAX_PROGRESS_BODY;
+  if (route === "progress" || route === "engine") return MAX_PROGRESS_BODY;
   return MAX_SMALL_BODY;
 }
 
@@ -195,10 +195,43 @@ export function parseClaimRequest(body: unknown): Parsed<{ waitSec: number }> {
   return { ok: true, value: { waitSec: Math.max(0, Math.min(LONG_POLL_MAX_SEC, wait)) } };
 }
 
+/** Huella física del puerto donde la PC ve la balanza (migración 227). La base la vuelve a limpiar. */
+export interface SeenDevice {
+  id: string;
+  kind?: "serial" | "tcp";
+  fingerprint?: string;
+  source?: string;
+  path?: string;
+  chip?: string;
+  host?: string;
+  port?: number;
+  mac?: string;
+}
+
 export interface SeenScale {
   key: string;
   name: string;
   online: boolean;
+  device?: SeenDevice;
+  family?: "kretz" | "systel";
+  model?: string;
+  label?: string;
+  identity?: Record<string, unknown>;
+}
+
+function parseDevice(raw: unknown): SeenDevice | undefined {
+  if (!isObj(raw)) return undefined;
+  const id = shortText(raw.id, 80);
+  if (!id) return undefined;
+  const d: SeenDevice = { id };
+  if (raw.kind === "serial" || raw.kind === "tcp") d.kind = raw.kind;
+  for (const [k, max] of [["fingerprint", 200], ["source", 20], ["path", 20], ["chip", 40], ["host", 60], ["mac", 20]] as const) {
+    const v = shortText(raw[k], max);
+    if (v) d[k] = v;
+  }
+  const port = int(raw.port, 1, 65535);
+  if (port !== null) d.port = port;
+  return d;
 }
 
 export function parseHeartbeatRequest(body: unknown): Parsed<{ version: string | null; scales: SeenScale[] }> {
@@ -210,7 +243,16 @@ export function parseHeartbeatRequest(body: unknown): Parsed<{ version: string |
     if (!isObj(s)) continue;
     const key = shortText(s.key, 120);
     if (!key) continue;
-    scales.push({ key, name: shortText(s.name, 60) ?? key, online: s.online === true });
+    const scale: SeenScale = { key, name: shortText(s.name, 60) ?? key, online: s.online === true };
+    const device = parseDevice(s.device);
+    if (device) scale.device = device;
+    if (s.family === "kretz" || s.family === "systel") scale.family = s.family;
+    const model = shortText(s.model, 40);
+    if (model) scale.model = model;
+    const label = shortText(s.label, 60);
+    if (label) scale.label = label;
+    if (isObj(s.identity) && JSON.stringify(s.identity).length <= 300) scale.identity = s.identity;
+    scales.push(scale);
   }
   return { ok: true, value: { version: shortText(body.version, 40), scales } };
 }
@@ -278,6 +320,35 @@ export function parseFinishRequest(body: unknown): Parsed<FinishRequest> {
   const items = parseItems(body.items, MAX_ITEMS_PER_FINISH);
   if (!items.ok) return items;
   return { ok: true, value: { jobId: body.job_id.toLowerCase(), status, counters, items: items.value, error: shortText(body.error, 80) } };
+}
+
+// ------------------------------------------------------------------------------------------------ motor
+/** Lo que el motor de "Mi balanza" del conector le pide a Patagonia durante un trabajo (migración 227). */
+export const ENGINE_ACTIONS = [
+  "load_branch_config",
+  "list_branch_scales",
+  "load_scale_setup",
+  "save_branch_config",
+  "save_scale_catalog",
+  "set_scale_links",
+  "set_scale_profile_active",
+  "report",
+] as const;
+export type EngineAction = (typeof ENGINE_ACTIONS)[number];
+
+export interface EngineRequest {
+  jobId: string;
+  action: EngineAction;
+  args: Obj;
+}
+
+export function parseEngineRequest(body: unknown): Parsed<EngineRequest> {
+  if (!isObj(body)) return bad("datos_invalidos");
+  if (typeof body.job_id !== "string" || !UUID.test(body.job_id)) return bad("trabajo_invalido");
+  if (typeof body.action !== "string" || !(ENGINE_ACTIONS as readonly string[]).includes(body.action)) return bad("accion_invalida");
+  const args = body.args === undefined || body.args === null ? {} : body.args;
+  if (!isObj(args)) return bad("datos_invalidos");
+  return { ok: true, value: { jobId: body.job_id.toLowerCase(), action: body.action as EngineAction, args } };
 }
 
 // ------------------------------------------------------------------------------------------------ errores

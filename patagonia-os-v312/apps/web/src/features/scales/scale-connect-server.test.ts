@@ -16,6 +16,7 @@ import {
   pairStatus,
   parseClaimRequest,
   parseConnectorCredential,
+  parseEngineRequest,
   parseFinishRequest,
   parseHeartbeatRequest,
   parsePairRequest,
@@ -153,5 +154,53 @@ describe("api del conector", () => {
     const lying = new Request("http://x", { method: "POST", body: JSON.stringify({ a: "y".repeat(500) }), headers: { "content-length": "10" } });
     assert.deepEqual(await readJsonLimited(lying, 100), { ok: false, error: "muy_grande" });
     assert.deepEqual(await readJsonLimited(new Request("http://x", { method: "POST", body: "{no" }), 100), { ok: false, error: "json_invalido" });
+  });
+});
+
+describe("motor del conector y huella (migración 227)", () => {
+  it("la ruta engine existe y acepta cuerpos como el avance", () => {
+    assert.equal(apiRoute("/functions/v1/scale-connect-api/engine"), "engine");
+    assert.equal(maxBodyFor("engine"), maxBodyFor("progress"));
+  });
+
+  it("engine: solo acciones conocidas, con un trabajo válido", () => {
+    assert.deepEqual(parseEngineRequest({ job_id: ID.toUpperCase(), action: "save_branch_config", args: { config: { pluLength: 5 } } }), {
+      ok: true,
+      value: { jobId: ID, action: "save_branch_config", args: { config: { pluLength: 5 } } }
+    });
+    assert.deepEqual(parseEngineRequest({ job_id: ID, action: "list_branch_scales" }), { ok: true, value: { jobId: ID, action: "list_branch_scales", args: {} } });
+    assert.deepEqual(parseEngineRequest({ job_id: ID, action: "drop_table" }), { ok: false, error: "accion_invalida" });
+    assert.deepEqual(parseEngineRequest({ job_id: "x", action: "report" }), { ok: false, error: "trabajo_invalido" });
+    assert.deepEqual(parseEngineRequest({ job_id: ID, action: "report", args: [1] }), { ok: false, error: "datos_invalidos" });
+  });
+
+  it("el latido lleva la huella física, la marca y la identidad, acotadas", () => {
+    const r = parseHeartbeatRequest({
+      version: "0.3.0",
+      scales: [
+        {
+          key: "dev:usb-1",
+          name: "Report",
+          online: true,
+          family: "kretz",
+          model: "kretz-report-lt",
+          identity: { letter: "C", equipment: "01" },
+          device: { id: "usb-1", kind: "serial", fingerprint: "serial:A1", path: "COM3", port: "x", extra: "no" }
+        },
+        { key: "dev:2", family: "otra", identity: { big: "z".repeat(400) }, device: { kind: "tcp" } }
+      ]
+    });
+    assert.ok(r.ok);
+    if (!r.ok) return;
+    assert.deepEqual(r.value.scales[0], {
+      key: "dev:usb-1",
+      name: "Report",
+      online: true,
+      family: "kretz",
+      model: "kretz-report-lt",
+      identity: { letter: "C", equipment: "01" },
+      device: { id: "usb-1", kind: "serial", fingerprint: "serial:A1", path: "COM3" }
+    });
+    assert.deepEqual(r.value.scales[1], { key: "dev:2", name: "dev:2", online: false });
   });
 });
