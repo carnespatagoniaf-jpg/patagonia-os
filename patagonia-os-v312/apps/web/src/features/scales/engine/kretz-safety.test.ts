@@ -319,3 +319,30 @@ describe("C13: Aura: el código de barras (1070) también tiene que quedar", () 
     assert.equal(again.upToDate, false);
   });
 });
+
+describe("C21: la Report suelta el puerto al terminar", () => {
+  it("después de leer y de sincronizar el puerto queda cerrado (iTegra lo puede abrir), y se reabre solo para seguir", async () => {
+    localStorage.clear();
+    const scale = new FakeReport();
+    const s = await reportSession(scale, [P("a", "10", "Vacio", "kg", 15000)]);
+    const prep = await s.prepare(noop);
+    assert.equal(scale.readable, null, "cerrado después de leer");
+    const out = await s.sync(prep, noop);
+    assert.equal(out.ok, true, out.message);
+    assert.equal(scale.readable, null, "cerrado después de sincronizar");
+    assert.ok(scale.opens >= 2, "se volvió a abrir para sincronizar");
+  });
+
+  it("al cerrar la sesión también olvida el puerto guardado", async () => {
+    localStorage.clear();
+    const scale = new FakeReport();
+    const s = await reportSession(scale, [P("a", "10", "Vacio", "kg", 15000)]);
+    await s.prepare(noop);
+    await s.close();
+    assert.equal(scale.readable, null);
+    const { sendScalePing } = await import("../../inventory/scale-serial");
+    const writesBefore = scale.commands.length;
+    await assert.rejects(() => sendScalePing(), "sin puerto guardado pide elegirlo de nuevo");
+    assert.equal(scale.commands.length, writesBefore, "no se le habla más al puerto viejo");
+  });
+});

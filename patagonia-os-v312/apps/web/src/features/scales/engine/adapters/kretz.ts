@@ -15,6 +15,7 @@ import {
   readAuraListOnScale,
   readReportLabelSample,
   readReportProduct,
+  releaseScaleSerialPort,
   reportDifferences,
   setReportLabelCode,
   runAuraSyncOnScale,
@@ -60,6 +61,8 @@ export interface KretzIO {
   readLabelSample?: () => Promise<ReportLabelSample[]>;
   /** Report: formato de etiqueta con el que se graban (y se verifican) los productos. */
   setLabelCode?: (code: string) => void;
+  /** Report: cierra el puerto al terminar (C21); `forget` = además olvidarlo (fin de la sesión). */
+  releasePort?: (options?: { forget?: boolean }) => Promise<void>;
 }
 
 export const KRETZ_IO: KretzIO = {
@@ -70,7 +73,8 @@ export const KRETZ_IO: KretzIO = {
   sendReport: syncProductsToScale,
   configureReportBarcode,
   readLabelSample: () => readReportLabelSample(),
-  setLabelCode: setReportLabelCode
+  setLabelCode: setReportLabelCode,
+  releasePort: releaseScaleSerialPort
 };
 
 /**
@@ -188,7 +192,16 @@ export class KretzSession implements ScaleSession {
       return { ...this.base(), scaleProducts: list.records.length, ready: s.sin_cambios, writes, pending, upToDate: writes === 0 && barcodeReady, notes, skipped, warnings: check.warnings };
     }
 
-    // Report: se lee cada número antes de escribir, para no pisar otro producto.
+    // Report: se lee cada número antes de escribir, para no pisar otro producto. Al terminar se suelta el puerto (C21).
+    try {
+      return await this.prepareReport(onProgress, check);
+    } finally {
+      await this.release(false);
+    }
+  }
+
+  private async prepareReport(onProgress: ProgressFn, check: PreflightResult): Promise<PreparedSync> {
+    const active = check.ready;
     const plan = planScaleSync(active.map(toSyncable));
     // Formato de etiqueta: el que ya usan los productos reales de ESTA balanza (en la NX2 de Lauda el "01" sale sin
     // código de barras, real 18/11). Se elige antes de comparar, así un producto grabado con otro formato se corrige.
@@ -294,6 +307,14 @@ export class KretzSession implements ScaleSession {
       return { ok: true, verified: r.written.length, message: done(opts.allowReplace ? [] : prepared.pending), pending: opts.allowReplace ? [] : prepared.pending };
     }
 
+    try {
+      return await this.syncReport(st, prepared, onProgress, opts);
+    } finally {
+      await this.release(false);
+    }
+  }
+
+  private async syncReport(st: ReportState, prepared: PreparedSync, onProgress: ProgressFn, opts: { allowReplace?: boolean }): Promise<SyncOutcome> {
     const list = [...st.create, ...st.update, ...(opts.allowReplace ? st.occupied.map((o) => o.product) : [])];
     // Cada producto que no quedó bien, con su motivo. Uno que falla no frena a los demás, pero nunca se dice "Listo".
     const failures: ProductProblem[] = [];
@@ -420,8 +441,19 @@ export class KretzSession implements ScaleSession {
     return `${this.ctx.scaleKey ?? ""}|${String(id.letter ?? "")}${String(id.equipment ?? "")}${this.plu5() ? `|${REPORT_NET_BARCODE_CONFIG}` : this.ctx.weightBarcode ? `|${REPORT_WEIGHT_BARCODE_CONFIG}` : this.ctx.pesosBarcode ? `|${REPORT_PESOS_BARCODE_CONFIG}` : ""}`;
   }
 
+  /** Fin de la sesión: la Report suelta el puerto y se olvida (C21). La Aura ya lo cierra en cada operación. */
   async close(): Promise<void> {
-    // El puerto lo maneja scale-serial (lo cierra solo cuando queda quieto).
+    await this.release(true);
+  }
+
+  /** Report por cable: cierra el puerto (lo libera para iTegra); por red no hay nada que soltar. */
+  private async release(forget: boolean): Promise<void> {
+    if (this.model === "kretz-aura" || this.diagnostic.red === true || !this.io.releasePort) return;
+    try {
+      await this.io.releasePort({ forget });
+    } catch {
+      // no frena nada
+    }
   }
 
   identity(): Record<string, unknown> {

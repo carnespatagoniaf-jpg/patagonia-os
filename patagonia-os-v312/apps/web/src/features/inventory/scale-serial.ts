@@ -246,6 +246,25 @@ export function forgetScalePort(): void {
   cachedPortOpenKey = null;
 }
 
+/**
+ * Cierra el puerto de la Report para que otro programa (iTegra) lo pueda abrir (C21). El próximo envío lo vuelve a abrir
+ * solo (ensureOpen). Con `forget` además se olvida el puerto guardado (la sesión de Mi balanza terminó). Por red no se
+ * toca: no hay un puerto COM que liberar y reconectar es caro.
+ */
+export async function releaseScaleSerialPort(options: { forget?: boolean } = {}): Promise<void> {
+  const port = cachedPort;
+  if (!port || isNetPort(port)) return;
+  cachedPortOpenKey = null;
+  if (options.forget) cachedPort = null;
+  if (port.readable || port.writable) {
+    try {
+      await port.close();
+    } catch {
+      // ya estaba cerrado o roto: no importa
+    }
+  }
+}
+
 // La balanza se enchufa solo para pasar precios y después se desenchufa: al
 // desenchufarla, el puerto guardado queda muerto. Se olvida acá para que al
 // volver a enchufarla el próximo envío tome el puerto nuevo, sin recargar la página.
