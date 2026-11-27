@@ -34,6 +34,8 @@ do $$
 declare
   r jsonb;
   spec jsonb;
+  -- Inicios que ya había (en staging o producción, los de la carga real): la prueba cuenta solo los que agrega.
+  n0 int := (select count(*) from scale_label_prefixes);
 begin
   r := public.scale_label_spec_load_223();
   if (r->>'cargadas')::int <> 8 then raise exception 'cargadas: %', r; end if;
@@ -68,7 +70,7 @@ begin
   -- Se puede correr de nuevo: no cambia nada.
   r := public.scale_label_spec_load_223();
   if (r->>'cargadas')::int <> 0 then raise exception 'segunda vez: %', r; end if;
-  if (select count(*) from scale_label_prefixes) <> 8 then raise exception 'inicios duplicados: %', (select count(*) from scale_label_prefixes); end if;
+  if (select count(*) from scale_label_prefixes) - n0 <> 8 then raise exception 'inicios duplicados: %', (select count(*) from scale_label_prefixes) - n0; end if;
   if has_function_privilege('authenticated', 'public.scale_label_spec_load_223()', 'execute') then raise exception 'la carga quedó abierta'; end if;
 end $$;
 
