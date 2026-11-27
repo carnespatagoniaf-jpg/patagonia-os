@@ -181,6 +181,10 @@ async function phase1() {
   conn = await connector();
   result.created.connectors.push(conn.id);
   log(`Conector ${conn.id} (${conn.version}) ve: ${conn.seen_scales.map((s) => s.key).join(", ")}`);
+  // El workflow acaba de reiniciar el servicio. Con la scale-connect-api que está hoy en staging, una consulta larga
+  // del proceso anterior puede seguir viva hasta 25 s en la nube y llevarse un trabajo que nadie recibe (arreglado en
+  // connect.ts → longPollClaim, falta publicarlo). Se espera que venza antes de encolar.
+  await sleep(30_000);
   // Agregar balanza → En esta computadora: identificar (solo lectura)
   const idJob = await queue(IDENTIFY_SCALE_KEY, "read", { mode: "identify" }, conn.id);
   const [idRow] = await waitJobs([idJob], 10);
@@ -257,7 +261,8 @@ async function phase3() {
 }
 
 async function phase4() {
-  await sleep(5000);
+  // Recién reinstalado (el servicio se frenó y volvió): misma espera que en la fase 1.
+  await sleep(30_000);
   const id = await queue(scaleKeys.kretz, "test", {}, conn.id);
   const [t] = await waitJobs([id], 12);
   result.phases.reinstalado = { test: t, items: await items(id) };
