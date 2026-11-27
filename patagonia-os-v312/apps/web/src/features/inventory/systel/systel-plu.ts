@@ -119,6 +119,11 @@ export interface NewPluInput {
   tareGrams?: number;
 }
 
+/** Lo que va después de la tara en un producto sin información extra (también lo usa el envío al reemplazar, C10). */
+export function emptyPluTail(layout: SystelLayout): string {
+  return defaultTail(layout);
+}
+
 function defaultTail(layout: SystelLayout): string {
   const n4 = "0000";
   if (layout === "cuora2") return "N";

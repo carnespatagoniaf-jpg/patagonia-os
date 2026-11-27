@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { installFakeLocalStorage } from "../test-fake-storage";
 import { FakeCuora } from "../../inventory/systel/systel-fake";
 import { SystelClient } from "../../inventory/systel/systel-client";
+import { parsePluAs } from "../../inventory/systel/systel-plu";
 import { planSystelPush, runSystelPush } from "./adapters/systel-push";
 import { SystelSession, type SystelDeps } from "./adapters/systel";
 import type { EngineContext, EngineProduct } from "./types";
@@ -140,7 +141,7 @@ describe("C12: si el envío frena a mitad, Mostrador reconoce lo que ya quedó g
     assert.deepEqual(calls.links?.map((l) => `${l.code}→${l.productId}`).sort(), ["13→p13", "1→p1", "4→p4", "77→p77"]);
   });
 
-  it("si frena en el primero y no había nada igual, no guarda nada", async () => {
+  it("si frena en el primero y no había nada igual, no guarda nada (y no inventa vínculos)", async () => {
     const f = cuora();
     f.corruptAfterWrite = 1;
     f.corruptOnce = true;
@@ -150,5 +151,68 @@ describe("C12: si el envío frena a mitad, Mostrador reconoce lo que ya quedó g
     assert.equal(out.ok, false);
     assert.equal(calls.catalog, undefined);
     assert.equal(calls.links, undefined);
+  });
+});
+
+describe("C10: un producto reemplazado o nuevo no hereda datos del registro anterior", () => {
+  // Cola de un max60 con información cargada: agua, nutrición, origen, conservación, receta, lote, código e ingredientes.
+  const FULL_TAIL = (type: string, config: string) => "0012" + "S" + "PORCION 100 G".padEnd(30, " ") + "0123".repeat(8) + "0003" + "0002" + "0005" + "123456789012" + type + config + "S" + "INGREDIENTES: HARINA, HUEVO, PAN RALLADO".padEnd(100, " ");
+  const BLANK_EXTRAS = "0000" + "N" + " ".repeat(30) + "0000".repeat(8) + "0000" + "0000" + "0000" + "0".repeat(12);
+  const extras = (raw: string) => {
+    const plu = parsePluAs("max60", raw)!;
+    return plu.tail.slice(0, 105 - 14);
+  };
+  const BOCADITOS = `00970BOCADITOS CAJA    05200004900000097010000U0000${FULL_TAIL("0", "21PPPPCCCCCC")}`;
+  const ALPINA = `00010ALPINA CAJON DE   08200007800000001010000U0000${FULL_TAIL(T1, "000000000000")}`;
+
+  it("al reemplazar un producto distinto: lista 2 en 0 y nutrición, lote, origen, receta e ingredientes en blanco", async () => {
+    const f = cuora();
+    f.plus.set(97, BOCADITOS);
+    const { deps } = fakeDb();
+    const s = new SystelSession(f, 20, ctx([P("p97", "97", "PECHUGA MAYORISTA", "kg", 8000)]), deps);
+    const out = await s.sync(await s.prepare(noop), noop, { allowReplace: true });
+    assert.equal(out.ok, true, out.message);
+    const now = parsePluAs("max60", f.plus.get(97)!)!;
+    assert.equal(now.name.trim(), "PECHUGA MAYORISTA");
+    assert.deepEqual(now.prices, [8000, 0], "la lista 2 del producto anterior no queda");
+    assert.equal(extras(now.raw), BLANK_EXTRAS);
+    assert.equal(now.tail.at(-1), "N", "sin los ingredientes del anterior");
+    assert.equal(now.tail.length, 105);
+  });
+
+  it("al crear un producto nuevo sobre el modelo, no copia la información del modelo", async () => {
+    const f = cuora();
+    f.plus.set(1, ALPINA);
+    const { deps } = fakeDb();
+    const s = new SystelSession(f, 20, ctx([P("p78", "78", "ARABES", "unit", 1000)]), deps);
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, true, out.message);
+    const now = parsePluAs("max60", f.plus.get(78)!)!;
+    assert.deepEqual(now.prices, [1000, 0]);
+    assert.equal(extras(now.raw), BLANK_EXTRAS);
+    assert.equal(now.tail.at(-1), "N");
+    assert.equal(f.plus.get(1), ALPINA, "el modelo no se toca");
+  });
+
+  it("cambiar el precio del MISMO producto conserva todo lo demás (lista 2, nutrición, lote, ingredientes)", async () => {
+    const f = cuora();
+    f.plus.set(1, ALPINA);
+    const { deps } = fakeDb();
+    const s = new SystelSession(f, 20, ctx([P("p1", "1", "ALPINA CAJON DE", "unit", 90000)]), deps);
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, true, out.message);
+    const now = parsePluAs("max60", f.plus.get(1)!)!;
+    assert.deepEqual(now.prices, [90000, 78000]);
+    assert.equal(extras(now.raw), extras(ALPINA));
+    assert.equal(now.tail.at(-101), "S", "los ingredientes siguen");
+  });
+
+  it("Cuora 2: al reemplazar, la lista 2 del anterior queda en 0", () => {
+    const rec = "00171bola lomo         02050000150000017010000P000000N";
+    const plu = parsePluAs("cuora2", rec)!;
+    const [item] = planSystelPush([plu], "cuora2", 0, [{ id: "p17", code: "17", name: "CUADRADA", byWeight: true, price: 20500 }], { replace: true });
+    assert.equal(item.action, "reemplazar");
+    const read = item.data!.slice(0, 53) + item.data!.slice(54);
+    assert.deepEqual(parsePluAs("cuora2", read)!.prices, [20500, 0]);
   });
 });

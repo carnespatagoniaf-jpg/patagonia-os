@@ -1,6 +1,6 @@
 import type { SystelClient } from "../../../inventory/systel/systel-client";
 import { toCuoraText } from "../../../inventory/systel/systel-frame";
-import { LAYOUT_INFO, pluEanSetting, priceToRaw, type SystelLayout, type SystelPlu } from "../../../inventory/systel/systel-plu";
+import { emptyPluTail, LAYOUT_INFO, pluEanSetting, priceToRaw, type SystelLayout, type SystelPlu } from "../../../inventory/systel/systel-plu";
 import { buildBarcodeRewrite, sameIgnoringLotePadding, targetCodeFor, writeDataFromRead, type TypeByteMode } from "../../../inventory/systel/systel-product-barcode";
 import { namesEquivalent } from "../matching";
 
@@ -63,11 +63,25 @@ const put = (s: string, at: number, value: string) => s.slice(0, at) + value + s
 const pad = (n: number, w: number) => String(n).padStart(w, "0");
 
 /**
+ * La información extra de un producto (después de la tara) en blanco, como en un producto nuevo: agua, nutrición,
+ * origen, conservación, receta y lote vacíos, sin ingredientes. El código de barras propio (tipo + configuración) se
+ * deja: lo arma después `buildBarcodeRewrite`. Cuora 2: después de la tara solo están los ingredientes.
+ */
+function blankExtras(layout: SystelLayout, r: string, tailAt: number): string {
+  const info = LAYOUT_INFO[layout];
+  if (layout === "cuora2") return r.slice(0, tailAt) + "N";
+  const typeAt = tailAt + info.tailFixed - 14;
+  return r.slice(0, tailAt) + emptyPluTail(layout).slice(0, info.tailFixed - 14) + r.slice(typeAt, typeAt + 13) + "N";
+}
+
+/**
  * Cómo tiene que quedar el registro (en forma de lectura, con gestión) para este producto.
  * Producto nuevo: se arma sobre un producto que la balanza YA tiene (el modelo), igual que los productos de prueba
  * creados en la balanza real de Los gringos (14/10): otro número, nombre, precio (lista 2 en 0), código y forma de venta.
+ * `fresh` (producto nuevo, o un número que tenía OTRO producto y se reemplaza): todas las listas menos la 1 en 0, sin
+ * tara y sin la información extra del registro anterior (C10). El mismo producto con otro precio conserva todo.
  */
-export function desiredRead(layout: SystelLayout, number: number, product: PushProduct, priceRaw: number, current: string | null, template: string | null = null): string | null {
+export function desiredRead(layout: SystelLayout, number: number, product: PushProduct, priceRaw: number, current: string | null, template: string | null = null, fresh = !current): string | null {
   const info = LAYOUT_INFO[layout];
   const o = offsets(layout);
   const saleType = product.byWeight ? "P" : "U";
@@ -77,14 +91,17 @@ export function desiredRead(layout: SystelLayout, number: number, product: PushP
   if (!current) {
     r = put(r, 0, pad(number, o.pd));
     r = put(r, o.pd, "1");
+  }
+  if (fresh) {
     r = put(r, o.pricesAt, "0".repeat(o.codeAt - o.pricesAt));
+    r = blankExtras(layout, r, o.tareAt + info.tareDigits);
   }
   r = put(r, o.nameAt, toCuoraText(product.name, 18));
   r = put(r, o.pricesAt, pad(priceRaw, 6));
   r = put(r, o.codeAt, pad(number, info.codeDigits));
   r = put(r, o.saleAt, saleType);
-  // Producto nuevo: sin la tara del producto que se usó de modelo.
-  if (!product.byWeight || !current) r = put(r, o.tareAt, pad(0, info.tareDigits));
+  // Producto nuevo o reemplazado: sin la tara del producto anterior o del modelo.
+  if (!product.byWeight || fresh) r = put(r, o.tareAt, pad(0, info.tareDigits));
   // Nunca vencimiento en la etiqueta (dueño 2026-11-19, Carnes premium): 0 días = no lo imprime. También en los que ya estaban.
   r = put(r, o.saleAt - 4, "0000");
   return r;
@@ -169,7 +186,8 @@ export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDec
     const cur = byNumber.get(number) ?? null;
     const target = targetCodeFor(product.byWeight ? "P" : "U")!;
     const template = cur ? null : (models.find((p) => (p.saleType === "P" || p.saleType === "C") === product.byWeight) ?? models[0])?.raw ?? null;
-    const read = desiredRead(layout, number, product, priceRaw, cur?.raw ?? null, template);
+    const fresh = !cur || !namesEquivalent(cur.name, product.name);
+    const read = desiredRead(layout, number, product, priceRaw, cur?.raw ?? null, template, fresh);
     let data: string | null;
     if (layout === "cuora2") {
       // Sin código de barras por producto: la etiqueta sale con el formato general de la balanza (el código es el número).
