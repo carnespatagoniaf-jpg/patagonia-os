@@ -52,11 +52,21 @@ if (!token) throw new Error("Falta SUPABASE_STAGING_ACCESS_TOKEN");
 
 async function sql(query) {
   for (let attempt = 0; ; attempt++) {
-    const r = await fetch(`https://api.supabase.com/v1/projects/${STAGING_REF}/database/query`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-      body: JSON.stringify({ query }),
-    });
+    let r;
+    try {
+      r = await fetch(`https://api.supabase.com/v1/projects/${STAGING_REF}/database/query`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ query }),
+      });
+    } catch (error) {
+      // Un corte de red de ESTA PC (no del runner): se reintenta.
+      if (attempt < 8) {
+        await sleep(3000 * (attempt + 1));
+        continue;
+      }
+      throw error;
+    }
     const text = await r.text();
     if (r.ok) return JSON.parse(text);
     if ((r.status === 429 || r.status >= 500) && attempt < 5) {

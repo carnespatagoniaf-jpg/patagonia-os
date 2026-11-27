@@ -284,6 +284,8 @@ jobs:
           Assert-Check 'Recuperación' 'config.json igual (balanzas y nube)' ($cfgAfter -eq $cfgBefore) ''
           $i = Get-ServiceInfo
           Assert-Check 'Inicio automático' 'Después de reinstalar: Automático (retrasado) y misma cuenta' ($i.StartMode -eq 'Auto' -and $i.DelayedAutostart -eq 1 -and $i.StartName -in @('NT SERVICE\PatagoniaScaleConnect', 'NT AUTHORITY\LocalService')) "$($i.StartMode) / $($i.StartName)"
+          # (sc query de arriba dejó 1060 en $LASTEXITCODE, y Actions toma ese código como resultado del paso)
+          exit 0
 
       - name: Fase 4 - un trabajo después de reinstalar
         timeout-minutes: 15
