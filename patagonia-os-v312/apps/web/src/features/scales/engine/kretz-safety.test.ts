@@ -262,3 +262,60 @@ describe("C1: el formato de etiqueta de la sucursal no se pisa si hay otra balan
     assert.equal((out.support as { etapa?: string }).etapa, "formato_sucursal_protegido");
   });
 });
+
+describe("C13: Aura: el código de barras (1070) también tiene que quedar", () => {
+  const SAME = ["000001FRUTILLA        D0000100010500000000"];
+  function auraIO(barcode: "ok" | "rechazada" | "sin_respuesta") {
+    const calls: number[] = [];
+    const io = {
+      diagnose: (async () => { throw new Error("no se usa"); }) as never,
+      readAuraList: (async () => ({ records: SAME.map((data) => ({ plu: Number(data.slice(0, 6)), data })), complete: true, detail: "", exchanges: [] })) as never,
+      runAuraSync: (async (plan: { plu: number | null; action: string }[]) => {
+        calls.push(1);
+        const todo = plan.filter((x) => ["crear", "actualizar", "reemplazar"].includes(x.action));
+        return { verdict: "ok", detail: "", written: todo.map((x) => ({ plu: x.plu, action: x.action })), stoppedAt: null, barcode, before: [], after: [], exchanges: [], openLog: [], startedAt: "", finishedAt: "" };
+      }) as never,
+      readReport: (async () => null) as never,
+      sendReport: (async () => { throw new Error("no se usa"); }) as never
+    };
+    return { io, calls };
+  }
+  const frutilla = [P("a", "1", "FRUTILLA", "kg", 1050)];
+
+  it("si la Aura no contesta 01 al 1070, el resultado no es OK y lo dice", async () => {
+    localStorage.clear();
+    const { KretzSession } = await import("./adapters/kretz");
+    for (const barcode of ["rechazada", "sin_respuesta"] as const) {
+      const s = new KretzSession("kretz-aura", ctx([...frutilla, P("b", "2", "MILANESA", "kg", 900)], { scaleKey: "a1" }), "datos", auraIO(barcode).io);
+      const out = await s.sync(await s.prepare(noop), noop);
+      assert.equal(out.ok, false, barcode);
+      assert.equal(out.verified, 1);
+      assert.match(out.message, /Los productos quedaron, pero el código de barras no/);
+    }
+  });
+
+  it("\"ya igual\" no cuenta como terminado mientras el código de barras de ESA Aura no esté confirmado", async () => {
+    localStorage.clear();
+    const { KretzSession } = await import("./adapters/kretz");
+    const first = new KretzSession("kretz-aura", ctx(frutilla, { scaleKey: "a1" }), "datos", auraIO("ok").io);
+    const prep = await first.prepare(noop);
+    assert.equal(prep.writes, 0);
+    assert.equal(prep.upToDate, false, "nunca se le mandó el 1070 a esta balanza");
+    assert.ok(prep.notes.some((n) => /código de barras/.test(n)));
+    const out = await first.sync(prep, noop);
+    assert.equal(out.ok, true, out.message);
+    const again = await new KretzSession("kretz-aura", ctx(frutilla, { scaleKey: "a1" }), "datos", auraIO("ok").io).prepare(noop);
+    assert.equal(again.upToDate, true, "con el 1070 confirmado en esta balanza, ya está todo listo");
+    const other = await new KretzSession("kretz-aura", ctx(frutilla, { scaleKey: "a2" }), "datos", auraIO("ok").io).prepare(noop);
+    assert.equal(other.upToDate, false, "otra Aura del local no hereda la marca");
+  });
+
+  it("si el 1070 falló, la próxima vez tampoco dice \"ya igual\"", async () => {
+    localStorage.clear();
+    const { KretzSession } = await import("./adapters/kretz");
+    const s = new KretzSession("kretz-aura", ctx(frutilla, { scaleKey: "a1" }), "datos", auraIO("rechazada").io);
+    await s.sync(await s.prepare(noop), noop);
+    const again = await new KretzSession("kretz-aura", ctx(frutilla, { scaleKey: "a1" }), "datos", auraIO("ok").io).prepare(noop);
+    assert.equal(again.upToDate, false);
+  });
+});

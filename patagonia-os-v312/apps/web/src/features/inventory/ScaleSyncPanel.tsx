@@ -310,7 +310,10 @@ export function ScaleSyncPanel({ products, onDownloadCsv }: { products: ScaleSyn
               ? " La balanza no contestó el ajuste del código de barras."
               : "";
       if (r.after.length || r.before.length) setAuraList({ records: r.after.length ? r.after : r.before, complete: r.verdict === "ok", detail: r.detail, readAt: new Date().toISOString() });
-      if (r.verdict === "ok") {
+      if (r.verdict === "ok" && barcode && r.barcode !== "ok") {
+        // C13: sin el 1070 confirmado no es "Listo".
+        report(`⚠️ Los productos quedaron, pero el código de barras no: ${r.detail}.${barcodeText} Volvé a mandar; si se repite, avisale al equipo de Patagonia OS.`);
+      } else if (r.verdict === "ok") {
         report(`✅ Listo: ${r.detail}. Los demás productos de la balanza quedaron igual.${barcodeText}`);
       } else {
         const canSend = profile?.role === "owner" || profile?.role === "admin";
