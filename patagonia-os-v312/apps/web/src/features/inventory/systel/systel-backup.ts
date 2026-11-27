@@ -1,5 +1,6 @@
 import type { SystelClient } from "./systel-client";
 import type { PluListEntry, SystelLayout, SystelPlu, SystelSignature } from "./systel-plu";
+import { readSystelScoped, writeSystelScoped } from "./systel-local-keys";
 
 /**
  * Identificación + respaldo completo de una balanza Systel. SOLO LECTURA
@@ -99,19 +100,18 @@ export function backupToJson(backup: SystelBackup): string {
 
 const KEY = "patagonia-systel-last-backup";
 
-/** Guarda el último respaldo en este navegador (si entra; si no, solo queda la descarga). */
-export function saveBackupLocally(backup: SystelBackup): boolean {
-  try {
-    localStorage.setItem(KEY, backupToJson(backup));
-    return true;
-  } catch {
-    return false;
-  }
+/**
+ * Guarda el último respaldo en este navegador (si entra; si no, solo queda la descarga). Uno por balanza (`scaleKey`,
+ * C24): con varias Systel en la PC no se pisan.
+ */
+export function saveBackupLocally(backup: SystelBackup, scaleKey?: string): boolean {
+  return writeSystelScoped(KEY, scaleKey, backupToJson(backup));
 }
 
-export function loadLocalBackup(): SystelBackup | null {
+/** El de esa balanza; si no tiene, el que quedó con la clave global de antes. */
+export function loadLocalBackup(scaleKey?: string): SystelBackup | null {
+  const raw = readSystelScoped(KEY, scaleKey);
   try {
-    const raw = localStorage.getItem(KEY);
     return raw ? (JSON.parse(raw) as SystelBackup) : null;
   } catch {
     return null;

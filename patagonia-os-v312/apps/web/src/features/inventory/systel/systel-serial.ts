@@ -1,4 +1,5 @@
 import type { SystelExchangeOptions, SystelLink } from "./systel-client";
+import { buildSystelFrame } from "./systel-frame";
 
 /**
  * Conexión por cable con una Systel desde Chrome (Web Serial).
@@ -50,6 +51,8 @@ export class SerialSystelLink implements SystelLink {
   private reading: Promise<void> | null = null;
   private open = false;
   private lost = false;
+  /** Las últimas señales que se pusieron (se vuelven a poner al reabrir después de un corte). */
+  private lastLines: { dtr: boolean; rts: boolean } | null = null;
 
   /** `events` se puede compartir entre varias conexiones (la búsqueda abre una por configuración). */
   constructor(private port: SerialPort, private readonly settings: SystelSerialSettings = CUORA_SERIAL, readonly events: SystelLinkEvent[] = []) {}
@@ -97,6 +100,7 @@ export class SerialSystelLink implements SystelLink {
   async setSignals(on: boolean): Promise<void> {
     try {
       const port = this.port as SerialPort & { setSignals?: (signals: { dataTerminalReady?: boolean; requestToSend?: boolean }) => Promise<void> };
+      this.lastLines = { dtr: on, rts: on };
       await port.setSignals?.({ dataTerminalReady: on, requestToSend: on });
       this.note("señales", `DTR y RTS ${on ? "encendidas" : "apagadas"}`);
     } catch (err) {
@@ -112,6 +116,7 @@ export class SerialSystelLink implements SystelLink {
   async setLines(dtr: boolean, rts: boolean): Promise<void> {
     try {
       const port = this.port as SerialPort & { setSignals?: (signals: { dataTerminalReady?: boolean; requestToSend?: boolean }) => Promise<void> };
+      this.lastLines = { dtr, rts };
       await port.setSignals?.({ dataTerminalReady: dtr, requestToSend: rts });
       this.note("señales", `DTR ${dtr ? "encendida" : "apagada"}, RTS ${rts ? "encendida" : "apagada"}`);
     } catch (err) {
@@ -166,9 +171,22 @@ export class SerialSystelLink implements SystelLink {
     this.open = false;
   }
 
+  /**
+   * E12: después de un corte, el puerto reabierto vuelve con las señales por defecto. Se vuelven a poner las que tenía
+   * (las que hicieron atender a ESA balanza, ver SystelSession.recoverLines) y se repite el arranque comprobado (ping al
+   * 1 y general, solo función 23, lo mismo que SystelClient.wake) antes de la orden.
+   */
   private async reopen(): Promise<void> {
     await this.close();
     await this.connect();
+    if (this.lastLines) await this.setLines(this.lastLines.dtr, this.lastLines.rts);
+    for (const address of [1, 0]) {
+      try {
+        await this.once(buildSystelFrame(address, 23), { timeoutMs: 350 });
+      } catch {
+        // si se vuelve a cortar, lo resuelve la orden que sigue
+      }
+    }
   }
 
   /** Una orden por vez en el cable: si se piden dos juntas, la segunda espera a que termine la primera. */

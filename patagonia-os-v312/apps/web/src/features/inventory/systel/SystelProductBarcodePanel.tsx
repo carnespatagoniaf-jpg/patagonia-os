@@ -4,6 +4,7 @@ import { compareWithBackup, restoreFromBackup, rewriteAllProductBarcodes, takePr
 import { runStage1FreeSlot, runStage2OneProduct, runTestProductRewrite, type WriteTestReport } from "./systel-barcode-write-test";
 import { saveSystelPluBarcodes } from "../../sale/systel-label-format";
 import { parsePluAs, pluEanSetting, type SystelLayout } from "./systel-plu";
+import { DEFAULT_SYSTEL_SCALE_KEY, readSystelScoped, writeSystelScoped } from "./systel-local-keys";
 
 /**
  * "Código de barras de cada producto" (Stock → Balanza, solo empresas piloto Systel).
@@ -36,9 +37,10 @@ interface WriteState {
   bulk?: { at: string; done: number; stoppedAt: number | null };
 }
 
+/** Panel de soporte (una sola Systel, la de antes de la migración 134): su clave propia, con la global vieja de respaldo. */
 export function loadProductBackup(): ProductBackup | null {
   try {
-    const raw = localStorage.getItem(BACKUP_KEY);
+    const raw = readSystelScoped(BACKUP_KEY, DEFAULT_SYSTEL_SCALE_KEY);
     return raw ? (JSON.parse(raw) as ProductBackup) : null;
   } catch {
     return null;
@@ -92,11 +94,8 @@ export function SystelProductBarcodePanel(p: ProductBarcodePanelProps) {
     const v = verifyBackup(r.backup);
     const complete = p.numbers.length > 0 && r.missing.length === 0 && r.backup.records.length === p.numbers.length && v.ok;
     if (complete) {
-      try {
-        localStorage.setItem(BACKUP_KEY, JSON.stringify(r.backup));
-      } catch {
-        // se manda igual a soporte
-      }
+      // si no entra, se manda igual a soporte
+      writeSystelScoped(BACKUP_KEY, DEFAULT_SYSTEL_SCALE_KEY, JSON.stringify(r.backup));
       setBackup(r.backup);
       // Otra balanza (otra firma): las pruebas hechas no valen para esta.
       if (!state || state.signature !== r.signature) {
