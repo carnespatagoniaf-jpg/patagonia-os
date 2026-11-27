@@ -1,7 +1,7 @@
 # Balanzas: sistema actual contra el nuevo (prueba comparativa, 27/11/2026)
 
 **En una línea:** de 21 casos reales de clientes, el sistema actual (`main`) hace mal **19**; el nuevo
-(`integracion/balanzas-etapa1`) hace mal **1** (E15, ver "Lo que sigue mal").
+(`integracion/balanzas-etapa1`) hace mal **0**. El único que quedaba (E15) se arregló el mismo día.
 
 ## Cómo se probó
 
@@ -34,7 +34,7 @@
 | E12 | Envío a medias informado como éxito (Aura "ya igual") | ❌ "Ya está todo listo" sin haber mandado el código de barras | ✅ Avisa que falta y lo manda | Sí |
 | E13 | "Enviar todos" sin releer (Report con iTegra) | ❌ "2 enviados con éxito" y uno no quedó ⁽¹⁾ | ✅ Relee: 1 confirmado, avisa el otro ⁽¹⁾ | Sí |
 | E14 | Mostrador arranca con el formato de fábrica (TripleS, PC nueva) | ❌ Agrega 0,017 kg (el papel dice 0,175) ⁽¹⁾ | ✅ "Cargando la balanza…", no agrega nada | Sí |
-| E15 | Sucursal sin formato guardado (TripleS, 13/10) | ❌ Agrega 0,017 kg sin avisar | ❌ **Agrega 0,017 kg sin avisar** | **No** |
+| E15 | Sucursal sin formato guardado (TripleS, 13/10) | ❌ Agrega 0,017 kg sin avisar | ✅ No agrega nada: muestra 0,017 kg y 0,175 kg para que la cajera elija mirando el papel | Sí |
 | E16 | La misma balanza registrada varias veces (Los gringos 4×, Carnes premium 3×…) | ❌ La registra como nueva | ✅ Pregunta "¿Es la Balanza Kretz?" | Sí |
 | E17 | Dos balanzas por red se cortan entre sí | ❌ Lo que se le manda a la A le llega a la B | ✅ Cada una contesta lo suyo | Sí |
 | E18 | Mostrador cierra el puerto de otra parte ("puerto ocupado") | ❌ Le cierra el puerto a la sincronización | ✅ No lo cierra y avisa | Sí |
@@ -42,16 +42,15 @@
 | E20 | La Report deja el puerto tomado (Giuseppe, Oliem) | ❌ El puerto queda tomado al terminar | ✅ Queda libre | Sí |
 | E21 | La calibración elige un formato con dudas | ❌ Guarda uno que puede leer otro producto | ✅ Pide el N.º de producto u otra etiqueta | Sí |
 
-**Resumen:** 21 casos. Mal antes: **19**. Mal ahora: **1**. Resueltos: 18. Ya andaban: 2 (el nuevo no los rompió).
+**Resumen:** 21 casos. Mal antes: **19**. Mal ahora: **0**. Resueltos: 19. Ya andaban: 2 (el nuevo no los rompió).
 
-## Lo que sigue mal (hallazgo)
+## E15: arreglado después de la comparativa
 
-- **E15. Sucursal sin formato guardado.** Si el local no tiene formato guardado en la base (no es "cargando", es
-  "no hay"), Mostrador lee con el formato de fábrica de Kretz. La etiqueta de la Systel de TripleS, MUZARELLA 0,175 kg
-  (`2001230001759`), entra como **0,017 kg sin ningún aviso**. El arreglo C5 cubre solo la PC nueva mientras carga.
-  Lo que habría que hacer: con el formato de fábrica sin calibrar, no agregar una etiqueta de peso sin confirmar los
-  kilos (o pedir calibrar). Está marcado como pendiente en `comparativa.test.ts`. **No se tocó el código de
-  producción.**
+La comparativa encontró que, en un local SIN formato guardado y sin balanzas configuradas, una etiqueta Systel
+(TripleS, `2001230001759`, 0,175 kg) entraba como 0,017 kg. Ahora, en ese caso, Mostrador lee la etiqueta con el
+formato de fábrica de Kretz y con el de Systel: si las dos encuentran producto y dicen algo distinto, no agrega nada y
+muestra las dos para elegir; si coinciden o solo una tiene sentido, cobra como siempre. No frena a los locales Kretz que
+venden con el de fábrica (El corte argentino y los alamos en producción). Exigido en `comparativa.test.ts`.
 
 ## Notas para leer bien la tabla
 

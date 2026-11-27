@@ -10,9 +10,7 @@ import { ESCENARIOS, correrEscenario, type Cargador } from "./escenarios";
  * HALLAZGOS_ABIERTOS: casos que el sistema nuevo TODAVÍA hace mal (están en el informe). Corren igual, marcados "todo"
  * (no frenan el test). Cuando se arreglen, se sacan de acá y pasan a ser obligatorios.
  */
-const HALLAZGOS_ABIERTOS: Record<string, string> = {
-  E15: "Sucursal sin formato guardado: la etiqueta Systel de TripleS se sigue leyendo con el formato de fábrica (0,017 kg)"
-};
+const HALLAZGOS_ABIERTOS: Record<string, string> = {};
 
 const base = new URL("../../", import.meta.url);
 const archivo = (ruta: string) => new URL(`${ruta}.ts`, base);

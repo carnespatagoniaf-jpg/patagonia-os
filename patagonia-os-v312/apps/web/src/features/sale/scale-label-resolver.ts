@@ -149,6 +149,9 @@ function systelOption(s: Extract<SystelReading, { kind: "item" }>): LabelChoiceO
   };
 }
 
+/** Formato de fábrica de las Systel (20 + producto 4 + gramos 6): solo para la duda E15 de una sucursal sin formato. */
+const SYSTEL_FACTORY_CONFIG: ScaleConfig = { prefixLength: 2, pluLength: 4, weightLength: 6, weightDivisor: 1000, totalLength: 13, payloadType: "weight" };
+
 export function resolveScaleLabel(rawInput: string, ctx: LabelContext): LabelResolution {
   const raw = rawInput.trim();
   // Con zona, la lectura usa el precio de la balanza del local; el producto que se devuelve es siempre el original.
@@ -160,6 +163,22 @@ export function resolveScaleLabel(rawInput: string, ctx: LabelContext): LabelRes
   const scan = zone ? withOriginalProducts(read(raw, scanProducts), byId) : read(raw, ctx.products);
   const priceOf = (p: Product) => scalePrintedPrice(p, zone);
   const asScan = (): LabelResolution => (scan.type === "ambiguous" ? { type: "ambiguous", options: scanChoiceOptions(scan.options, priceOf), ...(scan.note ? { note: scan.note } : {}) } : { type: "scan", resolution: scan });
+  /**
+   * E15 (TripleS 13/10, real): con la sucursal SIN formato guardado y sin balanzas configuradas, la etiqueta se lee con
+   * el formato de fábrica de Kretz (1-5-5). Una Systel imprime 20 + producto 4 + gramos 6: la misma etiqueta de 0,175 kg
+   * entraba como 0,017 kg sin aviso. No se sabe qué balanza hay, así que se lee también con el de fábrica de Systel: si
+   * las dos lecturas encuentran producto y dicen algo distinto, es ambigua (la cajera mira el papel y elige). Si coinciden
+   * o solo una tiene sentido, se cobra como siempre (no frena a los locales Kretz que venden con el de fábrica).
+   */
+  const factoryDoubt = (): LabelResolution | null => {
+    if (ctx.calibrated || ctx.setups.length > 0 || (lp && lp.profiles.length > 0) || scan.type !== "label") return null;
+    const alt = resolveScan(raw, zone ? scanProducts : ctx.products, SYSTEL_FACTORY_CONFIG);
+    const altScan = zone ? withOriginalProducts(alt, byId) : alt;
+    if (altScan.type !== "label" || labelWeightProblem(altScan.product.unit, altScan.quantity) !== null) return null;
+    const same = altScan.product.id === scan.product.id && Math.abs(altScan.quantity - scan.quantity) < SAME_KG;
+    if (same) return null;
+    return { type: "ambiguous", options: scanChoiceOptions([scan, altScan], priceOf), note: "Esta sucursal no tiene configurado el formato de la balanza: calibralo en el engranaje de Mostrador para que no pregunte más." };
+  };
   // Un código idéntico al de un producto gana sobre cualquier lectura de balanza (como siempre).
   if (ctx.products.some((p) => p.code === raw)) return { type: "scan", resolution: scan };
   // C5: sin formato conocido no se lee ninguna etiqueta de balanza (códigos del rango de comercio "2…" o TOTAL "0000…").
@@ -170,7 +189,7 @@ export function resolveScaleLabel(rawInput: string, ctx: LabelContext): LabelRes
   }
 
   const s = systelReading(raw, ctx.setups, ctx.products);
-  if (s.kind === "not_scale") return asScan();
+  if (s.kind === "not_scale") return factoryDoubt() ?? asScan();
 
   // Lecturas del formato de la sucursal: sirven de respaldo cuando la Systel no reconoce la etiqueta, y compiten con una
   // lectura Systel válida solo si el local tiene (o puede tener) otra marca de balanza.
