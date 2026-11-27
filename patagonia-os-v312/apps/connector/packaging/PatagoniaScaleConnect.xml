@@ -4,8 +4,9 @@
     PatagoniaScaleConnect.exe   = WinSW-x64.exe renombrado (el envoltorio del servicio)
     PatagoniaScaleConnect.xml   = este archivo
     scale-connect.exe           = el conector (Node SEA)
-  Instalación (como administrador):  PatagoniaScaleConnect.exe install
-  Desinstalación:                    PatagoniaScaleConnect.exe uninstall
+  Lo instala y lo desinstala packaging/installer.iss (Inno Setup). A mano, como administrador:
+    PatagoniaScaleConnect.exe install   (y después el sc.exe config de la cuenta, ver abajo)
+    PatagoniaScaleConnect.exe uninstall
   Ver apps/connector/README.md.
 -->
 <service>
@@ -30,15 +31,17 @@
   <stoptimeout>15 sec</stoptimeout>
 
   <!--
-    Cuenta de servicio virtual, sin contraseña y sin privilegios de administrador.
-    Si la versión de WinSW no la acepta, el instalador corre después:
+    Cuenta del servicio: la cuenta virtual "NT SERVICE\PatagoniaScaleConnect" (sin contraseña,
+    sin privilegios de administrador). NO va acá a propósito: WinSW v3.0.0-alpha.11, al
+    instalar, busca el SID de la cuenta (LookupAccountName) para darle el derecho de "iniciar
+    como servicio" ANTES de crear el servicio, y una cuenta virtual no existe hasta que el
+    servicio existe: la instalación falla (y sin <password> además pediría una).
+    Por eso WinSW instala con la cuenta por omisión y el instalador (packaging/installer.iss)
+    corre enseguida, antes del primer inicio:
       sc.exe config PatagoniaScaleConnect obj= "NT SERVICE\PatagoniaScaleConnect"
-    y le da permiso de escritura en %ProgramData%\Patagonia\ScaleConnect:
-      icacls "%ProgramData%\Patagonia\ScaleConnect" /grant "NT SERVICE\PatagoniaScaleConnect:(OI)(CI)M"
+      icacls "%ProgramData%\Patagonia\ScaleConnect" /grant "NT SERVICE\PatagoniaScaleConnect:(OI)(CI)M" /T
+    `PatagoniaScaleConnect.exe refresh` (actualizaciones) no cambia la cuenta.
   -->
-  <serviceaccount>
-    <username>NT SERVICE\PatagoniaScaleConnect</username>
-  </serviceaccount>
 
   <!-- Salida de consola del proceso (la bitácora propia está en logs\connector.log). -->
   <logpath>%ProgramData%\Patagonia\ScaleConnect\logs\winsw</logpath>

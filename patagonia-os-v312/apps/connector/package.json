@@ -10,10 +10,14 @@
   "scripts": {
     "dev": "tsx src/main.ts --dev",
     "ports": "tsx src/cli/list-ports.ts",
-    "test": "node --import tsx --test \"src/**/*.test.ts\"",
+    "test": "node --import tsx --test \"src/**/*.test.ts\" \"scripts/**/*.test.mjs\"",
     "typecheck": "tsc --noEmit",
     "build": "node scripts/build.mjs",
-    "package:sea": "node scripts/build.mjs && node scripts/package-sea.mjs"
+    "package": "node scripts/build.mjs && node scripts/package-sea.mjs",
+    "package:sea": "npm run package",
+    "smoke": "node scripts/smoke-exe.mjs",
+    "installer": "node scripts/build-installer.mjs",
+    "update-manifest": "node scripts/make-update-manifest.mjs"
   },
   "dependencies": {
     "serialport": "^13.0.0"
@@ -21,6 +25,7 @@
   "devDependencies": {
     "@types/node": "^22.10.0",
     "esbuild": "^0.28.1",
+    "postject": "1.0.0-alpha.6",
     "tsx": "^4.23.15",
     "typescript": "^5.6.3"
   }

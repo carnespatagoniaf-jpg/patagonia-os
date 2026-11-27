@@ -3,8 +3,14 @@
 
 import { resolvePaths } from "./config/paths";
 import { startService } from "./service";
+import { CONNECTOR_VERSION } from "./version";
 
 async function main(): Promise<void> {
+  // `scale-connect.exe --version`: lo usan el instalador, el CI y soporte. No toca datos ni puertos.
+  if (process.argv.includes("--version") || process.argv.includes("-v")) {
+    process.stdout.write(`${CONNECTOR_VERSION}\n`);
+    return;
+  }
   const dev = process.argv.includes("--dev");
   const paths = resolvePaths({ dev, env: process.env, cwd: process.cwd() });
   const service = await startService({ paths, dev });
