@@ -91,7 +91,7 @@ export function productProblem(p: EngineProduct, limits: ModelLimits): string | 
     return `el código ${n} tiene más de ${digits} cifras y la etiqueta lleva ${digits}: Mostrador leería otro producto. Poné un código de 1 a ${limits.labelMaxCode} en Stock`;
   }
   if (limits.labelMaxCode !== null && kretzTotalRuleApplies(limits) && isTicketTotalCode(n, String(limits.labelMaxCode).length)) {
-    return `el código ${n} es el que la balanza usa para el TOTAL del ticket: Mostrador cobraría el importe sin el producto ni el stock. Cambialo por otro código en Stock`;
+    return `el código ${n} lo usa la balanza para el TOTAL del ticket: cambialo en Stock por otro código (si no, sus etiquetas se pueden confundir con el TOTAL y Mostrador va a preguntar cada vez qué es)`;
   }
   if (!scaleName(p.name, limits.nameLength)) return "no tiene nombre: ponele uno en Stock";
   if (!UNITS.has(p.unit)) return "no dice si se vende por kilo o por unidad";

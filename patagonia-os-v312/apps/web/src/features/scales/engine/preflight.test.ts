@@ -81,6 +81,7 @@ describe("códigos que Mostrador lee como TOTAL del ticket (auditoría 29/10)", 
     const kretz = preflightProducts([P("998", "Pechito", 100), P("999", "Bolsa", 100, "unit")], MODEL_LIMITS["kretz-aura"]!);
     assert.equal(kretz.ready.length, 0, "en la Kretz siguen frenados");
     assert.ok(kretz.problems.every((p) => /TOTAL del ticket/.test(p.reason)));
+    assert.match(kretz.problems[0].reason, /el código 998 lo usa la balanza para el TOTAL del ticket: cambialo en Stock/);
     const marked = preflightProducts([P("9998", "Bolsa", 100, "unit")], { ...systel, family: "kretz" });
     assert.equal(marked.ready.length, 0, "con la marca explícita de Kretz se frena");
   });
