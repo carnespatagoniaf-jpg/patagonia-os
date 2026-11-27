@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { detectScaleConfig, parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, parseAuraSumTicket, parseSystelSumTicket } from "./scale-barcode";
+import { detectScaleConfig, detectScaleConfigFromSamples, parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, parseAuraSumTicket, parseSystelSumTicket } from "./scale-barcode";
 
 /** Dígito verificador EAN-13 para los primeros 12 dígitos. */
 function withCheckDigit(first12: string): string {
@@ -67,36 +67,63 @@ describe("parseWeightBarcode (etiqueta de un producto, formato Kretz por defecto
 });
 
 describe("detectScaleConfig (asistente de calibración)", () => {
-  it("encuentra la configuración que reproduce el peso indicado", () => {
+  // C6 (26/11): antes devolvía la PRIMERA combinación que coincidía. Con UNA etiqueta "200001201256" + 1,250 kg
+  // coinciden "producto 12 + 1,250 kg" (2-5-5) y "producto 120 + 1,250 kg" (2-6-4): elegir una a ciegas podía guardar
+  // un formato que lee otro producto. Ahora se pide el N.º de producto de la etiqueta o una segunda etiqueta.
+  it("una etiqueta que coincide con dos formatos que leen productos distintos: NO elige (null)", () => {
+    const code = withCheckDigit("200001201256");
+    assert.equal(detectScaleConfig(code, 1.256), null);
+    const r = detectScaleConfigFromSamples([{ code, value: 1.256 }]);
+    assert.equal(r.kind, "need_another_label");
+    if (r.kind === "need_another_label") {
+      assert.equal(r.askPlu, true);
+      assert.deepEqual([...new Set(r.options.map((o) => o.readings[0].plu))].sort(), ["12", "120"]);
+    }
+  });
+
+  it("con el N.º de producto de la etiqueta encuentra la configuración que reproduce el peso indicado", () => {
     // prefijo de 2 dígitos + PLU 5 + peso 5 (gramos) + verificador = 13
-    const code = withCheckDigit("200001201250");
-    const config = detectScaleConfig(code, 1.25);
-    assert.ok(config);
-    assert.deepEqual(parseWeightBarcode(code, config), { plu: "12", kind: "weight", weightKg: 1.25 });
+    const code = withCheckDigit("200001201256");
+    const r = detectScaleConfigFromSamples([{ code, value: 1.256, plu: "12" }]);
+    assert.equal(r.kind, "ok");
+    if (r.kind !== "ok") return;
+    assert.deepEqual(parseWeightBarcode(code, r.config), { plu: "12", kind: "weight", weightKg: 1.256 });
+    assert.equal(r.config.prefixLength + r.config.pluLength + r.config.weightLength, 12, "prefiere el formato que solo deja el verificador al final");
+    assert.equal("trailing" in r.config, false, "no filtra campos internos");
   });
 
-  it("reconoce el formato Kretz por defecto: 1 + PLU 5 + peso 5 + dígito reservado + verificador", () => {
-    const code = withCheckDigit("200012012500");
-    const config = detectScaleConfig(code, 1.25);
-    assert.ok(config);
-    assert.equal(config.weightLength, 5);
-    assert.deepEqual(parseWeightBarcode(code, config), { plu: "12", kind: "weight", weightKg: 1.25 });
+  it("con una segunda etiqueta (de más de 10 kg) se resuelve sola", () => {
+    const a = withCheckDigit("200001201256");
+    const b = withCheckDigit("200001212345");
+    const r = detectScaleConfigFromSamples([{ code: a, value: 1.256 }, { code: b, value: 12.345 }]);
+    assert.equal(r.kind, "ok");
+    if (r.kind === "ok") assert.deepEqual(parseWeightBarcode(a, r.config), { plu: "12", kind: "weight", weightKg: 1.256 });
   });
 
-  it("prefiere el formato que solo deja el verificador al final", () => {
-    const config = detectScaleConfig(withCheckDigit("200001201250"), 1.25);
-    assert.ok(config);
-    assert.equal(config.prefixLength + config.pluLength + config.weightLength, 12);
+  it("reconoce el formato Kretz por defecto (1 + PLU 5 + peso 5 + dígito reservado + verificador) con el N.º de producto", () => {
+    const code = withCheckDigit("200012012560");
+    assert.equal(detectScaleConfig(code, 1.256), null, "sola es ambigua: producto 12 o 120");
+    const r = detectScaleConfigFromSamples([{ code, value: 1.256, plu: "12" }]);
+    assert.equal(r.kind, "ok");
+    if (r.kind !== "ok") return;
+    assert.equal(r.config.weightLength, 5);
+    assert.deepEqual(parseWeightBarcode(code, r.config), { plu: "12", kind: "weight", weightKg: 1.256 });
   });
 
-  it("no filtra campos internos en la configuración devuelta", () => {
-    const config = detectScaleConfig(withCheckDigit("200001201250"), 1.25);
-    assert.ok(config);
-    assert.equal("trailing" in config, false);
+  it("formatos que leen lo mismo en todas las etiquetas (2-5-5 y 1-6-5 con \"20…\") no son una duda", () => {
+    // Real Carnes Patagonia (1-6-5): 2000035011987 = producto 35, 1,198 kg; y otra de más de 10 kg (sintética).
+    const r = detectScaleConfigFromSamples([{ code: "2000035011987", value: 1.198 }, { code: withCheckDigit("200003512345"), value: 12.345 }]);
+    assert.equal(r.kind, "ok");
+  });
+
+  it("un peso terminado en 0 no dice si el último dígito es de los gramos o reservado: pide otra etiqueta", () => {
+    const r = detectScaleConfigFromSamples([{ code: withCheckDigit("200001201250"), value: 1.25, plu: "12" }]);
+    assert.equal(r.kind, "need_another_label");
   });
 
   it("devuelve null si el peso indicado no coincide con nada", () => {
     assert.equal(detectScaleConfig(withCheckDigit("200012012500"), 99.9), null);
+    assert.equal(detectScaleConfigFromSamples([{ code: withCheckDigit("200012012500"), value: 99.9 }]).kind, "none");
   });
 });
 

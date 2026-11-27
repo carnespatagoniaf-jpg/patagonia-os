@@ -5,7 +5,10 @@ import { formatMoney, localDateIso } from "../shifts/format";
 import type { ProductCategory } from "../inventory/product-categories-service";
 import { parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, type ScaleConfig } from "./scale-config-service";
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
-import { labelWeightProblem, MAX_COUNTER_SCALE_KG, resolveScan } from "./scan-resolve";
+import { labelWeightProblem, MAX_COUNTER_SCALE_KG, resolveScan, type ScanResolution } from "./scan-resolve";
+import { scanChoiceOptions, type LabelChoiceOption } from "./scale-label-choice";
+import { resolveScaleLabel } from "./scale-label-resolver";
+import type { ScaleConfigStatus } from "./scale-config-cache";
 import { boxProblem, boxTicket, resolveBoxScan } from "./box-label";
 import { useBoxLabelFormats } from "./box-label-service";
 import { noteLabelRead } from "../scales/label-read";
@@ -19,6 +22,7 @@ import type { SystelTicket } from "../inventory/systel/systel-sales";
 import { chargedScaleTickets } from "./sale-service";
 import { useScalePapers } from "./useScalePapers";
 import { submitScaleSupportReport } from "../scales/support-service";
+import { systelTicketSupportReport } from "./scale-support-redact";
 import type { PosShift } from "./pos-shift-service";
 import { keepCurrentLists, lineGross, lineListFor, roundToPeso, withPriceList, type PaymentRow, type TicketLine } from "./sale-model";
 import { isSupabaseConfigured } from "../../lib/supabase";
@@ -27,6 +31,8 @@ import { chargedTicketQuestion, detailedTotalKey, SAME_SALE_LABEL_QUESTION, type
 import { hourAr, undoVoidQuestion, voidedTicketQuestion } from "./scale-void-warning";
 import { parseQuantity } from "./quantity";
 import { addDetailLine, detailGroupKeys, detailRemaining } from "./ticket-detail";
+import { addDetailScan, scanTotal } from "./scale-total-detail";
+import { productPrice } from "../pricing/price-lists";
 import { isPackageCode, normalizePackageCode, saleScanProblem } from "../planta/planta-logic";
 import { findPackage } from "../planta/planta-service";
 import { freezerTicket, matchFreezerScan, type FreezerStored } from "../freezer/freezer-logic";
@@ -41,6 +47,10 @@ export interface SaleTicketDeps {
   products: Product[];
   categories: ProductCategory[];
   scaleConfig: ScaleConfig;
+  /** La sucursal tiene su formato de etiquetas guardado (no el de fábrica): cuenta como lectura frente a la Systel. */
+  scaleCalibrated?: boolean;
+  /** C5: "loading"/"unknown" = todavía no se conoce el formato de la balanza: no se lee ninguna etiqueta. */
+  scaleConfigStatus?: ScaleConfigStatus;
   accounts: TreasuryAccount[];
   shift: PosShift | null;
   busy: boolean;
@@ -59,7 +69,7 @@ export interface SaleTicketDeps {
   freezer?: boolean;
 }
 
-export function useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false, scaleBranchId = null, zoneListId = null, boxLabels = false, freezer = false }: SaleTicketDeps) {
+export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrated = false, scaleConfigStatus = "ready", accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false, scaleBranchId = null, zoneListId = null, boxLabels = false, freezer = false }: SaleTicketDeps) {
   const [search, setSearch] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -81,6 +91,9 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       }),
     [baseCart, lineLists, productById, priceListId, zoneListId]
   );
+  /** El carrito de este momento, para lo que corre después de una consulta (escanear no espera a la pantalla). */
+  const cartRef = useRef(cart);
+  cartRef.current = cart;
   // Una línea que se quitó no deja su lista guardada (si vuelve a entrar, sigue al botón de arriba).
   useEffect(() => {
     setLineLists((prev) => {
@@ -118,6 +131,25 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     const local = loadSystelLabelTemplates();
     return local ? [local] : [];
   };
+  /** Etiqueta ambigua esperando que la persona elija qué es (regla de oro, 26/11). */
+  const [labelChoice, setLabelChoice] = useState<{ raw: string; options: LabelChoiceOption[]; note?: string; systelConfig: ScaleConfig | null } | null>(null);
+  function pickLabelChoice(index: number) {
+    const c = labelChoice;
+    setLabelChoice(null);
+    const option = c?.options[index];
+    if (!c || !option) return;
+    if (option.pick.type === "systel") {
+      papers.handleScan(c.raw);
+      searchInputRef.current?.focus();
+      return;
+    }
+    handleResolved(c.raw, option.pick, c.systelConfig);
+  }
+  function dismissLabelChoice() {
+    setLabelChoice(null);
+    setMessage("No se agregó nada: buscá el producto por nombre y cargá lo que dice el papel.");
+    searchInputRef.current?.focus();
+  }
   /** Clave del TOTAL de balanza que se está detallando (ticket-detail.ts), o null. */
   const [detailing, setDetailing] = useState<string | null>(null);
   /** Etiquetas de balanza escaneadas en ESTA venta (para avisar si se escanea dos veces la misma). */
@@ -393,6 +425,8 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     if (e.key !== "Enter") return;
     const raw = search.trim();
     if (!raw) return;
+    // Una elección pendiente (etiqueta ambigua) se descarta al escanear otra cosa: nunca se elige sola.
+    if (labelChoice) setLabelChoice(null);
 
     // Paquete envasado en la planta (plan Planta, migración 194): su producto con sus kilos, al precio de hoy.
     if (isPackageCode(raw) && !products.some((p) => p.code === raw)) {
@@ -448,33 +482,66 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       return;
     }
 
-    // Balanza "artículos + TOTAL" de la sucursal (si tiene): sus códigos los lee useScalePapers.
-    if (!products.some((p) => p.code === raw) && papers.handleScan(raw)) {
+    // Qué es el código: UN resolvedor (scale-label-resolver.ts, puro y probado con etiquetas reales) junta la lectura
+    // de las balanzas "artículos + TOTAL" de la sucursal (useScalePapers) y la del formato de la sucursal
+    // (scan-resolve.ts). Con una sola lectura posible se carga; con dos distintas, la persona elige (regla de oro).
+    // Systel piloto: el código de cada producto se lee con el formato que informó la balanza (no con el
+    // de la sucursal, que puede haber quedado viejo: real Los gringos 09/10 → 13/10).
+    const pilotConfig = systelTicketPilot ? systelConfigForCodeAcross(raw, systelTemplatesList()) : null;
+    const systelConfig = pilotConfig === "no_soportado" ? null : pilotConfig;
+    // Con el formato de la balanza, un producto sin precio en Patagonia se carga con el precio de lista 1 de la
+    // balanza (provisorio: el importe real sale del TOTAL del ticket).
+    const scanProducts = systelTicketPilot && systelConfig ? withScalePrices(products, mergedPerPlu(systelTemplatesList())) : products;
+    const label = resolveScaleLabel(raw, { products: scanProducts, config: systelConfig ?? scaleConfig, calibrated: scaleCalibrated || !!systelConfig, setups: papers.setups, branchFormatCompetes: papers.otherBrand !== false, zoneListId, configStatus: systelConfig ? "ready" : scaleConfigStatus });
+    if (label.type === "systel") {
+      // La lee useScalePapers (avisos de etiqueta repetida, precio, carrito).
+      papers.handleScan(raw);
       setSearch("");
       setHighlightedIndex(-1);
       return;
     }
-
-    // Qué es el código (producto, ticket de total, etiqueta de balanza o error): scan-resolve.ts,
-    // lógica pura y probada con etiquetas reales. Acá solo quedan los avisos y el carrito.
-    // Systel piloto: el código de cada producto se lee con el formato que informó la balanza (no con el
-    // de la sucursal, que puede haber quedado viejo: real Los gringos 09/10 → 13/10).
-    const systelConfig = systelTicketPilot ? systelConfigForCodeAcross(raw, systelTemplatesList()) : null;
-    if (systelConfig === "no_soportado") {
+    if (label.type === "not_ready") {
+      setMessage(label.message);
+      setSearch("");
+      setHighlightedIndex(-1);
+      return;
+    }
+    if (label.type === "systel_message") {
+      setMessage(label.message);
+      setSearch("");
+      setHighlightedIndex(-1);
+      return;
+    }
+    if (label.type === "ambiguous") {
+      setSearch("");
+      setHighlightedIndex(-1);
+      setLabelChoice({ raw, options: label.options, note: label.note, systelConfig });
+      setMessage("No se agregó nada: la etiqueta se puede leer de dos maneras. Elegí cuál es mirando el papel, o cargalo a mano.");
+      return;
+    }
+    if (pilotConfig === "no_soportado") {
       setMessage("La balanza imprime el código de los productos con un formato que Patagonia no puede leer sin riesgo de cargar mal los kilos. No se agregó nada: buscá el producto y escribí los kilos del ticket, y avisá a soporte.");
       setSearch("");
       setHighlightedIndex(-1);
       return;
     }
-    // Con el formato de la balanza, un producto sin precio en Patagonia se carga con el precio de lista 1 de la
-    // balanza (provisorio: el importe real sale del TOTAL del ticket).
-    const scanProducts = systelTicketPilot && systelConfig ? withScalePrices(products, mergedPerPlu(systelTemplatesList())) : products;
-    const resolved = resolveScan(raw, scanProducts, systelConfig ?? scaleConfig);
+    handleResolved(raw, label.resolution, systelConfig);
+  }
+
+  /** Lo que se hace con una lectura ya resuelta (al escanear, o al elegir una opción de una etiqueta ambigua). */
+  function handleResolved(raw: string, resolved: ScanResolution, systelConfig: ScaleConfig | null) {
     const done = () => {
       setSearch("");
       setHighlightedIndex(-1);
     };
 
+    // Regla de oro: dos lecturas válidas distintas → no se agrega nada; la persona elige (sin opción por defecto).
+    if (resolved.type === "ambiguous") {
+      done();
+      setLabelChoice({ raw, options: scanChoiceOptions(resolved.options), note: resolved.note, systelConfig });
+      setMessage("No se agregó nada: la etiqueta se puede leer de dos maneras. Elegí cuál es mirando el papel, o cargalo a mano.");
+      return;
+    }
     if (resolved.type === "error") {
       setMessage(resolved.message);
       done();
@@ -510,27 +577,24 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     const resolved = scan;
     if (resolved.type === "ticket_total") {
       const ticketTotal = resolved.amount;
-      if (cart.some((l) => l.key === resolved.key)) {
-        setMessage("Ese ticket de la balanza ya está cargado en esta venta.");
-      } else if (
-        // Con la balanza imprimiendo un código por producto, el ticket trae también el del total:
-        // si ya se escanearon los productos, cargar el total los cobraría dos veces.
-        cart.some((l) => l.source === "scale") &&
-        !window.confirm("Ya escaneaste productos de la balanza en esta venta. Si son de este mismo ticket, NO cargues también el total (se cobraría dos veces). ¿Cargar el total igual?")
-      ) {
-        setMessage("No se cargó el total del ticket.");
-      } else if (
+      if (
         ticketTotal >= TICKET_TOTAL_CONFIRM_FROM &&
+        !cart.some((l) => l.key === resolved.key || l.detailOf === resolved.key) &&
         !window.confirm(`El ticket de la balanza indica ${formatMoney(ticketTotal)}. ¿Coincide con el TOTAL impreso en el ticket?`)
       ) {
         setMessage("Ticket de la balanza no cargado. Revisá el importe o cargá los productos a mano.");
-      } else {
-        // Decisión del dueño (15/10): con varios productos se cobra el TOTAL directo, sin pedir el detalle (no baja
-        // stock). Un ticket de UN producto trae el código del producto y sí baja stock (etiqueta con importe).
-        setCart((current) => [...current, { key: resolved.key, kind: "manual", name: "Ticket de balanza", unit: "unit", quantity: 1, unitPrice: ticketTotal, source: "scale_total", scaleTickets: 1 }]);
-        setMessage(`Ticket de balanza cargado: ${formatMoney(ticketTotal)}. Trae varios productos: para que descuente stock, tocá "Detallar productos" en esa línea (es opcional).`);
+        done();
+        return;
       }
+      // C7 (dueño, 26/11): un TOTAL solo nunca se cobra sin productos. Se detalla, o confirma las etiquetas ya cargadas.
+      // El carrito de AHORA (esto corre después de consultar si el papel ya se cobró o se anuló).
+      const now = cartRef.current;
+      const r = scanTotal(now, resolved.key, ticketTotal);
+      if (r.kind === "detail" || r.kind === "confirmed") applyTotalScan(now, r.cart);
+      if (r.kind === "detail") setDetailing(resolved.key);
+      setMessage(r.message);
       done();
+      searchInputRef.current?.focus();
       return;
     }
     if (resolved.type === "label") {
@@ -541,8 +605,9 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       }
       scannedLabels.current.add(raw);
       if (
+        !detailing &&
         cart.some((l) => l.source === "scale_total") &&
-        !window.confirm("En esta venta ya está cargado el TOTAL de un ticket de la balanza. Si este producto es de ese mismo ticket, se cobraría dos veces. ¿Agregarlo igual?")
+        !window.confirm("En esta venta hay un TOTAL de la balanza sin detallar. Si este producto es de ese ticket, tocá Cancelar, después \"Seguir detallando\" en esa línea y escanealo de nuevo (si no, se cobraría dos veces). ¿Agregarlo aparte?")
       ) {
         setMessage("No se agregó el producto.");
         done();
@@ -581,6 +646,26 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
           done();
           return;
         }
+      }
+      // Detallando un TOTAL: la etiqueta es un producto de ese ticket (sus kilos y su importe salen de ese total).
+      const detailKey = detailing;
+      if (detailKey && cartRef.current.some((l) => l.key === detailKey)) {
+        const scalePrice = productPrice(resolved.product, zoneListId);
+        const amount = resolved.amount ?? Math.round(resolved.quantity * scalePrice * 100) / 100;
+        const priced = { ...resolved.product, priceRetail: scalePrice };
+        const r = addDetailScan(cartRef.current, detailKey, priced, resolved.quantity, amount);
+        done();
+        if (!r.ok) {
+          scannedLabels.current.delete(raw);
+          setMessage(`No se agregó: ${r.reason}.`);
+          return;
+        }
+        setCart((current) => {
+          const now = addDetailScan(current, detailKey, priced, resolved.quantity, amount);
+          return now.ok ? now.cart : current;
+        });
+        finishDetailStep(r);
+        return;
       }
       if (resolved.amount !== undefined) {
         // La etiqueta trae el importe (Kretz Aura en Pre-Empaque): se cobra el importe del papel, exacto, en su propia
@@ -827,11 +912,13 @@ ${l.name} ${qty}`);
           : `Hoy hay ${r.candidates.length} tickets de ${formatMoney(amount)} sin cobrar en la balanza. Elegí cuál es mirando la hora y el N.º de operación impresos en el ticket.`
       );
     }
-    // Todo lo que fue y vino por el cable le llega a soporte (sin pedirle nada al cliente).
+    // A soporte le llega cómo fue la lectura (sin pedirle nada al cliente). C26: solo códigos, formatos y el resultado;
+    // nunca los renglones de venta ni las respuestas de la balanza, que traen los importes de los clientes.
+    const report = systelTicketSupportReport({ code, result: r, context: read.context, log: read.log, events: read.events });
     void submitScaleSupportReport({
-      note: `Systel · Mostrador: detalle del ticket ${code} ($${amount}) · ${r.ok ? `OK: ${r.candidates.length} ticket(s) posible(s)` : `${r.stage}: ${r.reason}`}`,
-      logText: JSON.stringify({ context: read.context, result: r.ok ? r.candidates.map((c) => ({ key: c.key, lines: c.ticket.lines, problem: c.problem })) : r }),
-      connections: [{ displayName: "Systel (Mostrador)", driverId: "systel-cuora_max", status: "lectura", settings: {}, confirmedCapabilities: [], pairedAt: "", connectedNow: true, diagnosticRecord: { log: read.log.slice(-200), linkEvents: read.events.slice(-600) } } as never],
+      note: report.note,
+      logText: report.logText,
+      connections: [{ displayName: "Systel (Mostrador)", driverId: "systel-cuora_max", status: "lectura", settings: {}, confirmedCapabilities: [], pairedAt: "", connectedNow: true, diagnosticRecord: report.diagnosticRecord } as never],
       branchId: null
     }).catch(() => {});
   }
@@ -880,13 +967,13 @@ ${l.name} ${qty}`);
     const left = detailRemaining(cart, key);
     if (left === null) return;
     setDetailing(key);
-    setMessage(`Detallando el ticket: buscá cada producto del papel y escribí el importe impreso. Faltan ${formatMoney(left)}.`);
+    setMessage(`Detallando el ticket: escaneá la etiqueta de cada producto, o buscalo y escribí el importe impreso. Faltan ${formatMoney(left)}.`);
     searchInputRef.current?.focus();
   }
 
   function stopTicketDetail() {
     setDetailing(null);
-    setMessage("Lo que no se detalló se cobra igual dentro del TOTAL, sin descontar stock.");
+    setMessage("Detalle en pausa. El TOTAL sigue sin detallar: hasta que lo detalles entero (o lo saques) no se puede cobrar.");
   }
 
   function detailProduct(product: Product) {
@@ -900,24 +987,46 @@ ${l.name} ${qty}`);
     setSearch("");
     setHighlightedIndex(-1);
     if (typed === null) return;
-    const r = addDetailLine(cart, detailing, product, parseAmount(typed) || 0);
+    const r = addDetailLine(cart, detailing, { ...product, priceRetail: productPrice(product, zoneListId) }, parseAmount(typed) || 0);
     if (!r.ok) {
       setMessage(`No se agregó: ${r.reason}.`);
       return;
     }
     setCart(r.cart);
+    finishDetailStep(r);
+  }
+
+  function finishDetailStep(r: { cart: TicketLine[]; done: boolean; remaining: number; line: TicketLine }) {
+    const key = r.line.detailOf ?? detailing;
     if (r.done) {
-      const n = r.cart.filter((l) => l.detailOf === detailing).length;
+      const n = r.cart.filter((l) => l.detailOf === key).length;
       setDetailing(null);
-      setMessage(`Ticket detallado: ${n} ${n === 1 ? "producto" : "productos"}. Descuentan stock al cobrar.`);
+      setMessage(`Ticket detallado: ${n} ${n === 1 ? "producto" : "productos"}, suma exacto el TOTAL. Descuentan stock al cobrar.`);
     } else {
-      setMessage(`Agregado: ${product.name}, ${formatMoney(r.line.scaleAmount ?? 0)}. Faltan ${formatMoney(r.remaining)}.`);
+      setMessage(`Agregado: ${r.line.name}, ${formatMoney(r.line.scaleAmount ?? 0)}. Faltan ${formatMoney(r.remaining)} para el TOTAL.`);
     }
     searchInputRef.current?.focus();
   }
 
+  /** Aplica lo que devolvió scanTotal sobre el carrito real (sin perder lo que se haya agregado mientras tanto). */
+  function applyTotalScan(before: TicketLine[], after: TicketLine[]) {
+    const changed = new Map<string, TicketLine>();
+    before.forEach((l, i) => {
+      if (after[i] && after[i] !== l) changed.set(l.key, after[i]);
+    });
+    const added = after.slice(before.length);
+    setCart((current) => [
+      ...current.map((l) => {
+        const c = changed.get(l.key);
+        return c ? { ...l, key: c.key, detailOf: c.detailOf, scaleTickets: c.scaleTickets, scaleTicket: c.scaleTicket } : l;
+      }),
+      ...added.filter((x) => !current.some((l) => l.key === x.key))
+    ]);
+  }
+
   function clearTicket() {
     setDetailing(null);
+    setLabelChoice(null);
     scannedLabels.current = new Set();
     setScaleTicketChoices(null);
     papers.reset();
@@ -1011,7 +1120,7 @@ ${l.name} ${qty}`);
 
   /** Lista con la que se muestran los precios al buscar: la elegida o la zona del local. */
   const displayListId = priceListId ?? zoneListId;
-  return { priceListId, setPriceListId: choosePriceList, applyPriceListToAll, setLinePriceList, mixedPrices, displayListId, search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, detailing, startTicketDetail, stopTicketDetail, commitScaleTickets, papers, readingScaleTicket, scaleTicketChoices, setScaleTicketChoices, addScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
+  return { priceListId, setPriceListId: choosePriceList, applyPriceListToAll, setLinePriceList, mixedPrices, displayListId, search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, detailing, startTicketDetail, stopTicketDetail, commitScaleTickets, papers, scaleConfigStatus, labelChoice, pickLabelChoice, dismissLabelChoice, readingScaleTicket, scaleTicketChoices, setScaleTicketChoices, addScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
 }
 
 export type SaleTicket = ReturnType<typeof useSaleTicket>;
