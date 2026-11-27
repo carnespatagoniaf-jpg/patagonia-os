@@ -3,11 +3,14 @@ import {
   checkScaleCompatibility,
   deleteScalePlu,
   describeResponseCode,
+  expectedReportProduct,
+  readReportProduct,
   readScalePlu,
+  reportDifferences,
   sendScalePing,
   syncOneProductToScale
 } from "../../inventory/scale-serial";
-import type { ScaleDriver, ScaleIdentifyResult, ScaleWriteResult } from "../types";
+import type { ScaleDriver, ScaleIdentifyResult, ScaleSyncableProduct, ScaleWriteResult } from "../types";
 
 /**
  * Driver del Scale Manager para la familia Kretz Report NX/LT (PLU por
@@ -37,16 +40,15 @@ function writeResultFrom(responseCode: string | null, rawResponseHex: string): S
   return { verified: "failed", raw: rawResponseHex, message: `La balanza respondió código "${responseCode ?? "sin respuesta"}" (${describeResponseCode(responseCode)}).` };
 }
 
-/** Precio tal como lo manda `syncOneProductToScale` (entero, sin decimales
- * -- ver `fixedDigits` y el flag de posición decimal en scale-serial.ts).
- * No se reimplementa el formato de campo (ancho fijo, relleno de ceros):
- * alcanza con buscar los dígitos del precio como subcadena en el texto
- * ASCII que ya devuelve `readScalePlu` -- si el campo de precio se grabó
- * bien, esos dígitos van a estar ahí sí o sí, sea cual sea el ancho o el
- * relleno con el que la balanza los guardó. */
-function priceDigitsAppear(rawDataAscii: string, priceRetail: number): boolean {
-  const digits = String(Math.max(0, Math.round(priceRetail)));
-  return rawDataAscii.includes(digits);
+/**
+ * Relectura del PLU exacto (`readReportProduct`, campos separados) comparada campo por campo con lo que tenía que
+ * quedar (`reportDifferences`, la misma de Mi balanza). Antes se buscaban los dígitos del precio en cualquier parte del
+ * texto releído: el campo 19 trae "1000" de fábrica, y un precio de $1000 salía "confirmado" aunque la balanza no
+ * hubiera grabado nada (auditoría E20).
+ */
+async function readBackMatches(product: ScaleSyncableProduct): Promise<boolean> {
+  const back = await readReportProduct(product.code);
+  return back !== null && reportDifferences(back, expectedReportProduct(product)).length === 0;
 }
 
 export const kretzReportPluDriver: ScaleDriver = {
@@ -92,9 +94,8 @@ export const kretzReportPluDriver: ScaleDriver = {
     if (base.verified !== "unconfirmed" || settings.verifyWrite === false) return base;
 
     try {
-      const readBack = await readScalePlu(product.code);
-      if (readBack.responseCode === "01" && priceDigitsAppear(readBack.rawDataAscii, product.priceRetail)) {
-        return { verified: "confirmed", raw: base.raw, message: "Se relayó el PLU y el precio coincide con lo que se mandó." };
+      if (await readBackMatches(product)) {
+        return { verified: "confirmed", raw: base.raw, message: "Se releyó el PLU y quedó igual a lo que se mandó (nombre, precio y demás campos)." };
       }
       return { verified: "unconfirmed", raw: base.raw, message: "La balanza aceptó el envío, pero al releerlo no se pudo confirmar que el precio haya quedado bien grabado." };
     } catch {

@@ -1,7 +1,7 @@
 import type { Product } from "@patagonia/domain";
 import { probeAuraTotals } from "./kretz/aura-totals-probe";
 import { listenScale } from "./kretz/scale-listen";
-import { STAGE_LABELS, runKretzDiscovery, saveDiagnosticRecord, savePluScan, scanAllPlus, type DiagnosticRecord, type DiscoveryVerdict, type PluScan } from "./kretz/discovery";
+import { STAGE_LABELS, isKretzListEnd, runKretzDiscovery, saveDiagnosticRecord, savePluScan, scanAllPlus, type DiagnosticRecord, type DiscoveryVerdict, type PluScan } from "./kretz/discovery";
 import { runAuraWriteTest, saveAuraWriteTest, type AuraWriteTestResult } from "./kretz/aura-write-test";
 import { runAuraModelProbe, saveModelProbe, type ModelProbeResult } from "./kretz/aura-model-probe";
 import { AURA_BARCODE_CONFIG, readAuraList, runAuraSync, setAuraItemBarcodes, type AuraItemBarcodeResult, type AuraSyncItem, type AuraSyncResult } from "./kretz/aura-sync";
@@ -244,6 +244,25 @@ export async function getScalePortDescription(): Promise<string | null> {
 export function forgetScalePort(): void {
   cachedPort = null;
   cachedPortOpenKey = null;
+}
+
+/**
+ * Cierra el puerto de la Report para que otro programa (iTegra) lo pueda abrir (C21). El próximo envío lo vuelve a abrir
+ * solo (ensureOpen). Con `forget` además se olvida el puerto guardado (la sesión de Mi balanza terminó). Por red no se
+ * toca: no hay un puerto COM que liberar y reconectar es caro.
+ */
+export async function releaseScaleSerialPort(options: { forget?: boolean } = {}): Promise<void> {
+  const port = cachedPort;
+  if (!port || isNetPort(port)) return;
+  cachedPortOpenKey = null;
+  if (options.forget) cachedPort = null;
+  if (port.readable || port.writable) {
+    try {
+      await port.close();
+    } catch {
+      // ya estaba cerrado o roto: no importa
+    }
+  }
 }
 
 // La balanza se enchufa solo para pasar precios y después se desenchufa: al
@@ -792,16 +811,38 @@ function splitPluFields(data: string): string[] {
 async function readExistingPluFields(port: SerialPort, settings: ScaleSerialSettings, pluDigits: number): Promise<string[] | null> {
   const argument = fixedDigits(pluDigits - 1, 6);
   const frame = buildFrame(settings.deviceType, settings.equipmentId, "5005", argument);
-  const response = await writeFrameResilient(port, frame, settings.baudRate);
+  let response = await writeFrameResilient(port, frame, settings.baudRate);
+  // Una respuesta de error ("10" checksum, "60"…) tampoco es "libre": se reintenta una vez y, si sigue mal, se frena
+  // (auditoría balanzas v2, C8). Antes cualquier código distinto de "01" se tomaba como número libre y se creaba encima.
+  if (isKretzResponse(response) && !isReportReadAnswer(extractResponseCode(response))) response = await writeFrameResilient(port, frame, settings.baudRate);
   // Sin respuesta (o basura) NO es "libre": tomarlo así pisaba el producto que tenía ese número sin preguntar
   // (auditoría 29/10/2026, crítico C4). Se frena todo; un número libre es una respuesta de Kretz sin ese PLU.
   if (!isKretzResponse(response)) throw new Error(`La balanza no contestó al leer el producto ${pluDigits}. No se mandó nada: revisá la conexión y probá de nuevo.`);
-  if (extractResponseCode(response) !== "01") return null;
+  const code = extractResponseCode(response);
+  if (!isReportReadAnswer(code)) throw new ScaleReadError(pluDigits, code);
+  if (code !== "01") return null;
   const dataBytes = response.length > 10 ? response.slice(8, -3) : new Uint8Array();
   const dataStr = Array.from(dataBytes).map((b) => String.fromCharCode(b)).join("");
   const fields = splitPluFields(dataStr);
   if (Number(fields[0]) !== pluDigits) return null; // 5005 encontró otro registro distinto, no el pedido
   return fields;
+}
+
+/**
+ * Respuestas a una lectura 5005 de la Report que se pueden creer: "01" (vino un registro) o "no hay más" ("20" registro
+ * inexistente, "40" no hay registros; "02" lo contesta el simulador de report-sync-e2e al final de la tabla y no es un
+ * error pasajero). Cualquier otra ("10" checksum, "11", "60"…) es un error de lectura: el número NO cuenta como libre.
+ */
+function isReportReadAnswer(code: string | null): boolean {
+  return code === "01" || code === "02" || isKretzListEnd(code);
+}
+
+/** La balanza contestó con un error al leer un producto: no se sabe qué tiene ese número (no se escribe nada). */
+export class ScaleReadError extends Error {
+  constructor(readonly plu: number, readonly responseCode: string | null) {
+    super(`la balanza contestó ${responseCode ?? "?"} (${describeKretzCode(responseCode)}) al leer el producto ${plu}`);
+    this.name = "ScaleReadError";
+  }
 }
 
 /**
@@ -1309,6 +1350,13 @@ export async function syncProductsToScale(
         if (code !== "01") failed.push({ product, responseCode: code });
       }
     } catch (err) {
+      // La balanza contestó con un error al LEER ese número antes de escribirlo: no se sabe qué tiene, y la lectura de
+      // la balanza quedó incompleta. Se frena el envío entero (C8); lo que falta no se manda.
+      if (err instanceof ScaleReadError) {
+        for (const rest of toSend.slice(i)) transportErrors.push({ product: rest, message: `no se mandó: ${err.message}` });
+        onProgress?.(toSend.length, toSend.length);
+        break;
+      }
       // Un hipo puntual del cable/puerto (ej. "Framing error"), o un
       // payload inválido de un producto puntual -- no debe frenar el envío
       // del resto del catálogo. Una vez que el stream del puerto tira un
@@ -1439,6 +1487,31 @@ export async function readReportProduct(code: string): Promise<ReportProductFiel
 export function expectedReportProduct(product: ScaleSyncableProduct): ReportProductFields {
   // El precio es el de Stock tal cual (reportSkipReason ya descartó centavos o precios que no entran).
   return { name: fixedAscii(product.name, 26).trimEnd(), byWeight: product.unit === "kg", price: product.priceRetail, taxes: 0, code: Number(product.code), label: reportLabelCode, decimals: fixedDigits(2, 6), expiryDays: 0, description: "" };
+}
+
+/**
+ * Relee cada producto mandado (5005) y lo compara campo por campo con lo que tenía que quedar (C15). La Report puede
+ * contestar "01" a un 2005 sin grabarlo: solo cuenta como enviado lo que se releyó igual.
+ */
+export async function verifySentReportProducts(
+  products: ScaleSyncableProduct[],
+  onProgress?: (done: number, total: number) => void
+): Promise<{ confirmed: ScaleSyncableProduct[]; notConfirmed: { product: ScaleSyncableProduct; reason: string }[] }> {
+  const confirmed: ScaleSyncableProduct[] = [];
+  const notConfirmed: { product: ScaleSyncableProduct; reason: string }[] = [];
+  for (const [i, product] of products.entries()) {
+    let diffs: string[];
+    try {
+      const back = await readReportProduct(product.code);
+      diffs = back ? reportDifferences(back, expectedReportProduct(product)) : ["al releerlo, el número está vacío en la balanza"];
+    } catch (err) {
+      diffs = [`no se pudo releer (${err instanceof Error ? err.message : String(err)})`];
+    }
+    if (diffs.length === 0) confirmed.push(product);
+    else notConfirmed.push({ product, reason: diffs.join("; ") });
+    onProgress?.(i + 1, products.length);
+  }
+  return { confirmed, notConfirmed };
 }
 
 /** Aura: ¿entrega lo vendido por producto? SOLO LECTURA (5008/5001, nunca borra). Ver kretz/aura-totals-probe.ts. */
