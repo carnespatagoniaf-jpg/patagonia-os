@@ -1,5 +1,5 @@
 import type { Product } from "@patagonia/domain";
-import { resolveScan, labelWeightProblem } from "../sale/scan-resolve";
+import { labelWeightProblem } from "../sale/scan-resolve";
 import { readScaleCode } from "../sale/scale-profile-scan";
 import type { ScaleLabelProfile } from "./label-spec";
 import type { ScaleConfig } from "../sale/scale-barcode";
@@ -71,7 +71,7 @@ export function labelTestResult(rawInput: string, deps: LabelTestDeps): LabelTes
     return { ok: false, title: "Formato de etiqueta que Patagonia no puede leer", detail: "La balanza imprime el código con un formato que Patagonia no lee sin riesgo de cargar mal los kilos. Avisale a soporte con una foto de la etiqueta." };
   }
 
-  const r = systelConfig ? resolveScan(raw, products, systelConfig) : readScaleCode(raw, products, config, labelProfiles);
+  const r = systelConfig ? readScaleCode(raw, products, systelConfig, null) : readScaleCode(raw, products, config, labelProfiles);
   switch (r.type) {
     case "label": {
       if (labelWeightProblem(r.product.unit, r.quantity) === "excesivo") {

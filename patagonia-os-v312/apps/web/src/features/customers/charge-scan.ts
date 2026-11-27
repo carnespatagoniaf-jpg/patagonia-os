@@ -1,9 +1,9 @@
 import type { Product } from "@patagonia/domain";
 import { resolveBoxScan, type BoxLabelFormat } from "../sale/box-label";
 import type { ScaleConfig } from "../sale/scale-barcode";
-import { labelWeightProblem, resolveScan, type ScanResolution } from "../sale/scan-resolve";
+import { labelWeightProblem, type ScanResolution } from "../sale/scan-resolve";
 import { resolveScaleLabel, type LabelContext } from "../sale/scale-label-resolver";
-import { resolveScanByProfiles } from "../sale/scale-profile-scan";
+import { readScaleCode } from "../sale/scale-profile-scan";
 import { scanChoiceOptions, type LabelChoiceOption } from "../sale/scale-label-choice";
 import type { ScaleSetup } from "../scales/sale/scale-sale-service";
 import type { ScaleConfigStatus } from "../sale/scale-config-cache";
@@ -57,7 +57,7 @@ export function resolveChargeScan(rawInput: string, products: Product[], config:
   if (boxFormats.length > 0 && !active.some((p) => p.code === raw)) {
     const box = resolveBoxScan(raw, boxFormats, products);
     const lp = scale.labelProfiles;
-    const asScaleLabel = lp?.status === "ready" ? resolveScanByProfiles(raw, products, lp.profiles, config) : resolveScan(raw, products, config);
+    const asScaleLabel = readScaleCode(raw, products, config, lp);
     if (box && asScaleLabel.type !== "label") {
       return { type: "add", product: box.product, quantity: box.quantity, detail: box.detail };
     }

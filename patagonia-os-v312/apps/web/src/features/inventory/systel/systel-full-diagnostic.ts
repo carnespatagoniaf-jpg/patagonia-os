@@ -1,6 +1,6 @@
 import type { Product } from "@patagonia/domain";
 import type { ScaleConfig } from "../../sale/scale-barcode";
-import { resolveScan } from "../../sale/scan-resolve";
+import { readScaleCode } from "../../sale/scale-profile-scan";
 import { configFromSystelTemplate, systelConfigForCode } from "../../sale/systel-label-format";
 import { SYSTEL_READ_FUNCTIONS, type SystelClient } from "./systel-client";
 import { assignLineKeys, candidateTickets, groupTickets, linkTicketLines, parseSalesReport, type ScalePluInfo, type SystelSaleLine } from "./systel-sales";
@@ -350,7 +350,7 @@ export async function runSystelDiagnostic(client: SystelClient, input: Diagnosti
         labelChecks.push(`${line.product.name} ${raw}: no entra en el código (${tpl})`);
       } else {
         const cfg = systelConfigForCode(code, { weighed: v.E_P ?? null, unit: v.E_U ?? null, at: 0 });
-        const res = cfg && cfg !== "no_soportado" ? resolveScan(code, input.products, cfg) : null;
+        const res = cfg && cfg !== "no_soportado" ? readScaleCode(code, input.products, cfg, null) : null;
         const good = !!res && res.type === "label" && res.product.id === line.product.id && Math.abs(res.quantity - line.quantity) < 0.0005;
         if (!good) labelChecks.push(`${line.product.name}: su etiqueta (${code}) no se cargaría en Mostrador${res && res.type === "error" ? ` (${res.message.split(".")[0]})` : ""}`);
       }
