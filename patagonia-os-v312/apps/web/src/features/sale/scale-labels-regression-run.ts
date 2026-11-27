@@ -80,6 +80,13 @@ function describeResolution(r: ScanResolution): RegressionReading {
       return { resultado: "RECHAZO", mensaje: r.message };
     case "search":
       return { resultado: "BUSQUEDA", mensaje: "" };
+    default: {
+      // "ambiguous" (regla de oro, PR #111): dos lecturas válidas distintas, no se cobra nada y la cajera elige.
+      const other = r as { type: string; options?: unknown[] };
+      return other.type === "ambiguous"
+        ? { resultado: "AMBIGUO", mensaje: `${other.options?.length ?? 0} opciones` }
+        : { resultado: `OTRO ${other.type}`, mensaje: "" };
+    }
   }
 }
 
