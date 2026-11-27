@@ -97,6 +97,13 @@ export interface SendInput extends IdentifyOptions {
   weightBarcode?: boolean;
   pesosBarcode?: boolean;
   plu5Barcode?: boolean;
+  /**
+   * Lo que el motor le pide a Patagonia PARA ESTE envío (Scale Connect: la nube, con el trabajo y en nombre de quien lo
+   * pidió). Por omisión, el del anfitrión.
+   */
+  backend?: EngineBackend;
+  /** Cada producto que queda comprobado releyendo la balanza (para informar el avance). */
+  onConfirmed?: (code: string) => void;
 }
 
 export type ProductStatus = "confirmado" | "fallado" | "salteado";
@@ -395,9 +402,8 @@ export class ScaleProtocolHost {
 
   // ───────────────────────── adaptadores ─────────────────────────
 
-  private adapters(rt: Runtime, tracker: ConfirmTracker | null, options: IdentifyOptions): ScaleAdapter[] {
+  private adapters(rt: Runtime, tracker: ConfirmTracker | null, options: IdentifyOptions, backend: EngineBackend = this.options.backend): ScaleAdapter[] {
     const { mod } = rt;
-    const backend = this.options.backend;
     const io: KretzIO = {
       ...mod.KRETZ_IO,
       saveItemConfig: (branchId, config = mod.AURA_ITEM_SCALE_CONFIG) => backend.saveBranchScaleConfig(branchId, config),
@@ -432,9 +438,10 @@ export class ScaleProtocolHost {
       .map((j) => j.id);
     const diag = emptyDiag();
     const engineCtx = this.engineContext(input, diag);
-    const tracker = new ConfirmTracker(rt.mod, input.products, ctx);
+    const tracker = new ConfirmTracker(rt.mod, input.products, ctx, input.onConfirmed);
+    const backend = input.backend ?? this.options.backend;
     const family = input.family ?? this.rememberedFamily(rt) ?? undefined;
-    const found = await this.findSession(rt, ctx, engineCtx, { ...input, family }, this.adapters(rt, tracker, input));
+    const found = await this.findSession(rt, ctx, engineCtx, { ...input, family }, this.adapters(rt, tracker, input, backend));
     if (!found.session || !found.family) {
       throw new ScaleJobError("no_contesta", rt.mod.FRIENDLY_MESSAGES.no_contesta, { intentos: found.attempts, pasos: diag.steps });
     }
@@ -451,7 +458,7 @@ export class ScaleProtocolHost {
       }
       if (rt.shim.lost) throw rt.shim.lost;
       const result = this.buildResult(found.family, session, prepared, outcome, tracker, input, resumedFrom);
-      if (!result.ok) await this.report(ctx, "send", result.ok, result.message, { ...result.support, sesion: session.supportInfo(), pasos: diag.steps });
+      if (!result.ok) await this.report(ctx, "send", result.ok, result.message, { ...result.support, sesion: session.supportInfo(), pasos: diag.steps }, backend);
       return result;
     } finally {
       await session.close().catch(() => undefined);
@@ -507,9 +514,16 @@ export class ScaleProtocolHost {
     };
   }
 
-  private async report(ctx: JobContext, kind: "identify" | "test" | "send", ok: boolean, message: string, detail: Record<string, unknown>): Promise<void> {
+  private async report(
+    ctx: JobContext,
+    kind: "identify" | "test" | "send",
+    ok: boolean,
+    message: string,
+    detail: Record<string, unknown>,
+    backend: EngineBackend = this.options.backend,
+  ): Promise<void> {
     try {
-      await this.options.backend.reportToSupport({ deviceId: this.device.id, jobId: ctx.jobId, kind, ok, message, detail });
+      await backend.reportToSupport({ deviceId: this.device.id, jobId: ctx.jobId, kind, ok, message, detail });
     } catch (error) {
       this.log.warn("No se pudo mandar el reporte a soporte", { error });
     }
@@ -530,6 +544,7 @@ class ConfirmTracker {
     private readonly mod: WebProtocols,
     private readonly products: EngineProduct[],
     private readonly ctx: JobContext,
+    private readonly onConfirmed?: (code: string) => void,
   ) {
     for (const p of products) {
       const key = this.key(p.code);
@@ -558,6 +573,11 @@ class ConfirmTracker {
     if ((this.byCode.get(key) ?? []).length !== 1) return;
     this.confirmedCodes.add(key);
     await this.ctx.confirmStep(`producto:${key}`, data);
+    try {
+      this.onConfirmed?.(key);
+    } catch {
+      // el aviso de avance nunca frena el envío
+    }
   }
 
   private unconfirm(code: string | number, reason: string): void {

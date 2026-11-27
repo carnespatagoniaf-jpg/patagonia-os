@@ -9,7 +9,11 @@
 //   /progress   {job_id, seq, done, total, text, items[]}  avance y resultados por producto
 //   /finish     {job_id, status, counters, items[], error} cierra el trabajo
 //   /heartbeat  {version, scales[]}                        latido (cada 60 s)
-//   /config     {}                                         sus balanzas (solo las de SU sucursal)
+//   /config     {}                                         sus balanzas (solo las de SU sucursal) y en qué puerto está cada una
+//   /engine     {job_id, action, args}                     lo que el motor de "Mi balanza" le pide a Patagonia durante un
+//                                                          trabajo EN CURSO (migración 227): leer el formato y el catálogo
+//                                                          de la sucursal del trabajo, y escribir por las mismas RPC de la
+//                                                          web en nombre de quien encoló el trabajo
 //
 // Cada llamada a la base vuelve a validar la credencial (id + SHA-256 del secreto): revocar corta en el próximo
 // pedido, incluso a mitad de una consulta larga. La base limita a 240 pedidos por minuto por conector y nunca
@@ -25,6 +29,7 @@ import {
   maxBodyFor,
   parseClaimRequest,
   parseConnectorCredential,
+  parseEngineRequest,
   parseFinishRequest,
   parseHeartbeatRequest,
   parseProgressRequest,
@@ -99,6 +104,14 @@ Deno.serve(async (req) => {
       if (!parsed.ok) return json(parsed, 400);
       const { data, error } = await admin.rpc("scale_connector_heartbeat", { ...auth, p_version: parsed.value.version, p_scales: parsed.value.scales });
       return error ? fail(error) : json(data);
+    }
+
+    if (route === "engine") {
+      const parsed = parseEngineRequest(body.value);
+      if (!parsed.ok) return json(parsed, 400);
+      const e = parsed.value;
+      const { data, error } = await admin.rpc("scale_connector_engine", { ...auth, p_job_id: e.jobId, p_action: e.action, p_args: e.args });
+      return error ? fail(error) : json({ ok: true, ...(data ?? {}) });
     }
 
     const { data, error } = await admin.rpc("scale_connector_config", auth);

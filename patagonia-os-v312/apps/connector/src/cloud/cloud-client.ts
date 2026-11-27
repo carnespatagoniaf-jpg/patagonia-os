@@ -38,10 +38,31 @@ export interface Credential {
   secret: string;
 }
 
+/** Huella física del puerto donde está la balanza en esta PC (migración 227). */
+export interface ScaleDevice {
+  /** Id local estable del puerto en esta PC (no cambia si Windows le cambia el número de COM). */
+  id: string;
+  kind: "serial" | "tcp";
+  /** Serie real del adaptador USB o su ubicación física (discovery/port-classify). */
+  fingerprint?: string;
+  source?: string;
+  path?: string;
+  chip?: string;
+  host?: string;
+  port?: number;
+  mac?: string;
+}
+
 export interface SeenScale {
+  /** scale_key de la base si la web ya la vinculó; si no, "dev:<id del puerto>". */
   key: string;
   name: string;
   online: boolean;
+  device?: ScaleDevice;
+  family?: "kretz" | "systel";
+  model?: string;
+  label?: string;
+  identity?: Record<string, unknown>;
 }
 
 export interface PairRequest {
@@ -72,6 +93,8 @@ export interface CloudScaleConfig {
   model: string | null;
   identity: unknown;
   active: boolean | null;
+  /** En qué puerto de ESTA PC está (la web la vinculó); null = no está en esta PC. */
+  device: ScaleDevice | null;
 }
 
 export interface CloudConfig {
@@ -113,6 +136,19 @@ function kindForStatus(status: number): CloudErrorKind {
   if (status === 429) return "rate_limited";
   if (status === 400 || status === 413 || status === 422) return "bad_request";
   return "server";
+}
+
+export function parseDevice(raw: unknown): ScaleDevice | null {
+  if (!isObj(raw)) return null;
+  const id = str(raw.id);
+  if (!id) return null;
+  const device: ScaleDevice = { id, kind: raw.kind === "tcp" ? "tcp" : "serial" };
+  for (const k of ["fingerprint", "source", "path", "chip", "host", "mac"] as const) {
+    const v = str(raw[k]);
+    if (v) device[k] = v;
+  }
+  if (typeof raw.port === "number") device.port = raw.port;
+  return device;
 }
 
 export function parseJob(raw: unknown): CloudJob | null {
@@ -244,6 +280,14 @@ export class CloudClient {
     return isObj(r.result) ? r.result : {};
   }
 
+  /**
+   * Lo que el motor de "Mi balanza" le pide a Patagonia durante un trabajo en curso (migración 227): leer el formato
+   * de etiqueta y el catálogo de la sucursal del trabajo, y escribir por las RPC de la web en nombre de quien encoló.
+   */
+  async engine(credential: Credential, input: { jobId: string; action: string; args?: Obj }, signal?: AbortSignal): Promise<Obj> {
+    return this.api("engine", credential, { job_id: input.jobId, action: input.action, args: input.args ?? {} }, { timeoutMs: 60_000, signal });
+  }
+
   async config(credential: Credential, signal?: AbortSignal): Promise<CloudConfig> {
     const r = await this.api("config", credential, {}, { signal });
     const c = isObj(r.connector) ? r.connector : {};
@@ -259,6 +303,7 @@ export class CloudClient {
         model: str(s.model),
         identity: s.identity ?? null,
         active: typeof s.active === "boolean" ? s.active : null,
+        device: parseDevice(s.device),
       })),
     };
   }

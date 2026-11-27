@@ -3,7 +3,6 @@
 // poder probarlo entero sin hardware.
 
 import os from "node:os";
-import path from "node:path";
 import { loadConfig, type ConnectorConfig, type DeviceConfig } from "./config/config";
 import type { ConnectorPaths } from "./config/paths";
 import { JsonFileJournalStorage, StoredJobJournal, type JobJournal } from "./journal/job-journal";
@@ -11,14 +10,16 @@ import { createLogger, type Logger } from "./log/logger";
 import type { ByteLink } from "./link/byte-link";
 import { SerialByteLink } from "./link/serial-byte-link";
 import { TcpByteLink } from "./link/tcp-byte-link";
-import { PortManager, serialResource, tcpResource } from "./ports/port-manager";
+import { PortManager } from "./ports/port-manager";
 import { DeviceRegistry } from "./worker/device-registry";
 import { SerialportLister, discoverPorts, type DiscoveryResult, type PortLister } from "./discovery/port-lister";
 import { createLocalServer, type LocalServer } from "./server/local-server";
 import { CONNECTOR_VERSION, SERVICE_NAME } from "./version";
 import { MemoryEngineBackend, type EngineBackend } from "./protocols/engine-backend";
-import { ScaleProtocolHost, protocolDeviceFor } from "./protocols/scale-jobs";
+import type { ScaleProtocolHost } from "./protocols/scale-jobs";
 import { createCloudModule, type CloudModule, type CloudModuleOverrides } from "./cloud/cloud-module";
+import { ScaleFleet } from "./scales/scale-fleet";
+import { ScaleJobExecutor } from "./scales/scale-executor";
 
 export interface ServiceOptions {
   paths: ConnectorPaths;
@@ -29,8 +30,10 @@ export interface ServiceOptions {
   createLink?: (device: DeviceConfig) => ByteLink;
   /** Para pruebas: puerto HTTP (0 = cualquiera libre). */
   httpPort?: number;
-  /** Lo que el motor de balanzas le pide a Patagonia. Hasta que exista el canal con la nube, en memoria. */
+  /** Lo que el motor de balanzas le pide a Patagonia FUERA de un trabajo de la nube (banco). En los trabajos de la nube va por la nube. */
   backend?: EngineBackend;
+  /** Para pruebas: otro empaquetado del código de protocolos de la web. */
+  loadProtocolSource?: () => Promise<string>;
   logger?: Logger;
   /** Para pruebas: nube simulada (fetch, credencial en memoria, ejecutor falso). */
   cloud?: CloudModuleOverrides;
@@ -43,8 +46,10 @@ export interface RunningService {
   journal: JobJournal;
   registry: DeviceRegistry;
   portManager: PortManager;
-  /** Trabajos de protocolos (identify / test / send) de cada balanza, por id. */
+  /** Trabajos de protocolos (identify / test / send) de cada balanza, por id (las de config.json y las identificadas). */
   scales: Map<string, ScaleProtocolHost>;
+  /** Las balanzas de esta PC y a qué scale_key de Patagonia corresponde cada una. */
+  fleet: ScaleFleet;
   server: LocalServer;
   cloud: CloudModule;
   port: number;
@@ -100,16 +105,6 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
     commandTimeoutMs: config.commandTimeoutMs,
   });
   const makeLink = options.createLink ?? linkFor;
-  for (const device of config.devices) {
-    const t = device.transport;
-    registry.add({
-      id: device.id,
-      name: device.name,
-      resource: t.type === "serial" ? serialResource(t.path) : tcpResource(t.host, t.port),
-      createLink: () => makeLink(device),
-    });
-  }
-  registry.startAll();
 
   const lister = options.portLister ?? new SerialportLister();
   let discovery: DiscoveryResult = { ok: false, ports: [], error: "Todavía no se listaron los puertos.", at: startedAt.toISOString() };
@@ -120,24 +115,31 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
   };
   await refreshPorts();
   logger.info("Puertos encontrados", { count: discovery.ports.length, ports: discovery.ports.map((p) => `${p.path} ${p.chipLabel}`) });
-  // Protocolos Kretz/Systel de la web, uno por balanza (src/protocols).
+  // Las balanzas de esta PC (config.json + las identificadas antes), cada una con su trabajador y sus protocolos
+  // Kretz/Systel de la web (src/protocols). Una vista "por id" para quien la quiera (scales).
   const backend = options.backend ?? new MemoryEngineBackend();
+  let notifyChange: () => void = () => undefined;
+  const fleet = new ScaleFleet({
+    registry,
+    journal,
+    logger,
+    backend,
+    root: paths.root,
+    createLink: makeLink,
+    listPorts: async () => {
+      await refreshPorts();
+      return discovery.ports;
+    },
+    loadSource: options.loadProtocolSource,
+    onChange: () => notifyChange(),
+  });
+  await fleet.start(config.devices);
   const scales = new Map<string, ScaleProtocolHost>();
-  for (const device of config.devices) {
-    const worker = registry.get(device.id);
-    if (!worker) continue;
-    scales.set(
-      device.id,
-      new ScaleProtocolHost({
-        device: protocolDeviceFor(device, discovery.ports),
-        worker,
-        backend,
-        journal,
-        logger,
-        stateFile: path.join(paths.root, "protocols", `${device.id}.json`),
-      }),
-    );
-  }
+  const syncScales = () => {
+    scales.clear();
+    for (const d of fleet.list()) scales.set(d.id, d.host);
+  };
+  syncScales();
   const discoveryTimer =
     config.discoveryIntervalMs > 0 ? setInterval(() => void refreshPorts(), config.discoveryIntervalMs) : null;
   discoveryTimer?.unref();
@@ -158,16 +160,23 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
     cloud: cloud.status(),
   });
 
-  // Nube (vinculación, latido y trabajos): la balanza es "vista" con el id de config.json (= scale_key de la base).
+  // Nube (vinculación, latido y trabajos). Cada balanza se informa con su huella física y con el scale_key que le
+  // dio la web (o "dev:<id>" si todavía no la vinculó). Los trabajos los corre el ejecutor sobre los protocolos.
+  const executor = options.cloud?.executor ?? new ScaleJobExecutor({ fleet, logger, afterIdentify: () => notifyChange() });
   const cloud = createCloudModule({
     settings: config.cloud,
     credentialFile: paths.credentialFile,
     env: options.env ?? process.env,
     version: CONNECTOR_VERSION,
     logger,
-    seenScales: () => registry.statuses().map((s) => ({ key: s.id, name: s.name, online: s.state === "ready" || s.state === "busy" })),
-    overrides: options.cloud,
+    seenScales: () => fleet.seenScales(),
+    overrides: { ...options.cloud, executor },
+    onConfig: (cfg) => fleet.applyConfig(cfg),
   });
+  notifyChange = () => {
+    syncScales();
+    cloud.agent.heartbeatNow();
+  };
 
   const server = createLocalServer({ port: options.httpPort ?? config.http.port, getStatus: status, logger, routes: cloud.routes });
   let address;
@@ -191,6 +200,7 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
     registry,
     portManager,
     scales,
+    fleet,
     server,
     cloud,
     port: address.port,

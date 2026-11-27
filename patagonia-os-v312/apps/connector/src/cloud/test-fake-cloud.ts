@@ -1,5 +1,8 @@
 // Nube simulada para las pruebas: un servidor HTTP en 127.0.0.1 que imita scale-connect-pair y
-// scale-connect-api (mismas rutas, encabezado, códigos HTTP y reglas que la migración 226), en memoria.
+// scale-connect-api (mismas rutas, encabezado, códigos HTTP y reglas que las migraciones 226 y 227), en memoria.
+// Con `scales` imita también scale_profiles (en qué puerto de qué PC está cada balanza) y la ruta /engine (el motor
+// guarda el formato de etiqueta, el catálogo y los vínculos de la sucursal; solo con un trabajo en curso de esa PC y
+// solo para la balanza del trabajo).
 // Se puede "cortar" (cierra cada conexión sin responder) o hacer fallar con 503 para probar la reconexión.
 
 import http from "node:http";
@@ -17,7 +20,19 @@ export interface FakeConnector {
   revoked: boolean;
   version: string | null;
   lastSeen: number | null;
-  scales: Array<{ key: string; name: string; online: boolean }>;
+  scales: Array<{ key: string; name: string; online: boolean; device?: Obj; family?: string; model?: string; label?: string; identity?: Obj }>;
+}
+
+/** Una fila de scale_profiles (lo que la web registró y vinculó). */
+export interface FakeScaleProfile {
+  key: string;
+  name: string;
+  family: "kretz" | "systel";
+  model: string | null;
+  identity: Obj;
+  active: boolean;
+  connectorId: string | null;
+  device: Obj | null;
 }
 
 export interface FakeJob {
@@ -32,6 +47,9 @@ export interface FakeJob {
   progress: Obj[];
   items: Obj[];
   error: string | null;
+  queuedAt: number;
+  claimedAt: number | null;
+  finishedAt: number | null;
 }
 
 export class FakeCloud {
@@ -44,6 +62,13 @@ export class FakeCloud {
   readonly connectors = new Map<string, FakeConnector>();
   readonly jobs: FakeJob[] = [];
   readonly calls: string[] = [];
+  /** scale_profiles de la sucursal. Vacío = la configuración de antes (una kretz-1 fija). */
+  readonly scales: FakeScaleProfile[] = [];
+  readonly engineCalls: Array<{ jobId: string; action: string; args: Obj }> = [];
+  branchConfig: Obj | null = null;
+  readonly catalogs = new Map<string, Obj>();
+  readonly links = new Map<string, Obj[]>();
+  readonly reports: Obj[] = [];
 
   constructor() {
     this.server = http.createServer((req, res) => void this.handle(req, res));
@@ -82,6 +107,9 @@ export class FakeCloud {
       progress: [],
       items: [],
       error: null,
+      queuedAt: Date.now(),
+      claimedAt: null,
+      finishedAt: null,
     };
     this.jobs.push(job);
     return job;
@@ -135,6 +163,7 @@ export class FakeCloud {
         if (!job) return this.send(res, 200, { ok: true, job: null });
         job.status = "running";
         job.connectorId = conn.id;
+        job.claimedAt = Date.now();
         return this.send(res, 200, { ok: true, job: { id: job.id, kind: job.kind, scale_key: job.scaleKey, branch_id: "b1", requested: 0, payload: job.payload, queued_at: null } });
       }
       case "progress": {
@@ -154,12 +183,73 @@ export class FakeCloud {
         job.status = body.status;
         job.items.push(...(body.items ?? []));
         job.error = body.error ?? null;
+        job.finishedAt = Date.now();
         return this.send(res, 200, { ok: true, result: { id: job.id, status: job.status } });
       }
-      case "config":
-        return this.send(res, 200, { ok: true, connector: { id: conn.id, name: conn.name, branch_id: "b1" }, company_name: `Carnicería ${conn.company}`, branch_name: "Centro", scales: [{ key: "kretz-1", name: "Report" }] });
+      case "config": {
+        const scales = this.scales.length
+          ? this.scales.map((s) => ({ key: s.key, name: s.name, family: s.family, brand: s.family, model: s.model, identity: s.identity, active: s.active, device: s.connectorId === conn.id ? s.device : null }))
+          : [{ key: "kretz-1", name: "Report" }];
+        return this.send(res, 200, { ok: true, connector: { id: conn.id, name: conn.name, branch_id: "b1" }, company_name: `Carnicería ${conn.company}`, branch_name: "Centro", scales });
+      }
+      case "engine":
+        return this.engine(conn, body, res);
       default:
         return this.send(res, 404, { ok: false, error: "no_existe" });
+    }
+  }
+
+  private engine(conn: FakeConnector, body: Obj, res: http.ServerResponse): void {
+    const job = this.jobs.find((j) => j.id === body.job_id && j.company === conn.company && j.connectorId === conn.id);
+    if (!job) return this.send(res, 404, { ok: false, error: "no_existe" });
+    if (job.status !== "running") return this.send(res, 409, { ok: false, error: "cerrado" });
+    const args: Obj = body.args ?? {};
+    const action = String(body.action ?? "");
+    if (["load_scale_setup", "save_scale_catalog", "set_scale_links", "set_scale_profile_active"].includes(action) && args.scale_key !== job.scaleKey) {
+      return this.send(res, 400, { ok: false, error: "datos_invalidos", message: "Esa balanza no es la de este trabajo" });
+    }
+    this.engineCalls.push({ jobId: job.id, action, args });
+    switch (action) {
+      case "load_branch_config":
+        return this.send(res, 200, { ok: true, config: this.branchConfig });
+      case "list_branch_scales":
+        return this.send(res, 200, { ok: true, scales: this.scales.map((s) => ({ key: s.key, active: s.active })) });
+      case "load_scale_setup": {
+        const catalog = this.catalogs.get(job.scaleKey);
+        if (!catalog) return this.send(res, 200, { ok: true, profile: null, items: [] });
+        const links = this.links.get(job.scaleKey) ?? [];
+        const items = (catalog.items as Obj[]).map((i) => {
+          const l = links.find((x) => x.code === i.code);
+          return { ...i, link_kind: l?.kind ?? "none", product_id: l?.product_id ?? null };
+        });
+        return this.send(res, 200, { ok: true, profile: { scale_key: job.scaleKey, ...(catalog.profile as Obj), active: true }, items });
+      }
+      case "save_branch_config":
+        this.branchConfig = {
+          prefix_length: args.config.prefixLength,
+          plu_length: args.config.pluLength,
+          weight_length: args.config.weightLength,
+          weight_divisor: args.config.weightDivisor,
+          total_length: args.config.totalLength,
+          payload_type: args.config.payloadType,
+        };
+        return this.send(res, 200, { ok: true, result: null });
+      case "save_scale_catalog":
+        this.catalogs.set(job.scaleKey, { profile: args.profile, items: args.items });
+        return this.send(res, 200, { ok: true, result: { items: (args.items ?? []).length, removed: 0 } });
+      case "set_scale_links":
+        this.links.set(job.scaleKey, args.links ?? []);
+        return this.send(res, 200, { ok: true, result: null });
+      case "set_scale_profile_active": {
+        const s = this.scales.find((x) => x.key === job.scaleKey);
+        if (s) s.active = args.active === true;
+        return this.send(res, 200, { ok: true, result: null });
+      }
+      case "report":
+        this.reports.push(args);
+        return this.send(res, 200, { ok: true, result: "reporte" });
+      default:
+        return this.send(res, 400, { ok: false, error: "accion_invalida" });
     }
   }
 

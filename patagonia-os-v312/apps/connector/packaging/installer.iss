@@ -12,12 +12,16 @@
 ;     lo pasa a la cuenta virtual NT SERVICE\PatagoniaScaleConnect (si Windows no la acepta,
 ;     a NT AUTHORITY\LocalService), le da permisos y lo inicia.
 ;   - Actualización encima: frena el servicio, reemplaza los archivos y lo vuelve a iniciar.
-;   - Al terminar abre http://127.0.0.1:9120/vincular.
+;   - A qué Patagonia se conecta: parámetro /NUBE=produccion (por omisión) | pruebas | https://…/functions/v1.
+;     Se escribe SOLO "cloud.url" en config.json (scale-connect.exe --set-cloud). Sin /NUBE= y con una dirección ya
+;     guardada (actualización), se mantiene la que estaba: nunca cambia de sistema sola.
+;   - Al terminar abre http://127.0.0.1:9120/vincular (que dice a qué sistema se vincula).
 ;   - Desinstalar saca el servicio y deja los datos, salvo que se elija borrarlos
 ;     (silencioso: parámetro /BORRARDATOS).
 ;
 ; Soporte, sin preguntas:
 ;   PatagoniaScaleConnect-Setup-X.Y.Z.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="%TEMP%\scale-connect-setup.log"
+;   PatagoniaScaleConnect-Setup-X.Y.Z.exe /NUBE=pruebas      (PC de prueba contra staging)
 ;   "C:\Program Files\Patagonia\Scale Connect\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES [/BORRARDATOS]
 ;
 ; Firma: cuando haya certificado, se firma scale-connect.exe ANTES de compilar esto, y el
@@ -79,6 +83,7 @@ es.OpenLinkPage=Abrir la página para vincular esta PC con Patagonia System
 es.ServiceFailed=No se pudo registrar o iniciar el servicio Patagonia Scale Connect (paso: %1, código %2).%n%nEl programa quedó copiado. Avisá a soporte de Patagonia System.
 es.AskDeleteData=¿Borrar también los datos de Patagonia Scale Connect de esta PC?%n%n(Configuración, vinculación, diario de trabajos y bitácoras, en %1.)%n%nSi vas a reinstalar, elegí No.
 es.StoppingService=Frenando el servicio Patagonia Scale Connect...
+es.CloudFailed=No se pudo guardar a qué Patagonia se conecta esta PC (/NUBE=%1, código %2).%n%nScale Connect quedó instalado. Avisá a soporte de Patagonia System.
 
 [Dirs]
 ; Los datos nunca los borra la desinstalación por sí sola (ver CurUninstallStepChanged).
@@ -170,6 +175,24 @@ begin
   SuppressibleMsgBox(FmtMessage(CustomMessage('ServiceFailed'), [Step, IntToStr(Code)]), mbError, MB_OK, IDOK);
 end;
 
+procedure ConfigureCloud;
+var
+  Code: Integer;
+  Nube, Params: String;
+begin
+  Nube := Trim(ExpandConstant('{param:NUBE|}'));
+  if Nube = '' then
+    Params := '--set-cloud produccion --if-missing'
+  else
+    Params := '--set-cloud "' + Nube + '"';
+  Log('Nube: ' + Params);
+  if not (Run(ExpandConstant('{app}\scale-connect.exe'), Params, Code) and (Code = 0)) then
+  begin
+    Log(Format('ERROR al guardar la nube, código %d', [Code]));
+    SuppressibleMsgBox(FmtMessage(CustomMessage('CloudFailed'), [Nube, IntToStr(Code)]), mbError, MB_OK, IDOK);
+  end;
+end;
+
 procedure RegisterAndStartService;
 var
   Code: Integer;
@@ -200,6 +223,9 @@ begin
     end;
   end;
   Log('Cuenta del servicio: ' + ServiceAccountUsed);
+
+  // 2b. A qué Patagonia se conecta (config.json → cloud.url). Antes de los permisos, así el archivo nuevo los hereda.
+  ConfigureCloud;
 
   // 3. Permisos: escribir en los datos (incluye lo que WinSW ya creó como administrador)
   //    y leer/ejecutar el programa.
