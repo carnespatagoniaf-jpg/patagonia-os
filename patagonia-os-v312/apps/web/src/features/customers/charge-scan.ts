@@ -58,6 +58,8 @@ export function resolveChargeScan(rawInput: string, products: Product[], config:
     case "ticket_without_amount":
     case "error":
       return { type: "error", message: resolved.message };
+    case "ambiguous":
+      return { type: "error", message: "No se agregó nada: la etiqueta se puede leer de dos maneras (puede ser el TOTAL de un ticket o un producto). Buscá el producto por nombre y cargá lo que dice el papel." };
     default:
       return { type: "search" };
   }

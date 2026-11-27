@@ -5,7 +5,8 @@ import { formatMoney, localDateIso } from "../shifts/format";
 import type { ProductCategory } from "../inventory/product-categories-service";
 import { parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, type ScaleConfig } from "./scale-config-service";
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
-import { labelWeightProblem, MAX_COUNTER_SCALE_KG, resolveScan } from "./scan-resolve";
+import { labelWeightProblem, MAX_COUNTER_SCALE_KG, resolveScan, type ScanResolution } from "./scan-resolve";
+import { scanChoiceOptions, type LabelChoiceOption } from "./scale-label-choice";
 import { boxProblem, boxTicket, resolveBoxScan } from "./box-label";
 import { useBoxLabelFormats } from "./box-label-service";
 import { noteLabelRead } from "../scales/label-read";
@@ -114,6 +115,20 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     const local = loadSystelLabelTemplates();
     return local ? [local] : [];
   };
+  /** Etiqueta ambigua esperando que la persona elija qué es (regla de oro, 26/11). */
+  const [labelChoice, setLabelChoice] = useState<{ raw: string; options: LabelChoiceOption[]; note?: string; systelConfig: ScaleConfig | null } | null>(null);
+  function pickLabelChoice(index: number) {
+    const c = labelChoice;
+    setLabelChoice(null);
+    const option = c?.options[index];
+    if (!c || !option) return;
+    handleResolved(c.raw, option.pick, c.systelConfig);
+  }
+  function dismissLabelChoice() {
+    setLabelChoice(null);
+    setMessage("No se agregó nada: buscá el producto por nombre y cargá lo que dice el papel.");
+    searchInputRef.current?.focus();
+  }
   /** Clave del TOTAL de balanza que se está detallando (ticket-detail.ts), o null. */
   const [detailing, setDetailing] = useState<string | null>(null);
   /** Etiquetas de balanza escaneadas en ESTA venta (para avisar si se escanea dos veces la misma). */
@@ -366,6 +381,8 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     if (e.key !== "Enter") return;
     const raw = search.trim();
     if (!raw) return;
+    // Una elección pendiente (etiqueta ambigua) se descarta al escanear otra cosa: nunca se elige sola.
+    if (labelChoice) setLabelChoice(null);
 
     // Paquete envasado en la planta (plan Planta, migración 194): su producto con sus kilos, al precio de hoy.
     if (isPackageCode(raw) && !products.some((p) => p.code === raw)) {
@@ -420,11 +437,23 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     // balanza (provisorio: el importe real sale del TOTAL del ticket).
     const scanProducts = systelTicketPilot && systelConfig ? withScalePrices(products, mergedPerPlu(systelTemplatesList())) : products;
     const resolved = resolveScan(raw, scanProducts, systelConfig ?? scaleConfig);
+    handleResolved(raw, resolved, systelConfig);
+  }
+
+  /** Lo que se hace con una lectura ya resuelta (al escanear, o al elegir una opción de una etiqueta ambigua). */
+  function handleResolved(raw: string, resolved: ScanResolution, systelConfig: ScaleConfig | null) {
     const done = () => {
       setSearch("");
       setHighlightedIndex(-1);
     };
 
+    // Regla de oro: dos lecturas válidas distintas → no se agrega nada; la persona elige (sin opción por defecto).
+    if (resolved.type === "ambiguous") {
+      done();
+      setLabelChoice({ raw, options: scanChoiceOptions(resolved.options), note: resolved.note, systelConfig });
+      setMessage("No se agregó nada: la etiqueta se puede leer de dos maneras. Elegí cuál es mirando el papel, o cargalo a mano.");
+      return;
+    }
     if (resolved.type === "error") {
       setMessage(resolved.message);
       done();
@@ -868,6 +897,7 @@ ${l.name} ${qty}`);
 
   function clearTicket() {
     setDetailing(null);
+    setLabelChoice(null);
     scannedLabels.current = new Set();
     setScaleTicketChoices(null);
     papers.reset();
@@ -961,7 +991,7 @@ ${l.name} ${qty}`);
 
   /** Lista con la que se muestran los precios al buscar: la elegida o la zona del local. */
   const displayListId = priceListId ?? zoneListId;
-  return { priceListId, setPriceListId: choosePriceList, applyPriceListToAll, setLinePriceList, mixedPrices, displayListId, search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, detailing, startTicketDetail, stopTicketDetail, commitScaleTickets, papers, readingScaleTicket, scaleTicketChoices, setScaleTicketChoices, addScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
+  return { priceListId, setPriceListId: choosePriceList, applyPriceListToAll, setLinePriceList, mixedPrices, displayListId, search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, detailing, startTicketDetail, stopTicketDetail, commitScaleTickets, papers, labelChoice, pickLabelChoice, dismissLabelChoice, readingScaleTicket, scaleTicketChoices, setScaleTicketChoices, addScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
 }
 
 export type SaleTicket = ReturnType<typeof useSaleTicket>;

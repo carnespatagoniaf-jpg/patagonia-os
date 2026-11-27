@@ -6,6 +6,7 @@ import { parseQuantity } from "./quantity";
 import { lineGross, UNIT_LABELS } from "./sale-model";
 import { productPrice } from "../pricing/price-lists";
 import type { SaleTicket } from "./useSaleTicket";
+import { ScaleLabelChoice } from "./ScaleLabelChoice";
 
 // Columna izquierda de Mostrador: buscador, ticket armándose, descuentos,
 // medios de pago y barra de cobro. Es solo vista: el estado vive en
@@ -124,6 +125,7 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
       )}
     </div>
 
+    {ticket.labelChoice && <ScaleLabelChoice options={ticket.labelChoice.options} note={ticket.labelChoice.note} onPick={ticket.pickLabelChoice} onManual={ticket.dismissLabelChoice} />}
     {ticket.scaleTicketChoices && <ScaleTicketChoices ticket={ticket} />}
 
     <div className="pos-toolbar">
