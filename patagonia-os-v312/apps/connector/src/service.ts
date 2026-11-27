@@ -15,6 +15,7 @@ import { DeviceRegistry } from "./worker/device-registry";
 import { SerialportLister, discoverPorts, type DiscoveryResult, type PortLister } from "./discovery/port-lister";
 import { createLocalServer, type LocalServer } from "./server/local-server";
 import { CONNECTOR_VERSION, SERVICE_NAME } from "./version";
+import { createCloudModule, type CloudModule, type CloudModuleOverrides } from "./cloud/cloud-module";
 
 export interface ServiceOptions {
   paths: ConnectorPaths;
@@ -26,6 +27,9 @@ export interface ServiceOptions {
   /** Para pruebas: puerto HTTP (0 = cualquiera libre). */
   httpPort?: number;
   logger?: Logger;
+  /** Para pruebas: nube simulada (fetch, credencial en memoria, ejecutor falso). */
+  cloud?: CloudModuleOverrides;
+  env?: Record<string, string | undefined>;
 }
 
 export interface RunningService {
@@ -35,6 +39,7 @@ export interface RunningService {
   registry: DeviceRegistry;
   portManager: PortManager;
   server: LocalServer;
+  cloud: CloudModule;
   port: number;
   status(): Record<string, unknown>;
   stop(): Promise<void>;
@@ -125,9 +130,21 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
       interrupted: journal.list({ status: "interrupted" }).length,
     },
     problems: [...loaded.errors, ...registry.problems.map((p) => `${p.deviceId}: ${p.message}`)],
+    cloud: cloud.status(),
   });
 
-  const server = createLocalServer({ port: options.httpPort ?? config.http.port, getStatus: status, logger });
+  // Nube (vinculación, latido y trabajos): la balanza es "vista" con el id de config.json (= scale_key de la base).
+  const cloud = createCloudModule({
+    settings: config.cloud,
+    credentialFile: paths.credentialFile,
+    env: options.env ?? process.env,
+    version: CONNECTOR_VERSION,
+    logger,
+    seenScales: () => registry.statuses().map((s) => ({ key: s.id, name: s.name, online: s.state === "ready" || s.state === "busy" })),
+    overrides: options.cloud,
+  });
+
+  const server = createLocalServer({ port: options.httpPort ?? config.http.port, getStatus: status, logger, routes: cloud.routes });
   let address;
   try {
     address = await server.listen();
@@ -139,6 +156,7 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
     throw error;
   }
   logger.info("Canal local escuchando", { address: `${address.address}:${address.port}` });
+  await cloud.start();
 
   let stopped = false;
   return {
@@ -148,6 +166,7 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
     registry,
     portManager,
     server,
+    cloud,
     port: address.port,
     status,
     stop: async () => {
@@ -155,6 +174,7 @@ export async function startService(options: ServiceOptions): Promise<RunningServ
       stopped = true;
       logger.info("Se apaga Patagonia Scale Connect");
       if (discoveryTimer) clearInterval(discoveryTimer);
+      await cloud.stop();
       await server.close();
       await registry.stopAll();
       await portManager.releaseAll();

@@ -10,6 +10,8 @@ export interface ConnectorPaths {
   configFile: string;
   logsDir: string;
   journalFile: string;
+  /** Credencial de la PC (vinculación con la nube, cifrada con DPAPI en Windows). */
+  credentialFile: string;
 }
 
 export function resolvePaths(input: {
@@ -30,5 +32,6 @@ export function resolvePaths(input: {
     configFile: join(root, "config.json"),
     logsDir: join(root, "logs"),
     journalFile: join(root, "journal", "jobs.json"),
+    credentialFile: join(root, "credential.json"),
   };
 }

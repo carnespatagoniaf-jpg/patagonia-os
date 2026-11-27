@@ -25,6 +25,11 @@ Para probar balanzas en el banco, cargalas en `.data/config.json` (`devices`):
 
 Lo inválido se informa en `/status` (`problems`) y en la bitácora; el servicio arranca igual.
 
+Para la nube, `config.json` lleva `"cloud": { "url": "https://<proyecto>.supabase.co/functions/v1" }` (o la variable
+`PATAGONIA_CLOUD_URL`, que va a poner el instalador). Sin eso, Scale Connect trabaja solo en la PC y `/vincular` lo
+avisa. Vincular: abrir `http://127.0.0.1:9120/vincular` y escribir el código de Patagonia → Mis balanzas →
+"Agregar esta computadora". El POST de esa página solo se acepta desde la misma página (Origin exacto + token).
+
 ## Probar
 
 ```bash
@@ -44,6 +49,7 @@ No está en los `test`/`build`/`typecheck` de la raíz a propósito: esos siguen
 | `worker/` | `DeviceWorker`: cola propia (uno a la vez), tiempo por comando, vigía (si no avanza, aborta, libera el puerto y marca fallido), reconexión 1-2-5-10-30 s. `enqueue` nunca rechaza. |
 | `journal/` | Diario de trabajos con escritura atómica (temporal + `fsync` + renombrar). Al reiniciar, lo que estaba en curso queda `interrupted`/`resumable`; nunca se reenvía solo. `JournalStorage` es la costura para pasar a SQLite. |
 | `server/` | `127.0.0.1:9120`, solo `GET /status` (y preflight). Revisa Host (DNS rebinding) y Origin (`https://*.patagoniasystem.com.ar`, `http://localhost`), igual que `apps/web/public/patagonia-print-agent.ps1`. Sin endpoints de escritura. |
+| `cloud/` | Canal con la nube (migración 226). `CloudClient` (HTTPS a `scale-connect-pair` / `scale-connect-api`, encabezado `x-scale-connector: <id>.<secreto>`), `CloudAgent` (latido cada 60 s, consulta larga a `/claim`, espera creciente sin conexión, avance y cierre; si la nube dice 401/403 corta todo y borra la credencial), `JobExecutor` (costura con los protocolos: hoy `UnavailableExecutor` cierra como `sin_protocolo`), credencial en `credential.json` cifrada con DPAPI de **máquina** (ProtectedData vía PowerShell, el secreto por stdin), huella = SHA-256 de nombre del equipo + MachineGuid, y la página `GET/POST /vincular`. |
 | `config/`, `log/` | `%ProgramData%\Patagonia\ScaleConnect\` (`config.json`, `logs\connector.log` rotada, `journal\jobs.json`). En desarrollo `.data/`; se fuerza con `PATAGONIA_CONNECT_HOME`. La bitácora borra secretos (por nombre de campo y por patrón). |
 
 ## Empaquetar (sin firmar todavía)
@@ -83,8 +89,8 @@ el XML trae los comandos `sc.exe`/`icacls` alternativos.
 
 - **Protocolos** Kretz y Systel: pasan a `packages/scale-protocols` y hablan con `ByteLink`.
   Hoy no hay nada de protocolo acá.
-- **Vinculación** (código de 8 caracteres, credencial con DPAPI) y **canal con la nube**
-  (Edge Function, trabajos, latido).
+- Ejecutor real de trabajos de la nube (`JobExecutor` sobre los protocolos) y diario local por trabajo de la nube.
+- "Reemplaza a Caja 1" en una PC nueva (hoy solo se recupera con la misma huella).
 - Descubrimiento de **balanzas de red** (subredes, 169.254.x, puertos 1001/10001, ARP).
 - Peso en vivo para Mostrador (WebSocket local).
 - **Actualizador** firmado con Ed25519 y vuelta atrás automática.
