@@ -1,4 +1,4 @@
--- Pruebas de la migración 215 (historial de envíos a las balanzas). Se deshace al final.
+-- Pruebas de la migración 220 (historial de envíos a las balanzas). Se deshace al final.
 \set ON_ERROR_STOP 1
 begin;
 
@@ -45,7 +45,7 @@ begin
   if has_table_privilege('authenticated', 'public.scale_jobs', 'insert') or has_table_privilege('authenticated', 'public.scale_job_items', 'delete') then raise exception 'escritura directa abierta'; end if;
   if not exists (select 1 from pg_trigger where tgname = 'zz_accountant_readonly' and tgrelid = 'public.scale_jobs'::regclass) then raise exception 'falta zz_accountant_readonly en scale_jobs'; end if;
   if not exists (select 1 from pg_trigger where tgname = 'zz_accountant_readonly' and tgrelid = 'public.scale_job_items'::regclass) then raise exception 'falta zz_accountant_readonly en scale_job_items'; end if;
-  if not exists (select 1 from public.schema_migrations where version = '215_scale_jobs') then raise exception 'falta el registro en schema_migrations'; end if;
+  if not exists (select 1 from public.schema_migrations where version = '220_scale_jobs') then raise exception 'falta el registro en schema_migrations'; end if;
 end $$;
 
 set local role authenticated;

@@ -1,4 +1,4 @@
--- VUELTA ATRÁS de 216_scale_config_role_audit.sql: saca la línea de require_role que la 216 inyectó en
+-- VUELTA ATRÁS de 221_scale_config_role_audit.sql: saca la línea de require_role que la 221 inyectó en
 -- save_branch_scale_config y delete_branch_scale_config (dejando el resto de la definición viva como está) y el
 -- trigger de auditoría del borrado. No borra renglones de audit_log ya escritos.
 
@@ -14,7 +14,7 @@ begin
   loop
     v_def := replace(pg_get_functiondef(v_proc), E'\r\n', E'\n');
     if position(v_line in v_def) = 0 then
-      raise notice '216 rollback: % no tiene la línea de la 216 (no se toca)', v_proc;
+      raise notice '221 rollback: % no tiene la línea de la 221 (no se toca)', v_proc;
       continue;
     end if;
     execute replace(v_def, v_line, '');
@@ -25,4 +25,4 @@ $mig$;
 drop trigger if exists audit_branch_scale_config_delete on public.branch_scale_configs;
 drop function if exists public.audit_branch_scale_config_delete();
 
-delete from public.schema_migrations where version = '216_scale_config_role_audit';
+delete from public.schema_migrations where version = '221_scale_config_role_audit';

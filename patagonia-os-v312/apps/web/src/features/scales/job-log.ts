@@ -2,14 +2,14 @@ import { logScaleActivity } from "./activity-log";
 import type { EngineProduct, PreparedSync, SyncOutcome } from "./engine/types";
 
 /**
- * Historial de envíos a las balanzas (migración 215, C18): cada "PASAR PRODUCTOS" de Mis balanzas, bueno o malo,
+ * Historial de envíos a las balanzas (migración 220, C18): cada "PASAR PRODUCTOS" de Mis balanzas, bueno o malo,
  * queda en scale_jobs + scale_job_items con el resultado por producto.
  *
  * Reglas:
  * - Registrar NUNCA frena ni demora el envío: start va en paralelo y finish después, sin await en el camino del envío.
  * - Si falla (sin conexión, sin permiso, error de la base), queda en la bitácora local (activity-log.ts) y no se
  *   muestra nada.
- * - Si la base todavía no tiene la migración 215 (función inexistente), se ignora en silencio.
+ * - Si la base todavía no tiene la migración 220 (función inexistente), se ignora en silencio.
  *
  * Qué trae la sesión del motor (SyncOutcome de los adaptadores Kretz/Systel): `verified` (cuántos quedaron
  * releídos iguales, sin la lista), `failures` (cada producto que no quedó, con motivo), `pending` (lo que quedó para
@@ -40,7 +40,7 @@ export interface ScaleJobResult {
   errorCode: string | null;
 }
 
-/** Topes de la migración 215. */
+/** Topes de la migración 220. */
 export const MAX_JOB_ITEMS = 10000;
 const MAX_REASON = 300;
 const MAX_DETAIL_CHARS = 30000;
@@ -107,7 +107,7 @@ export function jobDetail(prepared: PreparedSync, outcome: SyncOutcome | null, e
   return JSON.stringify(withSupport).length <= MAX_DETAIL_CHARS ? withSupport : base;
 }
 
-/** La base no tiene la migración 215 (o PostgREST todavía no la ve). */
+/** La base no tiene la migración 220 (o PostgREST todavía no la ve). */
 export function isMissingFunction(error: { code?: string; message?: string } | null | undefined): boolean {
   if (!error) return false;
   return error.code === "PGRST202" || error.code === "42883" || /could not find the function|function .* does not exist/i.test(error.message ?? "");
@@ -118,7 +118,7 @@ function noteLocally(scaleKey: string, text: string): void {
 }
 
 export interface StartedJob {
-  /** Id del trabajo en la base, o null si no se pudo registrar (sin conexión, sin la 215…). */
+  /** Id del trabajo en la base, o null si no se pudo registrar (sin conexión, sin la 220…). */
   id: Promise<string | null>;
   scaleKey: string;
 }

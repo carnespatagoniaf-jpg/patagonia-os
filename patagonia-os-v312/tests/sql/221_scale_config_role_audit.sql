@@ -1,4 +1,4 @@
--- Pruebas de la migración 216 (formato de etiqueta de la sucursal: rol y auditoría del borrado). Se deshace al final.
+-- Pruebas de la migración 221 (formato de etiqueta de la sucursal: rol y auditoría del borrado). Se deshace al final.
 \set ON_ERROR_STOP 1
 begin;
 
