@@ -1,10 +1,11 @@
 import { parseAuraPlu } from "../../../inventory/kretz/aura-plu";
-import { AURA_BARCODE_CONFIG_22, auraMaySetBranchConfig, planAuraSync, summarizeAuraPlan, type AuraSyncItem } from "../../../inventory/kretz/aura-sync";
+import { AURA_BARCODE_CONFIG, AURA_BARCODE_CONFIG_22, AURA_ITEM_SCALE_CONFIG, auraMaySetBranchConfig, planAuraSync, summarizeAuraPlan, type AuraSyncItem } from "../../../inventory/kretz/aura-sync";
 import { AURA_PREFIX_22_BRANCHES } from "../weight-barcode";
 import { getStoredModelId, saveModelId } from "../../../inventory/kretz/models";
 import { isNetPort } from "../../../inventory/kretz/net-port";
 import { KRETZ_PLU5_WEIGHT_CONFIG } from "../../../sale/scan-resolve";
 import type { ScaleConfig } from "../../../sale/scale-barcode";
+import { BRANCH_CONFIG_PROTECTED, branchConfigSupport, mayWriteBranchScaleConfig, type BranchConfigDecision, type BranchScaleRef } from "../../../inventory/kretz/branch-scale-guard";
 import { chooseReportLabel, describeLabelSamples, type ReportLabelSample } from "../../../inventory/kretz/report-label";
 import {
   configureReportBarcode,
@@ -14,9 +15,11 @@ import {
   readAuraListOnScale,
   readReportLabelSample,
   readReportProduct,
+  releaseScaleSerialPort,
   reportDifferences,
   setReportLabelCode,
   runAuraSyncOnScale,
+  ScaleReadError,
   setScaleSerialPort,
   syncProductsToScale,
   type ReportProductFields,
@@ -47,12 +50,19 @@ export interface KretzIO {
   saveItemConfig?: (branchId: string, config?: ScaleConfig) => Promise<void>;
   /** Formato de etiqueta que la sucursal ya tiene guardado (null = ninguno). Sin esto, la Aura no cambia el formato. */
   loadBranchConfig?: (branchId: string) => Promise<ScaleConfig | null>;
+  /**
+   * Las balanzas registradas de la sucursal (scale_profiles). Sin esto (pruebas, demo) el formato se guarda como antes.
+   * Con más de una activa, el formato de la sucursal solo se cambia si queda igual (mayWriteBranchScaleConfig, C1).
+   */
+  listBranchScales?: (branchId: string) => Promise<BranchScaleRef[]>;
   /** Report: manda el formato del código de barras de las etiquetas (1070). */
   configureReportBarcode?: (config?: string) => Promise<"ok" | "rechazada" | "sin_respuesta">;
   /** Report: primeros productos de la balanza con su formato de etiqueta (solo lectura). */
   readLabelSample?: () => Promise<ReportLabelSample[]>;
   /** Report: formato de etiqueta con el que se graban (y se verifican) los productos. */
   setLabelCode?: (code: string) => void;
+  /** Report: cierra el puerto al terminar (C21); `forget` = además olvidarlo (fin de la sesión). */
+  releasePort?: (options?: { forget?: boolean }) => Promise<void>;
 }
 
 export const KRETZ_IO: KretzIO = {
@@ -63,7 +73,8 @@ export const KRETZ_IO: KretzIO = {
   sendReport: syncProductsToScale,
   configureReportBarcode,
   readLabelSample: () => readReportLabelSample(),
-  setLabelCode: setReportLabelCode
+  setLabelCode: setReportLabelCode,
+  releasePort: releaseScaleSerialPort
 };
 
 /**
@@ -102,12 +113,17 @@ const toSyncable = (p: EngineProduct): ScaleSyncableProduct => ({ id: p.id, code
 const sameReport = (a: ReportProductFields, b: ReportProductFields) => reportDifferences(a, b).length === 0;
 const problem = (p: ScaleSyncableProduct, reason: string): ProductProblem => ({ code: p.code, name: p.name, reason });
 
+/** El contexto puede traer la lista de balanzas de la sucursal (la que ya tiene Mi balanza); si no, se pide a la base. */
+export type KretzContext = EngineContext & { branchScales?: BranchScaleRef[] };
+
 type ReportState = { kind: "report"; create: ScaleSyncableProduct[]; update: ScaleSyncableProduct[]; occupied: { product: ScaleSyncableProduct; current: ReportProductFields }[] };
 type AuraState = { kind: "aura"; records: string[]; products: { code: string; name: string; byWeight: boolean; price: number }[]; plan: AuraSyncItem[] };
 
 export class KretzSession implements ScaleSession {
   label: string;
   private state: ReportState | AuraState | null = null;
+  /** C1: el formato de la sucursal no se cambió porque el local tiene otra balanza (dato para soporte). */
+  private protectedConfig: Record<string, unknown> | null = null;
 
   constructor(
     readonly model: ScaleModelId,
@@ -156,7 +172,8 @@ export class KretzSession implements ScaleSession {
     if (this.model === "kretz-aura") {
       onProgress("leer", "Leyendo los productos de tu balanza…");
       const list = await this.io.readAuraList((t) => onProgress("leer", "Leyendo los productos de tu balanza…", ...progressNumbers(t)));
-      if (!list.complete) throw new FriendlyError("no_contesta", list.detail);
+      // Lectura incompleta (un error en el medio de la lista): no se arma ningún plan, así nada parece "libre" (C8).
+      if (!list.complete) return this.readIncomplete(list.detail, list.records.length);
       onProgress("comparar", "Comparando con los productos de Patagonia…");
       const products = active.map((p) => ({ code: p.code, name: p.name, byWeight: p.unit === "kg", price: p.priceRetail }));
       const records = list.records.map((r) => r.data);
@@ -168,10 +185,23 @@ export class KretzSession implements ScaleSession {
         .map((x) => ({ code: x.plu ?? 0, scaleName: x.name, byWeight: false, reason: "ocupado_en_balanza", detail: x.reason, suggestionId: null }));
       const writes = s.crear + s.actualizar + s.reemplazar;
       const skipped = [...check.problems, ...plan.filter((x) => x.action === "omitir").map((x) => ({ code: String(x.plu ?? ""), name: x.name, reason: x.reason }))];
-      return { ...this.base(), scaleProducts: list.records.length, ready: s.sin_cambios, writes, pending, upToDate: writes === 0, notes: [], skipped, warnings: check.warnings };
+      // Nunca "ya está igual" sin el código de barras (1070) confirmado en ESTA Aura (C13): antes una Aura con los
+      // productos iguales nunca recibía el 1070.
+      const barcodeReady = isBarcodeConfigured(this.auraBarcodeKey());
+      const notes = barcodeReady ? [] : ["Falta configurar el código de barras de los tickets: se hace al sincronizar."];
+      return { ...this.base(), scaleProducts: list.records.length, ready: s.sin_cambios, writes, pending, upToDate: writes === 0 && barcodeReady, notes, skipped, warnings: check.warnings };
     }
 
-    // Report: se lee cada número antes de escribir, para no pisar otro producto.
+    // Report: se lee cada número antes de escribir, para no pisar otro producto. Al terminar se suelta el puerto (C21).
+    try {
+      return await this.prepareReport(onProgress, check);
+    } finally {
+      await this.release(false);
+    }
+  }
+
+  private async prepareReport(onProgress: ProgressFn, check: PreflightResult): Promise<PreparedSync> {
+    const active = check.ready;
     const plan = planScaleSync(active.map(toSyncable));
     // Formato de etiqueta: el que ya usan los productos reales de ESTA balanza (en la NX2 de Lauda el "01" sale sin
     // código de barras, real 18/11). Se elige antes de comparar, así un producto grabado con otro formato se corrige.
@@ -196,7 +226,14 @@ export class KretzSession implements ScaleSession {
     let same = 0;
     for (const [i, p] of plan.toSend.entries()) {
       onProgress("leer", "Leyendo los productos de tu balanza…", i + 1, plan.toSend.length);
-      const current = await this.io.readReport(p.code);
+      let current: ReportProductFields | null;
+      try {
+        current = await this.io.readReport(p.code);
+      } catch (err) {
+        // La balanza contestó con un error al leer ese número: no se sabe qué tiene, así que no se escribe nada (C8).
+        if (err instanceof ScaleReadError) return this.readIncomplete(err.message, i);
+        throw err;
+      }
       const expected = expectedReportProduct(p);
       // Un número con el producto de ejemplo de fábrica ("NOMBRE", o sin nombre) cuenta como libre:
       // una Report LT recién sacada de la caja lo trae así (real: M2 Alimentos, 24/10, PLU 1 "NOMBRE" a $955481 por unidad).
@@ -219,34 +256,65 @@ export class KretzSession implements ScaleSession {
     return { ...this.base(), scaleProducts: plan.toSend.length, ready: same, writes, pending, upToDate: writes === 0 && barcodeReady && !showLabel, skipped, warnings: check.warnings, notes };
   }
 
+  /** No se pudo leer toda la balanza: frena antes de escribir (sin botón de sincronizar) y va a soporte. */
+  private readIncomplete(detail: string, read: number): PreparedSync {
+    this.state = null;
+    this.diagnostic.lectura_incompleta = { detalle: detail, leidos: read };
+    return { ...this.base(), canWrite: false, scaleProducts: read, ready: 0, writes: 0, pending: [], upToDate: false, blocker: READ_INCOMPLETE, notes: [detail] };
+  }
+
   async sync(prepared: PreparedSync, onProgress: ProgressFn, opts: { allowReplace?: boolean } = {}): Promise<SyncOutcome> {
     const st = this.state;
     if (!st || !prepared.canWrite || prepared.blocker) throw new Error("primero hay que leer la balanza");
     if (st.kind === "aura") {
       const plan = opts.allowReplace ? planAuraSync(st.records, st.products, { replaceConflicts: true }) : st.plan;
-      const r = await this.io.runAuraSync(plan, (t) => onProgress("sincronizar", "Mandando tus productos a la balanza…", ...progressNumbers(t)), () => false, true, this.ctx.branchId && AURA_PREFIX_22_BRANCHES.has(this.ctx.branchId) ? AURA_BARCODE_CONFIG_22 : undefined);
+      const r = await this.io.runAuraSync(plan, (t) => onProgress("sincronizar", "Mandando tus productos a la balanza…", ...progressNumbers(t)), () => false, true, this.auraBarcodeConfig() === AURA_BARCODE_CONFIG_22 ? AURA_BARCODE_CONFIG_22 : undefined);
       if (r.verdict !== "ok") {
         const at = r.stoppedAt;
         const product = at ? st.products.find((p) => Number(p.code) === at.plu) : undefined;
         const failures: ProductProblem[] = at
           ? [{ code: String(at.plu), name: product?.name ?? "", reason: at.readBack === null ? "la balanza no lo devolvió al releerlo" : "al releerlo en la balanza no quedó igual a Patagonia" }]
           : [];
-        return { ok: false, verified: r.written.length, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, failures, support: { verdict: r.verdict, detail: r.detail, stoppedAt: r.stoppedAt } };
+        const nothingWritten = r.verdict === "lectura_incompleta" && r.written.length === 0;
+        return { ok: false, verified: r.written.length, message: nothingWritten ? READ_INCOMPLETE : FRIENDLY_MESSAGES.frenado, pending: prepared.pending, failures, support: { verdict: r.verdict, detail: r.detail, stoppedAt: r.stoppedAt } };
       }
       // La Aura imprime el TOTAL en los tickets con varios productos (manual Aura Eco §7.1.7; el código por producto
       // del ticket de suma no existe: real Pollo y mar 15/10). En Pre-Empaque (ALT + 7) imprime un ticket por producto
       // con su código 2-3-7 + importe: Mostrador de la sucursal queda leyendo ese formato, salvo que la sucursal ya
       // tenga otro guardado (el de otra balanza del local: auraMaySetBranchConfig). Si no se puede leer, no se toca.
-      if (r.barcode === "ok" && this.ctx.online && this.ctx.branchId && this.io.saveItemConfig && this.io.loadBranchConfig) {
+      // El 1070 tiene que contestar "01": si no, los productos quedaron pero los tickets pueden salir sin código (C13).
+      if (r.barcode !== "ok") {
+        return { ok: false, verified: r.written.length, message: AURA_BARCODE_FAILED, pending: opts.allowReplace ? [] : prepared.pending, support: { codigo_de_barras: r.barcode, detail: r.detail } };
+      }
+      markBarcodeConfigured(this.auraBarcodeKey());
+      let protectedSupport: Record<string, unknown> | null = null;
+      if (this.ctx.online && this.ctx.branchId && this.io.saveItemConfig && this.io.loadBranchConfig) {
         try {
-          if (auraMaySetBranchConfig(await this.io.loadBranchConfig(this.ctx.branchId))) await this.io.saveItemConfig(this.ctx.branchId);
+          const existing = await this.io.loadBranchConfig(this.ctx.branchId);
+          if (auraMaySetBranchConfig(existing)) {
+            // Y además, si el local tiene otra balanza, solo si el formato no cambia (C1).
+            const g = await this.branchConfigDecision(AURA_ITEM_SCALE_CONFIG, existing);
+            if (g.decision.allowed) await this.io.saveItemConfig(this.ctx.branchId);
+            else protectedSupport = g.support;
+          }
         } catch {
           // sin esto, Mostrador sigue leyendo el TOTAL (detalle a mano); no frena la sincronización
         }
       }
+      if (protectedSupport) {
+        return { ok: false, verified: r.written.length, message: `Los productos quedaron bien en la balanza. ${BRANCH_CONFIG_PROTECTED}`, pending: opts.allowReplace ? [] : prepared.pending, support: protectedSupport };
+      }
       return { ok: true, verified: r.written.length, message: done(opts.allowReplace ? [] : prepared.pending), pending: opts.allowReplace ? [] : prepared.pending };
     }
 
+    try {
+      return await this.syncReport(st, prepared, onProgress, opts);
+    } finally {
+      await this.release(false);
+    }
+  }
+
+  private async syncReport(st: ReportState, prepared: PreparedSync, onProgress: ProgressFn, opts: { allowReplace?: boolean }): Promise<SyncOutcome> {
     const list = [...st.create, ...st.update, ...(opts.allowReplace ? st.occupied.map((o) => o.product) : [])];
     // Cada producto que no quedó bien, con su motivo. Uno que falla no frena a los demás, pero nunca se dice "Listo".
     const failures: ProductProblem[] = [];
@@ -274,9 +342,13 @@ export class KretzSession implements ScaleSession {
       if (diffs.length === 0) verified++;
       else failures.push(problem(p, diffs.join("; ")));
     }
+    if (this.protectedConfig) Object.assign(support, this.protectedConfig);
     if (failures.length) {
       support.verificacion = failures;
       return { ok: false, verified, message: failedMessage(verified, failures.length), pending: prepared.pending, failures, support };
+    }
+    if (barcode === "protegido") {
+      return { ok: false, verified, message: `Los productos quedaron bien en la balanza. ${BRANCH_CONFIG_PROTECTED}`, pending: opts.allowReplace ? [] : prepared.pending, support };
     }
     if (barcode !== "ok") {
       return { ok: false, verified, message: BARCODE_FAILED, pending: prepared.pending, support };
@@ -286,7 +358,7 @@ export class KretzSession implements ScaleSession {
   }
 
   /** Report: formato del código de barras (1070) + Mostrador leyendo ese formato. "ok" solo si la balanza lo aceptó. */
-  private async configureBarcode(onProgress: ProgressFn): Promise<"ok" | "rechazada" | "sin_respuesta" | "error"> {
+  private async configureBarcode(onProgress: ProgressFn): Promise<"ok" | "rechazada" | "sin_respuesta" | "error" | "protegido"> {
     if (!this.io.configureReportBarcode) return "ok";
     onProgress("sincronizar", "Configurando el código de barras de las etiquetas…");
     try {
@@ -295,15 +367,44 @@ export class KretzSession implements ScaleSession {
       // empresas que imprimen igual que por red (REPORT_PLU5_WEIGHT_COMPANIES, Oliem).
       const net = this.plu5();
       const pesos = !net && !this.ctx.weightBarcode && this.ctx.pesosBarcode === true;
+      const saveBranch = this.ctx.online && this.ctx.branchId && this.io.saveItemConfig ? this.io.saveItemConfig : null;
+      if (saveBranch) {
+        // C1: con otra balanza en el local y un formato distinto, no se toca nada: ni el de la sucursal ni el de esta
+        // balanza (si la balanza cambiara su etiqueta y Mostrador no, sus etiquetas se cobrarían mal).
+        const g = await this.branchConfigDecision(net ? KRETZ_PLU5_WEIGHT_CONFIG : pesos ? REPORT_PESOS_SCALE_CONFIG : AURA_ITEM_SCALE_CONFIG);
+        if (!g.decision.allowed) {
+          this.protectedConfig = g.support;
+          return "protegido";
+        }
+      }
       const r = await this.io.configureReportBarcode(net ? REPORT_NET_BARCODE_CONFIG : this.ctx.weightBarcode ? REPORT_WEIGHT_BARCODE_CONFIG : pesos ? REPORT_PESOS_BARCODE_CONFIG : undefined);
       if (r === "ok") {
-        if (this.ctx.online && this.ctx.branchId && this.io.saveItemConfig) await this.io.saveItemConfig(this.ctx.branchId, net ? KRETZ_PLU5_WEIGHT_CONFIG : pesos ? REPORT_PESOS_SCALE_CONFIG : undefined);
+        if (saveBranch) await saveBranch(this.ctx.branchId!, net ? KRETZ_PLU5_WEIGHT_CONFIG : pesos ? REPORT_PESOS_SCALE_CONFIG : undefined);
         markBarcodeConfigured(this.barcodeKey());
       }
       return r;
     } catch {
       return "error";
     }
+  }
+
+  /**
+   * C1: ¿se puede guardar `next` como formato de etiqueta de la sucursal? Lista de balanzas: la del contexto, o la de la
+   * base (si no se puede leer, no se guarda). Sin forma de pedirla (pruebas, demo) se guarda como antes.
+   */
+  private async branchConfigDecision(next: ScaleConfig, known?: ScaleConfig | null): Promise<{ decision: BranchConfigDecision; support: Record<string, unknown> }> {
+    const ctx = this.ctx as KretzContext;
+    let scales: BranchScaleRef[] | null = [];
+    if (ctx.branchScales) scales = ctx.branchScales;
+    else if (this.io.listBranchScales && ctx.branchId) scales = await this.io.listBranchScales(ctx.branchId).catch(() => null);
+    let existing: ScaleConfig | null | undefined = known;
+    let decision = mayWriteBranchScaleConfig({ scales, currentKey: ctx.scaleKey ?? null, existing, next });
+    // El formato guardado solo hace falta si hay otra balanza: se lee recién ahí.
+    if (!decision.allowed && existing === undefined && this.io.loadBranchConfig && ctx.branchId) {
+      existing = await this.io.loadBranchConfig(ctx.branchId).catch(() => undefined);
+      decision = mayWriteBranchScaleConfig({ scales, currentKey: ctx.scaleKey ?? null, existing, next });
+    }
+    return { decision, support: branchConfigSupport(decision, next, existing, scales) };
   }
 
   /** Etiqueta "21" + producto de 5 + peso: la Report por red, o una por USB de una empresa que imprime igual (Oliem). */
@@ -323,14 +424,36 @@ export class KretzSession implements ScaleSession {
     return preflightProducts(this.ctx.products, limits);
   }
 
+  /** Formato del código de barras (1070) que recibe esta Aura: con inicio 22 en los locales que lo tienen. */
+  private auraBarcodeConfig(): string {
+    return this.ctx.branchId && AURA_PREFIX_22_BRANCHES.has(this.ctx.branchId) ? AURA_BARCODE_CONFIG_22 : AURA_BARCODE_CONFIG;
+  }
+
+  /** Marca "1070 confirmado" de ESTA Aura (misma lista que la Report, con otra clave). */
+  private auraBarcodeKey(): string {
+    const id = this.identity();
+    return `${this.ctx.scaleKey ?? ""}|${String(id.letter ?? "")}${String(id.equipment ?? "")}|aura:${this.auraBarcodeConfig()}`;
+  }
+
   private barcodeKey(): string {
     const id = this.identity();
     // Por red se marca aparte: así una NX que ya recibió el 2-3-7 vuelve a recibir su formato.
     return `${this.ctx.scaleKey ?? ""}|${String(id.letter ?? "")}${String(id.equipment ?? "")}${this.plu5() ? `|${REPORT_NET_BARCODE_CONFIG}` : this.ctx.weightBarcode ? `|${REPORT_WEIGHT_BARCODE_CONFIG}` : this.ctx.pesosBarcode ? `|${REPORT_PESOS_BARCODE_CONFIG}` : ""}`;
   }
 
+  /** Fin de la sesión: la Report suelta el puerto y se olvida (C21). La Aura ya lo cierra en cada operación. */
   async close(): Promise<void> {
-    // El puerto lo maneja scale-serial (lo cierra solo cuando queda quieto).
+    await this.release(true);
+  }
+
+  /** Report por cable: cierra el puerto (lo libera para iTegra); por red no hay nada que soltar. */
+  private async release(forget: boolean): Promise<void> {
+    if (this.model === "kretz-aura" || this.diagnostic.red === true || !this.io.releasePort) return;
+    try {
+      await this.io.releasePort({ forget });
+    } catch {
+      // no frena nada
+    }
   }
 
   identity(): Record<string, unknown> {
@@ -349,6 +472,13 @@ export function isFactoryPlaceholder(name: string | null | undefined): boolean {
   // De fábrica: "NOMBRE" o "NOMBRE 00002" (con el número de PLU), real M2 Alimentos 24/10.
   return n === "" || /^NOMBRE *\d*$/.test(n);
 }
+
+/** C8: una lectura de la balanza con error en el medio. Nada se escribió. */
+export const READ_INCOMPLETE = "No se pudo leer toda la balanza. No se cambió nada. Revisá el cable y tocá \"Conectar balanza\" de nuevo; si se repite, soporte ya recibió el detalle.";
+
+/** C13: la Aura no confirmó el 1070. */
+export const AURA_BARCODE_FAILED =
+  "Los productos quedaron, pero el código de barras no: la balanza no aceptó el ajuste del código de barras de los tickets y Mostrador puede no leerlos. Tocá \"Volver a sincronizar\"; si se repite, soporte ya recibió el detalle.";
 
 const BARCODE_FAILED =
   "Los productos quedaron bien, pero la balanza no aceptó el formato del código de barras: las etiquetas pueden salir sin código. Tocá \"Volver a sincronizar\"; si se repite, soporte ya recibió el detalle.";
