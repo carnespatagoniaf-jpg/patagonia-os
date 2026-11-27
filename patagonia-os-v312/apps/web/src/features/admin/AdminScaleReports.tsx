@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Scale } from "lucide-react";
 import { listScaleSupportReports, setScaleSupportReportResolved, type ScaleSupportReport } from "./admin-service";
 import { Alert, Badge, Button, Card, EmptyState, useConfirm } from "./ui/components";
+import { redactSensitive } from "./scale-center";
 
 /** Reportes de balanzas que mandan los clientes con "Enviar a soporte"
  * (pantalla Balanzas). Las balanzas se prueban en el local del cliente sin
