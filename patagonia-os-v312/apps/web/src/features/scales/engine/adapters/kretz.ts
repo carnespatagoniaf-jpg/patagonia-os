@@ -17,6 +17,7 @@ import {
   reportDifferences,
   setReportLabelCode,
   runAuraSyncOnScale,
+  ScaleReadError,
   setScaleSerialPort,
   syncProductsToScale,
   type ReportProductFields,
@@ -156,7 +157,8 @@ export class KretzSession implements ScaleSession {
     if (this.model === "kretz-aura") {
       onProgress("leer", "Leyendo los productos de tu balanza…");
       const list = await this.io.readAuraList((t) => onProgress("leer", "Leyendo los productos de tu balanza…", ...progressNumbers(t)));
-      if (!list.complete) throw new FriendlyError("no_contesta", list.detail);
+      // Lectura incompleta (un error en el medio de la lista): no se arma ningún plan, así nada parece "libre" (C8).
+      if (!list.complete) return this.readIncomplete(list.detail, list.records.length);
       onProgress("comparar", "Comparando con los productos de Patagonia…");
       const products = active.map((p) => ({ code: p.code, name: p.name, byWeight: p.unit === "kg", price: p.priceRetail }));
       const records = list.records.map((r) => r.data);
@@ -196,7 +198,14 @@ export class KretzSession implements ScaleSession {
     let same = 0;
     for (const [i, p] of plan.toSend.entries()) {
       onProgress("leer", "Leyendo los productos de tu balanza…", i + 1, plan.toSend.length);
-      const current = await this.io.readReport(p.code);
+      let current: ReportProductFields | null;
+      try {
+        current = await this.io.readReport(p.code);
+      } catch (err) {
+        // La balanza contestó con un error al leer ese número: no se sabe qué tiene, así que no se escribe nada (C8).
+        if (err instanceof ScaleReadError) return this.readIncomplete(err.message, i);
+        throw err;
+      }
       const expected = expectedReportProduct(p);
       // Un número con el producto de ejemplo de fábrica ("NOMBRE", o sin nombre) cuenta como libre:
       // una Report LT recién sacada de la caja lo trae así (real: M2 Alimentos, 24/10, PLU 1 "NOMBRE" a $955481 por unidad).
@@ -219,6 +228,13 @@ export class KretzSession implements ScaleSession {
     return { ...this.base(), scaleProducts: plan.toSend.length, ready: same, writes, pending, upToDate: writes === 0 && barcodeReady && !showLabel, skipped, warnings: check.warnings, notes };
   }
 
+  /** No se pudo leer toda la balanza: frena antes de escribir (sin botón de sincronizar) y va a soporte. */
+  private readIncomplete(detail: string, read: number): PreparedSync {
+    this.state = null;
+    this.diagnostic.lectura_incompleta = { detalle: detail, leidos: read };
+    return { ...this.base(), canWrite: false, scaleProducts: read, ready: 0, writes: 0, pending: [], upToDate: false, blocker: READ_INCOMPLETE, notes: [detail] };
+  }
+
   async sync(prepared: PreparedSync, onProgress: ProgressFn, opts: { allowReplace?: boolean } = {}): Promise<SyncOutcome> {
     const st = this.state;
     if (!st || !prepared.canWrite || prepared.blocker) throw new Error("primero hay que leer la balanza");
@@ -231,7 +247,8 @@ export class KretzSession implements ScaleSession {
         const failures: ProductProblem[] = at
           ? [{ code: String(at.plu), name: product?.name ?? "", reason: at.readBack === null ? "la balanza no lo devolvió al releerlo" : "al releerlo en la balanza no quedó igual a Patagonia" }]
           : [];
-        return { ok: false, verified: r.written.length, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, failures, support: { verdict: r.verdict, detail: r.detail, stoppedAt: r.stoppedAt } };
+        const nothingWritten = r.verdict === "lectura_incompleta" && r.written.length === 0;
+        return { ok: false, verified: r.written.length, message: nothingWritten ? READ_INCOMPLETE : FRIENDLY_MESSAGES.frenado, pending: prepared.pending, failures, support: { verdict: r.verdict, detail: r.detail, stoppedAt: r.stoppedAt } };
       }
       // La Aura imprime el TOTAL en los tickets con varios productos (manual Aura Eco §7.1.7; el código por producto
       // del ticket de suma no existe: real Pollo y mar 15/10). En Pre-Empaque (ALT + 7) imprime un ticket por producto
@@ -349,6 +366,9 @@ export function isFactoryPlaceholder(name: string | null | undefined): boolean {
   // De fábrica: "NOMBRE" o "NOMBRE 00002" (con el número de PLU), real M2 Alimentos 24/10.
   return n === "" || /^NOMBRE *\d*$/.test(n);
 }
+
+/** C8: una lectura de la balanza con error en el medio. Nada se escribió. */
+export const READ_INCOMPLETE = "No se pudo leer toda la balanza. No se cambió nada. Revisá el cable y tocá \"Conectar balanza\" de nuevo; si se repite, soporte ya recibió el detalle.";
 
 const BARCODE_FAILED =
   "Los productos quedaron bien, pero la balanza no aceptó el formato del código de barras: las etiquetas pueden salir sin código. Tocá \"Volver a sincronizar\"; si se repite, soporte ya recibió el detalle.";

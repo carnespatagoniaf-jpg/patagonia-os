@@ -26,6 +26,7 @@ import {
   isScalePortPaired,
   isScaleSerialSupported,
   planScaleSync,
+  readReportProduct,
   readScalePlu,
   saveScaleSerialSettings,
   sendScalePing,
@@ -264,7 +265,7 @@ export function ScaleSyncPanel({ products, onDownloadCsv }: { products: ScaleSyn
     try {
       const r = await readAuraListOnScale((text) => setScaleLog(text));
       setAuraList({ records: r.records, complete: r.complete, detail: r.detail, readAt: new Date().toISOString() });
-      report(r.complete ? `Listo: ${r.detail}.` : `No se pudo leer la balanza completa: ${r.detail}. No se va a mandar nada hasta poder leerla.`);
+      report(r.complete ? `Listo: ${r.detail}.` : `No se pudo leer toda la balanza. No se cambió nada (${r.detail}). No se va a mandar nada hasta poder leerla entera.`);
     } catch (err) {
       report(err instanceof Error ? err.message : "No se pudo leer la balanza.");
     } finally {
@@ -567,6 +568,17 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
     setScaleLog("");
     setScaleSyncProgress({ done: 0, total: 0 });
     try {
+      // Primero se lee cada número (solo lectura): si la balanza contesta con un error en alguno, no se escribe nada (C8).
+      const toRead = planScaleSync(products).toSend;
+      for (const [i, p] of toRead.entries()) {
+        setScaleLog(`Leyendo la balanza antes de mandar… ${i + 1} de ${toRead.length}`);
+        try {
+          await readReportProduct(p.code);
+        } catch (err) {
+          report(`No se pudo leer toda la balanza. No se cambió nada (${err instanceof Error ? err.message : String(err)}).`);
+          return;
+        }
+      }
       const result = await syncProductsToScale(products, (done, total) => setScaleSyncProgress({ done, total }));
       const okCount = result.responseCodeCounts["01"] ?? 0;
       const failedCount = result.attempted - okCount;

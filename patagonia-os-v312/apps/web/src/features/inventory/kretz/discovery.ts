@@ -606,6 +606,17 @@ export interface PluListResult {
   lastDetail: string;
 }
 
+/**
+ * Respuestas a 5005 que quieren decir "no hay más productos": "20" (registro inexistente, documento Report Nx) y "40"
+ * (no hay registros: lo que contesta la Aura REAL al final de la lista, aura-real-frames.test.ts). Cualquier otra es un
+ * error de lectura, nunca el fin.
+ */
+export const KRETZ_LIST_END_CODES: ReadonlySet<string> = new Set(["20", "40"]);
+
+export function isKretzListEnd(code: string | null | undefined): boolean {
+  return code !== null && code !== undefined && KRETZ_LIST_END_CODES.has(code);
+}
+
 /** Lee todos los PLU con 5005 sobre un puerto YA abierto (y con el 0001 ya contestado). Solo lectura. */
 export async function readPluList(
   port: SerialPort,
@@ -628,12 +639,18 @@ export async function readPluList(
     }
     const arg = String(after).padStart(6, "0");
     let ex = await sendRead(port, log, "leer PLU", responder.link, responder.deviceType, responder.equipmentId, "5005", arg, timeout);
-    if (!ex.kretz) ex = await sendRead(port, log, "leer PLU (reintento)", responder.link, responder.deviceType, responder.equipmentId, "5005", arg, timeout);
+    // Sin respuesta o con un error ("10" checksum, "60"…): se reintenta UNA vez esa misma lectura.
+    if (!ex.kretz || (ex.kretz.code !== "01" && !isKretzListEnd(ex.kretz.code))) {
+      ex = await sendRead(port, log, "leer PLU (reintento)", responder.link, responder.deviceType, responder.equipmentId, "5005", arg, timeout);
+    }
     if (log.length > 40) log.splice(20, 1); // guardar los primeros 20 y los últimos, no miles
     result.lastCode = ex.kretz?.code ?? null;
     if (!ex.kretz || ex.kretz.code !== "01") {
-      result.stoppedBy = ex.kretz ? "fin" : "error";
-      result.lastDetail = ex.kretz ? describeKretzCode(ex.kretz.code) : ex.rx ? `respuesta no reconocida: ${ex.rx}` : "sin respuesta";
+      // Solo "20"/"40" son el fin. Antes cualquier código era "fin": los PLU siguientes parecían libres y el envío
+      // los creaba encima de productos reales (auditoría C8).
+      const end = ex.kretz !== null && isKretzListEnd(ex.kretz.code);
+      result.stoppedBy = end ? "fin" : "error";
+      result.lastDetail = ex.kretz ? `${end ? "" : `después del PLU ${after} la balanza contestó ${ex.kretz.code}: `}${describeKretzCode(ex.kretz.code)}` : ex.rx ? `respuesta no reconocida: ${ex.rx}` : "sin respuesta";
       break;
     }
     const plu = Number(ex.kretz.data.slice(0, 6));
