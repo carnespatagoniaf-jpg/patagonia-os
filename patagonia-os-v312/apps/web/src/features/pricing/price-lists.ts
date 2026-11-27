@@ -56,6 +56,17 @@ export function scaleAmountForList(scaleAmount: number, retailPrice: number, lis
   return round2((scaleAmount * listPrice) / retailPrice);
 }
 
+/**
+ * Lista con la que se cobra una venta a cuenta (Clientes, migración 213), igual que customer_branch_price en SQL:
+ * la lista del cliente si tiene una activa; si no, la zona de precios del local donde se carga; si no, minorista
+ * (null). La zona se usa por su id aunque las listas no se hayan cargado, porque la base la cobra igual.
+ */
+export function chargePriceListId(lists: PriceList[], customerListId: string | null | undefined, zoneId: string | null | undefined): string | null {
+  const own = activeList(lists, customerListId);
+  if (own && !own.isZone) return own.id;
+  return zoneId || null;
+}
+
 /** Lista activa por id (ignora las desactivadas: se cobran a minorista). */
 export function activeList(lists: PriceList[], listId: string | null | undefined): PriceList | undefined {
   if (!listId) return undefined;

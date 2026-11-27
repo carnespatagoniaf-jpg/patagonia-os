@@ -32,8 +32,8 @@ import { can, canAccessPage, planAllows } from "../auth/permissions";
 import { ChequeFields, EMPTY_CHEQUE, readChequeForm, type ChequeForm } from "../cheques/ChequeFields";
 import { receiveCustomerCheque } from "../cheques/cheques-service";
 import { cleanCuit } from "../cheques/cheque-logic";
-import { listPriceLists, setCustomerPriceList } from "../pricing/price-lists-service";
-import { activeList, productPrice, sellingLists, type PriceList } from "../pricing/price-lists";
+import { getBranchZone, listPriceLists, setCustomerPriceList } from "../pricing/price-lists-service";
+import { activeList, chargePriceListId, productPrice, sellingLists, type PriceList } from "../pricing/price-lists";
 import { DEFAULT_SCALE_CONFIG, getBranchScaleConfig, type ScaleConfig } from "../sale/scale-config-service";
 import { cachedScaleConfig, scaleConfigLoaded, scaleConfigOnError } from "../sale/scale-config-cache";
 import { useBoxLabelFormats } from "../sale/box-label-service";
@@ -170,10 +170,24 @@ export function Customers() {
       .catch(() => setScaleConfig(scaleConfigOnError(branchId).config));
   }, [branchId]);
 
+  // Zona de precios del local (migración 192): sin lista propia, el cliente paga el precio de la zona del local donde
+  // se carga la venta, igual que en Mostrador (migración 213, Della Finca 26/11).
+  const [branchZone, setBranchZone] = useState<{ id: string; name: string } | null>(null);
+
   useEffect(() => {
     if (!branchId) return;
+    let cancelled = false;
     void listProductsForBranch(branchId).then(setProducts);
-    if (isSupabaseConfigured) void listPriceLists().then((l) => setPriceLists(sellingLists(l))).catch(() => setPriceLists([]));
+    if (isSupabaseConfigured) {
+      void Promise.all([listPriceLists().catch(() => [] as PriceList[]), getBranchZone(branchId).catch(() => null)]).then(([lists, zoneId]) => {
+        if (cancelled) return;
+        setPriceLists(sellingLists(lists));
+        setBranchZone(zoneId ? { id: zoneId, name: lists.find((l) => l.id === zoneId)?.name ?? "del local" } : null);
+      });
+    }
+    return () => {
+      cancelled = true;
+    };
   }, [branchId]);
 
   useEffect(() => {
@@ -243,7 +257,7 @@ export function Customers() {
         return current.map((l) => (l.key === existing.key ? { ...l, quantity: l.quantity + qty } : l));
       }
       const key = current.some((l) => l.key === product.id) ? `${product.id}-${Date.now()}` : product.id;
-      return [...current, { key, productId: product.id, name: product.name, unit: product.unit, quantity: qty, unitPrice: productPrice(product, customerList?.id) }];
+      return [...current, { key, productId: product.id, name: product.name, unit: product.unit, quantity: qty, unitPrice: productPrice(product, chargeListId) }];
     });
     setChargeSearch("");
   }
@@ -333,17 +347,20 @@ export function Customers() {
   const selectedCustomer = customers.find((c) => c.id === selectedId) ?? null;
   const activePriceLists = priceLists.filter((l) => l.active);
   const customerList = activeList(priceLists, selectedCustomer?.priceListId);
+  // Precio de la venta a cuenta: lista del cliente → zona del local → minorista (igual que la base).
+  const chargeListId = chargePriceListId(priceLists, selectedCustomer?.priceListId, branchZone?.id);
+  const chargePriceName = customerList?.name ?? (branchZone ? `zona ${branchZone.name}` : "Minorista");
   const canSetPriceList = activePriceLists.length > 0 && (profile?.role === "owner" || profile?.role === "admin");
 
-  // Si cambia el cliente (o su lista), los productos ya cargados en la venta toman su precio.
+  // Si cambia el cliente (o su lista, o la zona del local), los productos ya cargados en la venta toman su precio.
   useEffect(() => {
     setChargeCart((current) =>
       current.map((l) => {
         const product = l.productId ? products.find((p) => p.id === l.productId) : undefined;
-        return product ? { ...l, unitPrice: productPrice(product, customerList?.id) } : l;
+        return product ? { ...l, unitPrice: productPrice(product, chargeListId) } : l;
       })
     );
-  }, [customerList?.id, products]);
+  }, [chargeListId, products]);
 
   // Datos fiscales del cliente (los de su última factura) para no volver a escribirlos.
   useEffect(() => {
@@ -955,7 +972,7 @@ export function Customers() {
                       selectedCustomer.number !== undefined ? `N.º ${selectedCustomer.number}` : "",
                       selectedCustomer.phone ?? "",
                       [selectedCustomer.locality, selectedCustomer.province].filter(Boolean).join(", "),
-                      activePriceLists.length > 0 ? `Precio ${customerList?.name ?? "Minorista"}` : "",
+                      activePriceLists.length > 0 || branchZone ? `Precio ${chargePriceName}` : "",
                       selectedCustomer.paymentTermDays ? `Paga a ${selectedCustomer.paymentTermDays} días` : ""
                     ].filter(Boolean).join(" · ")}
                   </p>
@@ -1049,7 +1066,7 @@ export function Customers() {
                           {chargeMatches.map((product) => (
                             <button key={product.id} type="button" className="pos-dropdown-item" onClick={() => addProductToCharge(product)}>
                               <span>{product.name} <span className="muted">({UNIT_LABELS[product.unit]})</span></span>
-                              <strong>{formatMoney(productPrice(product, customerList?.id))}</strong>
+                              <strong>{formatMoney(productPrice(product, chargeListId))}</strong>
                             </button>
                           ))}
                         </div>
