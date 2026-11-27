@@ -10,7 +10,7 @@
     "build": "tsc -b && vite build",
     "typecheck": "tsc --noEmit",
     "lint": "eslint src --ext .ts,.tsx",
-    "test": "node --import tsx --test --test-timeout=240000 \"src/**/*.test.ts\""
+    "test": "node --import tsx --test --test-force-exit --test-timeout=240000 \"src/**/*.test.ts\""
   },
   "dependencies": {
     "@patagonia/domain": "3.0.0",
