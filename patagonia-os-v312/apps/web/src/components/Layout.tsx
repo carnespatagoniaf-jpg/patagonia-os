@@ -1,6 +1,7 @@
 import { useState, type ReactNode } from "react";
-import { LogOut, Menu } from "lucide-react";
+import { LogOut, Menu, PlayCircle } from "lucide-react";
 import { navGroups, visibleItem, type VisibleItem } from "./nav";
+import { TUTORIALS_PLAYLIST, tutorialsFor, youtubeUrl } from "./tutorials";
 import { useAuth } from "../features/auth/AuthProvider";
 import { PLAN_LABELS, canAccessPage, planAllows, profilePlan, type Page } from "../features/auth/permissions";
 
@@ -164,6 +165,31 @@ function ChangePasswordForm() {
   );
 }
 
+/** "Ver video" arriba de cada pantalla: abre en YouTube el tutorial de esa pantalla (y los otros, si hay más de uno). */
+function TutorialLinks({ page }: { page: Page }) {
+  const videos = tutorialsFor(page);
+  if (videos.length === 0) return null;
+  const [main, ...others] = videos;
+  return (
+    <div className="tutorial-links no-print">
+      <a className="tutorial-link" href={youtubeUrl(main)} target="_blank" rel="noopener noreferrer">
+        <PlayCircle size={16} /> Ver video: {main.title}
+      </a>
+      {others.length > 0 && (
+        <details className="tutorial-more">
+          <summary>Más videos</summary>
+          <div className="tutorial-more-list">
+            {others.map((v) => (
+              <a key={v.youtubeId} href={youtubeUrl(v)} target="_blank" rel="noopener noreferrer"><PlayCircle size={14} /> {v.title}</a>
+            ))}
+            <a href={TUTORIALS_PLAYLIST} target="_blank" rel="noopener noreferrer">Todos los videos</a>
+          </div>
+        </details>
+      )}
+    </div>
+  );
+}
+
 /** El rol en castellano (antes se veía "owner" o "cashier"). */
 const ROLE_LABELS: Record<string, string> = { owner: "Dueño", admin: "Administrador", manager: "Encargado", cashier: "Cajero/a", production: "Producción", readonly: "Solo lectura", accountant: "Contador" };
 function roleLabel(role: string | null | undefined): string {
@@ -260,6 +286,7 @@ export function Layout({ page, onPageChange, children }: Props) {
             ))}
           </div>
         )}
+        <TutorialLinks page={page} />
         {children}
       </main>
       {import.meta.env.VITE_HELP_CHAT === "1" && planAllows(profile, "estandar") && <HelpChat />}

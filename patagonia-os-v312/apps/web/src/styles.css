@@ -1186,6 +1186,15 @@ input[type="file"], main textarea { max-width: 100%; }
 /* Pestañas de un botón del menú que junta varias pantallas (Stock/Recetas, Bancos, Contable/Facturas, Reportes, Importar/Exportar) */
 .page-tabs { display: flex; gap: 6px; flex-wrap: wrap; margin: 0 0 14px; border-bottom: 1px solid #e5e7eb; }
 .page-tab { background: transparent; border: none; border-bottom: 3px solid transparent; border-radius: 0; padding: 8px 14px; font-weight: 600; color: #5b6475; cursor: pointer; }
+/* "Ver video" arriba de cada pantalla (tutoriales de YouTube). */
+.tutorial-links { display: flex; justify-content: flex-end; align-items: center; gap: 10px; margin: 0 0 8px; font-size: 13px; position: relative; }
+.tutorial-link { display: inline-flex; align-items: center; gap: 6px; color: #b3261e; font-weight: 600; text-decoration: none; padding: 4px 10px; border-radius: 999px; background: #fdecea; }
+.tutorial-link:hover { background: #f9d6d2; }
+.tutorial-more summary { cursor: pointer; color: #5b6475; font-weight: 600; list-style: none; }
+.tutorial-more summary::-webkit-details-marker { display: none; }
+.tutorial-more-list { position: absolute; right: 0; top: 30px; z-index: 30; display: flex; flex-direction: column; gap: 2px; min-width: 240px; padding: 8px; background: #fff; border: 1px solid #e5e7eb; border-radius: 10px; box-shadow: 0 8px 24px rgba(0,0,0,.12); }
+.tutorial-more-list a { display: flex; align-items: center; gap: 6px; padding: 6px 8px; border-radius: 6px; color: #1f2430; text-decoration: none; }
+.tutorial-more-list a:hover { background: #f3f4f6; }
 .page-tab:hover { color: #1d2330; }
 .page-tab.active { color: #8e1f1f; border-bottom-color: #8e1f1f; }
 
