@@ -438,7 +438,7 @@ export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrat
     // Con el formato de la balanza, un producto sin precio en Patagonia se carga con el precio de lista 1 de la
     // balanza (provisorio: el importe real sale del TOTAL del ticket).
     const scanProducts = systelTicketPilot && systelConfig ? withScalePrices(products, mergedPerPlu(systelTemplatesList())) : products;
-    const label = resolveScaleLabel(raw, { products: scanProducts, config: systelConfig ?? scaleConfig, calibrated: scaleCalibrated || !!systelConfig, setups: papers.setups });
+    const label = resolveScaleLabel(raw, { products: scanProducts, config: systelConfig ?? scaleConfig, calibrated: scaleCalibrated || !!systelConfig, setups: papers.setups, zoneListId });
     if (label.type === "systel") {
       // La lee useScalePapers (avisos de etiqueta repetida, precio, carrito).
       papers.handleScan(raw);

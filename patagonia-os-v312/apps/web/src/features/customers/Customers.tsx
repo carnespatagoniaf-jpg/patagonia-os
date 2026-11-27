@@ -35,9 +35,12 @@ import { cleanCuit } from "../cheques/cheque-logic";
 import { getBranchZone, listPriceLists, setCustomerPriceList } from "../pricing/price-lists-service";
 import { activeList, chargePriceListId, productPrice, sellingLists, type PriceList } from "../pricing/price-lists";
 import { DEFAULT_SCALE_CONFIG, getBranchScaleConfig, type ScaleConfig } from "../sale/scale-config-service";
-import { cachedScaleConfig, scaleConfigLoaded, scaleConfigOnError } from "../sale/scale-config-cache";
+import { cachedScaleConfig, scaleConfigLoaded, scaleConfigOnError, type ScaleConfigState } from "../sale/scale-config-cache";
 import { useBoxLabelFormats } from "../sale/box-label-service";
-import { resolveChargeScan } from "./charge-scan";
+import { chargeScanFromChoice, resolveChargeScan, type ChargeScan } from "./charge-scan";
+import { ScaleLabelChoice } from "../sale/ScaleLabelChoice";
+import type { LabelChoiceOption } from "../sale/scale-label-choice";
+import { loadScaleSetups, type ScaleSetup } from "../scales/sale/scale-sale-service";
 
 /** Valor del selector "Entra a…" para cobrar con cheque (migración 150). */
 const CHEQUE_OPTION = "__cheque";
@@ -161,14 +164,31 @@ export function Customers() {
   // Lectura de códigos de barra como en Mostrador: formato de etiquetas de la balanza de la sucursal (si falla la
   // carga, el último guardado en esta PC; si no hay, no se leen etiquetas, solo códigos exactos de producto).
   const [scaleConfig, setScaleConfig] = useState<ScaleConfig>(DEFAULT_SCALE_CONFIG);
+  const [scaleCalibrated, setScaleCalibrated] = useState(false);
   useEffect(() => {
     if (!branchId) return;
+    const apply = (st: ScaleConfigState) => {
+      setScaleConfig(st.config);
+      setScaleCalibrated(st.calibrated);
+    };
     const cached = cachedScaleConfig(branchId);
-    if (cached) setScaleConfig(cached.config);
+    if (cached) apply(cached);
     void getBranchScaleConfig(branchId)
-      .then((config) => setScaleConfig(scaleConfigLoaded(branchId, config).config))
-      .catch(() => setScaleConfig(scaleConfigOnError(branchId).config));
+      .then((config) => apply(scaleConfigLoaded(branchId, config)))
+      .catch(() => apply(scaleConfigOnError(branchId)));
   }, [branchId]);
+  // Las balanzas "artículos + TOTAL" (Systel) de la sucursal, como en Mostrador (C4): mismo resolvedor, misma regla.
+  const [scaleSetups, setScaleSetups] = useState<ScaleSetup[]>([]);
+  useEffect(() => {
+    if (!branchId || !isSupabaseConfigured) return;
+    let alive = true;
+    void loadScaleSetups(branchId).then((x) => alive && setScaleSetups(x)).catch(() => alive && setScaleSetups([]));
+    return () => {
+      alive = false;
+    };
+  }, [branchId]);
+  /** Etiqueta ambigua esperando que la persona elija qué es (regla de oro). */
+  const [chargeLabelChoice, setChargeLabelChoice] = useState<{ options: LabelChoiceOption[]; note?: string } | null>(null);
 
   // Zona de precios del local (migración 192): sin lista propia, el cliente paga el precio de la zona del local donde
   // se carga la venta, igual que en Mostrador (migración 213, Della Finca 26/11).
@@ -220,7 +240,19 @@ export function Customers() {
   function handleChargeSearchEnter() {
     const raw = chargeSearch.trim();
     if (!raw) return;
-    const scan = resolveChargeScan(raw, products, scaleConfig, boxFormats);
+    setChargeLabelChoice(null);
+    const scan = resolveChargeScan(raw, products, scaleConfig, boxFormats, { calibrated: scaleCalibrated, setups: scaleSetups, zoneListId: branchZone?.id ?? null });
+    applyChargeScan(scan);
+  }
+
+  function applyChargeScan(scan: ChargeScan) {
+    const raw = chargeSearch.trim();
+    if (scan.type === "choose") {
+      setChargeLabelChoice({ options: scan.options, note: scan.note });
+      setMessage("No se agregó nada: la etiqueta se puede leer de dos maneras. Elegí cuál es mirando el papel, o cargalo a mano.");
+      setChargeSearch("");
+      return;
+    }
     if (scan.type === "error") {
       setMessage(scan.message);
       setChargeSearch("");
@@ -235,6 +267,7 @@ export function Customers() {
       setMessage(`Agregado: ${scan.detail}.`);
       return;
     }
+    if (!raw) return;
     if (chargeMatches.length === 1) {
       addProductToCharge(chargeMatches[0]);
       return;
@@ -1074,6 +1107,21 @@ export function Customers() {
                     </div>
                     <button className={`secondary${showManualForm ? " active" : ""}`} onClick={() => setShowManualForm((v) => !v)}>+ Sin código</button>
                   </div>
+                  {chargeLabelChoice && (
+                    <ScaleLabelChoice
+                      options={chargeLabelChoice.options}
+                      note={chargeLabelChoice.note}
+                      onPick={(i) => {
+                        const option = chargeLabelChoice.options[i];
+                        setChargeLabelChoice(null);
+                        if (option) applyChargeScan(chargeScanFromChoice(option));
+                      }}
+                      onManual={() => {
+                        setChargeLabelChoice(null);
+                        setMessage("No se agregó nada: buscá el producto por nombre y cargá lo que dice el papel.");
+                      }}
+                    />
+                  )}
                   {products.length === 0 && (
                     <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>Todavía no cargaste productos: usá "+ Sin código" para cargar la venta igual.</p>
                   )}

@@ -1,4 +1,5 @@
 import type { Product } from "@patagonia/domain";
+import { productPrice } from "../pricing/price-lists";
 import { formatMoney } from "../shifts/format";
 import { decodeAcross } from "../scales/sale/multi-decode";
 import { addScannedItem, describeItem, emptyPaper } from "../scales/sale/paper";
@@ -34,6 +35,16 @@ export interface LabelContext {
   calibrated: boolean;
   /** Balanzas "artículos + TOTAL" activas de la sucursal. */
   setups: ScaleSetup[];
+  /**
+   * Zona de precios del local (migración 192): la balanza del local tiene ESOS precios (Stock le manda los de la zona),
+   * así que los kilos de una etiqueta con importe salen de ahí, en Mostrador y en Clientes (C4). null = precio general.
+   */
+  zoneListId?: string | null;
+}
+
+/** Precio con el que imprimió la balanza del local: el de la zona si tiene, si no el general. */
+export function scalePrintedPrice(product: Pick<Product, "priceRetail" | "listPrices">, zoneListId: string | null | undefined): number {
+  return productPrice(product, zoneListId);
 }
 
 export type SystelReading =
@@ -84,6 +95,16 @@ export function systelReading(raw: string, setups: ScaleSetup[], products: Produ
   return { kind: "item", product, quantity: it.quantity, unitPrice, scaleKey: setup.profile.scaleKey, description: describeItem(it) };
 }
 
+function original<T extends { product: Product }>(x: T, byId: Map<string, Product>): T {
+  return { ...x, product: byId.get(x.product.id) ?? x.product };
+}
+
+function withOriginalProducts(r: ScanResolution, byId: Map<string, Product>): ScanResolution {
+  if (r.type === "label" || r.type === "product") return original(r, byId);
+  if (r.type === "ambiguous") return { ...r, options: r.options.map((o) => (o.type === "label" ? original(o, byId) : o)) };
+  return r;
+}
+
 /** Lecturas cobrables de resolveScan (las que pueden competir con otra). */
 function scanCandidates(r: ScanResolution): ScanChoice[] {
   const ok = (c: ScanChoice) => c.type === "ticket_total" || labelWeightProblem(c.product.unit, c.quantity) === null;
@@ -105,8 +126,13 @@ function systelOption(s: Extract<SystelReading, { kind: "item" }>): LabelChoiceO
 
 export function resolveScaleLabel(rawInput: string, ctx: LabelContext): LabelResolution {
   const raw = rawInput.trim();
-  const scan = resolveScan(raw, ctx.products, ctx.config);
-  const asScan = (): LabelResolution => (scan.type === "ambiguous" ? { type: "ambiguous", options: scanChoiceOptions(scan.options), ...(scan.note ? { note: scan.note } : {}) } : { type: "scan", resolution: scan });
+  // Con zona, la lectura usa el precio de la balanza del local; el producto que se devuelve es siempre el original.
+  const zone = ctx.zoneListId ?? null;
+  const byId = new Map(ctx.products.map((p) => [p.id, p]));
+  const scanProducts = zone ? ctx.products.map((p) => ({ ...p, priceRetail: scalePrintedPrice(p, zone) })) : ctx.products;
+  const scan = zone ? withOriginalProducts(resolveScan(raw, scanProducts, ctx.config), byId) : resolveScan(raw, ctx.products, ctx.config);
+  const priceOf = (p: Product) => scalePrintedPrice(p, zone);
+  const asScan = (): LabelResolution => (scan.type === "ambiguous" ? { type: "ambiguous", options: scanChoiceOptions(scan.options, priceOf), ...(scan.note ? { note: scan.note } : {}) } : { type: "scan", resolution: scan });
   // Un código idéntico al de un producto gana sobre cualquier lectura de balanza (como siempre).
   if (ctx.products.some((p) => p.code === raw)) return { type: "scan", resolution: scan };
 
@@ -117,10 +143,10 @@ export function resolveScaleLabel(rawInput: string, ctx: LabelContext): LabelRes
   if (s.kind === "invalid") return others.length > 0 ? asScan() : { type: "systel_message", message: s.message };
   if (s.kind === "blocking") {
     if (others.length === 0) return { type: "systel_message", message: s.message };
-    return { type: "ambiguous", options: scanChoiceOptions(others), note: `También puede ser de la balanza Systel: ${s.message.replace(/^No se agregó: /, "")}` };
+    return { type: "ambiguous", options: scanChoiceOptions(others, priceOf), note: `También puede ser de la balanza Systel: ${s.message.replace(/^No se agregó: /, "")}` };
   }
   // Lectura Systel válida: ¿alguna otra lectura válida dice algo distinto?
   const different = others.filter((c) => !(c.type === "label" && c.product.id === s.product.id && Math.abs(c.quantity - s.quantity) < SAME_KG));
   if (different.length === 0) return { type: "systel", product: s.product, quantity: s.quantity, unitPrice: s.unitPrice, scaleKey: s.scaleKey, description: s.description };
-  return { type: "ambiguous", options: [systelOption(s), ...scanChoiceOptions(different)], ...(scan.type === "ambiguous" && scan.note ? { note: scan.note } : {}) };
+  return { type: "ambiguous", options: [systelOption(s), ...scanChoiceOptions(different, priceOf)], ...(scan.type === "ambiguous" && scan.note ? { note: scan.note } : {}) };
 }
