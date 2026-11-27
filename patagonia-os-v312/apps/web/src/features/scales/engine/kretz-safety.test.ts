@@ -367,3 +367,27 @@ describe("C15: \"Enviar todos\" relee cada producto antes de contarlo como envia
     assert.match(v.notConfirmed[0].reason, /precio quedó \$9000/);
   });
 });
+
+describe("E20: el driver de la Report confirma con el campo de precio, no con cualquier dígito", () => {
+  it("el 2005 no se grabó y el precio mandado ($1000) aparece solo en el campo 19: NO es \"confirmed\"", async () => {
+    localStorage.clear();
+    const scale = new FakeReport();
+    scale.records.set(7, reportRecord(7, "NALGA", 2000, { campo19: 1000 }));
+    scale.ignore.add(7);
+    const { setScaleSerialPort } = await import("../../inventory/scale-serial");
+    const { kretzReportPluDriver } = await import("../drivers/kretz-report-plu");
+    setScaleSerialPort(scale as unknown as SerialPort);
+    const r = await kretzReportPluDriver.writePlu!(scale as unknown as SerialPort, {}, { id: "a", code: "7", name: "NALGA", unit: "kg", priceRetail: 1000 });
+    assert.equal(r.verified, "unconfirmed");
+  });
+
+  it("si quedó grabado igual, sí es \"confirmed\"", async () => {
+    localStorage.clear();
+    const scale = new FakeReport();
+    const { setScaleSerialPort } = await import("../../inventory/scale-serial");
+    const { kretzReportPluDriver } = await import("../drivers/kretz-report-plu");
+    setScaleSerialPort(scale as unknown as SerialPort);
+    const r = await kretzReportPluDriver.writePlu!(scale as unknown as SerialPort, {}, { id: "a", code: "7", name: "NALGA", unit: "kg", priceRetail: 1000 });
+    assert.equal(r.verified, "confirmed");
+  });
+});
