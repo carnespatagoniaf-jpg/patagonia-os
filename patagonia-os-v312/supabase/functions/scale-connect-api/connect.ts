@@ -19,6 +19,33 @@ export const MAX_PROGRESS_BODY = 1024 * 1024;
 export const LONG_POLL_MAX_SEC = 25;
 export const LONG_POLL_STEP_MS = 2500;
 
+/**
+ * Consulta larga de /claim. NUNCA toma un trabajo si el conector ya cortó el pedido: el trabajo quedaría "en curso"
+ * a nombre de una PC que nunca lo recibió, hasta que la base lo diera por perdido (30 minutos sin avance). Visto en la
+ * prueba scale-connect-e2e: el servicio se reinició con una consulta larga abierta y el trabajo que se encoló en esos
+ * segundos se lo llevó la consulta vieja. Por eso se mira el corte ANTES de cada intento, no después.
+ */
+export async function longPollClaim<T>(input: {
+  claim: () => Promise<{ data: T | null; error: unknown }>;
+  waitSec: number;
+  aborted: () => boolean;
+  sleep: (ms: number) => Promise<void>;
+  now?: () => number;
+  stepMs?: number;
+}): Promise<{ job: T | null; error: unknown }> {
+  const now = input.now ?? Date.now;
+  const step = input.stepMs ?? LONG_POLL_STEP_MS;
+  const deadline = now() + input.waitSec * 1000;
+  for (;;) {
+    if (input.aborted()) return { job: null, error: null };
+    const { data, error } = await input.claim();
+    if (error) return { job: null, error };
+    if (data) return { job: data, error: null };
+    if (now() + step > deadline) return { job: null, error: null };
+    await input.sleep(step);
+  }
+}
+
 export const MAX_ITEMS_PER_PROGRESS = 2000;
 export const MAX_ITEMS_PER_FINISH = 10000;
 
