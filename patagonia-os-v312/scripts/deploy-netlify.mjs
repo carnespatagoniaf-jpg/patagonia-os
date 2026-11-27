@@ -9,8 +9,8 @@
 //   node scripts/deploy-netlify.mjs rollback [deployId] -> vuelve a esa versión (sin id: a la publicada antes de la actual)
 //
 // Token en la variable NETLIFY_AUTH_TOKEN (nunca en el chat ni en un archivo).
-// Las redirecciones viven en netlify.toml, que la API no lee: se sube el
-// equivalente como archivo _redirects dentro del deploy.
+// Las redirecciones y los encabezados viven en netlify.toml, que la API no lee: se
+// suben los equivalentes como archivos _redirects y _headers dentro del deploy.
 
 import { createHash } from "node:crypto";
 import fs from "node:fs";
@@ -24,6 +24,8 @@ const API = "https://api.netlify.com/api/v1";
 if (!TOKEN) throw new Error("Falta la variable NETLIFY_AUTH_TOKEN");
 
 const REDIRECTS = "/api/*  /.netlify/functions/:splat  200\n/*  /index.html  200\n";
+// Igual que [[headers]] de netlify.toml: los archivos con huella se guardan un año en el navegador.
+const HEADERS = "/assets/*\n  Cache-Control: public, max-age=31536000, immutable\n";
 
 async function api(method, url, body, headers = {}) {
   const res = await fetch(API + url, {
@@ -51,6 +53,7 @@ const sha1 = (buf) => createHash("sha1").update(buf).digest("hex");
 async function draft() {
   const files = walk(DIST).map((f) => ({ ...f, data: fs.readFileSync(f.full) }));
   files.push({ rel: "/_redirects", data: Buffer.from(REDIRECTS) });
+  files.push({ rel: "/_headers", data: Buffer.from(HEADERS) });
   const digest = Object.fromEntries(files.map((f) => [f.rel, sha1(f.data)]));
 
   const deploy = await api("POST", `/sites/${SITE_ID}/deploys`, JSON.stringify({ files: digest, draft: true }), { "Content-Type": "application/json" });

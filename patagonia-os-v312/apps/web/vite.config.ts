@@ -3,6 +3,8 @@ import react from "@vitejs/plugin-react";
 
 // Qué versión de la web tenía el cliente cuando mandó un diagnóstico a soporte (auditoría de balanzas 28/10).
 const APP_BUILD = new Date().toISOString();
+// Commit publicado: "Publicar" lo lee de /version.json para no volver a publicar lo mismo cada noche.
+const APP_COMMIT = process.env.GITHUB_SHA ?? process.env.COMMIT_REF ?? null;
 
 export default defineConfig({
   plugins: [
@@ -12,7 +14,7 @@ export default defineConfig({
     {
       name: "patagonia-version-json",
       generateBundle() {
-        this.emitFile({ type: "asset", fileName: "version.json", source: JSON.stringify({ build: APP_BUILD }) });
+        this.emitFile({ type: "asset", fileName: "version.json", source: JSON.stringify({ build: APP_BUILD, commit: APP_COMMIT }) });
       }
     }
   ],
