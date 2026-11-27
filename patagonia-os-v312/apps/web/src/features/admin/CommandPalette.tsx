@@ -12,7 +12,7 @@ const TABS: Array<{ key: string; label: string }> = [
   { key: "ventas", label: "Ventas" },
   { key: "contactos", label: "Contactos" },
   { key: "finanzas", label: "Finanzas" },
-  { key: "soporte", label: "Soporte" }
+  { key: "soporte", label: "Balanzas (soporte)" }
 ];
 
 type Item =

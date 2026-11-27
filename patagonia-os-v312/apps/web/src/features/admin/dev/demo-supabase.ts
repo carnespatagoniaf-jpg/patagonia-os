@@ -74,6 +74,69 @@ function monthly() {
   return out;
 }
 
+// Centro de diagnóstico de balanzas (migración 230), con mensajes reales de producción.
+const scaleReports = [
+  { id: "sr1", company_id: "c1", company_name: "Carnicería El Novillo", branch_name: "Centro", created_at: iso(-0.1), resolved_at: null as string | null,
+    note: "Mis balanzas (Systel) · sincronizar (frenado): 4 productos no quedaron bien",
+    log_text: JSON.stringify({ cuando: iso(-0.1), etapa: "sincronizar (frenado)", mensaje: "Frenamos para cuidar tus productos: no se cambió nada más en la balanza. 4 productos no quedaron bien en la balanza (respuesta 21)", tecnico: "envio: stoppedAt PLU 12, respuesta 21", cable: { usb: "FTDI 0403:6001", com: "COM3" }, version: "2026-11-27", pasos: [{ label: "Abrir puerto", ok: true, detail: "115200" }, { label: "Escribir PLU 12", ok: false, detail: "respuesta 21" }], password: "Secreta123" }) },
+  { id: "sr2", company_id: "c6", company_name: "Carnes del Sur", branch_name: "Ushuaia", created_at: iso(-1), resolved_at: null as string | null,
+    note: "Mis balanzas (Report) · conectar: No elegiste la balanza en la lista",
+    log_text: JSON.stringify({ etapa: "conectar", mensaje: 'No elegiste la balanza en la lista. Tocá "Conectar balanza" de nuevo y elegí la que dice USB.', tecnico: "NotFoundError: No port selected by the user.", cable: null, pasos: [] }) },
+  { id: "sr3", company_id: "c1", company_name: "Carnicería El Novillo", branch_name: "Centro", created_at: iso(-4), resolved_at: iso(-3) as string | null,
+    note: "Mis balanzas (Report) · conectar: Otro programa tiene tomada la balanza",
+    log_text: JSON.stringify({ etapa: "conectar", mensaje: "Otro programa tiene tomada la balanza (por ejemplo Qendra, el programa de la balanza, u otra ventana de Chrome o Edge). Cerralo y probá de nuevo.", tecnico: "NetworkError: Failed to open serial port." }) }
+];
+
+function scaleOverview() {
+  const open = (c: string) => scaleReports.filter((r) => r.company_id === c && !r.resolved_at).length;
+  const lastOpen = (c: string) => scaleReports.find((r) => r.company_id === c && !r.resolved_at);
+  const row = (c: string, name: string, plan: string, branch: string, o: Record<string, unknown>) => ({
+    company_id: c, company_name: name, company_active: true, plan, balanzas_v2: c === "c1", branch_id: `${c}b`, branch_name: branch,
+    scales_active: 1, scales_by_brand: { kretz: 1 }, duplicate_groups: 0, connectors_active: 0, connectors_online: 0, connectors_stale: 0,
+    connector_version_min: null, connector_version_max: null, connector_last_seen: null, last_job_at: iso(-1), last_job_status: "done",
+    last_job_confirmed: 40, last_job_requested: 40, jobs_failed_7d: 0, jobs_stuck: 0, reports_open: open(c), last_report_at: lastOpen(c)?.created_at ?? null,
+    last_open_report_stage: lastOpen(c) ? JSON.parse(lastOpen(c)!.log_text).etapa : null, last_open_report_message: lastOpen(c) ? JSON.parse(lastOpen(c)!.log_text).mensaje : null,
+    light: "verde", light_reason: "Sin problemas", ...o
+  });
+  return [
+    row("c1", "Carnicería El Novillo", "full", "Centro", { scales_active: 3, scales_by_brand: { kretz: 2, systel: 1 }, duplicate_groups: 1, connectors_active: 1, connectors_online: 1, connector_version_min: "0.2.0", connector_version_max: "0.2.0", connector_last_seen: iso(-0.0005), last_job_status: "failed", last_job_confirmed: 0, last_job_requested: 10, jobs_failed_7d: 2 }),
+    row("c6", "Carnes del Sur", "estandar", "Ushuaia", {}),
+    row("c5", "Pollería Doña Rosa", "basico", "Viedma", { last_job_status: "partial", last_job_confirmed: 18, last_job_requested: 20 }),
+    row("c7", "La Vaquita", "full", "Santa Rosa", { scales_active: 2, connectors_active: 2, connectors_online: 2, connector_version_min: "0.2.0", connector_version_max: "0.2.0", connector_last_seen: iso(-0.0003) }),
+    row("c7", "La Vaquita", "full", "General Pico", { branch_id: "c7b2", connectors_active: 1, connectors_stale: 1, connector_version_min: "0.1.9", connector_version_max: "0.1.9", connector_last_seen: iso(-3), last_job_at: iso(-3) })
+  ];
+}
+
+function scaleDetail(companyId: string) {
+  const c = companies.find((x) => x.id === companyId)!;
+  const failing = companyId === "c1";
+  return {
+    company: { id: c.id, name: c.name, active: true, plan: DEMO[Number(c.id.slice(1)) - 1].plan, balanzas_v2: companyId === "c1" },
+    scales: [
+      { branch_name: "Centro", scale_key: "kretz-1", name: "Report de la Caja 1", brand: "kretz", model: "Report LT", family: "kretz", identity: { serie: "A10KX3" }, label_spec: { prefixes: { weighed: "21", unit: "20", total: null }, writer: { kind: "kretz1070", code: "2112005" } }, status: "active", active: true, install: { model: "Report LT", detectedAt: iso(-20), communicationAt: iso(-20), sentAt: iso(-1), sentCount: 40, verifiedAt: iso(-1), verifiedCount: 40, failedCount: 0 }, connector_name: "Caja 1", connector_device: { com: "COM3", usb: "FTDI A10KX3" }, last_used_at: iso(-1) },
+      ...(failing ? [
+        { branch_name: "Centro", scale_key: "kretz-2", name: "Report (repetida)", brand: "kretz", model: "Report LT", family: "kretz", identity: { serie: "A10KX3" }, label_spec: null, status: "active", active: true, install: {}, connector_name: null, connector_device: null, last_used_at: iso(-30) },
+        { branch_name: "Centro", scale_key: "systel-1", name: "Cuora Max", brand: "systel", model: "Cuora Max", family: "systel", identity: { serie: "S9" }, label_spec: { prefixes: { weighed: "23", unit: "24", total: null }, writer: { kind: "systel", weighed: "23PPPPCCCCCC", unit: "24PPPPCCCCCC" } }, status: "active", active: true, install: { lastError: "4 productos no quedaron bien", lastErrorAt: iso(-0.1) }, connector_name: "Caja 1", connector_device: { ip: "192.168.0.50", port: 3001 }, last_used_at: iso(-0.1) }
+      ] : [])
+    ],
+    connectors: [{ id: "k1", name: "Caja 1", branch_name: "Centro", version: "0.2.0", status: "active", last_seen_at: iso(-0.0005), online: true, seen_scales: 2, paired_at: iso(-10), revoked_at: null }],
+    jobs: [
+      ...(failing ? [{ id: "j1", branch_name: "Centro", scale_key: "systel-1", scale_name: "Cuora Max", kind: "send", source: "connector", status: "failed", requested_count: 10, confirmed_count: 0, failed_count: 10, skipped_count: 0, started_at: iso(-0.1), finished_at: iso(-0.1), error_code: "envio", app_version: "0.2.0", connector_name: "Caja 1" }] : []),
+      { id: "j2", branch_name: "Centro", scale_key: "kretz-1", scale_name: "Report de la Caja 1", kind: "send", source: "web", status: "done", requested_count: 40, confirmed_count: 40, failed_count: 0, skipped_count: 0, started_at: iso(-1), finished_at: iso(-1), error_code: null, app_version: "2026-11-26", connector_name: null }
+    ],
+    failed_products: failing ? [
+      { product: "Asado de tira", plu: "12", reason: "la balanza rechazó el alta (respuesta 21)", times: 3, last_at: iso(-0.1) },
+      { product: "Vacío", plu: "40", reason: "E5", times: 1, last_at: iso(-0.1) }
+    ] : [],
+    reports: scaleReports.filter((r) => r.company_id === companyId).map((r) => {
+      const j = JSON.parse(r.log_text);
+      return { id: r.id, branch_name: r.branch_name, user_name: "Cajero", created_at: r.created_at, resolved_at: r.resolved_at, note: r.note, etapa: j.etapa, mensaje: j.mensaje, tecnico: j.tecnico, app_version: j.version ?? null, log_length: r.log_text.length };
+    }),
+    ambiguities_supported: false,
+    ambiguities: []
+  };
+}
+
 function rpc(name: string, args: Record<string, unknown> = {}): unknown {
   switch (name) {
     case "list_companies_for_admin": return companies;
@@ -106,7 +169,19 @@ function rpc(name: string, args: Record<string, unknown> = {}): unknown {
     case "mp_sync_status": return { scheduled: true, last_run_at: iso(-0.02), last_result: null };
     case "list_scale_support_access": return [];
     case "scale_support_tools_enabled": return false;
-    case "list_scale_support_reports": return [];
+    case "list_scale_support_reports": return scaleReports.map((r) => ({ ...r, user_name: "Cajero", connections: [], user_agent: "Chrome 153", log_text: r.log_text }));
+    case "admin_scale_overview": return scaleOverview();
+    case "admin_scale_company_detail": return scaleDetail(String(args.p_company_id));
+    case "admin_scale_report_log": {
+      const r = scaleReports.find((x) => x.id === args.p_report_id)!;
+      // Como lo devuelve la base: ya limpio.
+      return { id: r.id, company_id: r.company_id, company_name: r.company_name, branch_name: r.branch_name, created_at: r.created_at, resolved_at: r.resolved_at, note: r.note, user_agent: "Chrome 153", connections: [], log_text: r.log_text.replace(/"password":"[^"]*"/, '"password":"[oculto]"') };
+    }
+    case "set_scale_support_report_resolved": {
+      const r = scaleReports.find((x) => x.id === args.p_id);
+      if (r) r.resolved_at = args.p_resolved ? iso(0) : null;
+      return null;
+    }
     case "platform_daily_checks":
       return companies.filter((c) => c.active).map((c, i) => ({
         id: c.id, name: c.name, plan: DEMO[i].plan, in_trial: DEMO[i].trial !== null, products: DEMO[i].products,

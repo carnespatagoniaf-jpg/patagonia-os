@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Building2, KeyRound, LayoutDashboard, LifeBuoy, LogOut, MapPin, MessageCircle, Plus, Trash2, TrendingUp, Users, Wallet } from "lucide-react";
+import { Building2, KeyRound, LayoutDashboard, LogOut, MapPin, MessageCircle, Plus, Scale, Trash2, TrendingUp, Users, Wallet } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
 import {
   COMPANY_FEATURES, PROVINCES, createClient, deleteClient, deleteCompanyPayment, listCompanies, listCompanyFeatures, listCompanyPayments, listCompanyPlans, registerCompanyPayment,
@@ -21,7 +21,7 @@ import { grantScaleSupportAccess, listScaleSupportAccess, revokeScaleSupportAcce
 import { parseAmount } from "../../lib/money";
 import { AdminSalesPipeline } from "./AdminSalesPipeline";
 import { whatsappLink, type Lead } from "./sales-pipeline";
-import { AdminScaleReports } from "./AdminScaleReports";
+import { AdminScaleCenter } from "./AdminScaleCenter";
 import { AdminMercadoPago } from "./AdminMercadoPago";
 import { AdminSummary } from "./AdminSummary";
 import { AdminDailyChecks } from "./AdminDailyChecks";
@@ -945,7 +945,7 @@ export function AdminCreateClient() {
   }
 
   const detailCompany = detailId ? companies.find((c) => c.id === detailId) ?? null : null;
-  const tabTitles: Record<AdminTab, string> = { resumen: "Resumen", clientes: "Clientes", ventas: "Ventas", contactos: "Contactos", finanzas: "Finanzas", soporte: "Soporte" };
+  const tabTitles: Record<AdminTab, string> = { resumen: "Resumen", clientes: "Clientes", ventas: "Ventas", contactos: "Contactos", finanzas: "Finanzas", soporte: "Balanzas" };
   return (
     <AdminThemeRoot className="pa-shell">
       <div className="pa-container">
@@ -973,7 +973,7 @@ export function AdminCreateClient() {
             { key: "ventas", label: "Ventas", icon: TrendingUp },
             { key: "contactos", label: "Contactos", icon: Users },
             { key: "finanzas", label: "Finanzas", icon: Wallet },
-            { key: "soporte", label: "Soporte", icon: LifeBuoy, count: pendingReports }
+            { key: "soporte", label: "Balanzas", icon: Scale, count: pendingReports }
           ]}
         />
         <h1 className="pa-sr-only">{tabTitles[tab]}</h1>
@@ -984,7 +984,7 @@ export function AdminCreateClient() {
         <div className="pa-legacy">
           {tab === "finanzas" && <AdminFinance />}
 
-          {tab === "soporte" && <AdminScaleReports onChange={reloadPendingReports} />}
+          {tab === "soporte" && <AdminScaleCenter onReportsChange={reloadPendingReports} />}
 
           {tab === "resumen" && <AdminDailyChecks />}
           {tab === "resumen" && (

@@ -5,7 +5,7 @@ import { formatMoney, localDateIso } from "../shifts/format";
 import type { ProductCategory } from "../inventory/product-categories-service";
 import { parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM, type ScaleConfig } from "./scale-config-service";
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
-import { labelWeightProblem, MAX_COUNTER_SCALE_KG, resolveScan, type ScanResolution } from "./scan-resolve";
+import { labelWeightProblem, MAX_COUNTER_SCALE_KG, type ScanResolution } from "./scan-resolve";
 import { scanChoiceOptions, type LabelChoiceOption } from "./scale-label-choice";
 import { resolveScaleLabel } from "./scale-label-resolver";
 import type { ScaleConfigStatus } from "./scale-config-cache";
@@ -38,7 +38,7 @@ import { findPackage } from "../planta/planta-service";
 import { freezerTicket, matchFreezerScan, type FreezerStored } from "../freezer/freezer-logic";
 import { cachedFreezerStored, loadFreezerStored } from "../freezer/freezer-service";
 import type { LabelProfilesState } from "../scales/label-spec-cache";
-import { resolveScanByProfiles } from "./scale-profile-scan";
+import { readScaleCode } from "./scale-profile-scan";
 
 // Estado y acciones del ticket que se está armando en Mostrador: búsqueda,
 // carrito, descuentos y recargos, medios de pago y sus totales. Es la parte
@@ -472,7 +472,7 @@ export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrat
     // número de caja tiene producto (si no, null y sigue como siempre) y no es una etiqueta de la balanza de un
     // producto que existe (con los números del medio libres, una etiqueta "20…" también tiene forma de caja).
     const box = boxFormats.length > 0 && !products.some((p) => (p.active ?? true) && p.code === raw) ? resolveBoxScan(raw, boxFormats, products) : null;
-    const asScaleLabel = labelProfiles?.status === "ready" ? resolveScanByProfiles(raw, products, labelProfiles.profiles, scaleConfig) : resolveScan(raw, products, scaleConfig);
+    const asScaleLabel = readScaleCode(raw, products, scaleConfig, labelProfiles);
     if (box && asScaleLabel.type !== "label") {
       setSearch("");
       setHighlightedIndex(-1);

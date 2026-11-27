@@ -5,6 +5,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Scale } from "lucide-react";
 import { listScaleSupportReports, setScaleSupportReportResolved, type ScaleSupportReport } from "./admin-service";
 import { Alert, Badge, Button, Card, EmptyState, useConfirm } from "./ui/components";
+import { redactSensitive } from "./scale-center";
 
 /** Reportes de balanzas que mandan los clientes con "Enviar a soporte"
  * (pantalla Balanzas). Las balanzas se prueban en el local del cliente sin
@@ -63,9 +64,9 @@ export function AdminScaleReports({ onChange }: { onChange?: () => void } = {}) 
       `Enviado por: ${report.userName ?? "-"} · ${new Date(report.createdAt).toLocaleString("es-AR", { hourCycle: "h23" })}`,
       `Nota: ${report.note ?? "-"}`,
       `Navegador: ${report.userAgent ?? "-"}`,
-      `Balanzas configuradas: ${JSON.stringify(report.connections, null, 2)}`,
+      `Balanzas configuradas: ${redactSensitive(JSON.stringify(report.connections, null, 2))}`,
       "Actividad:",
-      report.logText
+      redactSensitive(report.logText)
     ].join("\n");
   }
 
