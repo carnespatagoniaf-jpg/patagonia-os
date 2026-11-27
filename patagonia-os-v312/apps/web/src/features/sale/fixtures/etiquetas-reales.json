@@ -1,0 +1,1223 @@
+{
+  "_leeme": [
+    "Banco de regresión de etiquetas de balanza: la FOTO de cómo lee Mostrador cada etiqueta real HOY (main 26/11/2026).",
+    "Lo corre scale-labels-regression.test.ts. Si un cambio mueve un resultado, la prueba falla y muestra la tabla de lo que cambió.",
+    "NO se 'arregla' un esperado para que pase: si el cambio es a propósito, se cambia el esperado en el mismo PR y se explica por qué.",
+    "contextos: lo mínimo de la sucursal para leer (formato guardado, perfiles de balanza, productos). Sin identificadores de empresa ni sucursal.",
+    "lector: 'sucursal' = resolveScan con el formato de la sucursal (scan-resolve.ts); 'perfil' = balanzas con perfil de la sucursal (decodeAcross + addScannedItem, useScalePapers); 'systel_piloto' = formato informado por la Systel (systelConfigForCodeAcross) y después resolveScan.",
+    "productos: [código, nombre, 'kg'|'unit', precio, activo?]. vinculos (perfil): [N.º en la balanza, código del producto en Patagonia].",
+    "esperado: ETIQUETA prod=<código> kg=<kilos>|u=<unidades> [importe=<lo que se cobra>] [pregunta=excesivo] · PRODUCTO prod=<código> · TOTAL importe=<n> · TOTAL_SYSTEL importe=<n> (no se carga) · SIN_IMPORTE · RECHAZO · BUSQUEDA · NO_SOPORTADO · PAPEL prod=<código> kg|u=<n> [importe_codigo=<n>] · PAPEL_TOTAL importe=<n> [articulos=<n>] · NO_ES_BALANZA · AMBIGUO.",
+    "mensaje (opcional): texto que tiene que estar en el aviso del rechazo.",
+    "evidencia: 'real' = etiqueta impresa por la balanza del cliente (foto, base de producción o commit); 'prueba' = código que ya estaba en una prueba del repo para ese cliente, sin constancia de que se haya impreso así.",
+    "sospechoso: lo que hoy parece mal leído (ver también los comentarios SOSPECHOSO en la prueba). Se deja tal cual: es la foto."
+  ],
+  "contextos": {
+    "carnes-patagonia": {
+      "cliente": "Carnes Patagonia",
+      "lector": "sucursal",
+      "descripcion": "Kretz del local, formato guardado 1-6-5 con peso en gramos",
+      "formato": {
+        "prefixLength": 1,
+        "pluLength": 6,
+        "weightLength": 5,
+        "weightDivisor": 1000,
+        "totalLength": 13,
+        "payloadType": "weight"
+      },
+      "productos": [
+        [
+          "1",
+          "Producto 1",
+          "kg",
+          10000
+        ],
+        [
+          "2",
+          "Producto 2",
+          "kg",
+          10000
+        ],
+        [
+          "3",
+          "Producto 3",
+          "kg",
+          10000
+        ],
+        [
+          "5",
+          "Producto 5",
+          "kg",
+          10000
+        ],
+        [
+          "11",
+          "Producto 11",
+          "kg",
+          10000
+        ],
+        [
+          "12",
+          "Producto 12",
+          "kg",
+          10000
+        ],
+        [
+          "13",
+          "Producto 13",
+          "kg",
+          10000
+        ],
+        [
+          "21",
+          "Producto 21",
+          "kg",
+          10000
+        ],
+        [
+          "22",
+          "Producto 22",
+          "kg",
+          10000
+        ],
+        [
+          "26",
+          "Producto 26",
+          "kg",
+          10000
+        ],
+        [
+          "30",
+          "Producto 30",
+          "kg",
+          10000
+        ],
+        [
+          "35",
+          "Producto 35",
+          "kg",
+          10000
+        ],
+        [
+          "101",
+          "Producto 101",
+          "kg",
+          10000
+        ],
+        [
+          "102",
+          "Producto 102",
+          "kg",
+          10000
+        ],
+        [
+          "201",
+          "Producto 201",
+          "kg",
+          10000
+        ],
+        [
+          "208",
+          "Producto 208",
+          "kg",
+          10000
+        ],
+        [
+          "210",
+          "Producto 210",
+          "kg",
+          10000
+        ],
+        [
+          "504",
+          "MILANESA POLLO",
+          "kg",
+          10000
+        ],
+        [
+          "901",
+          "Producto 901",
+          "kg",
+          10000
+        ]
+      ]
+    },
+    "aura-total-2409": {
+      "cliente": "Sin nombre (primer ticket de Kretz Aura Eco 2, 24/09)",
+      "lector": "sucursal",
+      "descripcion": "Ticket de TOTAL 00000 + centavos; el formato de la sucursal no influye (el de fábrica 1-5-5)",
+      "formato": {
+        "prefixLength": 1,
+        "pluLength": 5,
+        "weightLength": 5,
+        "weightDivisor": 1000,
+        "totalLength": 13,
+        "payloadType": "weight"
+      },
+      "productos": []
+    },
+    "m2": {
+      "cliente": "M2",
+      "lector": "sucursal",
+      "descripcion": "Kretz Report LT, 2-3-7 con importe en centavos (1070 de Patagonia)",
+      "formato": {
+        "prefixLength": 2,
+        "pluLength": 3,
+        "weightLength": 7,
+        "weightDivisor": 100,
+        "totalLength": 13,
+        "payloadType": "amount"
+      },
+      "productos": [
+        [
+          "2",
+          "Matambre novillo gorina",
+          "kg",
+          13700
+        ],
+        [
+          "99",
+          "Bondiola PifPaf",
+          "kg",
+          7000
+        ],
+        [
+          "6",
+          "Vacio novillo gorina",
+          "kg",
+          15500
+        ]
+      ]
+    },
+    "los-gringos-sucursal": {
+      "cliente": "Los gringos",
+      "lector": "sucursal",
+      "descripcion": "Systel Cuora, formato guardado en la sucursal 20PPPPCCCCCC (2-4-6 con peso)",
+      "formato": {
+        "prefixLength": 2,
+        "pluLength": 4,
+        "weightLength": 6,
+        "weightDivisor": 1000,
+        "totalLength": 13,
+        "payloadType": "weight"
+      },
+      "productos": [
+        [
+          "2",
+          "GRINGO CAJON DE POLLO",
+          "unit",
+          72000
+        ],
+        [
+          "5",
+          "TROZADITOx1x2",
+          "kg",
+          5200
+        ]
+      ]
+    },
+    "los-gringos-perfil-22aa": {
+      "cliente": "Los gringos",
+      "lector": "perfil",
+      "descripcion": "Systel con perfil: artículos 20PPPPCCCCCC/21PPPPCCCCCC, TOTAL 22AAIIIIIIII (cantidad de artículos), pesos enteros",
+      "balanzas": [
+        {
+          "perfil": {
+            "scaleKey": "systel-a",
+            "brand": "systel",
+            "weighedFormat": "20PPPPCCCCCC",
+            "unitFormat": "21PPPPCCCCCC",
+            "totalFormat": "22AAIIIIIIII",
+            "amountDecimals": 0,
+            "genericCodes": [],
+            "catalog": [
+              {
+                "code": 2,
+                "name": "GRINGO CAJON DE PO",
+                "saleType": "U",
+                "prices": [
+                  72000,
+                  0
+                ],
+                "eanType": 1,
+                "eanConfig": "21PPPPCCCCCC"
+              },
+              {
+                "code": 5,
+                "name": "TROZADITOx1x2",
+                "saleType": "P",
+                "prices": [
+                  5200,
+                  0
+                ],
+                "eanType": 1,
+                "eanConfig": "20PPPPCCCCCC"
+              }
+            ]
+          },
+          "vinculos": [
+            [
+              2,
+              "2"
+            ],
+            [
+              5,
+              "5"
+            ]
+          ]
+        }
+      ],
+      "productos": [
+        [
+          "2",
+          "GRINGO CAJON DE POLLO",
+          "unit",
+          72000
+        ],
+        [
+          "5",
+          "TROZADITOx1x2",
+          "kg",
+          5200
+        ]
+      ]
+    },
+    "los-gringos-perfil-22bb": {
+      "cliente": "Los gringos",
+      "lector": "perfil",
+      "descripcion": "Systel de la tarjeta del 19/10: TOTAL 22BBIIIIIIII (N.º de balanza 20), pesos enteros",
+      "balanzas": [
+        {
+          "perfil": {
+            "scaleKey": "systel-b",
+            "brand": "systel",
+            "weighedFormat": "20PPPPCCCCCC",
+            "unitFormat": "21PPPPCCCCCC",
+            "totalFormat": "22BBIIIIIIII",
+            "amountDecimals": 0,
+            "genericCodes": [],
+            "catalog": [
+              {
+                "code": 2,
+                "name": "GRINGO CAJON DE PO",
+                "saleType": "U",
+                "prices": [
+                  72000,
+                  0
+                ],
+                "eanType": 1,
+                "eanConfig": "21PPPPCCCCCC"
+              },
+              {
+                "code": 4,
+                "name": "POLLO ENTEROxKG",
+                "saleType": "P",
+                "prices": [
+                  5200,
+                  0
+                ],
+                "eanType": 1,
+                "eanConfig": "20PPPPCCCCCC"
+              }
+            ]
+          },
+          "vinculos": [
+            [
+              2,
+              "2"
+            ],
+            [
+              4,
+              "4"
+            ]
+          ]
+        }
+      ],
+      "productos": [
+        [
+          "2",
+          "GRINGO CAJON DE POLLO",
+          "unit",
+          72000
+        ],
+        [
+          "4",
+          "POLLO ENTEROxKG",
+          "kg",
+          5200
+        ]
+      ]
+    },
+    "los-gringos-3-systel": {
+      "cliente": "Los gringos",
+      "lector": "perfil",
+      "descripcion": "3 Systel en la sucursal (16/11): PATA MUSLO (8) solo en el catálogo de una",
+      "balanzas": [
+        {
+          "perfil": {
+            "scaleKey": "systel-sin8b",
+            "brand": "systel",
+            "weighedFormat": "20PPPPCCCCII",
+            "unitFormat": null,
+            "totalFormat": "22AAIIIIIIII",
+            "amountDecimals": 0,
+            "genericCodes": [],
+            "catalog": [
+              {
+                "code": 13,
+                "name": "P13",
+                "saleType": "P",
+                "prices": [
+                  1000
+                ],
+                "eanType": 1,
+                "eanConfig": "20PPPPCCCCCC"
+              }
+            ]
+          },
+          "vinculos": [
+            [
+              13,
+              "13"
+            ]
+          ]
+        },
+        {
+          "perfil": {
+            "scaleKey": "systel-sin8a",
+            "brand": "systel",
+            "weighedFormat": "20PPPPCCCCCC",
+            "unitFormat": null,
+            "totalFormat": "22BBIIIIIIII",
+            "amountDecimals": 0,
+            "genericCodes": [],
+            "catalog": [
+              {
+                "code": 13,
+                "name": "P13",
+                "saleType": "P",
+                "prices": [
+                  1000
+                ],
+                "eanType": 1,
+                "eanConfig": "20PPPPCCCCCC"
+              }
+            ]
+          },
+          "vinculos": [
+            [
+              13,
+              "13"
+            ]
+          ]
+        },
+        {
+          "perfil": {
+            "scaleKey": "systel-con8",
+            "brand": "systel",
+            "weighedFormat": "20PPPPCCCCCC",
+            "unitFormat": null,
+            "totalFormat": "22BBIIIIIIII",
+            "amountDecimals": 0,
+            "genericCodes": [],
+            "catalog": [
+              {
+                "code": 8,
+                "name": "PATA MUSLO X5X10",
+                "saleType": "P",
+                "prices": [
+                  3400
+                ],
+                "eanType": 1,
+                "eanConfig": "20PPPPCCCCCC"
+              },
+              {
+                "code": 13,
+                "name": "P13",
+                "saleType": "P",
+                "prices": [
+                  1000
+                ],
+                "eanType": 1,
+                "eanConfig": "20PPPPCCCCCC"
+              }
+            ]
+          },
+          "vinculos": [
+            [
+              8,
+              "8"
+            ],
+            [
+              13,
+              "13"
+            ]
+          ]
+        }
+      ],
+      "productos": [
+        [
+          "8",
+          "PATA MUSLO X5X10",
+          "kg",
+          3400
+        ],
+        [
+          "13",
+          "P13",
+          "kg",
+          1000
+        ]
+      ]
+    },
+    "triples": {
+      "cliente": "TripleS",
+      "lector": "sucursal",
+      "descripcion": "Systel, formato de la sucursal 20 + producto 4 + cantidad 6",
+      "formato": {
+        "prefixLength": 2,
+        "pluLength": 4,
+        "weightLength": 6,
+        "weightDivisor": 1000,
+        "totalLength": 13,
+        "payloadType": "weight"
+      },
+      "productos": [
+        [
+          "123",
+          "MUZARELLA PUNTA DA",
+          "kg",
+          10000
+        ],
+        [
+          "121",
+          "CREMOSO PUNTA D AG",
+          "kg",
+          10000
+        ],
+        [
+          "147",
+          "PALETA JAM GRASSET",
+          "kg",
+          10000
+        ],
+        [
+          "52",
+          "NUGGETS POLLO GTA",
+          "kg",
+          10000
+        ]
+      ]
+    },
+    "triples-fabrica": {
+      "cliente": "TripleS",
+      "lector": "sucursal",
+      "descripcion": "La misma etiqueta con la sucursal SIN configurar (formato de fábrica Kretz 1-5-5)",
+      "formato": {
+        "prefixLength": 1,
+        "pluLength": 5,
+        "weightLength": 5,
+        "weightDivisor": 1000,
+        "totalLength": 13,
+        "payloadType": "weight"
+      },
+      "productos": [
+        [
+          "123",
+          "MUZARELLA PUNTA DA",
+          "kg",
+          10000
+        ]
+      ]
+    },
+    "pollo-y-mar": {
+      "cliente": "Pollo y mar",
+      "lector": "sucursal",
+      "descripcion": "Kretz Aura en Pre-Empaque, 2-3-7 con importe en centavos; TOTAL con código suma 998",
+      "formato": {
+        "prefixLength": 2,
+        "pluLength": 3,
+        "weightLength": 7,
+        "weightDivisor": 100,
+        "totalLength": 13,
+        "payloadType": "amount"
+      },
+      "productos": [
+        [
+          "21",
+          "COSTELETAS",
+          "kg",
+          15900
+        ],
+        [
+          "1",
+          "milanesas de pollo",
+          "kg",
+          11600
+        ]
+      ]
+    },
+    "pollo-y-mar-fabrica": {
+      "cliente": "Pollo y mar",
+      "lector": "sucursal",
+      "descripcion": "Antes de configurar la Aura: sucursal con el formato de fábrica Kretz 1-5-5 (la Aura imprimía 2-5-5)",
+      "formato": {
+        "prefixLength": 1,
+        "pluLength": 5,
+        "weightLength": 5,
+        "weightDivisor": 1000,
+        "totalLength": 13,
+        "payloadType": "weight"
+      },
+      "productos": []
+    },
+    "el-dorado-fabrica": {
+      "cliente": "El Dorado",
+      "lector": "sucursal",
+      "descripcion": "Systel leída con el formato de fábrica Kretz 1-5-5 (auditoría 29/10)",
+      "formato": {
+        "prefixLength": 1,
+        "pluLength": 5,
+        "weightLength": 5,
+        "weightDivisor": 1000,
+        "totalLength": 13,
+        "payloadType": "weight"
+      },
+      "productos": [
+        [
+          "1",
+          "NALGA",
+          "kg",
+          14000
+        ]
+      ]
+    },
+    "el-dorado-systel": {
+      "cliente": "El Dorado",
+      "lector": "systel_piloto",
+      "descripcion": "Systel Cuora Max 7.0 con el formato que informa HOY (E_P=20PPPPIIIIII, el 1006 usa el general): producto + importe",
+      "plantillas": [
+        {
+          "weighed": "20PPPPIIIIII",
+          "unit": "21PPPPIIIIII",
+          "sums": "22AAIIIIIIII",
+          "at": 0,
+          "perPlu": {
+            "1006": {
+              "type": 0,
+              "config": "IIIIIIIIIIII",
+              "p1": 17990,
+              "p2": 17990,
+              "name": "BOLA DE LOMO",
+              "saleType": "P"
+            }
+          }
+        }
+      ],
+      "formato": {
+        "prefixLength": 2,
+        "pluLength": 4,
+        "weightLength": 6,
+        "weightDivisor": 1000,
+        "totalLength": 13,
+        "payloadType": "weight"
+      },
+      "productos": [
+        [
+          "1006",
+          "BOLA DE LOMO",
+          "kg",
+          17990
+        ]
+      ]
+    },
+    "el-dorado-systel-viejo": {
+      "cliente": "El Dorado",
+      "lector": "systel_piloto",
+      "descripcion": "El formato viejo que había quedado guardado en la PC (el 1006 con 20PPPPCCCCCC, producto + kilos)",
+      "plantillas": [
+        {
+          "weighed": null,
+          "unit": null,
+          "at": 0,
+          "perPlu": {
+            "1006": {
+              "type": 1,
+              "config": "20PPPPCCCCCC",
+              "p1": 17990,
+              "saleType": "P"
+            }
+          }
+        }
+      ],
+      "formato": {
+        "prefixLength": 2,
+        "pluLength": 4,
+        "weightLength": 6,
+        "weightDivisor": 1000,
+        "totalLength": 13,
+        "payloadType": "weight"
+      },
+      "productos": [
+        [
+          "1006",
+          "BOLA DE LOMO",
+          "kg",
+          17990
+        ]
+      ]
+    },
+    "el-dorado-perfil": {
+      "cliente": "El Dorado",
+      "lector": "perfil",
+      "descripcion": "La misma Systel con perfil en la sucursal: artículo con IMPORTE (20PPPPIIIIII), los kilos salen del precio de la balanza",
+      "balanzas": [
+        {
+          "perfil": {
+            "scaleKey": "systel-eldorado",
+            "brand": "systel",
+            "weighedFormat": "20PPPPIIIIII",
+            "unitFormat": "21PPPPIIIIII",
+            "totalFormat": "22AAIIIIIIII",
+            "amountDecimals": 0,
+            "genericCodes": [],
+            "catalog": [
+              {
+                "code": 1006,
+                "name": "BOLA DE LOMO",
+                "saleType": "P",
+                "prices": [
+                  17990,
+                  17990
+                ],
+                "eanType": 0,
+                "eanConfig": "IIIIIIIIIIII"
+              }
+            ]
+          },
+          "vinculos": [
+            [
+              1006,
+              "1006"
+            ]
+          ]
+        }
+      ],
+      "productos": [
+        [
+          "1006",
+          "BOLA DE LOMO",
+          "kg",
+          17990
+        ]
+      ]
+    },
+    "giuseppe": {
+      "cliente": "Giuseppe",
+      "lector": "perfil",
+      "descripcion": "Systel de Pollería Giuseppe: el código del artículo trae el IMPORTE (20PPPPIIIIII), pesos enteros",
+      "balanzas": [
+        {
+          "perfil": {
+            "scaleKey": "systel-giuseppe",
+            "brand": "systel",
+            "weighedFormat": "20PPPPIIIIII",
+            "unitFormat": "20PPPPIIIIII",
+            "totalFormat": "22AAIIIIIIII",
+            "amountDecimals": 0,
+            "genericCodes": [],
+            "catalog": [
+              {
+                "code": 1,
+                "name": "MILA POLLO",
+                "saleType": "P",
+                "prices": [
+                  11000
+                ],
+                "eanType": 0,
+                "eanConfig": null
+              },
+              {
+                "code": 2,
+                "name": "HUEVOS",
+                "saleType": "U",
+                "prices": [
+                  300
+                ],
+                "eanType": 0,
+                "eanConfig": null
+              }
+            ]
+          },
+          "vinculos": [
+            [
+              1,
+              "1"
+            ],
+            [
+              2,
+              "2"
+            ]
+          ]
+        }
+      ],
+      "productos": [
+        [
+          "1",
+          "MILA POLLO",
+          "kg",
+          11000
+        ],
+        [
+          "2",
+          "HUEVOS",
+          "unit",
+          300
+        ]
+      ]
+    },
+    "quesar": {
+      "cliente": "Quesar",
+      "lector": "perfil",
+      "descripcion": "Systel de Quesar: general de pesables 20PPPPPCCCCC, pero cada producto imprime con el suyo 20PPPPCCCCCC",
+      "balanzas": [
+        {
+          "perfil": {
+            "scaleKey": "systel-quesar",
+            "brand": "systel",
+            "weighedFormat": "20PPPPPCCCCC",
+            "unitFormat": "21PPPPPCCCCC",
+            "totalFormat": "22AAIIIIIIII",
+            "amountDecimals": 0,
+            "genericCodes": [],
+            "catalog": [
+              {
+                "code": 178,
+                "name": "Tybo Maquina",
+                "saleType": "P",
+                "prices": [
+                  21300
+                ],
+                "eanType": 1,
+                "eanConfig": "20PPPPCCCCCC"
+              },
+              {
+                "code": 1780,
+                "name": "Otro",
+                "saleType": "P",
+                "prices": [
+                  1000
+                ],
+                "eanType": 1,
+                "eanConfig": "20PPPPCCCCCC"
+              },
+              {
+                "code": 5,
+                "name": "Unitario",
+                "saleType": "U",
+                "prices": [
+                  500
+                ],
+                "eanType": 1,
+                "eanConfig": "21PPPPCCCCCC"
+              }
+            ]
+          },
+          "vinculos": [
+            [
+              178,
+              "178"
+            ],
+            [
+              1780,
+              "1780"
+            ],
+            [
+              5,
+              "5"
+            ]
+          ]
+        }
+      ],
+      "productos": [
+        [
+          "178",
+          "Tybo Maquina",
+          "kg",
+          21300
+        ],
+        [
+          "1780",
+          "Otro",
+          "kg",
+          1000
+        ],
+        [
+          "5",
+          "Unitario",
+          "unit",
+          500
+        ]
+      ]
+    },
+    "mercado-de-la-cruz": {
+      "cliente": "Mercado de la Cruz",
+      "lector": "perfil",
+      "descripcion": "Systel: general 20PPPPIIIIII, los productos leídos imprimen con su 20PPPPCCCCCC; el 112 se cargó después de leerla",
+      "balanzas": [
+        {
+          "perfil": {
+            "scaleKey": "systel-cruz",
+            "brand": "systel",
+            "weighedFormat": "20PPPPIIIIII",
+            "unitFormat": "21PPPPIIIIII",
+            "totalFormat": "22AAIIIIIIII",
+            "amountDecimals": 0,
+            "genericCodes": [],
+            "catalog": [
+              {
+                "code": 2,
+                "name": "PECETO",
+                "saleType": "P",
+                "prices": [
+                  25800,
+                  0
+                ],
+                "eanType": 1,
+                "eanConfig": "20PPPPCCCCCC"
+              },
+              {
+                "code": 111,
+                "name": "BOCADITO DE PAPA Y",
+                "saleType": "P",
+                "prices": [
+                  25800,
+                  0
+                ],
+                "eanType": 1,
+                "eanConfig": "20PPPPCCCCCC"
+              },
+              {
+                "code": 113,
+                "name": "PATITA DE POLLO JY",
+                "saleType": "P",
+                "prices": [
+                  25800,
+                  0
+                ],
+                "eanType": 1,
+                "eanConfig": "20PPPPCCCCCC"
+              }
+            ]
+          },
+          "vinculos": [
+            [
+              2,
+              "2"
+            ],
+            [
+              111,
+              "111"
+            ],
+            [
+              113,
+              "113"
+            ]
+          ]
+        }
+      ],
+      "productos": [
+        [
+          "2",
+          "PECETO",
+          "kg",
+          25800
+        ],
+        [
+          "111",
+          "BOCADITO DE PAPA Y",
+          "kg",
+          25800
+        ],
+        [
+          "113",
+          "PATITA DE POLLO JY",
+          "kg",
+          25800
+        ],
+        [
+          "112",
+          "MILA DE PECETO",
+          "kg",
+          18900
+        ]
+      ]
+    },
+    "oliem": {
+      "cliente": "Oliem",
+      "lector": "sucursal",
+      "descripcion": "Dos Kretz Report: la sucursal lee 2-5-5 con peso (\"21\" + producto 5 + gramos); la otra imprime \"20\" + producto 5 + pesos",
+      "formato": {
+        "prefixLength": 2,
+        "pluLength": 5,
+        "weightLength": 5,
+        "weightDivisor": 1000,
+        "totalLength": 13,
+        "payloadType": "weight"
+      },
+      "productos": [
+        [
+          "0000003",
+          "SALAME CAÑOLI",
+          "kg",
+          40000
+        ],
+        [
+          "212",
+          "PROMO PATA",
+          "kg",
+          3333
+        ]
+      ]
+    },
+    "lauda": {
+      "cliente": "Lauda",
+      "lector": "sucursal",
+      "descripcion": "Kretz Report NX2: la sucursal quedó en 2-3-7 con importe, la etiqueta trae \"21\" + producto 5 + gramos",
+      "formato": {
+        "prefixLength": 2,
+        "pluLength": 3,
+        "weightLength": 7,
+        "weightDivisor": 100,
+        "totalLength": 13,
+        "payloadType": "amount"
+      },
+      "productos": [
+        [
+          "37",
+          "Bondiola entera",
+          "kg",
+          11000
+        ]
+      ]
+    },
+    "carplat": {
+      "cliente": "Carplat",
+      "lector": "sucursal",
+      "descripcion": "Kretz Report con 2-3-7 con importe; desde el 18/11 1070 \"2112005\": por kilo sale \"21\" + producto 3 + gramos 7",
+      "formato": {
+        "prefixLength": 2,
+        "pluLength": 3,
+        "weightLength": 7,
+        "weightDivisor": 100,
+        "totalLength": 13,
+        "payloadType": "amount"
+      },
+      "productos": [
+        [
+          "67",
+          "ROAST BEEF (ENVASADO)",
+          "kg",
+          14000
+        ],
+        [
+          "2",
+          "ENTRAÑA (CAJA)",
+          "kg",
+          20000
+        ],
+        [
+          "243",
+          "MILANESAS DE POLLO (3KG)",
+          "kg",
+          9000
+        ],
+        [
+          "226",
+          "HUESOS",
+          "unit",
+          100
+        ]
+      ]
+    },
+    "el-abastero": {
+      "cliente": "El Abastero",
+      "lector": "sucursal",
+      "descripcion": "Report LT 1-6-5 con importe en PESOS enteros + Kretz Aura (TOTAL 2-3-7 en centavos, código 998). Sin la marca del inicio 22",
+      "formato": {
+        "prefixLength": 1,
+        "pluLength": 6,
+        "weightLength": 5,
+        "weightDivisor": 1,
+        "totalLength": 13,
+        "payloadType": "amount"
+      },
+      "productos": [
+        [
+          "1",
+          "NALGA XKG",
+          "kg",
+          18333
+        ],
+        [
+          "17",
+          "FALDA XKG",
+          "kg",
+          15555
+        ],
+        [
+          "15",
+          "MATAMBRE XKG",
+          "kg",
+          17222
+        ],
+        [
+          "101",
+          "CAJON DE POLLO FRESCO",
+          "unit",
+          69000
+        ],
+        [
+          "127",
+          "CAJA FORMITA",
+          "unit",
+          42000
+        ]
+      ]
+    },
+    "el-abastero-aura22": {
+      "cliente": "El Abastero",
+      "lector": "sucursal",
+      "descripcion": "Hoy (25/11): la misma sucursal con la marca auraPrefix22 (la Aura imprime \"22\" + producto 3 + centavos 7)",
+      "formato": {
+        "prefixLength": 1,
+        "pluLength": 6,
+        "weightLength": 5,
+        "weightDivisor": 1,
+        "totalLength": 13,
+        "payloadType": "amount",
+        "auraPrefix22": true
+      },
+      "productos": [
+        [
+          "1",
+          "NALGA XKG",
+          "kg",
+          18333
+        ],
+        [
+          "5",
+          "LOMO XKG",
+          "kg",
+          18333
+        ],
+        [
+          "6",
+          "CUADRIL XKG",
+          "kg",
+          18333
+        ],
+        [
+          "9",
+          "BIFE ANGOSTO XKG",
+          "kg",
+          18333
+        ],
+        [
+          "127",
+          "CAJA FORMITA",
+          "unit",
+          42000
+        ],
+        [
+          "144",
+          "MILANESA POLLO XKG",
+          "kg",
+          11000
+        ]
+      ]
+    }
+  },
+  "etiquetas": [
+    {"codigo":"2000001007969","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"0,796 kg","esperado":"ETIQUETA prod=1 kg=0.796"},
+    {"codigo":"2000001012604","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"1,260 kg","esperado":"ETIQUETA prod=1 kg=1.26"},
+    {"codigo":"2000001019665","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"1,966 kg","esperado":"ETIQUETA prod=1 kg=1.966"},
+    {"codigo":"2000001061053","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"6,105 kg","esperado":"ETIQUETA prod=1 kg=6.105"},
+    {"codigo":"2000002009429","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"0,942 kg","esperado":"ETIQUETA prod=2 kg=0.942"},
+    {"codigo":"2000003003006","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"0,300 kg","esperado":"ETIQUETA prod=3 kg=0.3"},
+    {"codigo":"2000005020766","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"2,076 kg","esperado":"ETIQUETA prod=5 kg=2.076"},
+    {"codigo":"2000011005948","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"0,594 kg","esperado":"ETIQUETA prod=11 kg=0.594"},
+    {"codigo":"2000012008627","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"0,862 kg","esperado":"ETIQUETA prod=12 kg=0.862"},
+    {"codigo":"2000012030789","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"3,078 kg","esperado":"ETIQUETA prod=12 kg=3.078"},
+    {"codigo":"2000013010568","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"1,056 kg","esperado":"ETIQUETA prod=13 kg=1.056"},
+    {"codigo":"2000021005044","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"0,504 kg","esperado":"ETIQUETA prod=21 kg=0.504"},
+    {"codigo":"2000021064652","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"6,465 kg","esperado":"ETIQUETA prod=21 kg=6.465"},
+    {"codigo":"2000022019361","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"1,936 kg","esperado":"ETIQUETA prod=22 kg=1.936"},
+    {"codigo":"2000026010784","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"1,078 kg","esperado":"ETIQUETA prod=26 kg=1.078"},
+    {"codigo":"2000026019664","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"1,966 kg","esperado":"ETIQUETA prod=26 kg=1.966"},
+    {"codigo":"2000030006766","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"0,676 kg","esperado":"ETIQUETA prod=30 kg=0.676"},
+    {"codigo":"2000030011944","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"1,194 kg","esperado":"ETIQUETA prod=30 kg=1.194"},
+    {"codigo":"2000035011987","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"1,198 kg","esperado":"ETIQUETA prod=35 kg=1.198"},
+    {"codigo":"2000035020767","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"2,076 kg","esperado":"ETIQUETA prod=35 kg=2.076"},
+    {"codigo":"2000101029540","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"2,954 kg","esperado":"ETIQUETA prod=101 kg=2.954"},
+    {"codigo":"2000102008261","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"0,826 kg","esperado":"ETIQUETA prod=102 kg=0.826"},
+    {"codigo":"2000201013401","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"1,340 kg","esperado":"ETIQUETA prod=201 kg=1.34"},
+    {"codigo":"2000208010168","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"1,016 kg","esperado":"ETIQUETA prod=208 kg=1.016"},
+    {"codigo":"2000210007507","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"0,750 kg","esperado":"ETIQUETA prod=210 kg=0.75"},
+    {"codigo":"2000504005127","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"0,512 kg","esperado":"ETIQUETA prod=504 kg=0.512"},
+    {"codigo":"2000504011722","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"1,172 kg","esperado":"ETIQUETA prod=504 kg=1.172"},
+    {"codigo":"2000901021423","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"2,142 kg","esperado":"ETIQUETA prod=901 kg=2.142"},
+    {"codigo":"2000901029061","cliente":"Carnes Patagonia","contexto":"carnes-patagonia","evidencia":"real","fuente":"scale_ticket_voids de producción, 30/09 a 12/10 (scale-real-labels.ts)","papel":"2,906 kg","esperado":"ETIQUETA prod=901 kg=2.906"},
+    {"codigo":"0000014550003","cliente":"Sin nombre (primer ticket de Kretz Aura Eco 2, 24/09)","contexto":"aura-total-2409","evidencia":"real","fuente":"primer ticket de TOTAL de una Kretz Aura, 24/09 (scale-barcode.test.ts)","papel":"TOTAL = 14550.00$","esperado":"TOTAL importe=14550"},
+    {"codigo":"2009901890008","cliente":"M2","contexto":"m2","evidencia":"real","fuente":"escaneada en su Mostrador el 24/10 (scan-resolve.test.ts)","papel":"Bondiola PifPaf 0,270 kg $1.890","esperado":"ETIQUETA prod=99 kg=0.27 importe=1890"},
+    {"codigo":"2000258567506","cliente":"M2","contexto":"m2","evidencia":"real","fuente":"escaneada en su Mostrador el 24/10 (scan-resolve.test.ts)","papel":"Matambre 4,275 kg $58.567,50","esperado":"ETIQUETA prod=2 kg=4.275 importe=58567.5"},
+    {"codigo":"2220000007801","cliente":"Los gringos","contexto":"los-gringos-sucursal","evidencia":"real","fuente":"foto del ticket 13/10 (scale-real-labels.ts)","papel":"TOTAL $780","esperado":"TOTAL_SYSTEL importe=780","mensaje":"no se cargó"},
+    {"codigo":"2202000731184","cliente":"Los gringos","contexto":"los-gringos-sucursal","evidencia":"real","fuente":"foto del ticket 13/10, operación 20-3095","papel":"CAJON 1 u $72.000 + TROZADITO 0,215 kg $1.118 = TOTAL $73.118","esperado":"TOTAL_SYSTEL importe=73118","mensaje":"no se cargó"},
+    {"codigo":"0000000000000","cliente":"Los gringos","contexto":"los-gringos-sucursal","evidencia":"real","fuente":"foto del ticket 13/10: el código impreso debajo de cada artículo","papel":"0 000000 000000","esperado":"BUSQUEDA"},
+    {"codigo":"2202000731184","cliente":"Los gringos","contexto":"los-gringos-perfil-22aa","evidencia":"real","fuente":"ticket 3095 (scale-sale.test.ts)","papel":"TOTAL $73.118, 2 artículos","esperado":"PAPEL_TOTAL importe=73118 articulos=2"},
+    {"codigo":"2202000727545","cliente":"Los gringos","contexto":"los-gringos-perfil-22aa","evidencia":"real","fuente":"ticket 3098 (scale-sale.test.ts)","papel":"TOTAL $72.754, 2 artículos","esperado":"PAPEL_TOTAL importe=72754 articulos=2"},
+    {"codigo":"2211999999994","cliente":"Los gringos","contexto":"los-gringos-perfil-22aa","evidencia":"real","fuente":"el TOTAL sin importe de TripleS leído con el perfil Systel (scale-sale.test.ts)","papel":"TOTAL $12.810","esperado":"RECHAZO","mensaje":"no entra en el código del TOTAL"},
+    {"codigo":"2220000732222","cliente":"Los gringos","contexto":"los-gringos-perfil-22bb","evidencia":"real","fuente":"venta de prueba en producción 19/10 (los-gringos-1910.test.ts)","papel":"TOTAL $73.222","esperado":"PAPEL_TOTAL importe=73222"},
+    {"codigo":"2220000012225","cliente":"Los gringos","contexto":"los-gringos-perfil-22bb","evidencia":"real","fuente":"TOTAL leído con 22BBIIIIIIII el 09/10 (systel-sales.test.ts)","papel":"TOTAL $1.222","esperado":"PAPEL_TOTAL importe=1222"},
+    {"codigo":"2000080001551","cliente":"Los gringos","contexto":"los-gringos-3-systel","evidencia":"real","fuente":"balanza 3, 16/11 (commit #46, ticket-detail.test.ts)","papel":"(8) PATA MUSLO X5X10 0.155kg 3400$/kg = 527$","esperado":"PAPEL prod=8 kg=0.155"},
+    {"codigo":"2001230001759","cliente":"TripleS","contexto":"triples","evidencia":"real","fuente":"foto del ticket 13/10 (scale-real-labels.ts)","papel":"MUZARELLA PUNTA DA 0,175 kg","esperado":"ETIQUETA prod=123 kg=0.175"},
+    {"codigo":"2001210001458","cliente":"TripleS","contexto":"triples","evidencia":"real","fuente":"foto del ticket 13/10","papel":"CREMOSO PUNTA D AG 0,145 kg","esperado":"ETIQUETA prod=121 kg=0.145"},
+    {"codigo":"2001470001205","cliente":"TripleS","contexto":"triples","evidencia":"real","fuente":"foto del ticket 13/10","papel":"PALETA JAM GRASSET 0,120 kg","esperado":"ETIQUETA prod=147 kg=0.12"},
+    {"codigo":"2000520003503","cliente":"TripleS","contexto":"triples","evidencia":"real","fuente":"foto del ticket 13/10","papel":"NUGGETS POLLO GTA 0,350 kg","esperado":"ETIQUETA prod=52 kg=0.35"},
+    {"codigo":"2211999999994","cliente":"TripleS","contexto":"triples","evidencia":"real","fuente":"foto del ticket 13/10: el código del TOTAL","papel":"TOTAL $12.810","esperado":"SIN_IMPORTE","mensaje":"cada producto"},
+    {"codigo":"2001230001759","cliente":"TripleS","contexto":"triples-fabrica","evidencia":"real","fuente":"foto del ticket 13/10, con la sucursal sin configurar","papel":"MUZARELLA PUNTA DA 0,175 kg","esperado":"ETIQUETA prod=123 kg=0.017","sospechoso":"Con la sucursal sin configurar se agrega 0,017 kg sin ningún aviso: el papel dice 0,175 kg (10 veces menos)."},
+    {"codigo":"2002103895000","cliente":"Pollo y mar","contexto":"pollo-y-mar","evidencia":"real","fuente":"ticket Pre-Empaque 15/10 (scan-resolve.test.ts)","papel":"ENV:15OCT26 COSTELETAS 0.245kg @ 15900$/kg 3895$","esperado":"ETIQUETA prod=21 kg=0.245 importe=3895"},
+    {"codigo":"2099806737003","cliente":"Pollo y mar","contexto":"pollo-y-mar","evidencia":"real","fuente":"ticket con varios productos, código suma 998 (scan-resolve.test.ts)","papel":"TOTAL $6.737","esperado":"TOTAL importe=6737"},
+    {"codigo":"2099998000008","cliente":"Pollo y mar","contexto":"pollo-y-mar","evidencia":"real","fuente":"tickets de $2.106 y $63.068 con el 2-5-5 de fábrica (scale-barcode.ts, 05/10)","papel":"TOTAL $2.106 / $63.068","esperado":"SIN_IMPORTE","mensaje":"no trae el importe"},
+    {"codigo":"2099998000008","cliente":"Pollo y mar","contexto":"pollo-y-mar-fabrica","evidencia":"real","fuente":"tickets de $2.106 y $63.068 con el 2-5-5 de fábrica (scale-barcode.ts, 05/10)","papel":"TOTAL $2.106 / $63.068","esperado":"SIN_IMPORTE","mensaje":"no trae el importe"},
+    {"codigo":"2099998005928","cliente":"Pollo y mar","contexto":"pollo-y-mar-fabrica","evidencia":"real","fuente":"ticket de $5,92 con el 2-5-5 de fábrica (\"20 99998 00592\", scale-barcode.ts)","papel":"TOTAL $5,92","esperado":"TOTAL importe=5.92"},
+    {"codigo":"2000019993407","cliente":"El Dorado","contexto":"el-dorado-fabrica","evidencia":"real","fuente":"auditoría 29/10, leído con el formato de fábrica (scan-resolve.test.ts)","papel":"NALGA $99.934","esperado":"ETIQUETA prod=1 kg=99.934 pregunta=excesivo","sospechoso":"El código trae un IMPORTE ($99.934) y se lee como 99,934 kg; solo lo frena la pregunta de más de 31 kg."},
+    {"codigo":"2010060999341","cliente":"El Dorado","contexto":"el-dorado-systel","evidencia":"real","fuente":"ticket 29/10 (systel-v7.test.ts)","papel":"BOLA DE LOMO $99.934","esperado":"NO_SOPORTADO"},
+    {"codigo":"2010060999341","cliente":"El Dorado","contexto":"el-dorado-systel-viejo","evidencia":"real","fuente":"ticket 29/10 con el formato viejo guardado en la PC (systel-v7.test.ts)","papel":"BOLA DE LOMO $99.934","esperado":"ETIQUETA prod=1006 kg=99.934 pregunta=excesivo","sospechoso":"Con el formato viejo guardado en la PC el importe $99.934 se lee como 99,934 kg; solo lo frena la pregunta de más de 31 kg."},
+    {"codigo":"2010060999341","cliente":"El Dorado","contexto":"el-dorado-perfil","evidencia":"real","fuente":"ticket 29/10 leído con el perfil de la balanza","papel":"BOLA DE LOMO $99.934","esperado":"PAPEL prod=1006 kg=5.555 importe_codigo=99934","sospechoso":"Por el camino de perfiles se cobra kilos × precio de Patagonia (5,555 × $17.990 = $99.934,45), no el importe impreso ($99.934): 45 centavos de más."},
+    {"codigo":"2000010024209","cliente":"Giuseppe","contexto":"giuseppe","evidencia":"real","fuente":"ticket 20-451, 27/10 (scale-sale.test.ts)","papel":"MILA POLLO 0,220 kg × $11.000 = $2.420","esperado":"PAPEL prod=1 kg=0.22 importe_codigo=2420"},
+    {"codigo":"2201000024203","cliente":"Giuseppe","contexto":"giuseppe","evidencia":"real","fuente":"TOTAL del ticket 20-451, 27/10","papel":"TOTAL $2.420, 1 artículo","esperado":"PAPEL_TOTAL importe=2420 articulos=1"},
+    {"codigo":"2001780003258","cliente":"Quesar","contexto":"quesar","evidencia":"real","fuente":"etiqueta 17/11 (scale-sale.test.ts, commit #61)","papel":"Tybo Maquina 0,325 kg × $21.300 = $6.923","esperado":"PAPEL prod=178 kg=0.325"},
+    {"codigo":"2001120138923","cliente":"Mercado de la Cruz","contexto":"mercado-de-la-cruz","evidencia":"real","fuente":"etiqueta 24/11 (mercado-cruz.test.ts)","papel":"MILA DE PECETO 0,735 kg = $13.892","esperado":"RECHAZO","mensaje":"N.º 112"},
+    {"codigo":"2100003002358","cliente":"Oliem","contexto":"oliem","evidencia":"real","fuente":"18/11, Report por red (scan-resolve.test.ts)","papel":"SALAME CAÑOLI 0,235 kg","esperado":"ETIQUETA prod=0000003 kg=0.235"},
+    {"codigo":"2000212051836","cliente":"Oliem","contexto":"oliem","evidencia":"real","fuente":"18/11, la otra balanza del local (commit #63)","papel":"PROMO PATA $5.183","esperado":"ETIQUETA prod=212 kg=1.555 importe=5183"},
+    {"codigo":"2100037017403","cliente":"Lauda","contexto":"lauda","evidencia":"real","fuente":"18/11, Report NX2 (scan-resolve.test.ts)","papel":"BONDIOLA/ENTERA 1,740 kg","esperado":"ETIQUETA prod=37 kg=1.74"},
+    {"codigo":"2006788022508","cliente":"Carplat","contexto":"carplat","evidencia":"real","fuente":"etiqueta vieja con importe (scan-resolve.test.ts)","papel":"ROAST BEEF $88.022,50","esperado":"ETIQUETA prod=67 kg=6.287 importe=88022.5"},
+    {"codigo":"2106700064255","cliente":"Carplat","contexto":"carplat","evidencia":"prueba","fuente":"etiqueta \"21\" con peso, 18/11 (scan-resolve.test.ts)","papel":"ROAST BEEF 6,425 kg","esperado":"ETIQUETA prod=67 kg=6.425"},
+    {"codigo":"2124300030005","cliente":"Carplat","contexto":"carplat","evidencia":"prueba","fuente":"etiqueta \"21\" con peso, 18/11 (scan-resolve.test.ts)","papel":"MILANESAS DE POLLO 3,000 kg","esperado":"ETIQUETA prod=243 kg=3"},
+    {"codigo":"2106700642507","cliente":"Carplat","contexto":"carplat","evidencia":"prueba","fuente":"etiqueta \"21\" de más de 31 kg (scan-resolve.test.ts)","papel":"64,25 kg","esperado":"RECHAZO","mensaje":"64,25 kg"},
+    {"codigo":"2199900064255","cliente":"Carplat","contexto":"carplat","evidencia":"prueba","fuente":"etiqueta \"21\" de un producto que no existe (scan-resolve.test.ts)","papel":"N.º 999","esperado":"RECHAZO","mensaje":"N.º 999"},
+    {"codigo":"2099998689326","cliente":"El Abastero","contexto":"el-abastero","evidencia":"real","fuente":"ticket de suma de 3 productos, 21/11 (commit #78)","papel":"TOTAL 68932.10","esperado":"TOTAL importe=68932"},
+    {"codigo":"2000101690009","cliente":"El Abastero","contexto":"el-abastero","evidencia":"real","fuente":"21/11 (scan-resolve.test.ts)","papel":"CAJON DE POLLO $69.000","esperado":"ETIQUETA prod=101 u=1 importe=69000"},
+    {"codigo":"2000127420000","cliente":"El Abastero","contexto":"el-abastero","evidencia":"real","fuente":"24/11, Report LT (commit #90)","papel":"CAJA FORMITA $42.000","esperado":"ETIQUETA prod=127 u=1 importe=42000"},
+    {"codigo":"2099869000007","cliente":"El Abastero","contexto":"el-abastero","evidencia":"real","fuente":"24/11, TOTAL de la Aura 2-3-7 (scan-resolve.test.ts)","papel":"TOTAL $69.000","esperado":"TOTAL importe=69000"},
+    {"codigo":"2000017195216","cliente":"El Abastero","contexto":"el-abastero","evidencia":"real","fuente":"24/11, Report LT (scan-resolve.test.ts)","papel":"FALDA 1,255 kg $19.521,53","esperado":"ETIQUETA prod=17 kg=1.255 importe=19521.53"},
+    {"codigo":"2000015216135","cliente":"El Abastero","contexto":"el-abastero","evidencia":"real","fuente":"24/11, Report LT","papel":"MATAMBRE 1,255 kg $21.613,61","esperado":"ETIQUETA prod=15 kg=1.255 importe=21613.61"},
+    {"codigo":"2000001230077","cliente":"El Abastero","contexto":"el-abastero","evidencia":"real","fuente":"24/11, Report LT","papel":"NALGA 1,255 kg $23.007,92","esperado":"ETIQUETA prod=1 kg=1.255 importe=23007.92"},
+    {"codigo":"2099826857002","cliente":"El Abastero","contexto":"el-abastero","evidencia":"real","fuente":"24/11, TOTAL de la Aura","papel":"TOTAL $26.857","esperado":"TOTAL importe=26857"},
+    {"codigo":"2099802566003","cliente":"El Abastero","contexto":"el-abastero-aura22","evidencia":"real","fuente":"25/11, TOTAL de la Aura con inicio 20 (antes de cambiarla)","papel":"TOTAL $2.566","esperado":"TOTAL importe=2566"},
+    {"codigo":"2000009278668","cliente":"El Abastero","contexto":"el-abastero-aura22","evidencia":"real","fuente":"25/11, Report LT","papel":"BIFE ANGOSTO $27.866,16","esperado":"ETIQUETA prod=9 kg=1.52 importe=27866.16"},
+    {"codigo":"2200121266004","cliente":"El Abastero","contexto":"el-abastero-aura22","evidencia":"real","fuente":"25/11, Aura con inicio 22, ticket T.0028 (commit #96)","papel":"NALGA 1,160 kg $21.266","esperado":"ETIQUETA prod=1 kg=1.16 importe=21266"},
+    {"codigo":"2000621357000","cliente":"El Abastero","contexto":"el-abastero-aura22","evidencia":"real","fuente":"25/11, la Aura antes de aceptar el inicio 22 (commit #94)","papel":"CUADRIL $21.357,00 (Pre-Empaque)","esperado":"RECHAZO","mensaje":"N.º 621"},
+    {"codigo":"2000127420000","cliente":"El Abastero","contexto":"el-abastero-aura22","evidencia":"real","fuente":"24/11, Report LT, con la marca del inicio 22","papel":"CAJA FORMITA $42.000","esperado":"ETIQUETA prod=127 u=1 importe=42000"}
+  ]
+}
