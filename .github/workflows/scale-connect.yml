@@ -1,0 +1,129 @@
+# Instalador de Windows de Patagonia Scale Connect (apps/connector).
+# Arma el ejecutable (Node SEA), lo prueba, compila el instalador Inno Setup SIN FIRMAR y lo
+# sube como artefacto junto con su SHA-256. No publica nada en ningún sitio.
+#
+# Se dispara SOLO:
+#   - a mano: Actions → "Scale Connect (instalador)" → Run workflow, o
+#   - con un tag scale-connect-vX.Y.Z (que tiene que coincidir con la versión de
+#     apps/connector/package.json).
+# No corre en cada push ni en los PR a propósito: tarda y no hace falta.
+#
+# El repo vive un nivel arriba de la carpeta del proyecto (patagonia-os-v312).
+name: Scale Connect (instalador)
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "scale-connect-v*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scale-connect-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  instalador:
+    name: Ejecutable + instalador (sin firmar)
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        working-directory: patagonia-os-v312
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22 LTS: el ejecutable se arma con el node.exe que corre el script
+      # (scripts/lib/node22.mjs solo baja uno si no es 22.x).
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          architecture: x64
+          cache: npm
+          cache-dependency-path: patagonia-os-v312/package-lock.json
+
+      - name: Versión del tag = versión del conector
+        if: startsWith(github.ref, 'refs/tags/scale-connect-v')
+        run: |
+          $tag = "${{ github.ref_name }}".Substring("scale-connect-v".Length)
+          $pkg = (Get-Content apps/connector/package.json -Raw | ConvertFrom-Json).version
+          if ($tag -ne $pkg) { Write-Error "El tag dice $tag y apps/connector/package.json dice $pkg"; exit 1 }
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Pruebas del conector
+        run: npm run test -w @patagonia/connector
+
+      - name: Tipos del conector
+        run: npm run typecheck -w @patagonia/connector
+
+      # build (esbuild) + Node SEA + firma de node.exe quitada + postject + serialport
+      # + WinSW con SHA-256 fijo. Deja apps/connector/dist/PatagoniaScaleConnect/.
+      - name: Armar el ejecutable
+        run: npm run package -w @patagonia/connector
+
+      - name: Probar el ejecutable (--version y /status)
+        run: npm run smoke -w @patagonia/connector
+
+      # Inno Setup 6.3+ (hace falta por "x64compatible"). Si la imagen ya lo trae, se usa ese;
+      # si no, Chocolatey lo instala y verifica el checksum del paquete.
+      - name: Instalar Inno Setup
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          if (-not (Test-Path $iscc)) { Write-Error "No quedó ISCC.exe en $iscc"; exit 1 }
+          "ISCC=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # ---------------------------------------------------------------------------------
+      # FIRMA: COMENTADA hasta tener certificado de firma de código.
+      # Va comentada (y no con "if: false") porque GitHub baja todas las acciones de un job
+      # aunque el paso no corra. Para activarla, con SSL.com eSigner + CodeSignTool:
+      #   1. Cargar los secretos ES_USERNAME, ES_PASSWORD, ES_CREDENTIAL_ID, ES_TOTP_SECRET.
+      #   2. Descomentar los dos pasos de firma, fijando la acción a un commit (no a una rama).
+      #   3. scale-connect.exe se firma ANTES de compilar el instalador (así lo lleva firmado);
+      #      el instalador se firma después y su .sha256 se recalcula sobre el archivo firmado.
+      # Sin firma, Windows SmartScreen avisa "editor desconocido" al instalar.
+      # ---------------------------------------------------------------------------------
+      # - name: Firmar scale-connect.exe
+      #   uses: sslcom/esigner-codesign@<commit>
+      #   with:
+      #     command: sign
+      #     username: ${{ secrets.ES_USERNAME }}
+      #     password: ${{ secrets.ES_PASSWORD }}
+      #     credential_id: ${{ secrets.ES_CREDENTIAL_ID }}
+      #     totp_secret: ${{ secrets.ES_TOTP_SECRET }}
+      #     file_path: ${{ github.workspace }}/patagonia-os-v312/apps/connector/dist/PatagoniaScaleConnect/scale-connect.exe
+      #     override: true
+      #     environment_name: PROD
+
+      - name: Compilar el instalador (sin firmar)
+        run: npm run installer -w @patagonia/connector
+
+      # - name: Firmar el instalador
+      #   uses: sslcom/esigner-codesign@<commit>
+      #   with:
+      #     command: sign
+      #     username: ${{ secrets.ES_USERNAME }}
+      #     password: ${{ secrets.ES_PASSWORD }}
+      #     credential_id: ${{ secrets.ES_CREDENTIAL_ID }}
+      #     totp_secret: ${{ secrets.ES_TOTP_SECRET }}
+      #     file_path: ${{ github.workspace }}/patagonia-os-v312/apps/connector/dist/installer/PatagoniaScaleConnect-Setup-<versión>.exe
+      #     override: true
+      #     environment_name: PROD
+      # - name: Recalcular el SHA-256 del instalador firmado
+      #   run: Get-ChildItem apps/connector/dist/installer/*.exe | ForEach-Object { "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower()) *$($_.Name)" | Out-File "$($_.FullName).sha256" -Encoding ascii }
+
+      - name: Subir el instalador y su SHA-256
+        uses: actions/upload-artifact@v4
+        with:
+          name: PatagoniaScaleConnect-instalador-sin-firmar
+          path: |
+            patagonia-os-v312/apps/connector/dist/installer/PatagoniaScaleConnect-Setup-*.exe
+            patagonia-os-v312/apps/connector/dist/installer/PatagoniaScaleConnect-Setup-*.exe.sha256
+            patagonia-os-v312/apps/connector/dist/PatagoniaScaleConnect/build-info.json
+          if-no-files-found: error
+          retention-days: 30

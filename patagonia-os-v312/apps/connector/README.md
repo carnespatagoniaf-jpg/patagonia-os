@@ -34,7 +34,7 @@ avisa. Vincular: abrir `http://127.0.0.1:9120/vincular` y escribir el código de
 ## Probar
 
 ```bash
-npm run test -w @patagonia/connector       # node --test vía tsx, sin hardware
+npm run test -w @patagonia/connector       # node --test vía tsx, sin hardware (incluye scripts/lib/*.test.mjs)
 npm run typecheck -w @patagonia/connector
 ```
 
@@ -79,39 +79,146 @@ Typecheck: `tsconfig.json` revisa todo con `DOM` y los `.d.ts` de la web (la web
 ```bash
 npm run build -w @patagonia/connector        # esbuild -> dist/scale-connect.cjs (un solo JS, serialport afuera; ~333 KB, ~232 KB son los protocolos de la web)
 npm run package:sea -w @patagonia/connector  # Node SEA -> dist/package/
+## Ejecutable e instalador (sin firmar todavía)
+
+### Armar en esta PC
+
+Hace falta Windows x64. Para el instalador, además, [Inno Setup 6.3+](https://jrsoftware.org/isdl.php)
+(o la variable `ISCC` con la ruta de `ISCC.exe`).
+
+```bash
+npm run package -w @patagonia/connector    # build + ejecutable -> dist/PatagoniaScaleConnect/
+npm run smoke -w @patagonia/connector      # prueba: --version y /status, sin instalar nada
+npm run installer -w @patagonia/connector  # Inno Setup -> dist/installer/PatagoniaScaleConnect-Setup-X.Y.Z.exe (+ .sha256)
 ```
 
-`dist/package/` queda así:
+`dist/PatagoniaScaleConnect/` queda así (es lo que copia el instalador):
 
 ```
-PatagoniaScaleConnect.exe   WinSW-x64.exe renombrado (lo agrega el instalador)
+scale-connect.exe           Node 22 + el bundle inyectado (Node SEA), sin la firma de node.exe
+PatagoniaScaleConnect.exe   WinSW v3 x64 (el servicio), bajado con SHA-256 fijo
 PatagoniaScaleConnect.xml   packaging/PatagoniaScaleConnect.xml
-scale-connect.exe           node.exe + bundle inyectado (Node SEA)
-node_modules/serialport/…   JS de serialport + @serialport/bindings-cpp/prebuilds/win32-x64/*.node
+node_modules/serialport/…   serialport y sus dependencias, solo el .node de win32-x64
+build-info.json             versión, Node, WinSW y SHA-256 de cada archivo
 ```
 
-Plan SEA + módulo nativo:
-- El bundle es CommonJS porque SEA en Node 22 solo ejecuta CJS.
-- Dentro de SEA, `require` solo ve los módulos internos de Node. Por eso
-  `native/serialport-loader.ts` usa `createRequire` desde la carpeta del `.exe`, y el
-  script copia `serialport` y sus dependencias ahí, con solo el `.node` de win32-x64.
-- `serialport` usa N-API precompilado: no hace falta compilar, y el `.node` sirve
-  para cualquier Node 22 o posterior.
-- Para inyectar el bundle hace falta `postject`. El script avisa si falta. Armar
-  con **Node 22 LTS x64**.
-- `node.exe` viene firmado: hay que sacarle la firma antes de inyectar
-  (`signtool remove /s`) y firmar `scale-connect.exe` con el certificado propio después.
+Cómo se arma (`scripts/package-sea.mjs`):
+- **Node 22 LTS x64, siempre.** Si el Node que corre el script es 22.x se usa ese (el CI).
+  Si no (esta PC tiene Node 24), baja `node-v22.x-win-x64.zip` con el SHA-256 publicado
+  por nodejs.org fijado en `scripts/lib/pinned.mjs`, a `%TEMP%\patagonia-scale-connect-build`
+  (fuera del repo), y extrae solo `node.exe`. También se puede indicar uno:
+  `npm run package -w @patagonia/connector -- --node C:\ruta\node.exe` o `SCALE_CONNECT_NODE`.
+- El blob SEA se genera con **ese mismo** `node.exe` (el formato depende de la versión).
+- `node.exe` viene firmado por OpenJS: inyectar rompe esa firma (Windows mostraría "firma
+  no válida"). `scripts/lib/pe-unsign.mjs` la quita antes (lo mismo que `signtool remove /s`,
+  sin necesitar el Windows SDK) y `postject` (dependencia fija `1.0.0-alpha.6`) inyecta.
+- Dentro de SEA, `require` no ve `node_modules`: `src/native/serialport-loader.ts` carga
+  `serialport` desde la carpeta del `.exe`. `serialport` usa N-API precompilado.
+- WinSW `v3.0.0-alpha.11` se baja de GitHub y se compara con el SHA-256 fijo; si no
+  coincide, el build se frena. El proyecto no publica hashes: el fijado se calculó al bajarlo
+  el 27/11/2026.
+- `scale-connect.exe --version` imprime la versión y sale (lo usan el CI y soporte).
 
-Servicio (WinSW v3): inicio automático diferido, reinicio ante caída (5 s, 15 s, 60 s) y
-cuenta virtual `NT SERVICE\PatagoniaScaleConnect`, sin administrador. Instalar con
-`PatagoniaScaleConnect.exe install`. Si la versión de WinSW no acepta la cuenta virtual,
-el XML trae los comandos `sc.exe`/`icacls` alternativos.
+### Qué hace el instalador (`packaging/installer.iss`)
+
+- Programa en `C:\Program Files\Patagonia\Scale Connect`; datos en
+  `C:\ProgramData\Patagonia\ScaleConnect` (config, diario, bitácoras), que nunca se pisan.
+- Registra el servicio con WinSW: inicio **automático con retardo**, reinicio ante caídas
+  (5 s, 15 s, 60 s) y parada prolija (Ctrl+C, 15 s).
+- **Cuenta del servicio:** la virtual `NT SERVICE\PatagoniaScaleConnect`. WinSW v3 no puede
+  instalar con ella (busca el SID antes de crear el servicio, y la cuenta virtual no existe
+  hasta que el servicio existe; está explicado en el XML), así que el instalador la asigna con
+  `sc.exe config … obj=` justo después de instalar y antes del primer inicio. Si Windows no la
+  acepta, usa `NT AUTHORITY\LocalService` (tampoco es administrador). Las dos pueden abrir los
+  puertos COM, igual que cualquier usuario. Después da permiso de escritura en los datos
+  (`icacls … (OI)(CI)M /T`) y de lectura en el programa, e inicia el servicio.
+- **Actualizar** = instalar la versión nueva encima (mismo `AppId`): frena el servicio,
+  reemplaza los archivos (borra `node_modules` viejo), `refresh` de WinSW y vuelve a iniciar.
+  Los datos quedan.
+- Al terminar abre `http://127.0.0.1:9120/vincular` con el usuario que instaló (no como
+  administrador). Si esa página todavía no existe en esta versión, igual abre la dirección.
+- **Desinstalar** frena y saca el servicio y pregunta si borrar los datos (por omisión: No).
+- En español. Requiere Windows 10/11 x64 y administrador.
+- Silencioso, para soporte:
+
+```bat
+PatagoniaScaleConnect-Setup-0.1.0.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="%TEMP%\scale-connect-setup.log"
+"C:\Program Files\Patagonia\Scale Connect\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES            (deja los datos)
+"C:\Program Files\Patagonia\Scale Connect\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES /BORRARDATOS
+```
+
+Si algo del servicio falla, el instalador lo dice (paso y código) y lo anota en el log.
+
+### En el CI (`.github/workflows/scale-connect.yml`, raíz del repo)
+
+Corre en `windows-latest` con Node 22 **solo** a mano (Actions → "Scale Connect
+(instalador)" → Run workflow) o al subir un tag `scale-connect-vX.Y.Z` (tiene que coincidir con
+`version` de este `package.json`). No corre en los PR. Pasos: `npm ci`, pruebas y tipos del
+conector, `package`, `smoke`, Inno Setup (el de la imagen o `choco install innosetup`),
+`installer`. Sube como artefacto el instalador sin firmar, su `.sha256` y `build-info.json`.
+Los pasos de firma están comentados (ver "Qué falta").
+
+```bash
+git tag scale-connect-v0.1.0 && git push origin scale-connect-v0.1.0
+```
+
+### Probar en una PC limpia
+
+Mejor una máquina virtual con Windows 10/11 x64 recién instalado (o Windows Sandbox), sin Node.
+
+1. Copiar el instalador y comprobar el hash: `certutil -hashfile PatagoniaScaleConnect-Setup-0.1.0.exe SHA256`
+   contra el `.sha256`.
+2. Instalar con doble clic. Sin firma, SmartScreen avisa: "Más información" → "Ejecutar de todas formas".
+3. Al terminar se abre el navegador en `/vincular`. `http://127.0.0.1:9120/status` tiene que responder.
+4. `sc qc PatagoniaScaleConnect`: `START_TYPE AUTO_START (DELAYED)`, `SERVICE_START_NAME NT SERVICE\PatagoniaScaleConnect`.
+   `sc qfailure PatagoniaScaleConnect`: tres reinicios.
+5. Reiniciar Windows y esperar un par de minutos antes de iniciar sesión: en
+   `C:ProgramDataPatagoniaScaleConnectlogsconnector.log` el arranque tiene que ser anterior al inicio de sesión.
+6. Matar `scale-connect.exe` en el Administrador de tareas: a los 5 s vuelve.
+7. Con un adaptador USB-serie enchufado, `/status` → `ports` lo lista (la cuenta del servicio ve los COM).
+8. Instalar encima una versión más nueva (subir `version`, rearmar): el servicio se frena y
+   vuelve, `config.json` sigue igual.
+9. Desinstalar: el servicio desaparece (`sc query PatagoniaScaleConnect` → 1060) y
+   `C:\ProgramData\Patagonia\ScaleConnect` queda; repetir eligiendo borrar los datos.
+10. Repetir 2 y 9 en silencioso con los comandos de arriba.
+
+### Manifiesto de actualización (`scripts/make-update-manifest.mjs`)
+
+`latest.json` dice versión, canal (`interno` | `piloto` | `general`), versión mínima, URL
+(https), SHA-256 y tamaño del instalador, firmado con **Ed25519** (formato exacto y qué se
+firma: `scripts/lib/update-manifest.mjs`). La clave privada viene **solo** de la variable
+`SCALE_CONNECT_UPDATE_KEY` (PEM PKCS#8 o DER en base64); nunca va al repo.
+
+```bash
+node scripts/make-update-manifest.mjs keygen --out-dir C:\claves-scale-connect   # se niega dentro de un repo
+SCALE_CONNECT_UPDATE_KEY=… npm run update-manifest -w @patagonia/connector -- \
+  --url https://…/PatagoniaScaleConnect-Setup-0.2.0.exe --file dist/installer/PatagoniaScaleConnect-Setup-0.2.0.exe \
+  --channel interno --min-version 0.1.0
+node scripts/make-update-manifest.mjs verify --manifest dist/installer/latest.json --public-key publica.pem
+```
+
+`verifyManifest` es la misma verificación que hará el servicio. Las pruebas
+(`scripts/lib/*.test.mjs`) corren con `npm run test -w @patagonia/connector`.
 
 ## Qué falta
 
 - **Protocolos en hardware real**: hasta ahora solo contra simuladores (ver `protocols/`).
   Más adelante, cuando el otro lote termine de mover archivos, pasar `web-entry.ts` a
   `packages/scale-protocols` sin cambiar el conector.
+- **Firma de código.** Certificado (SSL.com eSigner con CodeSignTool, a confirmar); después
+  descomentar los pasos de firma del CI: primero `scale-connect.exe`, después el instalador
+  (y el desinstalador, con `SignTool=` en el `.iss`), y recalcular el `.sha256`. Sin firma,
+  SmartScreen asusta al cliente.
+- **Probar el instalador en una PC limpia** (lista de arriba). Hasta ahora: el ejecutable se
+  armó y arrancó en la PC de desarrollo; el `.iss` no se compiló en ella (no tiene Inno Setup),
+  lo compila el CI.
+- Confirmar en el banco que la cuenta virtual abre los COM de cada adaptador (FTDI, CH340,
+  PL2303, CP210x).
+- Avisos de licencia de terceros (Node, WinSW, serialport) junto al programa.
+- **Actualizador** dentro del servicio (lee `latest.json`, verifica firma y hash, instala al
+  lado y vuelve atrás solo) y dónde se publica el manifiesto.
+- **Protocolos** Kretz y Systel: pasan a `packages/scale-protocols` y hablan con `ByteLink`.
+  Hoy no hay nada de protocolo acá.
 - **Vinculación** (código de 8 caracteres, credencial con DPAPI) y **canal con la nube**
   (Edge Function, trabajos, latido).
 - **Protocolos** Kretz y Systel: pasan a `packages/scale-protocols` y hablan con `ByteLink`.
@@ -120,6 +227,5 @@ el XML trae los comandos `sc.exe`/`icacls` alternativos.
 - "Reemplaza a Caja 1" en una PC nueva (hoy solo se recupera con la misma huella).
 - Descubrimiento de **balanzas de red** (subredes, 169.254.x, puertos 1001/10001, ARP).
 - Peso en vivo para Mostrador (WebSocket local).
-- **Actualizador** firmado con Ed25519 y vuelta atrás automática.
-- **Instalador** Inno Setup **firmado** y certificado de firma de código.
 - Diario sobre SQLite (`better-sqlite3`), si el JSON queda chico.
+- "Instalar también el programa de impresión": queda para más adelante.
