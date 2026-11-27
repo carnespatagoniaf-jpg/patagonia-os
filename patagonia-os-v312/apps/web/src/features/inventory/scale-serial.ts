@@ -141,6 +141,11 @@ let cachedPortOpenKey: string | null = null;
 /** Tiempo de espera de la respuesta; la detección automática lo baja para probar rápido. */
 let frameTimeoutMs = 2000;
 
+/** Solo pruebas: una balanza simulada contesta al instante, así que no hace falta esperar 2 s cada respuesta que no llega. */
+export function setScaleFrameTimeoutForTests(ms: number): void {
+  frameTimeoutMs = ms;
+}
+
 export async function isScalePortPaired(): Promise<boolean> {
   if (!isScaleSerialSupported()) return false;
   if (cachedPort) return true;
