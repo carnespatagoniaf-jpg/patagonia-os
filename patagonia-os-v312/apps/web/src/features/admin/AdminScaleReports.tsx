@@ -64,9 +64,9 @@ export function AdminScaleReports({ onChange }: { onChange?: () => void } = {}) 
       `Enviado por: ${report.userName ?? "-"} · ${new Date(report.createdAt).toLocaleString("es-AR", { hourCycle: "h23" })}`,
       `Nota: ${report.note ?? "-"}`,
       `Navegador: ${report.userAgent ?? "-"}`,
-      `Balanzas configuradas: ${JSON.stringify(report.connections, null, 2)}`,
+      `Balanzas configuradas: ${redactSensitive(JSON.stringify(report.connections, null, 2))}`,
       "Actividad:",
-      report.logText
+      redactSensitive(report.logText)
     ].join("\n");
   }
 
