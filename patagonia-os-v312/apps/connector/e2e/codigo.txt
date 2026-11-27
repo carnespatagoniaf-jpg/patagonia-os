@@ -1,2 +1,2 @@
 # Código de vinculación de UNA corrida de scale-connect-e2e.yml (vence a los 10 minutos y se usa una sola vez).
-run=46019862589 codigo=DG7Z-6U6L
+run=46021800907 codigo=3B39-TRQS
