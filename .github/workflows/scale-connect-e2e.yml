@@ -1,0 +1,340 @@
+# Prueba de punta a punta de Patagonia Scale Connect en una PC Windows LIMPIA (cada corrida de windows-latest es una
+# máquina recién creada): arma el instalador, lo instala como lo haría soporte, revisa el servicio, lo rompe a propósito
+# (matar el proceso, reiniciarlo, desinstalar y reinstalar, cortar la red), lo vincula con el sistema de PRUEBAS
+# (staging) y le manda trabajos reales por la nube a dos balanzas simuladas por red (Kretz Report y Systel Cuora).
+#
+# Se dispara SOLO con un push a una rama prueba/scale-connect-e2e* (no con PR, no en main).
+#
+# Este workflow NO tiene credenciales de staging. Lo de la nube lo hace una persona (o Claude) desde su PC con
+# apps/connector/e2e/conducir-staging.mjs mientras esto corre, siguiendo el nombre del paso en curso:
+#   - "Vincular con staging": crea el código de vinculación (vale 10 minutos, un solo uso) y lo sube a
+#     apps/connector/e2e/codigo.txt con un commit "[skip ci]". Este paso lo lee de la rama (git fetch) y vincula por
+#     http://127.0.0.1:9120/vincular igual que un navegador (token anti-CSRF + Origin de la misma página).
+#   - "Fase 1/2/3/4": registra y vincula las balanzas y encola los trabajos; acá se espera a que terminen y se guarda lo
+#     que quedó grabado en cada balanza simulada. La comprobación producto por producto (scale_jobs / scale_job_items
+#     contra los simuladores) la hace el conductor con los artefactos.
+#
+# Lo que no se puede en Actions (reiniciar Windows, puertos COM físicos) queda anotado en la tabla del resumen.
+name: Scale Connect (PC limpia, punta a punta)
+
+on:
+  push:
+    branches:
+      - "prueba/scale-connect-e2e*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scale-connect-e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  E2E_OUT: ${{ github.workspace }}\e2e-salida
+
+jobs:
+  pc-limpia:
+    name: Instalar, romper y mandar por la nube
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        working-directory: patagonia-os-v312
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          architecture: x64
+          cache: npm
+          cache-dependency-path: patagonia-os-v312/package-lock.json
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Pruebas del conector
+        run: npm run test -w @patagonia/connector
+
+      - name: Armar el ejecutable
+        run: npm run package -w @patagonia/connector
+
+      - name: Instalar Inno Setup
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          if (-not (Test-Path $iscc)) { Write-Error "No quedó ISCC.exe en $iscc"; exit 1 }
+          "ISCC=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Compilar el instalador
+        run: npm run installer -w @patagonia/connector
+
+      # ── 1. Instalación ───────────────────────────────────────────────────────────────────────────────────────────
+      - name: Instalar (/VERYSILENT /NUBE=pruebas)
+        run: |
+          Import-Module ./apps/connector/e2e/e2e.psm1 -Force
+          Save-Evidence 'pc.json' ([pscustomobject]@{ os = (Get-CimInstance Win32_OperatingSystem).Caption; build = [Environment]::OSVersion.Version.ToString(); computer = $env:COMPUTERNAME; node = (node --version) })
+          Assert-Check 'Instalación' 'Antes: no hay servicio ni datos' ((-not (Get-Service PatagoniaScaleConnect -ErrorAction SilentlyContinue)) -and -not (Test-Path (Get-DataDir))) 'PC limpia'
+          $code = Install-ScaleConnect 'setup-1.log' @('/NUBE=pruebas')
+          $log = Get-Content (Join-Path (Get-E2EOut) 'setup-1.log') -Raw
+          Assert-Check 'Instalación' 'El instalador termina bien' ($code -eq 0) "código $code"
+          Assert-Check 'Instalación' 'Sin errores del servicio en el log' (-not ($log -match 'ERROR')) ''
+          Assert-Check 'Instalación' 'Programa copiado' (Test-Path (Join-Path (Get-AppDir) 'scale-connect.exe')) (Get-AppDir)
+
+      - name: Comprobar el servicio
+        run: |
+          Import-Module ./apps/connector/e2e/e2e.psm1 -Force
+          $i = Get-ServiceInfo
+          Save-Evidence 'servicio-1.json' $i
+          Assert-Check 'Servicio' 'Existe y está corriendo' ($i -and $i.State -eq 'Running') "$($i.State)"
+          Assert-Check 'Inicio automático' 'Inicio Automático (retrasado)' ($i.StartMode -eq 'Auto' -and $i.DelayedAutostart -eq 1) "StartMode=$($i.StartMode) DelayedAutostart=$($i.DelayedAutostart)"
+          $qc = (sc.exe qc PatagoniaScaleConnect) -join "`n"; $qf = (sc.exe qfailure PatagoniaScaleConnect) -join "`n"; $qff = (sc.exe qfailureflag PatagoniaScaleConnect) -join "`n"
+          Save-Evidence 'sc-qc.txt' $qc; Save-Evidence 'sc-qfailure.txt' $qf; Save-Evidence 'sc-qfailureflag.txt' $qff
+          Assert-Check 'Inicio automático' 'sc qc: AUTO_START (DELAYED)' ($qc -match 'AUTO_START\s+\(DELAYED\)') ''
+          Assert-Check 'Recuperación' 'sc qfailure: reinicia ante caídas' (([regex]::Matches($qf, 'RESTART')).Count -ge 3) ''
+          $account = $i.StartName
+          Assert-Check 'Servicio' 'Cuenta: la virtual o LocalService (no administrador, no SYSTEM)' ($account -in @('NT SERVICE\PatagoniaScaleConnect', 'NT AUTHORITY\LocalService')) $account
+          $proc = Get-Process -Name scale-connect -IncludeUserName -ErrorAction SilentlyContinue | Select-Object -First 1
+          Assert-Check 'Servicio' 'scale-connect.exe corre con esa cuenta' ($proc -and $proc.UserName -eq $account) "$($proc.UserName)"
+          $acl = (icacls (Get-DataDir)) -join "`n"
+          Save-Evidence 'icacls-datos.txt' $acl
+          Assert-Check 'Servicio' 'Permiso de escritura en ProgramData' ($acl -match [regex]::Escape("${account}:(OI)(CI)(M)")) "$account (OI)(CI)(M)"
+          $readers = @(Get-CommonReaders (Get-DataDir)) + @(Get-CommonReaders (Join-Path (Get-DataDir) 'config.json'))
+          Assert-Check 'Servicio' 'Los datos no los lee cualquier usuario de la PC' ($readers.Count -eq 0) ($(if ($readers.Count) { $readers -join '; ' } else { 'solo el servicio, SYSTEM y Administradores' }))
+          Assert-Check 'Servicio' 'Sin permisos de más en el programa' (-not (((icacls (Get-AppDir)) -join "`n") -match [regex]::Escape("${account}:(OI)(CI)(F)"))) 'solo lectura/ejecución'
+          $secs = Wait-Until { Get-Status } 60 '/status responde'
+          $s = Get-Status
+          Save-Evidence 'status-1.json' $s
+          Assert-Check 'Servicio' '/status responde' ($s.service -eq 'PatagoniaScaleConnect') "en $secs s, versión $($s.version)"
+          $cfg = Get-Content (Join-Path (Get-DataDir) 'config.json') -Raw | ConvertFrom-Json
+          Assert-Check 'Instalación' 'config.json con la nube de staging' ($cfg.cloud.url -eq (Get-StagingUrl)) $cfg.cloud.url
+          Assert-Check 'Instalación' '/status: nube de pruebas, sin vincular' ($s.cloud.target -eq 'pruebas' -and $s.cloud.state -eq 'sin_vincular') "$($s.cloud.target) / $($s.cloud.state)"
+
+      # ── 2. Recuperación ──────────────────────────────────────────────────────────────────────────────────────────
+      - name: Recuperación (matar el proceso y Restart-Service)
+        run: |
+          Import-Module ./apps/connector/e2e/e2e.psm1 -Force
+          $old = Get-ConnectorProcess
+          Assert-Check 'Recuperación' 'Hay un scale-connect.exe para matar' ([bool]$old) "pid $($old.Id)"
+          Stop-Process -Id $old.Id -Force
+          $secs = Wait-Until { $p = Get-ConnectorProcess; $p -and $p.Id -ne $old.Id -and (Get-Status) } 60 'que WinSW lo vuelva a levantar'
+          $new = Get-ConnectorProcess
+          Assert-Check 'Recuperación' 'Proceso matado: vuelve solo en menos de 60 s' ($secs -lt 60) "en $secs s (pid $($old.Id) → $($new.Id))"
+          Save-Evidence 'servicio-despues-de-matar.json' (Get-ServiceInfo)
+          $before = Get-ConnectorProcess
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          Restart-Service PatagoniaScaleConnect
+          $secs = Wait-Until { Get-Status } 60 '/status después de Restart-Service'
+          $s = Get-Status
+          Assert-Check 'Recuperación' 'Restart-Service' ((Get-Service PatagoniaScaleConnect).Status -eq 'Running' -and (Get-ConnectorProcess).Id -ne $before.Id -and $s.uptimeSec -lt 60) "en $([math]::Round($sw.Elapsed.TotalSeconds,1)) s, uptime $($s.uptimeSec) s"
+
+      # ── 3. Vinculación real con staging ─────────────────────────────────────────────────────────────────────────
+      - name: Vincular con staging
+        timeout-minutes: 25
+        run: |
+          Import-Module ./apps/connector/e2e/e2e.psm1 -Force
+          $run = $env:GITHUB_RUN_ID
+          $branch = $env:GITHUB_REF_NAME
+          Write-Host "Esperando el código para la corrida $run en apps/connector/e2e/codigo.txt (rama $branch)…"
+          $code = $null
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          while (-not $code -and $sw.Elapsed.TotalMinutes -lt 20) {
+            git fetch --quiet origin $branch 2>$null
+            $text = git show "FETCH_HEAD:patagonia-os-v312/apps/connector/e2e/codigo.txt" 2>$null
+            if ($text -match "run=$run\s+codigo=([2-9A-HJ-NP-Z]{4}-?[2-9A-HJ-NP-Z]{4})") { $code = $Matches[1] } else { Start-Sleep 10 }
+          }
+          Assert-Check 'Vinculación' 'Llegó el código de vinculación' ([bool]$code) "a los $([math]::Round($sw.Elapsed.TotalSeconds)) s"
+          # Igual que un navegador: GET de la página (token anti-CSRF) y POST con el Origin de la misma página.
+          $page = Invoke-WebRequest -Uri 'http://127.0.0.1:9120/vincular' -UseBasicParsing
+          Assert-Check 'Vinculación' '/vincular dice que es el sistema de PRUEBAS' ($page.Content -match 'data-nube="pruebas"') ''
+          if ($page.Content -notmatch 'name="csrf" value="([^"]+)"') { throw 'La página no trae el token' }
+          $csrf = $Matches[1]
+          # Un POST sin el Origin de la página se rechaza (otra página no puede vincular esta PC).
+          $bad = try { Invoke-WebRequest -Method Post -Uri 'http://127.0.0.1:9120/vincular' -Headers @{ Origin = 'https://evil.example' } -ContentType 'application/x-www-form-urlencoded' -Body "csrf=$csrf&code=$code&name=x" -UseBasicParsing; 200 } catch { [int]$_.Exception.Response.StatusCode }
+          Assert-Check 'Vinculación' 'POST desde otro Origin: rechazado' ($bad -eq 403) "HTTP $bad"
+          $badToken = try { Invoke-WebRequest -Method Post -Uri 'http://127.0.0.1:9120/vincular' -Headers @{ Origin = 'http://127.0.0.1:9120' } -ContentType 'application/x-www-form-urlencoded' -Body "csrf=otro&code=$code&name=x" -UseBasicParsing; 200 } catch { [int]$_.Exception.Response.StatusCode }
+          Assert-Check 'Vinculación' 'POST sin el token: rechazado' ($badToken -eq 403) "HTTP $badToken"
+          $name = "PC limpia e2e $run"
+          $body = "csrf=$([uri]::EscapeDataString($csrf))&code=$([uri]::EscapeDataString($code))&name=$([uri]::EscapeDataString($name))"
+          $r = Invoke-WebRequest -Method Post -Uri 'http://127.0.0.1:9120/vincular' -Headers @{ Origin = 'http://127.0.0.1:9120' } -ContentType 'application/x-www-form-urlencoded' -Body $body -UseBasicParsing
+          Save-Evidence 'vincular-respuesta.html' $r.Content
+          Assert-Check 'Vinculación' 'Vinculada con el código' ($r.StatusCode -eq 200 -and $r.Content -match 'quedó vinculada') "como `"$name`""
+          $secs = Wait-Until { $s = Get-Status; $s.cloud.paired -and $s.cloud.state -eq 'en_linea' } 120 'en línea con staging'
+          $s = Get-Status
+          Save-Evidence 'status-vinculada.json' $s
+          Assert-Check 'Vinculación' 'En línea con staging' $true "en $secs s, conector $($s.cloud.connectorId), credencial $($s.cloud.credentialScheme)"
+          $credFile = Join-Path (Get-DataDir) 'credential.json'
+          Assert-Check 'Vinculación' 'Credencial cifrada (DPAPI de máquina)' ((Test-Path $credFile) -and $s.cloud.credentialScheme -eq 'dpapi-machine' -and -not ((Get-Content $credFile -Raw) -match '"secret"')) $s.cloud.credentialScheme
+          $readers = @(Get-CommonReaders $credFile)
+          Assert-Check 'Vinculación' 'credential.json no lo lee cualquier usuario' ($readers.Count -eq 0) ($readers -join '; ')
+          $again = Invoke-WebRequest -Uri 'http://127.0.0.1:9120/vincular' -UseBasicParsing
+          Assert-Check 'Vinculación' 'Ya vinculada: la página no ofrece el formulario' (-not ($again.Content -match 'name="csrf"')) ''
+          "CONECTOR_ID=$($s.cloud.connectorId)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # ── 4. Balanzas simuladas por red ───────────────────────────────────────────────────────────────────────────
+      - name: Balanzas simuladas por red (Report y Cuora)
+        run: |
+          Import-Module ./apps/connector/e2e/e2e.psm1 -Force
+          $ip = Get-LanIp
+          "LAN_IP=$ip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $out = Get-E2EOut
+          $p = Start-Process -FilePath node -ArgumentList @('--import', 'tsx', 'e2e/simuladores.ts', '--host', $ip) -WorkingDirectory (Resolve-Path 'apps/connector') -RedirectStandardOutput (Join-Path $out 'simuladores.log') -RedirectStandardError (Join-Path $out 'simuladores.err.log') -PassThru -WindowStyle Hidden
+          "SIM_PID=$($p.Id)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Wait-Until { Invoke-Sim -Path '/estado' } 60 'simuladores arriba' | Out-Null
+          Assert-Check 'Balanzas' 'Simuladores escuchando en la red local' $true "Report $ip`:1001, Cuora $ip`:10001 (por red: en el runner no hay puertos COM)"
+          # Las balanzas de esta PC (como en el banco de pruebas): config.json → devices. El resto de la configuración queda.
+          Stop-Service PatagoniaScaleConnect
+          $file = Join-Path (Get-DataDir) 'config.json'
+          $cfg = Get-Content $file -Raw | ConvertFrom-Json
+          $cfg | Add-Member -Force -NotePropertyName devices -NotePropertyValue @(
+            [pscustomobject]@{ id = 'report-red'; name = 'Report por red'; transport = [pscustomobject]@{ type = 'tcp'; host = $ip; port = 1001 } },
+            [pscustomobject]@{ id = 'cuora-red'; name = 'Cuora por red'; transport = [pscustomobject]@{ type = 'tcp'; host = $ip; port = 10001 } })
+          $cfg.cloud | Add-Member -Force -NotePropertyName heartbeatMs -NotePropertyValue 15000
+          $cfg | ConvertTo-Json -Depth 10 | Set-Content -Path $file -Encoding utf8
+          Start-Service PatagoniaScaleConnect
+          $secs = Wait-Until { $s = Get-Status; $s -and $s.cloud.state -eq 'en_linea' -and @($s.devices).Count -eq 2 } 120 'servicio con las dos balanzas y en línea'
+          $s = Get-Status
+          Save-Evidence 'status-balanzas.json' $s
+          Assert-Check 'Balanzas' 'El servicio ve las dos balanzas' (@($s.problems).Count -eq 0) "en $secs s: $((@($s.devices) | ForEach-Object { "$($_.id)=$($_.state)" }) -join ', ')"
+
+      # ── 5. Envío por la nube ────────────────────────────────────────────────────────────────────────────────────
+      - name: Fase 1 - identificar y dos envíos a la vez
+        timeout-minutes: 25
+        run: |
+          Import-Module ./apps/connector/e2e/e2e.psm1 -Force
+          Write-Host 'Esperando: un trabajo de identificar + dos envíos (los encola el conductor desde staging)…'
+          $secs = Wait-Until { (Get-JobsCount) -ge 3 } 1380 'los 3 trabajos de la fase 1' 2000
+          $st = Save-SimState 'simuladores-fase1.json'
+          Save-Evidence 'status-fase1.json' (Get-Status)
+          Assert-Check 'Envío doble' 'Los tres trabajos terminaron (identificar + 2 envíos)' $true "en $secs s; Report $(@($st.report.plus).Count) PLU, Cuora $(@($st.systel.plus).Count) PLU, 1070 $($st.report.codigoDeBarras1070 -join ',')"
+          Assert-Check 'Envío doble' 'La Report recibió el formato de código de barras (1070)' (@($st.report.codigoDeBarras1070).Count -ge 1) ($st.report.codigoDeBarras1070 -join ',')
+
+      # ── 6. Fallas ───────────────────────────────────────────────────────────────────────────────────────────────
+      - name: Fase 2 - se corta la Report a mitad del envío
+        timeout-minutes: 25
+        run: |
+          Import-Module ./apps/connector/e2e/e2e.psm1 -Force
+          $base = Get-JobsCount
+          Invoke-Sim -Method Post -Path '/borrar' | Out-Null
+          Invoke-Sim -Method Post -Path '/cortar-report?despues=3' | Out-Null
+          Write-Host 'Report vacía y armada para cortarse al 3er producto. Esperando dos envíos…'
+          $secs = Wait-Until { (Get-JobsCount) -ge $base + 2 } 1380 'los 2 envíos de la fase 2' 2000
+          $st = Save-SimState 'simuladores-fase2.json'
+          Save-Evidence 'status-fase2.json' (Get-Status)
+          Assert-Check 'Fallas' 'La Report se cortó a mitad' (-not $st.report.enRed -and @($st.report.plus).Count -ge 1) "quedaron $(@($st.report.plus).Count) PLU grabados antes del corte"
+          Assert-Check 'Fallas' 'Los dos envíos terminaron (el conector no se colgó)' $true "en $secs s"
+          Invoke-Sim -Method Post -Path '/reiniciar-report' | Out-Null
+          Assert-Check 'Fallas' 'El servicio sigue en línea' ((Get-Status).cloud.state -eq 'en_linea') ''
+
+      - name: Fase 3 - sin red un rato (firewall de salida a staging)
+        timeout-minutes: 25
+        run: |
+          Import-Module ./apps/connector/e2e/e2e.psm1 -Force
+          $base = Get-JobsCount
+          Invoke-Sim -Method Post -Path '/borrar' | Out-Null
+          $hostName = ([uri](Get-StagingUrl)).Host
+          $ips = @([System.Net.Dns]::GetHostAddresses($hostName) | ForEach-Object { $_.IPAddressToString })
+          $profiles = Get-NetFirewallProfile | Select-Object Name, Enabled, DefaultOutboundAction
+          Save-Evidence 'firewall-antes.json' $profiles
+          Set-NetFirewallProfile -All -Enabled True
+          $exe = Join-Path (Get-AppDir) 'scale-connect.exe'
+          $blockedAt = Get-Date
+          New-NetFirewallRule -DisplayName 'E2E: Scale Connect sin staging' -Direction Outbound -Action Block -Program $exe -RemoteAddress $ips | Out-Null
+          Write-Host "Bloqueado $hostName ($($ips -join ', ')) para $exe a las $($blockedAt.ToString('o'))"
+          $off = Wait-Until { (Get-Status).cloud.state -eq 'sin_conexion' } 150 'que el conector note que no hay red'
+          Assert-Check 'Reconexión' 'El conector nota que no hay red' $true "a los $off s: $((Get-Status).cloud.lastError.message)"
+          # La red queda cortada al menos 150 s: en ese rato el conductor encola dos envíos (quedan en la nube).
+          while (((Get-Date) - $blockedAt).TotalSeconds -lt 150) { Start-Sleep 5 }
+          Assert-Check 'Reconexión' 'Sin red: no tomó ningún trabajo' ((Get-JobsCount) -eq $base) "trabajos $(Get-JobsCount)"
+          Remove-NetFirewallRule -DisplayName 'E2E: Scale Connect sin staging'
+          $unblockedAt = Get-Date
+          Save-Evidence 'corte-de-red.json' ([pscustomobject]@{ bloqueado = $blockedAt.ToUniversalTime().ToString('o'); desbloqueado = $unblockedAt.ToUniversalTime().ToString('o'); ips = $ips })
+          $on = Wait-Until { (Get-Status).cloud.state -eq 'en_linea' } 120 'que vuelva solo'
+          Assert-Check 'Reconexión' 'Vuelve solo cuando vuelve la red' $true "a los $on s"
+          $secs = Wait-Until { (Get-JobsCount) -ge $base + 2 } 900 'los 2 envíos encolados sin red' 2000
+          $st = Save-SimState 'simuladores-fase3.json'
+          Save-Evidence 'status-fase3.json' (Get-Status)
+          Assert-Check 'Reconexión' 'Tomó y terminó lo encolado mientras no había red' (@($st.report.plus).Count -ge 1 -and @($st.systel.plus).Count -ge 2) "en $secs s después de volver"
+
+      # ── 7. Desinstalar y reinstalar ─────────────────────────────────────────────────────────────────────────────
+      - name: Desinstalar y reinstalar (los datos y la vinculación quedan)
+        run: |
+          Import-Module ./apps/connector/e2e/e2e.psm1 -Force
+          $before = Get-Status
+          $cfgBefore = Get-Content (Join-Path (Get-DataDir) 'config.json') -Raw
+          $code = Uninstall-ScaleConnect 'uninstall.log'
+          Assert-Check 'Recuperación' 'Desinstalar en silencio' ($code -eq 0) "código $code"
+          sc.exe query PatagoniaScaleConnect | Out-Null
+          Assert-Check 'Recuperación' 'Sin servicio después de desinstalar' ($LASTEXITCODE -eq 1060) "sc query → $LASTEXITCODE"
+          Assert-Check 'Recuperación' 'Los datos quedan (config, credencial, balanzas)' ((Test-Path (Join-Path (Get-DataDir) 'config.json')) -and (Test-Path (Join-Path (Get-DataDir) 'credential.json')) -and (Test-Path (Join-Path (Get-DataDir) 'scales.json'))) (Get-DataDir)
+          $code = Install-ScaleConnect 'setup-2.log' @('/NUBE=pruebas')
+          Assert-Check 'Recuperación' 'Reinstalar en silencio' ($code -eq 0) "código $code"
+          $secs = Wait-Until { $s = Get-Status; $s.cloud.state -eq 'en_linea' } 120 'en línea después de reinstalar'
+          $s = Get-Status
+          Save-Evidence 'status-reinstalado.json' $s
+          Assert-Check 'Recuperación' 'Misma vinculación después de reinstalar' ($s.cloud.connectorId -eq $before.cloud.connectorId -and $s.cloud.paired) "conector $($s.cloud.connectorId), en línea a los $secs s"
+          $cfgAfter = Get-Content (Join-Path (Get-DataDir) 'config.json') -Raw
+          Assert-Check 'Recuperación' 'config.json igual (balanzas y nube)' ($cfgAfter -eq $cfgBefore) ''
+          $i = Get-ServiceInfo
+          Assert-Check 'Inicio automático' 'Después de reinstalar: Automático (retrasado) y misma cuenta' ($i.StartMode -eq 'Auto' -and $i.DelayedAutostart -eq 1 -and $i.StartName -in @('NT SERVICE\PatagoniaScaleConnect', 'NT AUTHORITY\LocalService')) "$($i.StartMode) / $($i.StartName)"
+
+      - name: Fase 4 - un trabajo después de reinstalar
+        timeout-minutes: 15
+        run: |
+          Import-Module ./apps/connector/e2e/e2e.psm1 -Force
+          $base = Get-JobsCount
+          $secs = Wait-Until { (Get-JobsCount) -ge $base + 1 } 840 'la prueba de conexión encolada después de reinstalar' 2000
+          Save-Evidence 'status-fase4.json' (Get-Status)
+          Assert-Check 'Recuperación' 'Después de reinstalar sigue tomando trabajos' $true "en $secs s"
+
+      - name: Arranque en frío (lo más parecido a reiniciar Windows)
+        run: |
+          Import-Module ./apps/connector/e2e/e2e.psm1 -Force
+          Stop-Service PatagoniaScaleConnect
+          Wait-Until { -not (Get-ConnectorProcess) } 30 'que el proceso termine' | Out-Null
+          Assert-Check 'Inicio automático' 'Parado: sin proceso y sin /status' (-not (Get-Status)) ''
+          # El SCM arranca los "automático (retrasado)" igual que esto, después de los automáticos. Sin sesión de usuario.
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          Start-Service PatagoniaScaleConnect
+          Wait-Until { Get-Status } 60 '/status en frío' | Out-Null
+          $t1 = [math]::Round($sw.Elapsed.TotalSeconds, 1)
+          Wait-Until { (Get-Status).cloud.state -eq 'en_linea' } 120 'en línea en frío' | Out-Null
+          Assert-Check 'Inicio automático' 'Arranque en frío del servicio parado' $true "/status a los $t1 s, en línea a los $([math]::Round($sw.Elapsed.TotalSeconds,1)) s"
+          $log = Get-Content (Join-Path (Get-DataDir) 'logs\connector.log') -Raw
+          Assert-Check 'Inicio automático' 'Arranca sin sesión de usuario (cuenta de servicio)' ($log -match 'Credencial cargada') 'la credencial DPAPI de máquina se lee en frío'
+          Add-Note 'Inicio automático' 'Reiniciar Windows de verdad' 'GitHub Actions no deja reiniciar el runner: se comprobó el tipo de inicio (AUTO_START DELAYED) y el arranque en frío. En la PC real: reiniciar y mirar en connector.log que arranque antes de iniciar sesión.'
+          Add-Note 'Balanzas' 'Balanzas por cable (COM)' 'El runner no tiene puertos COM (ni virtuales): las dos balanzas simuladas van por red. En la PC real: adaptador USB-serie + /status → ports.'
+
+      # ── 8. Evidencia ────────────────────────────────────────────────────────────────────────────────────────────
+      - name: Juntar registros
+        if: always()
+        run: |
+          Import-Module ./apps/connector/e2e/e2e.psm1 -Force
+          $out = Get-E2EOut
+          Save-Evidence 'status-final.json' (Get-Status)
+          try { Save-SimState 'simuladores-final.json' | Out-Null } catch { }
+          $data = Get-DataDir
+          if (Test-Path $data) {
+            New-Item -ItemType Directory -Force (Join-Path $out 'datos') | Out-Null
+            Copy-Item -Recurse -Force (Join-Path $data 'logs') (Join-Path $out 'datos') -ErrorAction SilentlyContinue
+            foreach ($f in 'config.json', 'scales.json', 'journal\jobs.json') { if (Test-Path (Join-Path $data $f)) { Copy-Item (Join-Path $data $f) (Join-Path $out ('datos\' + ($f -replace '\\', '-'))) } }
+          }
+          Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Service Control Manager' } -MaxEvents 200 -ErrorAction SilentlyContinue |
+            Where-Object { $_.Message -match 'Scale Connect|PatagoniaScaleConnect' } |
+            Select-Object TimeCreated, Id, Message | ConvertTo-Json | Set-Content (Join-Path $out 'eventos-scm.json') -Encoding utf8
+          if ($env:SIM_PID) { Stop-Process -Id $env:SIM_PID -Force -ErrorAction SilentlyContinue }
+          $tsv = Join-Path $out 'comprobaciones.tsv'
+          if (Test-Path $tsv) {
+            $rows = Get-Content $tsv | ForEach-Object { $c = $_ -split "`t"; "| $($c[0]) | $($c[1]) | $($c[2]) | $($c[3]) |" }
+            @('## Scale Connect en una PC limpia', '', '| Área | Comprobación | Resultado | Detalle |', '|---|---|---|---|') + $rows | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+          }
+
+      - name: Subir registros, /status y resultado
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scale-connect-e2e-${{ github.run_id }}
+          path: ${{ github.workspace }}\e2e-salida
+          if-no-files-found: warn
+          retention-days: 14
