@@ -48,6 +48,28 @@ jobs:
       - name: Compilar
         run: npm run build
 
+  # Patagonia Scale Connect es un servicio de Windows (DPAPI, puertos COM, WinSW): se prueba en Windows.
+  scale-connect:
+    name: Scale Connect (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: patagonia-os-v312
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: patagonia-os-v312/package-lock.json
+      - name: Instalar dependencias
+        run: npm ci
+      - name: Tipos del servicio
+        run: npm run typecheck -w @patagonia/connector
+      - name: Pruebas del servicio
+        run: npm run test -w @patagonia/connector
+
   migraciones:
     name: Migraciones desde cero + pruebas SQL
     runs-on: ubuntu-latest
