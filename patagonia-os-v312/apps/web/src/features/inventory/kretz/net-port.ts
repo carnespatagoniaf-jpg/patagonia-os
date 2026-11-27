@@ -1,4 +1,5 @@
 import { AGENT_URL } from "../../sale/printer-agent";
+import { acquireScaleLocks, ScaleBusyError, type ReleaseLock } from "./scale-lock";
 
 /**
  * Balanza Kretz Report por CABLE DE RED (Ethernet), a través del programa de Patagonia en la PC
@@ -21,6 +22,8 @@ export interface NetAddress {
 export const KRETZ_NET_PORT = 1001;
 /** Versión del programa de la PC que trae el puente a la red. */
 export const NET_AGENT_VERSION = 4;
+/** Desde esta versión el programa de la PC tiene una conexión por balanza (cada una con su id de enlace). */
+export const NET_AGENT_MULTI_VERSION = 7;
 
 export interface LocalAddress {
   name: string;
@@ -133,6 +136,12 @@ export class NetScalePort {
   /** Lo que llegó y todavía nadie leyó. */
   private buffered: number[] = [];
   private generation = 0;
+  /** El candado de esta balanza (entre pestañas), tomado desde que se abre hasta que se cierra. */
+  private releaseLock: ReleaseLock | null = null;
+  /** El id de la conexión en el programa de la PC (versión 7); null con la versión 6 o anterior. */
+  private link: string | null = null;
+  /** La conexión la abrió ESTE puerto: solo así se la puede cerrar (sin id, cerrar corta lo que haya abierto). */
+  private owns = false;
 
   /** Cuándo se buscó por última vez una dirección nueva (una vez por minuto como mucho). */
   private relocatedAt = 0;
@@ -158,11 +167,56 @@ export class NetScalePort {
    * marca, es ella con otra dirección. La recuerda con la dirección nueva y sigue, sin que nadie toque nada.
    */
   async open(_options?: SerialOptions): Promise<void> {
+    this.assertClosed();
+    if (!(await this.claim(false))) throw netError("ocupada", new ScaleBusyError().message, null);
+    await this.openClaimed();
+  }
+
+  /**
+   * Como open(), pero si otra pestaña (u otra parte de esta) está usando la balanza no espera ni la toca: devuelve
+   * false. Es lo que usa el vigía de 30 s.
+   */
+  async tryOpen(): Promise<boolean> {
+    this.assertClosed();
+    if (!(await this.claim(true))) return false;
+    await this.openClaimed();
+    return true;
+  }
+
+  private assertClosed() {
     if (this.readable) {
       const err = new Error("La conexión con la balanza ya estaba abierta.");
       err.name = "InvalidStateError";
       throw err;
     }
+  }
+
+  /** Toma el candado (si ya lo tiene, sigue). false = la está usando otro. */
+  private async claim(ifAvailable: boolean): Promise<boolean> {
+    if (this.releaseLock) return true;
+    await learnAgentVersion();
+    const release = await acquireScaleLocks(netLockKeys(this.net), ifAvailable ? { ifAvailable: true } : { waitMs: netTiming.lockWaitMs });
+    if (!release) return false;
+    this.releaseLock = release;
+    return true;
+  }
+
+  private unlock() {
+    const r = this.releaseLock;
+    this.releaseLock = null;
+    r?.();
+  }
+
+  private async openClaimed(): Promise<void> {
+    try {
+      await this.openWithRecovery();
+    } catch (err) {
+      this.unlock();
+      throw err;
+    }
+  }
+
+  private async openWithRecovery(): Promise<void> {
     if (!this.recover) return this.openOnce();
     let last: unknown = null;
     for (let attempt = 0; attempt < NET_OPEN_RETRIES; attempt++) {
@@ -201,13 +255,17 @@ export class NetScalePort {
   }
 
   private async openOnce(): Promise<void> {
-    let r: { status: number; body: { ok?: boolean; error?: string; local?: LocalAddress[] } };
+    let r: { status: number; body: { ok?: boolean; error?: string; local?: LocalAddress[]; link?: string } };
     try {
-      r = await agentCall(`/scale/open?host=${encodeURIComponent(this.net.host)}&port=${this.net.port}`, { method: "POST" });
+      // multi=1: el programa versión 7 abre una conexión aparte para esta balanza y devuelve su id (la 6 lo ignora).
+      r = await agentCall(`/scale/open?host=${encodeURIComponent(this.net.host)}&port=${this.net.port}&multi=1`, { method: "POST" });
     } catch (err) {
       throw netError("sin_programa", "El programa de Patagonia no está funcionando en esta computadora.", err);
     }
     if (!r.body.ok) throw netError("sin_conexion", r.body.error ?? `La balanza no contesta en ${this.net.host}.`, null, r.body.local);
+    this.link = typeof r.body.link === "string" && r.body.link ? r.body.link : null;
+    this.owns = true;
+    if (this.link) agentMulti = true;
     this.generation++;
     this.buffered = [];
     const gen = this.generation;
@@ -215,16 +273,33 @@ export class NetScalePort {
     this.writable = this.makeWritable(gen) as unknown as WritableStream<Uint8Array>;
   }
 
+  /**
+   * Cierra SOLO la conexión de este puerto: con el programa versión 7, por su id; con la 6, solo si la abrió este
+   * puerto (y tiene el candado). Un puerto que no abrió nada no le manda nada al programa: antes cerraba la conexión
+   * que tuviera abierta otra pestaña.
+   */
   async close(): Promise<void> {
+    const link = this.link;
+    const owned = this.owns;
     this.generation++;
     this.readable = null;
     this.writable = null;
     this.buffered = [];
+    this.link = null;
+    this.owns = false;
     try {
-      await agentCall("/scale/close", { method: "POST" }, 3000);
+      if (link) await agentCall(`/scale/close?link=${encodeURIComponent(link)}`, { method: "POST" }, 3000);
+      else if (owned) await agentCall("/scale/close", { method: "POST" }, 3000);
     } catch {
       // el programa no está: no hay nada abierto
+    } finally {
+      this.unlock();
     }
+  }
+
+  /** "?link=…" / "&link=…" para hablarle a la conexión de este puerto (vacío con el programa versión 6). */
+  private linkParam(sep: "?" | "&"): string {
+    return this.link ? `${sep}link=${encodeURIComponent(this.link)}` : "";
   }
 
   private makeWritable(gen: number) {
@@ -236,7 +311,7 @@ export class NetScalePort {
         return {
           async write(chunk: Uint8Array) {
             if (gen !== port.generation) throw closedError();
-            const r = await agentCall<{ ok?: boolean; error?: string; closed?: boolean }>("/scale/write", {
+            const r = await agentCall<{ ok?: boolean; error?: string; closed?: boolean }>(`/scale/write${port.linkParam("?")}`, {
               method: "POST",
               headers: { "Content-Type": "application/octet-stream" },
               body: new Blob([chunk as unknown as BlobPart])
@@ -280,7 +355,7 @@ export class NetScalePort {
                 while (!released && gen === port.generation) {
                   let r: { status: number; body: { ok?: boolean; data?: string; closed?: boolean; error?: string } };
                   try {
-                    r = await agentCall("/scale/read?ms=200", { method: "POST" }, 5000);
+                    r = await agentCall(`/scale/read?ms=200${port.linkParam("&")}`, { method: "POST" }, 5000);
                   } catch (err) {
                     if (released || gen !== port.generation) break;
                     port.lost(gen);
@@ -331,6 +406,9 @@ export class NetScalePort {
     this.generation++;
     this.readable = null;
     this.writable = null;
+    // Sin id ya no se sabe si lo que quede abierto en el programa es de este puerto: no se cierra desde acá.
+    if (!this.link) this.owns = false;
+    this.unlock();
   }
 }
 
@@ -340,7 +418,8 @@ function closedError(detail?: string): Error {
   return err;
 }
 
-export type NetErrorKind = "sin_programa" | "sin_conexion";
+/** ocupada = la está usando otra pestaña de Patagonia en esta computadora (candado de scale-lock.ts). */
+export type NetErrorKind = "sin_programa" | "sin_conexion" | "ocupada";
 
 function netError(kind: NetErrorKind, message: string, cause: unknown, local?: LocalAddress[]): Error {
   const err = new Error(message);
@@ -360,7 +439,30 @@ const ports = new Map<string, NetScalePort>();
 /** Intentos antes de buscarla con otra dirección (cada uno espera a que la balanza conteste hasta 3 s). */
 const NET_OPEN_RETRIES = 3;
 /** Tiempos de la reconexión (las pruebas los achican). */
-export const netTiming = { retryMs: 2000, relocateEveryMs: 60000 };
+/** lockWaitMs: cuánto espera una pestaña a que otra suelte la balanza antes de avisar que está ocupada. */
+export const netTiming = { retryMs: 2000, relocateEveryMs: 60000, lockWaitMs: 15000 };
+
+/**
+ * ¿El programa de la PC tiene una conexión por balanza (versión 7)? null = todavía no se sabe. Con la 6 o anterior,
+ * abrir una balanza corta la otra, así que además del candado de cada balanza se toma uno del programa entero.
+ */
+let agentMulti: boolean | null = null;
+
+async function learnAgentVersion(): Promise<void> {
+  if (agentMulti !== null) return;
+  const v = await netAgentVersion();
+  if (v !== null) agentMulti = v >= NET_AGENT_MULTI_VERSION;
+}
+
+/** Los candados de una balanza por red, siempre en el mismo orden (primero el del programa, si hace falta). */
+export function netLockKeys(a: NetAddress, multi: boolean | null = agentMulti): string[] {
+  return multi ? [netKey(a)] : ["red:programa", netKey(a)];
+}
+
+/** Solo para pruebas: olvidar la versión del programa de la PC. */
+export function resetNetAgentForTests(): void {
+  agentMulti = null;
+}
 
 function sleep(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
@@ -491,6 +593,8 @@ export async function localNetworkPermission(): Promise<PermissionState | null> 
 
 /** ¿La PC llega a la balanza en esa dirección? Abre y cierra (no le manda nada). */
 export async function testNetScale(a: NetAddress): Promise<{ ok: true } | { ok: false; message: string; local: LocalAddress[] | null; kind: NetErrorKind }> {
+  // Ya abierta en esta pestaña (por ejemplo pasando productos): contesta, y no se le corta la conexión.
+  if (ports.get(netKey(a))?.readable) return { ok: true };
   const port = new NetScalePort(a, false);
   try {
     await port.open();

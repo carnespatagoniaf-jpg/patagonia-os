@@ -1,5 +1,6 @@
 import type { ScaleFrame } from "./scale-weight-parser";
 import { WEIGHT_PORT_OPTIONS, exchangeWeightFrame, weightReadError } from "./scale-weight-protocol";
+import { ScaleBusyError, isScaleBusyError, serialLockKey, withScaleLock } from "../inventory/kretz/scale-lock";
 
 // Lectura del peso directo de la balanza Kretz Aura Eco por cable RS-232, con la
 // Web Serial API (Chrome/Edge), para Mostrador. Cómo se le pide el peso está en
@@ -35,7 +36,52 @@ export function setWeightScaleEnabled(enabled: boolean): void {
 }
 
 let cachedPort: SerialPort | null = null;
-let portIsOpen = false;
+/** Los puertos que abrió Mostrador: son los ÚNICOS que cierra (C20: cerraba el de la sincronización de la Report). */
+const openedHere = new WeakSet<SerialPort>();
+
+/** El aparato USB de la balanza de peso, recordado en esta computadora (Web Serial no da otro identificador). */
+const PORT_KEY = "patagonia-weight-scale-port";
+type PortId = { usbVendorId?: number; usbProductId?: number };
+
+function portId(port: SerialPort): PortId | null {
+  const i = (port.getInfo?.() ?? {}) as PortId;
+  return i.usbVendorId === undefined && i.usbProductId === undefined ? null : { usbVendorId: i.usbVendorId, usbProductId: i.usbProductId };
+}
+
+function rememberWeightPort(port: SerialPort): void {
+  const id = portId(port);
+  if (!id) return;
+  try {
+    localStorage.setItem(PORT_KEY, JSON.stringify(id));
+  } catch {
+    // sin localStorage: la próxima vez se vuelve a buscar
+  }
+}
+
+function rememberedWeightPort(): PortId | null {
+  try {
+    const raw = localStorage.getItem(PORT_KEY);
+    const id = raw ? (JSON.parse(raw) as PortId) : null;
+    return id && (id.usbVendorId !== undefined || id.usbProductId !== undefined) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+function forgetRememberedPort(): void {
+  try {
+    localStorage.removeItem(PORT_KEY);
+  } catch {
+    // nada que olvidar
+  }
+}
+
+/** ¿Lo tiene abierto otra parte (u otra pestaña lo abrió en este mismo objeto)? */
+function openElsewhere(port: SerialPort): boolean {
+  return !openedHere.has(port) && Boolean(port.readable || port.writable);
+}
+
+const BUSY_MESSAGE = "La balanza de peso la tiene abierta otra parte del sistema (por ejemplo, pasando productos a la balanza). Esperá a que termine y probá de nuevo.";
 
 export async function isWeightScalePaired(): Promise<boolean> {
   if (!isWeightScaleSupported()) return false;
@@ -48,6 +94,7 @@ export async function connectWeightScale(): Promise<void> {
   if (!isWeightScaleSupported()) throw new Error("Este navegador no soporta la conexión por cable. Usá Chrome o Edge.");
   await closePort();
   cachedPort = await navigator.serial.requestPort();
+  rememberWeightPort(cachedPort);
 }
 
 /** La pantalla "Balanzas" (Scale Manager) le pasa acá el puerto de la
@@ -57,11 +104,13 @@ export async function setWeightScalePort(port: SerialPort): Promise<void> {
   if (cachedPort === port) return;
   await closePort();
   cachedPort = port;
+  rememberWeightPort(port);
 }
 
 export async function forgetWeightScale(): Promise<void> {
   await closePort();
   cachedPort = null;
+  forgetRememberedPort();
 }
 
 // Cable desenchufado: el puerto guardado queda muerto. Se olvida para que al
@@ -69,70 +118,103 @@ export async function forgetWeightScale(): Promise<void> {
 if (isWeightScaleSupported()) {
   navigator.serial.addEventListener("disconnect", (event) => {
     if (event.target === cachedPort) {
+      if (cachedPort) openedHere.delete(cachedPort);
       cachedPort = null;
-      portIsOpen = false;
     }
   });
 }
 
+/** Cierra el puerto de Mostrador, solo si lo abrió Mostrador. */
 async function closePort(): Promise<void> {
-  if (cachedPort && portIsOpen) {
-    try {
-      await cachedPort.close();
-    } catch {
-      // ya estaba cerrado o roto -- no importa
-    }
-  }
-  portIsOpen = false;
+  await closeIfMine(cachedPort);
 }
 
+async function closeIfMine(port: SerialPort | null): Promise<void> {
+  if (!port || !openedHere.has(port)) return;
+  openedHere.delete(port);
+  try {
+    await port.close();
+  } catch {
+    // ya estaba cerrado o roto -- no importa
+  }
+}
+
+const samePortId = (a: PortId | null, b: PortId) => !!a && a.usbVendorId === b.usbVendorId && a.usbProductId === b.usbProductId;
+
+/**
+ * El puerto de la balanza de peso: el marcado (engranaje de Mostrador o pantalla Balanzas) o el recordado en esta
+ * computadora. Si no hay ninguno, se busca preguntándole el peso a los puertos que nadie tiene abiertos, y el que
+ * contesta queda recordado. Antes, con un solo puerto autorizado se tomaba ese aunque fuera la Report.
+ */
 async function getPort(): Promise<SerialPort> {
   if (cachedPort) return cachedPort;
   const known = await navigator.serial.getPorts();
   if (known.length === 0) throw new Error("Todavía no conectaste la balanza. Configurala en Mostrador → engranaje → “Peso directo de la balanza”.");
-  if (known.length === 1) {
-    cachedPort = known[0];
-    return cachedPort;
+  const remembered = rememberedWeightPort();
+  if (remembered) {
+    const same = known.filter((p) => samePortId(portId(p), remembered));
+    if (same.length === 1) {
+      cachedPort = same[0];
+      return cachedPort;
+    }
+    if (same.length > 1) return findWeightScalePort(same);
   }
   return findWeightScalePort(known);
 }
 
-/** Con más de un aparato autorizado (ej. la Aura para peso y una Report
- * para PLU en la misma PC) no alcanza con tomar el primero: se le pide el
- * peso a cada uno y se queda con el que responde como balanza de peso.
- * Los puertos que ya tiene abiertos otra parte de la app (ej. la
+/** Sin puerto marcado ni recordado (o con dos adaptadores iguales): se le
+ * pide el peso a cada uno y se queda con el que responde como balanza de
+ * peso. Los puertos que ya tiene abiertos otra parte de la app (ej. la
  * sincronización de PLU) no se tocan, para no cortarle la conexión. */
 async function findWeightScalePort(known: SerialPort[]): Promise<SerialPort> {
+  let busy = 0;
+  let lastErr: unknown = null;
   for (const port of known) {
-    if (port.readable || port.writable) continue;
+    if (openElsewhere(port)) {
+      busy++;
+      continue;
+    }
     try {
       await readOnce(port);
       cachedPort = port;
+      rememberWeightPort(port);
       return port;
-    } catch {
-      try {
-        await port.close();
-      } catch {
-        // no llegó a abrirse -- no importa
+    } catch (err) {
+      if (isScaleBusyError(err)) {
+        busy++;
+        continue;
       }
-      portIsOpen = false;
+      lastErr = err;
+      await closeIfMine(port);
     }
   }
+  if (busy > 0) throw new ScaleBusyError(BUSY_MESSAGE);
+  // Con un solo aparato, el error tal cual (dice qué le pasó a la balanza).
+  if (known.length === 1 && lastErr) throw lastErr;
   throw new Error("Hay varios aparatos conectados a la PC y ninguno respondió como balanza de peso. Revisá el cable, o volvé a conectarla en Mostrador → engranaje → “Peso directo de la balanza”.");
 }
 
+/** Abre el puerto a 9600 solo si está cerrado. Si lo tiene abierto otra parte (otra velocidad, otro módulo), NO lo cierra. */
 async function ensureOpen(port: SerialPort): Promise<void> {
-  if (portIsOpen && port.readable && port.writable) return;
-  if (port.readable || port.writable) await port.close();
+  if (openedHere.has(port) && port.readable && port.writable) return;
+  if (openElsewhere(port)) throw new ScaleBusyError(BUSY_MESSAGE);
+  if (openedHere.has(port)) await closeIfMine(port); // quedó a medias: es nuestro, se reabre
   await port.open(WEIGHT_PORT_OPTIONS);
-  portIsOpen = true;
+  openedHere.add(port);
 }
 
+/** Una pesada, con el candado del puerto (entre pestañas, scale-lock.ts): nadie más le habla en el medio. */
 async function readOnce(port: SerialPort): Promise<ScaleReading> {
-  await ensureOpen(port);
-  const { raw, frame } = await exchangeWeightFrame(port);
-  if (frame) return { frame, raw };
-  throw weightReadError(raw);
+  return withScaleLock(
+    serialLockKey(port),
+    async () => {
+      await ensureOpen(port);
+      const { raw, frame } = await exchangeWeightFrame(port);
+      if (frame) return { frame, raw };
+      throw weightReadError(raw);
+    },
+    { waitMs: 3000 }
+  );
 }
 
 /** Después de leer, el puerto se cierra solo a los pocos segundos sin uso.
@@ -174,7 +256,7 @@ async function readScaleWeightNow(): Promise<ScaleReading> {
   try {
     return await readOnce(port);
   } catch (err) {
-    if (err instanceof Error && (err.message.startsWith("La balanza no respondió") || err.message.startsWith("Recibí datos") || err.message.startsWith("Todavía"))) {
+    if (isScaleBusyError(err) || (err instanceof Error && (err.message.startsWith("La balanza no respondió") || err.message.startsWith("Recibí datos") || err.message.startsWith("Todavía")))) {
       throw err;
     }
     await closePort();

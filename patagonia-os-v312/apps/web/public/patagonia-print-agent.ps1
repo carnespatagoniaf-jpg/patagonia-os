@@ -18,7 +18,7 @@
 
 $ErrorActionPreference = "Stop"
 $Port = 9101
-$AgentVersion = 6
+$AgentVersion = 7
 
 Add-Type -TypeDefinition @'
 using System;
@@ -223,12 +223,19 @@ function Get-RawQueueName($p) {
 # Systel Cuora Max con su modulo de red, puerto 10001, desde la version 6).
 # Chrome no puede abrir una conexion TCP: este programa la abre y le pasa los
 # bytes tal cual (el sistema arma y revisa cada trama, igual que por USB o
-# Bluetooth). Una sola conexion a la vez. Solo direcciones de la red local
-# (10.x, 172.16-31.x, 192.168.x, 169.254.x): nunca hacia internet.
+# Bluetooth). Solo direcciones de la red local (10.x, 172.16-31.x,
+# 192.168.x, 169.254.x): nunca hacia internet.
+#
+# Version 7: varias balanzas a la vez, una conexion por direccion
+# (host:puerto). /scale/open?...&multi=1 devuelve "link" (el id de esa
+# conexion) y /scale/write, /scale/read y /scale/close lo reciben en
+# "link=". Sin "link" (la web de antes) se comporta como la version 6: abrir
+# cierra todo lo anterior y write/read/close usan la ultima abierta.
 # ---------------------------------------------------------------------------
-$script:ScaleClient = $null
-$script:ScaleStream = $null
-$script:ScaleTarget = ""
+$script:ScaleLinks = @{}
+$script:ScaleLastId = ""
+$script:ScaleLinkSeq = 0
+$MaxScaleLinks = 8
 
 function Test-LocalScaleHost([string]$h) {
   $ip = $null
@@ -249,12 +256,39 @@ function Test-ScalePort([int]$p) {
   return (($p -ge 1000 -and $p -le 1099) -or $p -eq 10001)
 }
 
+# Cierra UNA conexion (por su id).
+function Close-ScaleLinkById([string]$id) {
+  if (-not $id -or -not $script:ScaleLinks.ContainsKey($id)) { return }
+  $l = $script:ScaleLinks[$id]
+  try { if ($l.stream) { $l.stream.Close() } } catch { }
+  try { if ($l.client) { $l.client.Close() } } catch { }
+  $script:ScaleLinks.Remove($id)
+  if ($script:ScaleLastId -eq $id) { $script:ScaleLastId = "" }
+}
+
+# Cierra todas (lo que hacia la version 6 al abrir o cerrar).
 function Close-ScaleLink {
-  try { if ($script:ScaleStream) { $script:ScaleStream.Close() } } catch { }
-  try { if ($script:ScaleClient) { $script:ScaleClient.Close() } } catch { }
-  $script:ScaleClient = $null
-  $script:ScaleStream = $null
-  $script:ScaleTarget = ""
+  foreach ($id in @($script:ScaleLinks.Keys)) { Close-ScaleLinkById $id }
+  $script:ScaleLastId = ""
+}
+
+# Cierra la conexion que haya con esa direccion (una sola por direccion).
+function Close-ScaleTarget([string]$target) {
+  foreach ($id in @($script:ScaleLinks.Keys)) {
+    if ($script:ScaleLinks[$id].target -eq $target) { Close-ScaleLinkById $id }
+  }
+}
+
+# La conexion de un pedido: la de su "link", o sin "link" la ultima abierta.
+# $null si no esta abierta.
+function Get-ScaleLinkFor($req) {
+  $id = [string]$req.QueryString["link"]
+  if ($id) {
+    if ($script:ScaleLinks.ContainsKey($id)) { return $script:ScaleLinks[$id] }
+    return $null
+  }
+  if ($script:ScaleLastId -and $script:ScaleLinks.ContainsKey($script:ScaleLastId)) { return $script:ScaleLinks[$script:ScaleLastId] }
+  return $null
 }
 
 # Las direcciones IPv4 de esta PC (para saber si la balanza esta en la misma red).
@@ -296,30 +330,39 @@ function Get-WiredNics {
   return ,$out
 }
 
-function Open-ScaleLink([string]$h, [int]$p) {
-  Close-ScaleLink
+# Abre la conexion con una balanza. $multi = $true (web nueva): solo se
+# cierra la conexion anterior con ESA direccion. $multi = $false (web de
+# antes): se cierra todo, como en la version 6.
+# Devuelve @{ id; target } o @{ error }.
+function Open-ScaleLink([string]$h, [int]$p, [bool]$multi) {
+  $target = "${h}:$p"
+  if ($multi) { Close-ScaleTarget $target } else { Close-ScaleLink }
+  if ($script:ScaleLinks.Count -ge $MaxScaleLinks) {
+    return @{ error = "Hay demasiadas balanzas conectadas a la vez en esta PC (maximo $MaxScaleLinks)." }
+  }
   $c = New-Object System.Net.Sockets.TcpClient
   $ar = $c.BeginConnect($h, $p, $null, $null)
   if (-not $ar.AsyncWaitHandle.WaitOne(3000)) {
     try { $c.Close() } catch { }
-    return "La balanza no contesta en $h (puerto $p)."
+    return @{ error = "La balanza no contesta en $h (puerto $p)." }
   }
   try {
     $c.EndConnect($ar)
   } catch {
     try { $c.Close() } catch { }
-    return "La balanza rechazo la conexion en $h (puerto $p)."
+    return @{ error = "La balanza rechazo la conexion en $h (puerto $p)." }
   }
   $c.NoDelay = $true
-  $script:ScaleClient = $c
-  $script:ScaleStream = $c.GetStream()
-  $script:ScaleTarget = "${h}:$p"
-  return "OK"
+  $script:ScaleLinkSeq++
+  $id = "L" + $script:ScaleLinkSeq + "-" + [guid]::NewGuid().ToString("N").Substring(0, 8)
+  $script:ScaleLinks[$id] = @{ id = $id; target = $target; client = $c; stream = $c.GetStream() }
+  $script:ScaleLastId = $id
+  return @{ id = $id; target = $target }
 }
 
 # Lo que mando la balanza: espera hasta $ms el primer byte y despues junta lo
 # que siga llegando hasta 60 ms de silencio. closed = la balanza corto.
-function Read-ScaleLink([int]$ms) {
+function Read-ScaleLink($link, [int]$ms) {
   $buf = New-Object System.IO.MemoryStream
   $tmp = New-Object byte[] 4096
   $deadline = [DateTime]::UtcNow.AddMilliseconds($ms)
@@ -327,14 +370,14 @@ function Read-ScaleLink([int]$ms) {
   $closed = $false
   while ($true) {
     $now = [DateTime]::UtcNow
-    if ($script:ScaleStream.DataAvailable) {
-      $n = $script:ScaleStream.Read($tmp, 0, $tmp.Length)
+    if ($link.stream.DataAvailable) {
+      $n = $link.stream.Read($tmp, 0, $tmp.Length)
       if ($n -le 0) { $closed = $true; break }
       $buf.Write($tmp, 0, $n)
       $lastData = $now
       continue
     }
-    $sock = $script:ScaleClient.Client
+    $sock = $link.client.Client
     if ($sock.Poll(0, [System.Net.Sockets.SelectMode]::SelectRead) -and $sock.Available -eq 0) { $closed = $true; break }
     if ($lastData -ne $null -and ($now - $lastData).TotalMilliseconds -ge 60) { break }
     if ($lastData -eq $null -and $now -ge $deadline) { break }
@@ -423,17 +466,21 @@ function Handle-ScaleRequest($ctx, [string]$path, [string]$origin) {
       Send-Json $ctx 400 @{ ok = $false; error = "Puerto invalido: Kretz va de 1000 a 1099 (de fabrica 1001) y Systel usa el 10001." } $origin
       return
     }
-    $r = Open-ScaleLink $h $p
-    if ($r -eq "OK") { Send-Json $ctx 200 @{ ok = $true; target = $script:ScaleTarget } $origin }
-    else { Send-Json $ctx 502 @{ ok = $false; error = $r; local = (Get-LocalIPv4) } $origin }
+    $multi = ([string]$req.QueryString["multi"] -eq "1")
+    $r = Open-ScaleLink $h $p $multi
+    if ($r.id) { Send-Json $ctx 200 @{ ok = $true; target = $r.target; link = $r.id } $origin }
+    else { Send-Json $ctx 502 @{ ok = $false; error = $r.error; local = (Get-LocalIPv4) } $origin }
     return
   }
   if ($path -eq "/scale/close") {
-    Close-ScaleLink
+    # Con "link": solo esa conexion (si ya no existe, no hay nada que cerrar). Sin "link": todas, como la version 6.
+    $id = [string]$req.QueryString["link"]
+    if ($id) { Close-ScaleLinkById $id } else { Close-ScaleLink }
     Send-Json $ctx 200 @{ ok = $true } $origin
     return
   }
-  if (-not $script:ScaleStream) {
+  $link = Get-ScaleLinkFor $req
+  if (-not $link) {
     Send-Json $ctx 409 @{ ok = $false; error = "La conexion con la balanza no esta abierta."; closed = $true } $origin
     return
   }
@@ -446,11 +493,11 @@ function Handle-ScaleRequest($ctx, [string]$path, [string]$origin) {
     $req.InputStream.CopyTo($ms)
     $bytes = $ms.ToArray()
     try {
-      $script:ScaleStream.Write($bytes, 0, $bytes.Length)
-      $script:ScaleStream.Flush()
+      $link.stream.Write($bytes, 0, $bytes.Length)
+      $link.stream.Flush()
       Send-Json $ctx 200 @{ ok = $true; bytes = $bytes.Length } $origin
     } catch {
-      Close-ScaleLink
+      Close-ScaleLinkById $link.id
       Send-Json $ctx 502 @{ ok = $false; error = "Se corto la conexion con la balanza."; closed = $true } $origin
     }
     return
@@ -460,11 +507,11 @@ function Handle-ScaleRequest($ctx, [string]$path, [string]$origin) {
     if (-not [int]::TryParse([string]$req.QueryString["ms"], [ref]$wait) -or $wait -lt 0) { $wait = 300 }
     if ($wait -gt 3000) { $wait = 3000 }
     try {
-      $r = Read-ScaleLink $wait
-      if ($r.closed) { Close-ScaleLink }
+      $r = Read-ScaleLink $link $wait
+      if ($r.closed) { Close-ScaleLinkById $link.id }
       Send-Json $ctx 200 @{ ok = $true; data = $r.data; closed = $r.closed } $origin
     } catch {
-      Close-ScaleLink
+      Close-ScaleLinkById $link.id
       Send-Json $ctx 502 @{ ok = $false; error = "Se corto la conexion con la balanza."; closed = $true } $origin
     }
     return
