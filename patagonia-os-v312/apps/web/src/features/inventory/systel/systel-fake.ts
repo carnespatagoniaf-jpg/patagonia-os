@@ -48,6 +48,11 @@ export class FakeCuora implements SystelLink {
   sectors: Map<number, string> | null = null;
   /** Lista de sectores vacía: contesta E7 ("el dato pedido no existe") en vez de una lista vacía. */
   noSectorsReplyE7 = false;
+  /** Las próximas N escrituras de producto contestan este error sin guardar nada (REAL Quesar 17/11: E1). */
+  rejectNextWrites = 0;
+  rejectCode = "E1";
+  /** Las próximas N escrituras de producto se guardan pero la respuesta (ACK) se pierde en el cable. */
+  dropNextWriteReplies = 0;
 
   /** Cantidad de PLU de la firma digital ("P08000"): también el número más alto que acepta. */
   capacity(): number {
@@ -156,6 +161,10 @@ export class FakeCuora implements SystelLink {
       case 4:
       case 61: {
         if (fn !== info.writeFn) return this.reply(fn, "E4");
+        if (this.rejectNextWrites > 0) {
+          this.rejectNextWrites -= 1;
+          return this.reply(fn, this.rejectCode);
+        }
         const n = Number(data.slice(0, pd));
         // REAL GRANJAVIER 22/11/2026 (Cuora Max 6.0 "P08000"): el 9521 da E6 (fuera de límites) al leer y al escribir.
         // En la 7.0 no (El Dorado "P03000" acepta el 7014).
@@ -207,6 +216,10 @@ export class FakeCuora implements SystelLink {
         if (this.corruptAfterWrite === n) {
           this.plus.set(n, rec.slice(0, pd + 1) + "X" + rec.slice(pd + 2));
           if (this.corruptOnce) this.corruptAfterWrite = null;
+        }
+        if (this.dropNextWriteReplies > 0) {
+          this.dropNextWriteReplies -= 1;
+          return null;
         }
         return this.reply(fn, "ACK");
       }
