@@ -180,15 +180,41 @@ export function parseTicketTotalBarcode(rawCode: string): number | null {
 }
 
 /**
- * Asistente de calibración: el carnicero escanea una etiqueta de SU
- * balanza y dice qué peso (o importe) mostraba -- se prueban las
- * combinaciones de formato más comunes (largo de prefijo, largo de PLU,
- * largo del valor, divisor) hasta encontrar una que reproduzca ese valor
- * exacto. Devuelve la primera que matchea.
+ * Asistente de calibración: el carnicero escanea una etiqueta de SU balanza y dice qué peso (o importe) mostraba; se
+ * prueban las combinaciones de formato más comunes (largo de prefijo, de PLU, del valor, divisor) que reproducen ese
+ * valor exacto.
+ *
+ * C6 (26/11): antes se quedaba con la PRIMERA que coincidía. Con una etiqueta de menos de 10 kg casi siempre coinciden
+ * dos que leen productos distintos (ej. "20 00012 01250": producto 12 + 1,250 kg, o producto 120 + 1,250 kg) y guardar
+ * la equivocada hace que Mostrador cobre otro producto. Ahora nunca elige con dudas: devuelve null si hay más de una
+ * lectura posible. La pantalla de calibración tiene que usar `detectScaleConfigFromSamples` y, ante
+ * "need_another_label", pedir el N.º de producto de la etiqueta (askPlu) o una segunda etiqueta (mejor de más de 10 kg).
  */
 export function detectScaleConfig(code: string, knownValue: number, payloadType: ScalePayloadType = "weight"): ScaleConfig | null {
-  if (!/^\d+$/.test(code) || code.length < 8) return null;
-  const total = code.length;
+  const r = detectScaleConfigFromSamples([{ code, value: knownValue }], payloadType);
+  return r.kind === "ok" ? r.config : null;
+}
+
+/** Una etiqueta de muestra: el código, el peso (o importe) que mostraba la balanza y, si se sabe, el N.º de producto. */
+export interface CalibrationSample {
+  code: string;
+  value: number;
+  plu?: string;
+}
+
+export type CalibrationResult =
+  | { kind: "ok"; config: ScaleConfig }
+  /**
+   * Más de una lectura posible: no se guarda nada. `options`: lo que leería cada formato en cada etiqueta (para mostrar
+   * "¿es el producto 12 o el 120?"). `askPlu`: las lecturas difieren en el N.º de producto (preguntarlo lo resuelve).
+   */
+  | { kind: "need_another_label"; askPlu: boolean; options: Array<{ config: ScaleConfig; readings: Array<{ plu: string; value: number }> }> }
+  | { kind: "none" };
+
+export function detectScaleConfigFromSamples(samples: CalibrationSample[], payloadType: ScalePayloadType = "weight"): CalibrationResult {
+  if (samples.length === 0 || samples.some((s) => !/^\d+$/.test(s.code) || s.code.length < 8)) return { kind: "none" };
+  const total = samples[0].code.length;
+  if (samples.some((s) => s.code.length !== total)) return { kind: "none" };
   const TOLERANCE = payloadType === "weight" ? 0.001 : 0.01;
 
   // "trailing" = dígitos que sobran después del valor: 1 es solo el verificador
@@ -209,15 +235,32 @@ export function detectScaleConfig(code: string, knownValue: number, payloadType:
   }
   candidates.sort((a, b) => a.trailing - b.trailing);
 
+  // Formatos que leen TODAS las etiquetas con su valor (y su N.º de producto, si se dijo), agrupados por lo que leen:
+  // dos formatos que leen lo mismo en todas las muestras (ej. 2-5-5 y 1-6-5 con "20…") no son una duda.
+  const groups = new Map<string, { config: ScaleConfig; readings: Array<{ plu: string; value: number }> }>();
   for (const candidate of candidates) {
-    const result = parseWeightBarcode(code, candidate);
-    if (!result) continue;
-    const value = result.kind === "weight" ? result.weightKg : result.amount;
-    if (Math.abs(value - knownValue) < TOLERANCE) {
+    const readings: Array<{ plu: string; value: number }> = [];
+    for (const s of samples) {
+      const result = parseWeightBarcode(s.code, candidate);
+      if (!result) break;
+      const value = result.kind === "weight" ? result.weightKg : result.amount;
+      if (Math.abs(value - s.value) >= TOLERANCE) break;
+      if (s.plu !== undefined && String(Number(s.plu)) !== result.plu) break;
+      readings.push({ plu: result.plu, value });
+    }
+    if (readings.length !== samples.length) continue;
+    // Mismo producto en cada etiqueta Y mismo campo del valor (dónde empieza, dónde termina, divisor): si no, dos
+    // formatos que hoy dan lo mismo leerían distinto otra etiqueta (ej. 1,250 kg en "01250" o en "0125" ÷ 100).
+    const valueStart = candidate.prefixLength + candidate.pluLength;
+    const key = `${readings.map((r) => r.plu).join("|")}#${valueStart}-${valueStart + candidate.weightLength}/${candidate.weightDivisor}`;
+    if (!groups.has(key)) {
       const { trailing: _trailing, ...config } = candidate;
-      return config;
+      groups.set(key, { config, readings });
     }
   }
-
-  return null;
+  if (groups.size === 0) return { kind: "none" };
+  const options = [...groups.values()];
+  if (options.length === 1) return { kind: "ok", config: options[0].config };
+  const askPlu = samples.some((s, i) => new Set(options.map((o) => o.readings[i].plu)).size > 1);
+  return { kind: "need_another_label", askPlu, options };
 }

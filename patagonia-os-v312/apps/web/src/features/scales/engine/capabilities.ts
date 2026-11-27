@@ -112,9 +112,9 @@ export const KRETZ_LABEL_MAX_CODE = 999;
 
 export const MODEL_LIMITS: Partial<Record<ScaleModelId, ModelLimits>> = {
   // Campo "Código de PLU" de 5 cifras (5002), precio de 6 en pesos enteros, nombre de 26.
-  "kretz-report-lt": { maxCode: 99999, labelMaxCode: KRETZ_LABEL_MAX_CODE, priceDecimals: 0, maxPriceRaw: 999999, nameLength: 26 },
+  "kretz-report-lt": { maxCode: 99999, labelMaxCode: KRETZ_LABEL_MAX_CODE, priceDecimals: 0, maxPriceRaw: 999999, nameLength: 26, family: "kretz" },
   // PLU hasta 9999, tipo D/C en pesos enteros, nombre de 16 (Pollo y mar, real).
-  "kretz-aura": { maxCode: 9999, labelMaxCode: KRETZ_LABEL_MAX_CODE, priceDecimals: 0, maxPriceRaw: 999999, nameLength: 16 }
+  "kretz-aura": { maxCode: 9999, labelMaxCode: KRETZ_LABEL_MAX_CODE, priceDecimals: 0, maxPriceRaw: 999999, nameLength: 16, family: "kretz" }
 };
 
 /** Límites de una Systel según lo que leyó de la balanza. */
@@ -125,6 +125,7 @@ export function systelLimits(info: { maxPlu: number; maxCode: number }, priceDec
     labelMaxCode: label.length ? Math.min(...label) : null,
     priceDecimals: priceDecimals === 2 ? 2 : 0,
     maxPriceRaw: 999999,
-    nameLength: 18
+    nameLength: 18,
+    family: "systel"
   };
 }

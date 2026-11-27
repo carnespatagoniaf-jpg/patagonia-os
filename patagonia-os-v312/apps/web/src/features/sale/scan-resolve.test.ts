@@ -511,3 +511,50 @@ describe("REAL El Abastero 25/11: la Aura imprime con 22 y la Nalga vuelve al 1"
     assert.notEqual(missing.type, "label", "producto 147 inexistente en la Report: no se agrega nada (antes podía dar NALGA)");
   });
 });
+
+describe("C2: producto 998 o 999 con el formato 2-3-7 (auditoría 26/11: se cobraba como TOTAL, sin producto ni stock)", () => {
+  const AMOUNT_237 = { prefixLength: 2, pluLength: 3, weightLength: 7, weightDivisor: 100, totalLength: 13, payloadType: "amount" as const };
+  const prods = [product("998", "PECHITO DE CERDO", "kg", 10000), product("999", "BOLSA CARBON", "unit", 2106), product("21", "COSTELETAS", "kg", 15900)];
+
+  it("20 998 0210600 con un producto 998 activo: ambigua (TOTAL $2.106 o PECHITO 0,211 kg), no se cobra sola", () => {
+    const r = resolveScan(withCheck("209980210600"), prods, AMOUNT_237);
+    assert.equal(r.type, "ambiguous");
+    if (r.type !== "ambiguous") return;
+    const total = r.options.find((o) => o.type === "ticket_total");
+    const label = r.options.find((o) => o.type === "label");
+    assert.ok(total && total.type === "ticket_total" && total.amount === 2106);
+    assert.ok(label && label.type === "label" && label.product.code === "998" && label.amount === 2106 && label.quantity === 0.211);
+  });
+
+  it("20 999 0210600 con un producto 999 activo: ambigua (el 999 también se toma como suma)", () => {
+    const r = resolveScan(withCheck("209990210600"), prods, AMOUNT_237);
+    assert.equal(r.type, "ambiguous");
+    if (r.type === "ambiguous") assert.ok(r.options.some((o) => o.type === "label" && o.product.code === "999" && o.quantity === 1));
+  });
+
+  it("sin producto 998 sigue siendo el TOTAL, como siempre", () => {
+    const r = resolveScan(withCheck("209980210600"), [product("21", "COSTELETAS", "kg", 15900)], AMOUNT_237);
+    assert.ok(r.type === "ticket_total" && r.amount === 2106);
+  });
+
+  it("un producto 998 desactivado no cuenta: TOTAL", () => {
+    const r = resolveScan(withCheck("209980210600"), [product("998", "PECHITO", "kg", 10000, false)], AMOUNT_237);
+    assert.equal(r.type, "ticket_total");
+  });
+
+  it("Aura con inicio 22 (El Abastero) y un producto 998: ambigua", () => {
+    const ABASTERO = { prefixLength: 1, pluLength: 6, weightLength: 5, weightDivisor: 1, totalLength: 13, payloadType: "amount" as const, auraPrefix22: true };
+    const r = resolveScan(withCheck("229980256600"), [product("998", "PECHITO", "kg", 10000)], ABASTERO);
+    assert.equal(r.type, "ambiguous");
+    if (r.type === "ambiguous") assert.ok(r.options.some((o) => o.type === "label" && o.product.code === "998" && o.amount === 2566));
+  });
+
+  it("producto 998 sin precio: no se toma solo como TOTAL, se pregunta y se explica", () => {
+    const r = resolveScan(withCheck("209980210600"), [product("998", "PECHITO", "kg", 0)], AMOUNT_237);
+    assert.equal(r.type, "ambiguous");
+    if (r.type === "ambiguous") {
+      assert.deepEqual(r.options.map((o) => o.type), ["ticket_total"]);
+      assert.match(r.note ?? "", /PECHITO/);
+    }
+  });
+});

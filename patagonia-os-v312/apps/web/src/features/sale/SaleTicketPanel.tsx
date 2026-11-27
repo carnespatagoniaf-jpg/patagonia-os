@@ -6,6 +6,7 @@ import { parseQuantity } from "./quantity";
 import { lineGross, UNIT_LABELS } from "./sale-model";
 import { productPrice } from "../pricing/price-lists";
 import type { SaleTicket } from "./useSaleTicket";
+import { ScaleLabelChoice } from "./ScaleLabelChoice";
 
 // Columna izquierda de Mostrador: buscador, ticket armándose, descuentos,
 // medios de pago y barra de cobro. Es solo vista: el estado vive en
@@ -124,6 +125,10 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
       )}
     </div>
 
+    {ticket.scaleConfigStatus === "loading" && (
+      <p className="muted" style={{ fontSize: 13, margin: "4px 0" }}>Cargando la balanza… las etiquetas se leen cuando termine.</p>
+    )}
+    {ticket.labelChoice && <ScaleLabelChoice options={ticket.labelChoice.options} note={ticket.labelChoice.note} onPick={ticket.pickLabelChoice} onManual={ticket.dismissLabelChoice} />}
     {ticket.scaleTicketChoices && <ScaleTicketChoices ticket={ticket} />}
 
     <div className="pos-toolbar">
@@ -242,11 +247,14 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
               {line.kind === "manual" && line.source === "scale_total" && (
                 ticket.detailing === line.key ? (
                   <small className="pos-detail-hint">
-                    Falta detallar este importe: buscá cada producto del papel.{" "}
-                    <button type="button" className="link-button" onClick={ticket.stopTicketDetail}>Terminar después</button>
+                    Detallá el ticket: escaneá la etiqueta de cada producto, o buscalo y escribí su importe. Se cobra cuando dé exacto el TOTAL.{" "}
+                    <button type="button" className="link-button" onClick={ticket.stopTicketDetail}>Pausar</button>
                   </small>
                 ) : (
-                  <button type="button" className="link-button" onClick={() => ticket.startTicketDetail(line.key)}>Detallar productos (descuenta stock)</button>
+                  <small className="pos-detail-hint">
+                    Sin detallar: no se puede cobrar así.{" "}
+                    <button type="button" className="link-button" onClick={() => ticket.startTicketDetail(line.key)}>Seguir detallando</button>
+                  </small>
                 )
               )}
             </div>

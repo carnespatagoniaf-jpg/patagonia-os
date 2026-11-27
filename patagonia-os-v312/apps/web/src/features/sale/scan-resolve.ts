@@ -20,10 +20,32 @@ import { parseAuraSumTicket, parseSumTicketWithConfig, parseSystelSumTicket, par
  * 4. Si no es nada de eso: se busca por nombre/código en la lista (lo resuelve el hook).
  */
 
+export interface LabelScan {
+  type: "label";
+  product: Product;
+  quantity: number;
+  plu: string;
+  detail: string;
+  /** Importe impreso por la balanza (etiquetas con importe): se cobra ESE, no cantidad × precio. */
+  amount?: number;
+}
+export interface TicketTotalScan {
+  type: "ticket_total";
+  amount: number;
+  key: string;
+}
+/** Una lectura posible de una etiqueta ambigua (la persona elige una, o carga a mano). */
+export type ScanChoice = LabelScan | TicketTotalScan;
+
 export type ScanResolution =
   | { type: "product"; product: Product }
-  | { type: "label"; product: Product; quantity: number; plu: string; detail: string; /** Importe impreso por la balanza (etiquetas con importe): se cobra ESE, no cantidad × precio. */ amount?: number }
-  | { type: "ticket_total"; amount: number; key: string }
+  | LabelScan
+  | TicketTotalScan
+  /**
+   * Regla de oro (26/11): dos lecturas válidas distintas → NO se agrega nada. Se muestran las opciones (sin ninguna
+   * elegida) para que la persona mire el papel y elija una, o cargue a mano. `note`: otra lectura que no se puede cobrar.
+   */
+  | { type: "ambiguous"; options: ScanChoice[]; note?: string }
   | { type: "ticket_without_amount"; message: string }
   /** TOTAL de una Systel: el detalle se lee de la balanza por cable (si está conectada); si no, `message`. */
   | { type: "systel_total"; amount: number; key: string; message: string }
@@ -175,12 +197,12 @@ function resolveAura22(raw: string, products: Product[]): ScanResolution {
   // TOTAL del ticket (código suma 998). Va primero: con inicio "22" el lector de Systel lo tomaría como su TOTAL.
   if (raw.slice(2, 5) === "998") {
     const value = raw.slice(5, 12);
-    if (/^(0+|9+)$/.test(value)) {
-      return { type: "ticket_without_amount", message: "Este ticket de la Aura no trae el importe en el código de barras (pasa de $99.999,99). Cargá el TOTAL impreso con \"Vender algo sin código\"." };
-    }
-    return { type: "ticket_total", amount: parseInt(value, 10) / 100, key: `ticket-${raw}` };
+    const sum: ScanResolution = /^(0+|9+)$/.test(value)
+      ? { type: "ticket_without_amount", message: "Este ticket de la Aura no trae el importe en el código de barras (pasa de $99.999,99). Cargá el TOTAL impreso con \"Vender algo sin código\"." }
+      : { type: "ticket_total", amount: parseInt(value, 10) / 100, key: `ticket-${raw}` };
+    return sumOrProduct(sum, raw, products, AURA_22_CONFIG);
   }
-  const r = resolveScan(raw, products, AURA_22_CONFIG);
+  const r = resolveScanCore(raw, products, AURA_22_CONFIG, false);
   if (r.type === "systel_total" || r.type === "search") {
     const plu = String(parseInt(raw.slice(2, 5), 10));
     return { type: "error", message: `La etiqueta de la Aura es del producto N.º ${plu}, y en Patagonia no hay ningún producto con ese código. No se agregó nada.` };
@@ -188,7 +210,35 @@ function resolveAura22(raw: string, products: Product[]): ScanResolution {
   return r;
 }
 
+/**
+ * C2 (26/11): el código del medio de un TOTAL (998/999, 9998, 99998) también puede ser el número de un producto. Si hay
+ * un producto ACTIVO con ese número, la etiqueta es ambigua: "es el TOTAL" o "es el producto X". Si no hay, el TOTAL.
+ */
+function sumOrProduct(sum: ScanResolution, raw: string, products: Product[], config: ScaleConfig): ScanResolution {
+  const active = products.filter((p) => p.active ?? true);
+  const plus = new Set<string>();
+  const byConfig = looksLikeScaleLabel(raw, config) ? parseWeightBarcode(raw, config) : null;
+  if (byConfig) plus.add(byConfig.plu);
+  const kretz = kretzPlu5Label(raw);
+  if (kretz) plus.add(kretz.plu);
+  const named = [...plus].flatMap((plu) => pluCandidates(active, plu));
+  if (named.length === 0) return sum;
+  const alt = resolveScanCore(raw, products, config, true);
+  const options: ScanChoice[] = [];
+  if (sum.type === "ticket_total") options.push(sum);
+  if (alt.type === "label") options.push(alt);
+  const notes: string[] = [];
+  if (sum.type === "ticket_without_amount") notes.push("También puede ser el TOTAL de un ticket que no trae el importe en el código.");
+  if (alt.type !== "label") notes.push(`También puede ser el producto ${named.map((p) => `${p.name} (N.º ${p.code})`).join(" o ")}, que no se puede cobrar con esta etiqueta${alt.type === "error" ? `: ${alt.message}` : "."}`);
+  return { type: "ambiguous", options, ...(notes.length ? { note: notes.join(" ") } : {}) };
+}
+
 export function resolveScan(rawInput: string, products: Product[], config: ScaleConfig): ScanResolution {
+  return resolveScanCore(rawInput, products, config, false);
+}
+
+/** `ignoreSums`: leer el código como etiqueta aunque tenga forma de TOTAL (para la otra lectura de C2). */
+function resolveScanCore(rawInput: string, products: Product[], config: ScaleConfig, ignoreSums: boolean): ScanResolution {
   const raw = rawInput.trim();
   if (!raw) return { type: "search" };
   const active = products.filter((p) => p.active ?? true);
@@ -198,19 +248,19 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
   if (exact) return { type: "product", product: exact };
 
   // Aura con inicio "22" en un local que tiene además otra balanza (AURA_PREFIX_22_BRANCHES, El Abastero 25/11/2026).
-  if (config.auraPrefix22 && /^22\d{11}$/.test(raw) && validEan13(raw)) return resolveAura22(raw, products);
+  if (config.auraPrefix22 && !ignoreSums && /^22\d{11}$/.test(raw) && validEan13(raw)) return resolveAura22(raw, products);
   // Sin lectura doble de los "20": la Aura de El Abastero ya imprime con "22" (REAL 25/11/2026, "22 001 2126600 4" =
   // NALGA $21.266). Probar un "20" también como Aura podía cruzarse con la Report (su Nalga es el 1). Un "20" es de la Report.
 
   // 2. Ticket de total.
   // El formato guardado de la sucursal manda sobre los de fábrica (El Abastero: 1-6-5 en pesos, no 2-5-5 en centavos).
-  const ownSum = parseSumTicketWithConfig(raw, config);
-  const aura = ownSum ? { amount: ownSum.amount } : parseAuraSumTicket(raw);
+  const ownSum = ignoreSums ? undefined : parseSumTicketWithConfig(raw, config);
+  const aura = ignoreSums ? null : ownSum ? { amount: ownSum.amount } : parseAuraSumTicket(raw);
   if (aura && aura.amount === null) {
-    return {
+    return sumOrProduct({
       type: "ticket_without_amount",
       message: "Este ticket de la balanza no trae el importe en el código de barras (con el formato actual de la balanza solo entran tickets de hasta $999,99). Cargá el TOTAL impreso con \"Vender algo sin código\" y avisale al encargado: en Productos → \"Balanza por cable\" → \"Mandar productos a la balanza\", Patagonia le ajusta el código de barras a la balanza."
-    };
+    }, raw, products, config);
   }
   // Etiqueta con importe que no entró en el campo (7 cifras en centavos = hasta $99.999,99): la balanza pone todo
   // en 0 (REAL Aura con 2-5-5) o todo en 9 (REAL Systel). Nunca se cobra: el importe impreso no está en el código.
@@ -264,7 +314,8 @@ export function resolveScan(rawInput: string, products: Product[], config: Scale
       message: `Ese es el código del TOTAL del ticket ($${systel.toLocaleString("es-AR")}): no dice qué productos son ni cuántos kilos, así que no se cargó. Escaneá el código que está debajo de CADA producto del ticket. Si debajo de un producto el código sale en ceros (0 000000 000000), buscá ese producto y escribí los kilos o unidades que dice el ticket.`
     };
   }
-  const total = aura?.amount ?? parseTicketTotalBarcode(raw);
+  if (aura && aura.amount !== null) return sumOrProduct({ type: "ticket_total", amount: aura.amount, key: `ticket-${raw.padStart(13, "0")}` }, raw, products, config);
+  const total = parseTicketTotalBarcode(raw);
   if (total !== null) return { type: "ticket_total", amount: total, key: `ticket-${raw.padStart(13, "0")}` };
 
   // 3. Etiqueta de balanza.
