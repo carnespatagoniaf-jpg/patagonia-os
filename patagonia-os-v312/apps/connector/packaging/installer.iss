@@ -1,4 +1,5 @@
-; Instalador de Patagonia Scale Connect (Inno Setup 6.3 o posterior). SIN FIRMAR todavía.
+﻿; Instalador de Patagonia Scale Connect (Inno Setup 6.3 o posterior). SIN FIRMAR todavía.
+; El archivo va en UTF-8 CON BOM: sin BOM, Inno Setup lo lee como ANSI y rompe los acentos.
 ;
 ; Se compila con scripts/build-installer.mjs (local y CI), que pasa:
 ;   /DAppVersion=0.1.0  /DSourceDir=<dist\PatagoniaScaleConnect>  /DOutputDir=<dist\installer>
