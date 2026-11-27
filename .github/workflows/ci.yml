@@ -65,6 +65,9 @@ jobs:
           cache-dependency-path: patagonia-os-v312/package-lock.json
       - name: Instalar dependencias
         run: npm ci
+      # El servicio corre los protocolos de la web, que importan @patagonia/domain (se usa compilado, desde dist/).
+      - name: Compilar el dominio
+        run: npm run build -w @patagonia/domain
       - name: Tipos del servicio
         run: npm run typecheck -w @patagonia/connector
       - name: Pruebas del servicio
