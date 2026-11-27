@@ -84,4 +84,12 @@ describe("códigos que Mostrador lee como TOTAL del ticket (auditoría 29/10)", 
     const marked = preflightProducts([P("9998", "Bolsa", 100, "unit")], { ...systel, family: "kretz" });
     assert.equal(marked.ready.length, 0, "con la marca explícita de Kretz se frena");
   });
+
+  it("los límites de cada modelo dicen su marca; una Systel con producto de 3 o 5 cifras tampoco se frena", () => {
+    assert.equal(MODEL_LIMITS["kretz-report-lt"]!.family, "kretz");
+    assert.equal(MODEL_LIMITS["kretz-aura"]!.family, "kretz");
+    const systel5 = systelLimits({ maxPlu: 99999, maxCode: 99999 }, 0, ["20PPPPPCCCCC"]);
+    assert.equal(systel5.family, "systel");
+    assert.deepEqual(preflightProducts([P("99998", "Bolsa", 100, "unit")], systel5).ready.map((p) => p.code), ["99998"]);
+  });
 });

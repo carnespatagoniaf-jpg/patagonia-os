@@ -29,9 +29,9 @@ export interface ModelLimits {
 }
 
 /**
- * ¿Hay que frenar los códigos que una Kretz usa para el TOTAL? Con `family` se sabe. Sin ella (los límites que arman
- * capabilities.ts no la traen todavía): las etiquetas Kretz llevan el producto en 3, 5 o 6 cifras (2-3-7, 2-5-5,
- * 1-6-5) y la Systel en 4 ("20PPPPCCCCCC"), así que con 4 cifras no se aplica.
+ * ¿Hay que frenar los códigos que una Kretz usa para el TOTAL? Manda `family` (capabilities.ts la completa en
+ * MODEL_LIMITS y systelLimits). Solo como respaldo, para límites armados sin marca: las etiquetas Kretz llevan el
+ * producto en 3, 5 o 6 cifras (2-3-7, 2-5-5, 1-6-5) y la Systel en 4 ("20PPPPCCCCCC"), así que con 4 cifras no se aplica.
  */
 export function kretzTotalRuleApplies(limits: ModelLimits): boolean {
   if (limits.family) return limits.family === "kretz";
