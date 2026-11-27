@@ -1,3 +1,4 @@
+import type { Product } from "@patagonia/domain";
 import { formatMoney } from "../shifts/format";
 import type { ScanChoice } from "./scan-resolve";
 
@@ -6,10 +7,19 @@ import type { ScanChoice } from "./scan-resolve";
  * e importe, o "TOTAL del ticket". Puro (sin pantallas), para Mostrador y Clientes.
  */
 
+/** Lectura de la balanza Systel de la sucursal (perfil "artículos + TOTAL"). */
+export interface SystelChoice {
+  type: "systel";
+  product: Product;
+  quantity: number;
+  unitPrice: number;
+  scaleKey: string;
+}
+
 export interface LabelChoiceOption {
   title: string;
   detail?: string;
-  pick: ScanChoice;
+  pick: ScanChoice | SystelChoice;
 }
 
 const qtyText = (q: number, unit: string) => (unit === "kg" ? `${q.toLocaleString("es-AR", { minimumFractionDigits: 3, maximumFractionDigits: 3 })} kg` : `${q} u.`);

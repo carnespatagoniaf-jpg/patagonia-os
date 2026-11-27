@@ -7,6 +7,7 @@ import { parseTicketTotalBarcode, parseWeightBarcode, TICKET_TOTAL_CONFIRM_FROM,
 import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
 import { labelWeightProblem, MAX_COUNTER_SCALE_KG, resolveScan, type ScanResolution } from "./scan-resolve";
 import { scanChoiceOptions, type LabelChoiceOption } from "./scale-label-choice";
+import { resolveScaleLabel } from "./scale-label-resolver";
 import { boxProblem, boxTicket, resolveBoxScan } from "./box-label";
 import { useBoxLabelFormats } from "./box-label-service";
 import { noteLabelRead } from "../scales/label-read";
@@ -40,6 +41,8 @@ export interface SaleTicketDeps {
   products: Product[];
   categories: ProductCategory[];
   scaleConfig: ScaleConfig;
+  /** La sucursal tiene su formato de etiquetas guardado (no el de fábrica): cuenta como lectura frente a la Systel. */
+  scaleCalibrated?: boolean;
   accounts: TreasuryAccount[];
   shift: PosShift | null;
   busy: boolean;
@@ -56,7 +59,7 @@ export interface SaleTicketDeps {
   boxLabels?: boolean;
 }
 
-export function useSaleTicket({ products, categories, scaleConfig, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false, scaleBranchId = null, zoneListId = null, boxLabels = false }: SaleTicketDeps) {
+export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrated = false, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false, scaleBranchId = null, zoneListId = null, boxLabels = false }: SaleTicketDeps) {
   const [search, setSearch] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -122,6 +125,11 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
     setLabelChoice(null);
     const option = c?.options[index];
     if (!c || !option) return;
+    if (option.pick.type === "systel") {
+      papers.handleScan(c.raw);
+      searchInputRef.current?.focus();
+      return;
+    }
     handleResolved(c.raw, option.pick, c.systelConfig);
   }
   function dismissLabelChoice() {
@@ -415,29 +423,44 @@ export function useSaleTicket({ products, categories, scaleConfig, accounts, shi
       return;
     }
 
-    // Balanza "artículos + TOTAL" de la sucursal (si tiene): sus códigos los lee useScalePapers.
-    if (!products.some((p) => p.code === raw) && papers.handleScan(raw)) {
+    // Qué es el código: UN resolvedor (scale-label-resolver.ts, puro y probado con etiquetas reales) junta la lectura
+    // de las balanzas "artículos + TOTAL" de la sucursal (useScalePapers) y la del formato de la sucursal
+    // (scan-resolve.ts). Con una sola lectura posible se carga; con dos distintas, la persona elige (regla de oro).
+    // Systel piloto: el código de cada producto se lee con el formato que informó la balanza (no con el
+    // de la sucursal, que puede haber quedado viejo: real Los gringos 09/10 → 13/10).
+    const pilotConfig = systelTicketPilot ? systelConfigForCodeAcross(raw, systelTemplatesList()) : null;
+    const systelConfig = pilotConfig === "no_soportado" ? null : pilotConfig;
+    // Con el formato de la balanza, un producto sin precio en Patagonia se carga con el precio de lista 1 de la
+    // balanza (provisorio: el importe real sale del TOTAL del ticket).
+    const scanProducts = systelTicketPilot && systelConfig ? withScalePrices(products, mergedPerPlu(systelTemplatesList())) : products;
+    const label = resolveScaleLabel(raw, { products: scanProducts, config: systelConfig ?? scaleConfig, calibrated: scaleCalibrated || !!systelConfig, setups: papers.setups });
+    if (label.type === "systel") {
+      // La lee useScalePapers (avisos de etiqueta repetida, precio, carrito).
+      papers.handleScan(raw);
       setSearch("");
       setHighlightedIndex(-1);
       return;
     }
-
-    // Qué es el código (producto, ticket de total, etiqueta de balanza o error): scan-resolve.ts,
-    // lógica pura y probada con etiquetas reales. Acá solo quedan los avisos y el carrito.
-    // Systel piloto: el código de cada producto se lee con el formato que informó la balanza (no con el
-    // de la sucursal, que puede haber quedado viejo: real Los gringos 09/10 → 13/10).
-    const systelConfig = systelTicketPilot ? systelConfigForCodeAcross(raw, systelTemplatesList()) : null;
-    if (systelConfig === "no_soportado") {
+    if (label.type === "systel_message") {
+      setMessage(label.message);
+      setSearch("");
+      setHighlightedIndex(-1);
+      return;
+    }
+    if (label.type === "ambiguous") {
+      setSearch("");
+      setHighlightedIndex(-1);
+      setLabelChoice({ raw, options: label.options, note: label.note, systelConfig });
+      setMessage("No se agregó nada: la etiqueta se puede leer de dos maneras. Elegí cuál es mirando el papel, o cargalo a mano.");
+      return;
+    }
+    if (pilotConfig === "no_soportado") {
       setMessage("La balanza imprime el código de los productos con un formato que Patagonia no puede leer sin riesgo de cargar mal los kilos. No se agregó nada: buscá el producto y escribí los kilos del ticket, y avisá a soporte.");
       setSearch("");
       setHighlightedIndex(-1);
       return;
     }
-    // Con el formato de la balanza, un producto sin precio en Patagonia se carga con el precio de lista 1 de la
-    // balanza (provisorio: el importe real sale del TOTAL del ticket).
-    const scanProducts = systelTicketPilot && systelConfig ? withScalePrices(products, mergedPerPlu(systelTemplatesList())) : products;
-    const resolved = resolveScan(raw, scanProducts, systelConfig ?? scaleConfig);
-    handleResolved(raw, resolved, systelConfig);
+    handleResolved(raw, label.resolution, systelConfig);
   }
 
   /** Lo que se hace con una lectura ya resuelta (al escanear, o al elegir una opción de una etiqueta ambigua). */
