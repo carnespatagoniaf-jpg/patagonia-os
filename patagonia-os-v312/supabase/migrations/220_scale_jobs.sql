@@ -1,4 +1,4 @@
--- 215: historial de envíos a las balanzas (plan balanzas v2, etapa 0, C18). 26/11/2026.
+-- 220: historial de envíos a las balanzas (plan balanzas v2, etapa 0, C18). 26/11/2026.
 --
 -- Por qué: "Mis balanzas" manda productos a la balanza y, si algo sale mal, solo quedaba la bitácora de ESA
 -- computadora (activity-log.ts, localStorage) o un reporte a soporte si alguien lo mandaba. No había forma de saber,
@@ -18,7 +18,7 @@
 -- Lectura: RLS por empresa (company_id = current_company_id()), como el resto. Sin políticas de escritura.
 -- Topes: 10.000 productos por trabajo, 300 trabajos por sucursal por día, textos y jsonb acotados.
 -- La web ignora en silencio si esta migración todavía no está (función inexistente): el envío nunca se frena.
--- Vuelta atrás: 215_scale_jobs.rollback.sql.
+-- Vuelta atrás: 220_scale_jobs.rollback.sql.
 
 -- ------------------------------------------------------------------------------------------------- tablas
 create table if not exists public.scale_jobs (
@@ -230,4 +230,4 @@ revoke all on function public.finish_scale_job(uuid, text, jsonb, jsonb, text) f
 grant execute on function public.start_scale_job(uuid, text, text, text, integer, text, jsonb) to authenticated;
 grant execute on function public.finish_scale_job(uuid, text, jsonb, jsonb, text) to authenticated;
 
-insert into public.schema_migrations (version) values ('215_scale_jobs') on conflict do nothing;
+insert into public.schema_migrations (version) values ('220_scale_jobs') on conflict do nothing;

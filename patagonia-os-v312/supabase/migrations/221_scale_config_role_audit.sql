@@ -1,4 +1,4 @@
--- 216: el formato de etiqueta de la sucursal controla el rol, y borrarlo queda auditado (plan balanzas v2, C25).
+-- 221: el formato de etiqueta de la sucursal controla el rol, y borrarlo queda auditado (plan balanzas v2, C25).
 -- 26/11/2026.
 --
 -- save_branch_scale_config (070/071) y delete_branch_scale_config (070) solo miraban que el usuario fuera de la
@@ -23,7 +23,7 @@
 -- función, igual que la 178. No se reescriben las funciones porque cada base puede tener una definición distinta
 -- (la 101 inyectó require_plan en vivo y staging ya derivó de producción más de una vez): así no se pisa nada de lo
 -- que tengan. La auditoría va por trigger por el mismo motivo (meter un insert en medio del cuerpo vivo es frágil).
--- No cambia ningún dato. Vuelta atrás: 216_scale_config_role_audit.rollback.sql.
+-- No cambia ningún dato. Vuelta atrás: 221_scale_config_role_audit.rollback.sql.
 
 do $mig$
 declare
@@ -39,14 +39,14 @@ begin
   loop
     v_def := replace(pg_get_functiondef(v_proc), E'\r\n', E'\n');
     if position('public.require_role(' in v_def) > 0 then
-      raise notice '216: % ya controla el rol', v_proc;
+      raise notice '221: % ya controla el rol', v_proc;
       v_count := v_count + 1;
       continue;
     end if;
     -- El cuerpo empieza en la primera línea "begin" después de "AS $function$" (como en la 178).
     v_pos := position(E'\nbegin\n' in substr(v_def, position('$function$' in v_def)));
     if v_pos = 0 then
-      raise exception '216: % no tiene el "begin" esperado (revisar a mano)', v_proc;
+      raise exception '221: % no tiene el "begin" esperado (revisar a mano)', v_proc;
     end if;
     v_pos := v_pos + position('$function$' in v_def) - 1;
     v_def := substr(v_def, 1, v_pos + 6) || v_roles || substr(v_def, v_pos + 7);
@@ -54,7 +54,7 @@ begin
     v_count := v_count + 1;
   end loop;
   if v_count < 2 then
-    raise exception '216: se esperaban save_branch_scale_config y delete_branch_scale_config, se encontraron %', v_count;
+    raise exception '221: se esperaban save_branch_scale_config y delete_branch_scale_config, se encontraron %', v_count;
   end if;
 end
 $mig$;
@@ -83,4 +83,4 @@ drop trigger if exists audit_branch_scale_config_delete on public.branch_scale_c
 create trigger audit_branch_scale_config_delete after delete on public.branch_scale_configs
   for each row execute function public.audit_branch_scale_config_delete();
 
-insert into public.schema_migrations (version) values ('216_scale_config_role_audit') on conflict do nothing;
+insert into public.schema_migrations (version) values ('221_scale_config_role_audit') on conflict do nothing;

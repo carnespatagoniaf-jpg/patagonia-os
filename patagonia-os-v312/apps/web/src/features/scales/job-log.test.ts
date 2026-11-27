@@ -122,7 +122,7 @@ describe("historial de envíos: registrar nunca frena el envío", () => {
     assert.equal(getActivityLog().length, 0);
   });
 
-  it("sin la migración 215 (función inexistente): no tira error ni llama a finish; queda en la bitácora local", async () => {
+  it("sin la migración 220 (función inexistente): no tira error ni llama a finish; queda en la bitácora local", async () => {
     clearActivityLog();
     const { rpc, calls } = fakeRpc(() => ({ data: null, error: { code: "PGRST202", message: "Could not find the function public.start_scale_job" } }));
     const job = startScaleJob(rpc, { branchId: "b1", scaleKey: "kretz-1", kind: "send", requested: 3, appVersion: null });

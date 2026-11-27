@@ -66,7 +66,7 @@ export async function submitScaleSupportReport(input: {
 }
 
 /**
- * Llamada a las RPC del historial de envíos (migración 215, job-log.ts). null en modo demostración: el historial
+ * Llamada a las RPC del historial de envíos (migración 220, job-log.ts). null en modo demostración: el historial
  * queda solo en la bitácora local.
  */
 export const scaleJobRpc: ScaleJobRpc | null = supabase
