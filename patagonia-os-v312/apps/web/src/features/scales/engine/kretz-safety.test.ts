@@ -346,3 +346,24 @@ describe("C21: la Report suelta el puerto al terminar", () => {
     assert.equal(scale.commands.length, writesBefore, "no se le habla más al puerto viejo");
   });
 });
+
+describe("C15: \"Enviar todos\" relee cada producto antes de contarlo como enviado", () => {
+  it("la Report contesta 01 pero no graba un producto: no cuenta como enviado", async () => {
+    localStorage.clear();
+    const scale = new FakeReport();
+    scale.records.set(5, reportRecord(5, "NALGA", 9000, { label: "03" }));
+    scale.ignore.add(5); // lo que hace la real con algunos PLU de iTegra: 01 sin grabar
+    const { setScaleSerialPort, syncProductsToScale, verifySentReportProducts } = await import("../../inventory/scale-serial");
+    setScaleSerialPort(scale as unknown as SerialPort);
+    const products = [
+      { id: "a", code: "5", name: "NALGA", unit: "kg" as const, priceRetail: 9500 },
+      { id: "b", code: "6", name: "PECETO", unit: "kg" as const, priceRetail: 12000 }
+    ];
+    const r = await syncProductsToScale(products);
+    assert.equal(r.responseCodeCounts["01"], 2, "la balanza dijo 01 a los dos");
+    const v = await verifySentReportProducts(products);
+    assert.deepEqual(v.confirmed.map((p) => p.code), ["6"]);
+    assert.deepEqual(v.notConfirmed.map((x) => x.product.code), ["5"]);
+    assert.match(v.notConfirmed[0].reason, /precio quedó \$9000/);
+  });
+});

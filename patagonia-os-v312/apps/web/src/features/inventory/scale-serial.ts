@@ -1489,6 +1489,31 @@ export function expectedReportProduct(product: ScaleSyncableProduct): ReportProd
   return { name: fixedAscii(product.name, 26).trimEnd(), byWeight: product.unit === "kg", price: product.priceRetail, taxes: 0, code: Number(product.code), label: reportLabelCode, decimals: fixedDigits(2, 6), expiryDays: 0, description: "" };
 }
 
+/**
+ * Relee cada producto mandado (5005) y lo compara campo por campo con lo que tenía que quedar (C15). La Report puede
+ * contestar "01" a un 2005 sin grabarlo: solo cuenta como enviado lo que se releyó igual.
+ */
+export async function verifySentReportProducts(
+  products: ScaleSyncableProduct[],
+  onProgress?: (done: number, total: number) => void
+): Promise<{ confirmed: ScaleSyncableProduct[]; notConfirmed: { product: ScaleSyncableProduct; reason: string }[] }> {
+  const confirmed: ScaleSyncableProduct[] = [];
+  const notConfirmed: { product: ScaleSyncableProduct; reason: string }[] = [];
+  for (const [i, product] of products.entries()) {
+    let diffs: string[];
+    try {
+      const back = await readReportProduct(product.code);
+      diffs = back ? reportDifferences(back, expectedReportProduct(product)) : ["al releerlo, el número está vacío en la balanza"];
+    } catch (err) {
+      diffs = [`no se pudo releer (${err instanceof Error ? err.message : String(err)})`];
+    }
+    if (diffs.length === 0) confirmed.push(product);
+    else notConfirmed.push({ product, reason: diffs.join("; ") });
+    onProgress?.(i + 1, products.length);
+  }
+  return { confirmed, notConfirmed };
+}
+
 /** Aura: ¿entrega lo vendido por producto? SOLO LECTURA (5008/5001, nunca borra). Ver kretz/aura-totals-probe.ts. */
 export async function probeAuraTotalsOnScale(onProgress: (text: string) => void) {
   const port = await pickPort();

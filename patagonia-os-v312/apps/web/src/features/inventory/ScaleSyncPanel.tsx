@@ -32,6 +32,7 @@ import {
   sendScalePing,
   syncOneProductToScale,
   syncProductsToScale,
+  verifySentReportProducts,
   type ScaleSerialSettings,
   type ScaleSyncableProduct
 } from "./scale-serial";
@@ -584,13 +585,24 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
         }
       }
       const result = await syncProductsToScale(products, (done, total) => setScaleSyncProgress({ done, total }));
-      const okCount = result.responseCodeCounts["01"] ?? 0;
-      const failedCount = result.attempted - okCount;
+      // C15: un "01" no alcanza (la Report puede contestarlo sin grabar): se relee cada uno antes de contarlo.
+      const notAnswered = new Set([...result.failed, ...result.noResponse, ...result.transportErrors].map((x) => x.product.id));
+      setScaleLog("Comprobando lo que quedó en la balanza…");
+      const check = await verifySentReportProducts(toRead.filter((p) => !notAnswered.has(p.id)), (done, total) => setScaleSyncProgress({ done, total }));
+      const okCount = check.confirmed.length;
+      const failedCount = result.attempted - (result.responseCodeCounts["01"] ?? 0);
       const codesSummary = Object.entries(result.responseCodeCounts)
         .filter(([code]) => code !== "01")
         .map(([code, count]) => `${count} con código "${code}" (${describeResponseCode(code)})`)
         .join(", ");
-      const parts = [`${okCount} enviados con éxito de ${result.attempted} intentados.`];
+      const parts = [`${okCount} enviados y comprobados de ${result.attempted} intentados.`];
+      if (check.notConfirmed.length) {
+        parts.push(
+          `${check.notConfirmed.length} la balanza los aceptó pero al releerlos no quedaron iguales: ` +
+            check.notConfirmed.map((x) => `${x.product.name} (${x.product.code}: ${x.reason})`).join(", ") +
+            "."
+        );
+      }
       if (failedCount > 0 && codesSummary) parts.push(`Fallidos: ${codesSummary}.`);
       if (result.failed.length) {
         parts.push(
