@@ -26,6 +26,9 @@ import { compactSupportLog } from "./support-compact";
 import { submitScaleSupportReport } from "./support-service";
 import { planScaleImport } from "./engine/scale-import";
 import { importProducts } from "../import/import-service";
+// C22: "¿Es la Balanza X?" al agregar una que se parece a una registrada.
+import { applySameScaleAnswer } from "./engine/connect-branch";
+import { lastUseText, type SameScaleCandidate } from "./registry/scale-identity";
 
 /**
  * "Mis balanzas": la única pantalla de balanza que ve el cliente.
@@ -68,6 +71,8 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
   const [newChoice, setNewChoice] = useState<ScaleChoice | null>(null);
   /** Al agregar: otra balanza registrada con el mismo número (solo se avisa). */
   const [lookalike, setLookalike] = useState<BranchScale | null>(null);
+  /** C22: la pregunta "¿Es la Balanza X?" mientras espera la respuesta (key = "Sí, es esa", null = "No, es otra"). */
+  const [sameAsk, setSameAsk] = useState<{ candidates: SameScaleCandidate[]; answer: (key: string | null) => void } | null>(null);
   /** El último reporte a soporte: llegó, no llegó, o todavía se está mandando (null). */
   const [reportSent, setReportSent] = useState<boolean | null>(null);
   /** El último diagnóstico, para verlo y descargarlo aunque el reporte no haya llegado. */
@@ -207,7 +212,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
     const isLegacy = target?.key === LOCAL_KEY;
     const remembered = loadRememberedScale();
     try {
-      const result = await connectBranchScale(
+      let result = await connectBranchScale(
         { branchId, products, online: isSupabaseConfigured, canManageLinks: canManage, diag, allowSystelRelease, weightBarcode, pesosBarcode, plu5Barcode },
         progress,
         { target: isLegacy ? { ...target!, identity: {} } : target, known: scales, pick },
@@ -220,6 +225,15 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       );
       session.current = result.session;
       ctxRef.current = result;
+      // C22: se parece a una registrada: no se registra otra hasta que la persona diga si es la misma.
+      if (result.sameAsk) {
+        const { candidates } = result.sameAsk;
+        progress("permiso", "Contestá la pregunta para seguir.");
+        const answer = await new Promise<string | null>((resolve) => setSameAsk({ candidates, answer: resolve }));
+        setSameAsk(null);
+        result = applySameScaleAnswer(result, scales, answer);
+        ctxRef.current = result;
+      }
       setNetConnected(parseNetKey(result.usb as string | null | undefined));
       setLookalike(result.lookalike);
       const key = await remember(result, target);
@@ -485,6 +499,23 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
             {phase.done && phase.total ? ` (${phase.done} de ${phase.total})` : ""}
           </p>
           {phase.stage === "sincronizar" && <p className="my-scale-warning">No desenchufes la balanza ni cierres esta pantalla.</p>}
+        </div>
+      )}
+
+      {sameAsk && (
+        <div className="my-scale-body">
+          {sameAsk.candidates.map((c) => (
+            <div key={c.key}>
+              <p className="my-scale-status">¿Es la <strong>{c.name}</strong>?</p>
+              <p className="muted">Ya está registrada en esta sucursal ({lastUseText(c.lastSeenAt)}).</p>
+              <div className="my-scale-actions">
+                <button className="my-scale-primary" onClick={() => sameAsk.answer(c.key)}>Sí, es esa</button>
+              </div>
+            </div>
+          ))}
+          <div className="my-scale-actions">
+            <button className="secondary" onClick={() => sameAsk.answer(null)}>No, es otra balanza</button>
+          </div>
         </div>
       )}
 

@@ -86,6 +86,39 @@ export function legacyCandidate(scales: BranchScale[], family: ScaleFamily): Bra
   return ofFamily.length === 1 && Object.keys(ofFamily[0].identity).length === 0 ? ofFamily[0] : null;
 }
 
+/** Una registrada que podría ser la balanza recién conectada ("¿Es la Balanza X?"). */
+export interface SameScaleCandidate {
+  key: string;
+  name: string;
+  lastSeenAt: string | null;
+}
+
+const noIdentity = (i: Record<string, unknown> | null | undefined) => !Object.values(i ?? {}).some((v) => v !== undefined && v !== null);
+
+/**
+ * C22: al AGREGAR, las registradas que podrían ser la misma balanza: misma marca y misma identidad de protocolo
+ * (número Systel, letra y equipo Kretz), o sin identidad guardada (de antes de la 134). Lo que distingue a dos
+ * balanzas iguales (el cable, cómo imprimen) es débil, así que no se decide solo: se le pregunta a la persona.
+ * Real (producción, 26/11): Los gringos 4 × {"address":20}, El Abastero 2 × {"letter":"C","equipment":"01"}.
+ * Primero la usada más recientemente.
+ */
+export function sameScaleCandidates(scales: BranchScale[], family: ScaleFamily, identity: Record<string, unknown>): SameScaleCandidate[] {
+  return scales
+    .filter((s) => s.family === family && (noIdentity(s.identity) || noIdentity(identity) || sameIdentity(s.identity, identity)))
+    .sort((a, b) => (b.lastSeenAt ?? "").localeCompare(a.lastSeenAt ?? ""))
+    .map((s) => ({ key: s.key, name: s.name, lastSeenAt: s.lastSeenAt }));
+}
+
+/** "usada hoy 10:15", "usada el 20/11 13:00" o "nunca se conectó". */
+export function lastUseText(lastSeenAt: string | null, now = new Date()): string {
+  if (!lastSeenAt) return "nunca se conectó";
+  const at = new Date(lastSeenAt);
+  if (Number.isNaN(at.getTime())) return "nunca se conectó";
+  const hh = at.toLocaleTimeString("es-AR", { hour: "2-digit", hourCycle: "h23", minute: "2-digit" });
+  if (at.toDateString() === now.toDateString()) return `usada hoy ${hh}`;
+  return `usada el ${at.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit" })} ${hh}`;
+}
+
 /** Nombre inicial que no se repita en la sucursal: "Systel Cuora Max", "Systel Cuora Max 2"… */
 export function defaultScaleName(label: string, scales: BranchScale[]): string {
   const used = new Set(scales.map((s) => s.name.trim().toLowerCase()));
