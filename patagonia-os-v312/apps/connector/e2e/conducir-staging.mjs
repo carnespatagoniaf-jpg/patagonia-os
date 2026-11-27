@@ -79,7 +79,7 @@ if (!company) throw new Error(`No está la empresa "${companyName}" en staging`)
 const [branch] = await sql(
   `select id, name from branches where company_id = ${lit(company.id)} and active and not coalesce(is_vehicle, false) ${branchName ? `and name ilike ${lit(`%${branchName}%`)}` : ""} order by created_at limit 1`,
 );
-const [admin] = await sql(`select id, full_name, role from profiles where company_id = ${lit(company.id)} and active and role in ('owner', 'admin') order by role desc, created_at limit 1`);
+const [admin] = await sql(`select id, full_name, role from profiles where company_id = ${lit(company.id)} and active and role in ('owner', 'admin') order by role desc, id limit 1`);
 if (!branch || !admin) throw new Error("Falta la sucursal o un dueño/administrador");
 log(`Empresa "${company.name}", sucursal "${branch.name}", como "${admin.full_name}" (${admin.role})`);
 
