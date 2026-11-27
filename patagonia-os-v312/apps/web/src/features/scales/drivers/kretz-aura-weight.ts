@@ -29,7 +29,7 @@ export const kretzAuraWeightDriver: ScaleDriver = {
   capabilities: ["readWeight"],
 
   async identify(port, onProgress): Promise<ScaleIdentifyResult> {
-    onProgress?.("Probando Kretz Aura Eco (9600 baudios, pedido de peso)…");
+    onProgress?.("Probando Kretz Aura Eco (pedido de peso)…");
     try {
       const { raw, frame } = await requestWeight(port);
       if (frame) {

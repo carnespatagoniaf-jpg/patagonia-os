@@ -30,6 +30,12 @@ import { importProducts } from "../import/import-service";
 // C22: "¿Es la Balanza X?" al agregar una que se parece a una registrada.
 import { applySameScaleAnswer } from "./engine/connect-branch";
 import { lastUseText, type SameScaleCandidate } from "./registry/scale-identity";
+// Permiso scales.send (migración 224), registros repetidos (225) y textos simples de envío.
+import { can } from "../auth/permissions";
+import { DuplicateScalesNotice } from "./DuplicateScalesNotice";
+import { mergedRedirects } from "./registry/scale-merge";
+import { redirectMergedBindings } from "./registry/local-bindings";
+import { brandAndModel, lastSendText, sendSummary } from "./my-scale-text";
 
 /**
  * "Mis balanzas": la única pantalla de balanza que ve el cliente.
@@ -47,9 +53,12 @@ type Phase =
   | { kind: "red" }
   | { kind: "trabajando"; stage: "conectar" | "sincronizar"; step: EngineStep; text: string; done?: number; total?: number }
   | { kind: "listo_para_sincronizar"; prepared: PreparedSync }
-  | { kind: "listo"; message: string; pending: PendingItem[]; model: string; skipped?: ProductProblem[] }
+  | { kind: "listo"; message: string; pending: PendingItem[]; model: string; skipped?: ProductProblem[]; summary?: SendSummary }
   | { kind: "bloqueado"; prepared: PreparedSync }
-  | { kind: "error"; message: string; canPick: boolean; canRelease?: boolean; failures?: ProductProblem[]; net?: NetAddress | null };
+  | { kind: "error"; message: string; canPick: boolean; canRelease?: boolean; failures?: ProductProblem[]; net?: NetAddress | null; summary?: SendSummary };
+
+/** Resultado final de un envío en palabras simples (my-scale-text.ts). */
+type SendSummary = ReturnType<typeof sendSummary>;
 
 /** Balanza que esta computadora usaba antes de "Mis balanzas" y que todavía no está registrada en la sucursal. */
 const LOCAL_KEY = "__esta-computadora";
@@ -59,6 +68,8 @@ const CHOICE_FOR_TARGET: Record<ReturnType<typeof choiceForScale>, ScaleChoice> 
 export function MyScale({ products, branchId }: { products: EngineProduct[]; branchId: string | null }) {
   const { profile } = useAuth();
   const canManage = profile?.role === "owner" || profile?.role === "admin";
+  // scales.send (migración 224): sin él (solo lectura, o destildado en Usuarios) se ve el estado, sin enviar ni agregar.
+  const canSend = can(profile, "scales.send");
   const weightBarcode = REPORT_WEIGHT_BARCODE_COMPANIES.has(profile?.company_id ?? "");
   const pesosBarcode = REPORT_PESOS_BARCODE_COMPANIES.has(profile?.company_id ?? "");
   const plu5Barcode = REPORT_PLU5_WEIGHT_COMPANIES.has(profile?.company_id ?? "");
@@ -93,7 +104,10 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       return;
     }
     try {
-      setScales(await listBranchScales(branchId));
+      const all = await listBranchScales(branchId);
+      // Registros unidos (225): no se muestran, y lo que esta PC recordaba de ellos pasa al que quedó.
+      redirectMergedBindings(branchId, mergedRedirects(all));
+      setScales(all.filter((s) => !s.mergedInto));
     } catch {
       // sin conexión: se muestra lo que se recuerda en esta computadora
     } finally {
@@ -260,7 +274,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
             kind: "error",
             canPick: false,
             message: check.same
-              ? `La balanza enchufada es "${check.same.name}", no "${realTarget.name}" (imprime los códigos como esa). Volvé a mis balanzas y tocá "PASAR PRODUCTOS" en "${check.same.name}". No se cambió nada.`
+              ? `La balanza enchufada es "${check.same.name}", no "${realTarget.name}" (imprime los códigos como esa). Volvé a mis balanzas y tocá "Enviar productos" en "${check.same.name}". No se cambió nada.`
               : `La balanza enchufada no es "${realTarget.name}": imprime los códigos distinto. Si es otra balanza, volvé a mis balanzas y tocá "AGREGAR BALANZA". No se cambió nada.`
           });
           reportAndShow("conectar (otra balanza)", `imprime distinto que ${realTarget.key}`, diag, { formatos_leidos: result.session.codeFormats?.() ?? null, formatos_tarjeta: realTarget.formats ?? null });
@@ -344,19 +358,25 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       const at = new Date().toISOString();
       if (!out.ok) {
         recordInstall(activeKey, { sentAt: at, sentCount: prepared.ready + out.verified, verifiedAt: at, verifiedCount: prepared.ready + out.verified, failedCount: Math.max(out.failures?.length ?? 0, 1), lastError: out.message.slice(0, 200), lastErrorAt: at });
-        setPhase({ kind: "error", message: out.message, canPick: false, failures: out.failures });
+        setPhase({ kind: "error", message: out.message, canPick: false, failures: out.failures, summary: summaryOf(prepared, out) });
         reportAndShow("sincronizar (frenado)", out.message, ctxRef.current?.diag ?? null, out.support ?? {});
         return;
       }
       markSynced();
       recordInstall(activeKey, { sentAt: at, sentCount: prepared.ready + out.verified, verifiedAt: at, verifiedCount: prepared.ready + out.verified, failedCount: 0, ...clearedInstallError(at) });
-      setPhase({ kind: "listo", message: out.message, pending: out.pending, model: prepared.label, skipped: prepared.skipped });
+      setPhase({ kind: "listo", message: out.message, pending: out.pending, model: prepared.label, skipped: prepared.skipped, summary: summaryOf(prepared, out) });
       void reload();
     } catch (err) {
       logJob(null, friendlyKind(err));
       setPhase({ kind: "error", message: friendlyMessage(err), canPick: false });
       reportAndShow("sincronizar", err, ctxRef.current?.diag ?? null);
     }
+  }
+
+  /** "X de Y productos quedaron y se comprobaron en la balanza" y qué hacer con el resto. */
+  function summaryOf(prepared: PreparedSync, out: SyncOutcome): SendSummary {
+    const occupied = out.pending.filter((p) => p.reason === "ocupado_en_balanza").length;
+    return sendSummary({ ready: prepared.ready, verified: out.verified, failed: out.failures?.length ?? (out.ok ? 0 : 1), skipped: prepared.skipped?.length ?? 0, toReview: out.pending.length - occupied, occupied });
   }
 
   async function handleRename(s: BranchScale) {
@@ -411,7 +431,10 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
 
       {showList && (
         <div className="my-scale-body">
+          {/* Registros repetidos de la misma balanza (migración 225): dueño o administrador. */}
+          {canManage && branchId && isSupabaseConfigured && <DuplicateScalesNotice branchId={branchId} onChanged={() => void reload()} />}
           {loaded && list.length === 0 && <p className="my-scale-status">Todavía no agregaste ninguna balanza.</p>}
+          {!canSend && list.length > 0 && <p className="muted">Tu usuario puede ver cómo están las balanzas, pero no enviarles productos ni cambiarlas.</p>}
           {list.length > 0 && (
             <ul className="my-scale-list">
               {list.map((s) => {
@@ -423,13 +446,15 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
                 return (
                   <li key={s.key} className="my-scale-item">
                     <div>
+                      {/* Con varias balanzas, cada tarjeta dice marca, nombre y último envío. */}
                       <strong>{s.name}</strong>
-                      <span className="muted"> · {s.model ?? (s.family === "kretz" ? "Kretz" : "Systel")}</span>
+                      <span className="muted"> · {brandAndModel(s)}</span>
+                      <p className="my-scale-item-status">{lastSendText(inst)}</p>
                       <p className={`my-scale-item-status ${st.tone}`}>{st.text}</p>
                       {netWatch[s.key] && <p className={`my-scale-item-status ${netWatchText(netWatch[s.key]).tone}`}>{netWatchText(netWatch[s.key]).text}</p>}
                     </div>
                     <div className="my-scale-actions">
-                      <button className="my-scale-primary" onClick={() => void handleConnect(s, false)}>PASAR PRODUCTOS</button>
+                      {canSend && <button className="my-scale-primary" onClick={() => void handleConnect(s, false)}>Enviar productos</button>}
                       {canManage && s.key !== LOCAL_KEY && <button className="secondary" onClick={() => void handleRename(s)}>Cambiar nombre</button>}
                       {canManage && s.key !== LOCAL_KEY && <button className="secondary" onClick={() => void handleRemove(s)}>Quitar</button>}
                     </div>
@@ -440,7 +465,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
               })}
             </ul>
           )}
-          {canManage ? (
+          {canManage && canSend ? (
             <button className={list.length === 0 ? "my-scale-primary" : "secondary"} onClick={() => setPhase({ kind: "elegir_marca" })}>
               <Plus size={16} /> AGREGAR BALANZA
             </button>
@@ -498,7 +523,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
 
       {working && (
         <div className="my-scale-body" aria-live="polite">
-          <p className="my-scale-status">{phase.stage === "conectar" ? "Conectando tu balanza…" : "Sincronizando…"}</p>
+          <p className="my-scale-status">{phase.stage === "conectar" ? "Conectando tu balanza…" : "Enviando los productos…"}</p>
           <div className="my-scale-bar" role="progressbar" aria-valuemin={0} aria-valuemax={phase.total ?? 100} aria-valuenow={phase.done ?? undefined}>
             <div style={phase.done && phase.total ? { width: `${Math.round((phase.done / phase.total) * 100)}%` } : undefined} className={phase.done && phase.total ? "" : "indeterminate"} />
           </div>
@@ -532,7 +557,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
           {netConnected ? (
             <p className="my-scale-status ok"><CheckCircle2 size={22} /> Listo, balanza conectada</p>
           ) : (
-            <p className="my-scale-status">Tu balanza está lista para sincronizar</p>
+            <p className="my-scale-status">Tu balanza está lista para recibir los productos</p>
           )}
           <p className="muted">{phase.prepared.label} conectada{netConnected ? ` por cable de red (${netConnected.host})` : ""}. Patagonia ya leyó lo que tiene la balanza.</p>
           <div className="my-scale-facts">
@@ -557,7 +582,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
             </p>
           )}
           <div className="my-scale-actions">
-            <button className="my-scale-primary" onClick={() => void handleSync(phase.prepared)}>SINCRONIZAR PRODUCTOS</button>
+            {canSend && <button className="my-scale-primary" onClick={() => void handleSync(phase.prepared)}>ENVIAR PRODUCTOS A LA BALANZA</button>}
             <button className="secondary" onClick={backToList}>Volver a mis balanzas</button>
           </div>
         </div>
@@ -583,7 +608,8 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
 
       {phase.kind === "listo" && (
         <div className="my-scale-body">
-          <p className="my-scale-status ok"><CheckCircle2 size={22} /> {phase.message}</p>
+          <p className="my-scale-status ok"><CheckCircle2 size={22} /> {phase.summary ? phase.summary.headline : phase.message}</p>
+          {phase.summary && <SendNext summary={phase.summary} />}
           {/* La etiqueta se prueba apenas termina de enlazarse, arriba de los pasos (antes quedaba al final y no se veía). */}
           {active && branchId && needsLabelTestFor(active) && <LabelTestBox products={products as unknown as Product[]} branchId={branchId} onDone={() => void reload()} />}
           <InstallChecklist record={installOf(active)} onRefresh={() => void reload()} products={products} branchId={branchId} />
@@ -591,7 +617,7 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
           {phase.pending.length > 0 && active && <PendingReview items={phase.pending} products={products} branchId={branchId} scaleKey={active.key} />}
           <ProblemList title="no van a la balanza" items={phase.skipped} />
           <div className="my-scale-actions">
-            <button className="secondary" onClick={() => void handleConnect(active, false)}>Volver a sincronizar</button>
+            {canSend && <button className="secondary" onClick={() => void handleConnect(active, false)}>Enviar de nuevo</button>}
             <button className="secondary" onClick={backToList}>Volver a mis balanzas</button>
           </div>
         </div>
@@ -600,6 +626,8 @@ export function MyScale({ products, branchId }: { products: EngineProduct[]; bra
       {phase.kind === "error" && (
         <div className="my-scale-body">
           <p className="my-scale-status bad"><TriangleAlert size={20} /> {phase.message}</p>
+          {phase.summary && <p className="my-scale-status">{phase.summary.headline}</p>}
+          {phase.summary && <SendNext summary={phase.summary} />}
           <ProblemList title="no quedaron bien en la balanza" items={phase.failures} open />
           <div className="my-scale-actions">
             {active ? (
@@ -696,7 +724,7 @@ function connectErrorMessage(err: unknown, choice: ScaleChoice | null): string {
   const label = choiceLabel(choice);
   if (choice === "kretz-report") {
     // Manual Kretz Report NX/LT: la LT va por Bluetooth o USB (sin adaptador), la NX por red. No usa adaptador USB a serie (DB9).
-    return `Tu ${label} no contestó. La Report LT se conecta por Bluetooth (emparejala en Windows y elegí "Puerto serie estándar a través de vínculo Bluetooth") o con su cable USB directo, no con un adaptador USB a serie DB9. Si tu balanza va con cable de red, tocá "VA CON CABLE DE RED" acá abajo. Revisá también que no esté abierto iTegra.`;
+    return `Tu ${label} no contestó. La Report LT se conecta por Bluetooth (primero emparejala desde la configuración de Bluetooth de Windows) o con su propio cable USB directo, sin adaptadores. Si tu balanza va con cable de red, tocá "VA CON CABLE DE RED" acá abajo. Revisá también que no esté abierto iTegra.`;
   }
   const check = choice === "kretz-aura" ? "el cable enchufado y, en el menú de la balanza, COMUNI → MODO \"Datos\"" : "el cable USB enchufado y que no esté abierto el programa de la balanza";
   return `Tu ${label} no contestó. Revisá que esté prendida, ${check}, y probá de nuevo.`;
@@ -751,6 +779,16 @@ function DiagnosticView({ diagnostic }: { diagnostic: Record<string, unknown> })
         </table>
       </div>
     </details>
+  );
+}
+
+/** Qué hacer con lo que no quedó en la balanza, después de un envío. */
+function SendNext({ summary }: { summary: SendSummary }) {
+  if (!summary.next.length) return null;
+  return (
+    <ul className="my-scale-notes">
+      {summary.next.map((n) => <li key={n}>{n}</li>)}
+    </ul>
   );
 }
 

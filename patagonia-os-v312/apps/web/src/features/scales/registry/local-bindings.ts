@@ -89,6 +89,26 @@ export function restoreBinding(binding: ScaleBinding, s: StorageLike | null = st
   }
 }
 
+/**
+ * Registros unidos (migración 225): lo que esta computadora recuerda de una clave que se unió a otra pasa a la que
+ * quedó. Si la que quedó ya tenía su cable recordado, se queda con la conexión buena más reciente. Devuelve cuántas
+ * claves se redirigieron.
+ */
+export function redirectMergedBindings(branchId: string, redirects: Record<string, string>, s: StorageLike | null = store()): number {
+  const all = loadBindings(s);
+  let moved = 0;
+  for (const [from, to] of Object.entries(redirects)) {
+    const old = all[`${branchId}|${from}`];
+    if (!old) continue;
+    const current = all[`${branchId}|${to}`];
+    if (!current || (old.lastOkAt ?? "") > (current.lastOkAt ?? "")) all[`${branchId}|${to}`] = old;
+    delete all[`${branchId}|${from}`];
+    moved++;
+  }
+  if (moved > 0) saveAll(all, s);
+  return moved;
+}
+
 export function forgetBinding(scaleKey: string, branchId: string, s: StorageLike | null = store()): void {
   const all = loadBindings(s);
   delete all[`${branchId}|${scaleKey}`];
