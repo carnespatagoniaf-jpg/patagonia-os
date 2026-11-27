@@ -26,6 +26,7 @@ export type Permission =
   | "audit.view"
   | "import.data"
   | "scales.manage"
+  | "scales.send"
   | "route.sell"
   | "frigo.manage"
   | "orders.view"
@@ -94,6 +95,9 @@ export const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> 
     "users.manage",
     "import.data",
     "scales.manage",
+    // scales.send (migración 224): mandar productos a la balanza y cambiar su formato de etiqueta. Todos los roles que
+    // trabajan en el local, NO solo lectura ni el contador (decisión del dueño, 27/11/2026).
+    "scales.send",
     "route.sell",
     "frigo.manage",
     "transfers.manage",
@@ -106,12 +110,12 @@ export const rolePermissions: Record<UserProfile["role"], (Permission | "*")[]> 
   ],
   // frigo.manage: el encargado carga DT, faena y salidas (la pantalla solo existe si la empresa tiene 'frigorifico').
   // transfers.manage (migración 190, plan Empresa): pedir, preparar, despachar y recibir mercadería, solo de su local.
-  manager: ["dashboard.view", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view", "frigo.manage", "orders.view", "orders.manage", "transfers.manage", "planta.manage", "freezer.manage"],
+  manager: ["dashboard.view", "scales.send", "sales.create", "sales.cancel", "inventory.view", "inventory.adjust", "purchases.manage", "reports.view", "frigo.manage", "orders.view", "orders.manage", "transfers.manage", "planta.manage", "freezer.manage"],
   // "route.sell": vendedor de un camión (venta en ruta, migración 161); la pantalla además pide companies.features "venta_ruta".
   // Pedidos (migración 187): el cajero los carga y los entrega, solo en su sucursal (la base lo exige).
-  cashier: ["pos.sell", "products.view", "sales.create", "pos.treasury", "route.sell", "orders.view", "orders.manage", "transfers.manage", "freezer.manage"],
+  cashier: ["pos.sell", "products.view", "scales.send", "sales.create", "pos.treasury", "route.sell", "orders.view", "orders.manage", "transfers.manage", "freezer.manage"],
   // planta.manage (migración 194, plan Planta): envasar, imprimir etiquetas y despachar paquetes, solo en su local.
-  production: ["dashboard.view", "inventory.view", "inventory.adjust", "transfers.manage", "planta.manage", "freezer.manage"],
+  production: ["dashboard.view", "inventory.view", "scales.send", "inventory.adjust", "transfers.manage", "planta.manage", "freezer.manage"],
   readonly: ["dashboard.view", "inventory.view", "reports.view"],
   // El contador (migración 155): solo la pantalla Contable. La base le corta toda escritura.
   accountant: ["accounting.view"]
@@ -145,6 +149,7 @@ export const PERMISSION_LABELS: Record<Permission, string> = {
   "audit.view": "Auditoría",
   "import.data": "Importar desde Excel",
   "scales.manage": "Balanzas",
+  "scales.send": "Balanzas: mandar productos y cambiar el formato de etiqueta",
   "route.sell": "Venta en ruta (camión)",
   "frigo.manage": "Frigorífico (tropa, garrón y kilo)",
   "orders.view": "Pedidos (ver)",
@@ -176,6 +181,8 @@ export const PLAN_LIMITS: Record<Plan, { maxBranches: number | null; maxUsers: n
 const PLAN_RANK: Record<Plan, number> = { basico: 1, estandar: 2, full: 3, empresa: 4, planta: 4 };
 
 /** Permisos que solo existen desde cierto plan. Lo que no está acá va en todos. */
+// scales.send no va acá a propósito: la calibración de etiquetas de Mostrador es de todos los planes, y "Mis balanzas"
+// ya pide Estándar por pantalla (planAllows en Stock/Productos).
 const PERMISSION_MIN_PLAN: Partial<Record<Permission, Plan>> = {
   "customers.manage": "estandar",
   "customers.payments": "estandar",
@@ -217,7 +224,7 @@ export function planAllows(profile: UserProfile | null, min: Plan): boolean {
 export function isNotButcher(profile: UserProfile | null): boolean {
   return Boolean(profile?.features?.includes("sin_carniceria"));
 }
-const NOT_BUTCHER_HIDDEN: Permission[] = ["carcass.manage", "scales.manage", "frigo.manage"];
+const NOT_BUTCHER_HIDDEN: Permission[] = ["carcass.manage", "scales.manage", "scales.send", "frigo.manage"];
 
 /** companies.features 'pedidos_tienda' (migración 196): el dueño/administrador también carga pedidos y los cobra en Mostrador. */
 export function ordersForOwner(profile: UserProfile | null): boolean {

@@ -10,6 +10,8 @@ import { SettingSection } from "../../components/SettingSection";
 import type { Product } from "@patagonia/domain";
 import { BoxLabelSettings } from "./BoxLabelSettings";
 import { calibrationStep } from "./scale-calibration-flow";
+import { useAuth } from "../auth/AuthProvider";
+import { can } from "../auth/permissions";
 import type { CalibrationSample } from "./scale-barcode";
 
 // Panel de configuración de Mostrador (engranaje): impresora, balanza (peso
@@ -44,6 +46,9 @@ export function SaleConfigPanel({
   visible, branchId, canSeeShiftTotals, autoPrintEnabled, onAutoPrintChange, thermalPaired, thermalConnectBusy, onConnectThermal,
   scaleConfigCalibrated, onScaleConfigChange, mostradorPin, onPinChange, onMessage, products, boxLabelsEnabled, canEditBoxFormats
 }: SaleConfigPanelProps) {
+  // scales.send (migración 224): calibrar o borrar el formato de etiqueta de la sucursal. Sin él se ve el estado.
+  const { profile } = useAuth();
+  const canCalibrateScale = can(profile, "scales.send");
   const [scaleWizardCode, setScaleWizardCode] = useState("");
   const [scaleWizardWeight, setScaleWizardWeight] = useState("");
   const [scaleWizardPayload, setScaleWizardPayload] = useState<ScalePayloadType>("weight");
@@ -198,8 +203,11 @@ export function SaleConfigPanel({
         title="Etiquetas de la balanza"
         status={scaleConfigCalibrated ? "Calibradas" : "Formato Kretz de fábrica"}
         tone={scaleConfigCalibrated ? "ok" : "neutral"}
-        actionLabel={scaleConfigCalibrated ? "Volver a calibrar" : "Calibrar"}
+        actionLabel={!canCalibrateScale ? "Ver" : scaleConfigCalibrated ? "Volver a calibrar" : "Calibrar"}
       >
+        {!canCalibrateScale ? (
+          <p className="setting-help">Tu usuario no puede cambiar el formato de las etiquetas de la balanza. Pedíselo al dueño o a un encargado.</p>
+        ) : (<>
         <p className="setting-help">
           Solo si al escanear una etiqueta de producto el peso o el importe no da bien. Poné un producto en la balanza, escaneá acá su etiqueta y escribí lo que mostró la balanza: el sistema detecta el formato solo. (Los tickets de total de la Kretz Aura no necesitan esto.)
         </p>
@@ -256,6 +264,7 @@ export function SaleConfigPanel({
             </p>
           )}
         </div>
+        </>)}
       </SettingSection>
 
       {boxLabelsEnabled && <BoxLabelSettings products={products} canEdit={canEditBoxFormats} />}
