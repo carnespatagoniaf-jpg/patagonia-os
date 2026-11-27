@@ -3,7 +3,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { exportActivityLogText, logScaleActivity } from "../scales/activity-log";
 import { submitScaleSupportReport } from "../scales/support-service";
-import { planAllows } from "../auth/permissions";
+import { can, planAllows } from "../auth/permissions";
 import { formatMoney } from "../shifts/format";
 import {
   autoDetectScale,
@@ -709,6 +709,11 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
           "En la balanza: menú de usuario (clave de fábrica 99999) → COMUNI → MODO \"Datos\" y PUERT \"RS-232\"."
         ]
       : ["Cable de PC de la balanza Kretz (o un adaptador USB a serie) conectado a esta computadora."];
+
+  // scales.send (migración 224): casi todo este panel escribe en la balanza o cambia su formato. Sin el permiso, nada.
+  if (!can(profile, "scales.send")) {
+    return <p className="muted">Tu usuario no puede enviar productos a la balanza ni cambiar su configuración.</p>;
+  }
 
   return (
     <>

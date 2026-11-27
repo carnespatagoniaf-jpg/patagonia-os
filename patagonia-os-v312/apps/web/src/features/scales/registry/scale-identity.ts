@@ -18,6 +18,8 @@ export interface BranchScale {
   formats?: CodeFormats | null;
   /** Pasos de la instalación comprobados (migración 165), o null si la base no lo tiene. */
   install?: InstallRecord | null;
+  /** Registro repetido que se unió a otro (migración 225): la clave del que quedó. */
+  mergedInto?: string | null;
 }
 
 export interface CodeFormats {
@@ -39,6 +41,7 @@ export interface ScaleRow {
   unit_format: string | null;
   total_format: string | null;
   install?: InstallRecord | null;
+  merged_into?: string | null;
 }
 
 export function familyOfBrand(brand: string): ScaleFamily {
@@ -58,7 +61,8 @@ export function rowToScale(r: ScaleRow): BranchScale {
     lastSeenAt: r.last_seen_at ?? null,
     sellsWithCodes: !!(r.weighed_format || r.unit_format || r.total_format),
     formats: r.weighed_format || r.unit_format || r.total_format ? { weighed: r.weighed_format, unit: r.unit_format, total: r.total_format } : null,
-    install: r.install ?? null
+    install: r.install ?? null,
+    mergedInto: r.merged_into ?? null
   };
 }
 

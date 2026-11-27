@@ -99,11 +99,12 @@ begin
   if (select confirmed_count from scale_jobs where id = v) <> 10000 then raise exception 'contados de los productos'; end if;
 end $$;
 
--- 3. Solo lectura llega a "Mis balanzas" y puede registrar; el contador no.
+-- 3. Solo lectura (desde la 224 no manda productos a la balanza) y el contador: no.
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000d1008', true);
 do $$
 begin
-  perform public.finish_scale_job(public.start_scale_job('00000000-0000-0000-0000-0000000d1002', 'kretz-aura', 'test'), 'failed', '{}', '[]', 'no_contesta');
+  perform pg_temp.must_fail($q$select public.start_scale_job('00000000-0000-0000-0000-0000000d1002', 'kretz-aura', 'test')$q$, 'solo lectura');
+  perform pg_temp.must_fail(format($q$select public.finish_scale_job(%L, 'done', '{}', '[]', null)$q$, current_setting('test.job1')), 'solo lectura cierra');
 end $$;
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000d1007', true);
 do $$
@@ -124,7 +125,7 @@ end $$;
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000d1005', true);
 do $$
 begin
-  if (select count(*) from scale_jobs) <> 3 then raise exception 'el dueño no ve los 3 envíos'; end if;
+  if (select count(*) from scale_jobs) <> 2 then raise exception 'el dueño no ve los 2 envíos'; end if;
   if (select count(*) from scale_job_items) <> 10003 then raise exception 'el dueño no ve los productos'; end if;
   perform pg_temp.must_fail($q$insert into scale_jobs (company_id, branch_id, scale_key, kind) values ('00000000-0000-0000-0000-0000000d1001', '00000000-0000-0000-0000-0000000d1002', 'k', 'send')$q$, 'insert directo');
   perform pg_temp.must_fail($q$update scale_jobs set status = 'done'$q$, 'update directo');
