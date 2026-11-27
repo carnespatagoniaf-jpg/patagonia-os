@@ -184,10 +184,11 @@ describe("[SIMULADO, registros REALES] Mi balanza con una Systel Cuora Max: Pata
     assert.match(out.message, /Frenamos para cuidar tus productos/);
     assert.equal((out.support as { restored: boolean }).restored, true);
     assert.equal(f.plus.get(4)!.slice(23, 29), "005200", "el 4 quedó como estaba");
-    assert.equal(calls.catalog, undefined);
+    // C12 (plan balanzas v2): Mostrador guarda solo lo confirmado (el 1) y lo que ya estaba igual (el 13); nunca el 4.
+    assert.deepEqual(calls.catalog?.map((c) => c.code).sort((a, b) => a - b), [1, 13]);
   });
 
-  it("se corta el cable a mitad: frena y no guarda nada en Patagonia", async () => {
+  it("se corta el cable a mitad: frena y en Patagonia guarda solo lo que ya quedó confirmado", async () => {
     const f = cuora();
     const { deps, calls } = fakeDb();
     const s = new SystelSession(f, 20, ctx(PRODUCTS), lab(deps));
@@ -200,7 +201,8 @@ describe("[SIMULADO, registros REALES] Mi balanza con una Systel Cuora Max: Pata
     };
     const out = await s.sync(prep, noop);
     assert.equal(out.ok, false);
-    assert.equal(calls.catalog, undefined);
+    // C12: el 1 se releyó igual antes del corte; el 4 (donde se cortó) no se sabe cómo quedó y no entra.
+    assert.deepEqual(calls.catalog?.map((c) => c.code).sort((a, b) => a - b), [1, 13]);
   });
 
   it("si alguien cambió la balanza entre la lectura y el envío, no escribe encima", async () => {

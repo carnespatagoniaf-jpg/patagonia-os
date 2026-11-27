@@ -106,3 +106,49 @@ describe("C9: antes de crear un producto, solo E7 es 'libre'", () => {
     assert.equal(writesTo(f, 78).length, 0);
   });
 });
+
+describe("C12: si el envío frena a mitad, Mostrador reconoce lo que ya quedó grabado", () => {
+  const PRODUCTS = [P("p1", "1", "ALPINA CAJON DE 15 KG", "unit", 82000), P("p4", "4", "POLLO ENTEROxKG", "kg", 5400), P("p13", "13", "PECHUGA S/H x1x3", "kg", 9200), P("p78", "78", "ARABES", "unit", 1000)];
+
+  it("guarda catálogo y vínculos de lo confirmado y de lo que ya estaba igual; el mensaje dice cuántos quedaron", async () => {
+    const f = cuora();
+    f.corruptAfterWrite = 4;
+    f.corruptOnce = true;
+    const { deps, calls } = fakeDb();
+    const s = new SystelSession(f, 20, ctx(PRODUCTS), deps);
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, false);
+    assert.equal(out.verified, 1);
+    assert.deepEqual(calls.catalog?.map((c) => c.code).sort((a, b) => a - b), [1, 13], "el 1 (confirmado) y el 13 (ya igual); ni el 4 (restaurado) ni el 78 (no llegó)");
+    assert.deepEqual(calls.links?.map((l) => `${l.code}→${l.productId}`).sort(), ["13→p13", "1→p1"]);
+    assert.match(out.message, /Quedaron grabados 1 de 3/);
+  });
+
+  it("lo que no se llegó a mandar conserva lo que Mostrador ya sabía (la balanza lo sigue teniendo así)", async () => {
+    const f = cuora();
+    f.corruptAfterWrite = 4;
+    f.corruptOnce = true;
+    const { deps, calls } = fakeDb();
+    const old = { code: 4, name: "POLLO ENTEROxKG", saleType: "P" as const, prices: [5200, 0], eanType: 1, eanConfig: "20PPPPCCCCCC" };
+    const old78 = { code: 77, name: "OTRO", saleType: "U" as const, prices: [100, 0], eanType: 1, eanConfig: "21PPPPCCCCCC" };
+    deps.loadSetup = async () => ({ profile: { scaleKey: "systel", brand: "systel", weighedFormat: null, unitFormat: null, totalFormat: null, amountDecimals: 0, genericCodes: [], catalog: [old, old78] }, links: [{ code: 4, kind: "product", productId: "p4" }, { code: 77, kind: "product", productId: "p77" }], readAt: null, repeatWindowMinutes: 0, active: true });
+    const s = new SystelSession(f, 20, ctx(PRODUCTS), deps);
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, false);
+    assert.equal((out.support as { restored: boolean }).restored, true);
+    assert.deepEqual(calls.catalog?.map((c) => c.code).sort((a, b) => a - b), [1, 4, 13, 77], "el 4 quedó restaurado: sigue con lo de antes");
+    assert.deepEqual(calls.links?.map((l) => `${l.code}→${l.productId}`).sort(), ["13→p13", "1→p1", "4→p4", "77→p77"]);
+  });
+
+  it("si frena en el primero y no había nada igual, no guarda nada", async () => {
+    const f = cuora();
+    f.corruptAfterWrite = 1;
+    f.corruptOnce = true;
+    const { deps, calls } = fakeDb();
+    const s = new SystelSession(f, 20, ctx([P("p1", "1", "ALPINA CAJON DE 15 KG", "unit", 82000), P("p4", "4", "POLLO ENTEROxKG", "kg", 5400)]), deps);
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, false);
+    assert.equal(calls.catalog, undefined);
+    assert.equal(calls.links, undefined);
+  });
+});

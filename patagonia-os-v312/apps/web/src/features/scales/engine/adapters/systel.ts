@@ -450,30 +450,22 @@ export class SystelSession implements ScaleSession {
       const r = await runSystelPush(writer, layout, modePlan, (d, t) => onProgress("sincronizar", "Mandando tus productos a la balanza…", d, t), mode);
       written = r.done;
       if (r.stoppedAt !== null) {
-        return { ok: false, verified: r.done.length, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, support: { etapa: "envio", stoppedAt: r.stoppedAt, detail: r.detail, restored: r.restored } };
+        // C12: lo que ya quedó grabado y releído igual está en la balanza; Mostrador tiene que reconocerlo igual.
+        // El producto donde frenó solo conserva lo de antes si se comprobó que quedó como estaba.
+        const stopped = plan.find((x) => x.number === r.stoppedAt);
+        const unknown = stopped && stopped.current && r.restored !== true ? [r.stoppedAt] : [];
+        const sentNow = plan.filter((x) => x.number !== null && (x.action === "sin_cambios" || written.some((w) => w.number === x.number)));
+        if (sentNow.length > 0) await this.saveForMostrador(st, layout, sentNow, { keepPrevious: true, unknown });
+        const total = toWrite.length;
+        const partial = written.length > 0 ? ` Quedaron grabados ${written.length} de ${total} productos, y Mostrador ya los reconoce.` : "";
+        return { ok: false, verified: r.done.length, message: FRIENDLY_MESSAGES.frenado + partial, pending: prepared.pending, support: { etapa: "envio", stoppedAt: r.stoppedAt, detail: r.detail, restored: r.restored, grabados: written.length, total } };
       }
     }
 
     // Mostrador: cada código de la balanza es el producto de Patagonia con ese código (sin vincular a mano).
     onProgress("verificar", "Dejando Mostrador listo…");
     const sent = plan.filter((x) => x.number !== null && (x.action === "sin_cambios" || written.some((w) => w.number === x.number)));
-    const catalog: ScaleCatalogItem[] = sent.map((x) => {
-      // La Cuora 2 no tiene código por producto: imprime con el formato general de la balanza (tipo 0).
-      const ean = layout === "cuora2" ? { type: 0, config: null } : { type: 1, config: x.product.byWeight ? "20PPPPCCCCCC" : "21PPPPCCCCCC" };
-      return { code: x.number!, name: x.product.name.slice(0, 18), saleType: x.product.byWeight ? "P" : "U", prices: [x.product.price, 0], eanType: ean.type, eanConfig: ean.config };
-    });
-    const values = st.backup.config?.values ?? {};
-    if (this.ctx.online && this.ctx.branchId) {
-      await this.deps.saveCatalog(
-        this.ctx.branchId,
-        { scaleKey: this.scaleKey, brand: "systel", model: this.label, weighedFormat: values.E_P ?? null, unitFormat: values.E_U ?? null, totalFormat: values.E_S ?? null, amountDecimals: st.backup.signature?.priceDecimals ?? 0, genericCodes: [] },
-        catalog
-      );
-      await this.deps.setLinks(this.ctx.branchId, this.scaleKey, sent.map((x) => ({ code: x.number!, kind: "product" as const, productId: x.product.id })));
-      await this.deps.setActive(this.ctx.branchId, this.scaleKey, true);
-    }
-    saveSystelLabelTemplates(values);
-    saveSystelPluBarcodes(Object.fromEntries(catalog.map((c) => [String(c.code), { type: c.eanType, config: c.eanConfig, p1: c.prices[0], p2: 0, name: c.name, saleType: c.saleType }])));
+    await this.saveForMostrador(st, layout, sent, { keepPrevious: false, unknown: [] });
 
     const pending = opts.allowReplace ? [] : prepared.pending;
     return {
@@ -482,6 +474,37 @@ export class SystelSession implements ScaleSession {
       message: pending.length ? `${SENT_AND_CHECKED} ${pending.length === 1 ? "1 producto no se mandó porque en la balanza ese número es" : `${pending.length} productos no se mandaron porque en la balanza esos números son`} de otro producto. Para poner los de Patagonia, tocá "Volver a sincronizar" y marcá "Reemplazarlos por los de Patagonia".` : SENT_AND_CHECKED,
       pending
     };
+  }
+
+  /**
+   * Catálogo y vínculos de Mostrador con lo que la balanza tiene. `keepPrevious` (envío frenado a mitad): lo que no se
+   * llegó a mandar sigue en la balanza como estaba, así que se conserva lo que Mostrador ya sabía de esos números
+   * (salvo `unknown`: el producto donde frenó, si no se pudo comprobar cómo quedó).
+   */
+  private async saveForMostrador(st: State, layout: SystelLayout, sent: PushItem[], opts: { keepPrevious: boolean; unknown: number[] }): Promise<void> {
+    let catalog: ScaleCatalogItem[] = sent.map((x) => {
+      // La Cuora 2 no tiene código por producto: imprime con el formato general de la balanza (tipo 0).
+      const ean = layout === "cuora2" ? { type: 0, config: null } : { type: 1, config: x.product.byWeight ? "20PPPPCCCCCC" : "21PPPPCCCCCC" };
+      return { code: x.number!, name: x.product.name.slice(0, 18), saleType: x.product.byWeight ? "P" : "U", prices: [x.product.price, 0], eanType: ean.type, eanConfig: ean.config };
+    });
+    let links: ScaleLink[] = sent.map((x) => ({ code: x.number!, kind: "product" as const, productId: x.product.id }));
+    if (opts.keepPrevious && st.setup) {
+      const mine = new Set([...sent.map((x) => x.number!), ...opts.unknown]);
+      catalog = [...catalog, ...(st.setup.profile.catalog ?? []).filter((c) => !mine.has(c.code))];
+      links = [...links, ...st.setup.links.filter((l) => !mine.has(l.code))];
+    }
+    const values = st.backup.config?.values ?? {};
+    if (this.ctx.online && this.ctx.branchId) {
+      await this.deps.saveCatalog(
+        this.ctx.branchId,
+        { scaleKey: this.scaleKey, brand: "systel", model: this.label, weighedFormat: values.E_P ?? null, unitFormat: values.E_U ?? null, totalFormat: values.E_S ?? null, amountDecimals: st.backup.signature?.priceDecimals ?? 0, genericCodes: [] },
+        catalog
+      );
+      await this.deps.setLinks(this.ctx.branchId, this.scaleKey, links);
+      await this.deps.setActive(this.ctx.branchId, this.scaleKey, true);
+    }
+    saveSystelLabelTemplates(values);
+    saveSystelPluBarcodes(Object.fromEntries(catalog.map((c) => [String(c.code), { type: c.eanType, config: c.eanConfig, p1: c.prices[0], p2: c.prices[1] ?? 0, name: c.name, saleType: c.saleType }])));
   }
 
   async close(): Promise<void> {
