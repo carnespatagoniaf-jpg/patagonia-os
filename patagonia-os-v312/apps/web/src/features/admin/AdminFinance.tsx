@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { parseAmount } from "../../lib/money";
 import { BRAND } from "../../lib/brand";
 import { useConfirm } from "./ui/components";
+import { FinanceImport } from "./FinanceImport";
 import {
   addPlatformAdmin,
   deleteFinanceMovement,
@@ -158,6 +159,11 @@ export function AdminFinance() {
           <section className="panel">
             <h2>Cargar un movimiento</h2>
             <MovementForm accounts={activeAccounts} partners={data.partners} onSaved={(t) => { setMessage(t); void reload(); }} />
+          </section>
+
+          <section className="panel">
+            <h2>Importar gastos de un archivo</h2>
+            <FinanceImport accounts={activeAccounts} onDone={(t) => { setMessage(t); void reload(); }} />
           </section>
 
           <section className="panel">
