@@ -44,6 +44,7 @@ import { PriceListToggle } from "../pricing/PriceListToggle";
 import { getBranchZone, listPriceLists } from "../pricing/price-lists-service";
 import { sellingLists } from "../pricing/price-lists";
 import type { PriceList } from "../pricing/price-lists";
+import { PENDING_TOTAL_MESSAGE, pendingTotals } from "./scale-total-detail";
 import { buildCloseTicket as buildCloseTicketBytes, buildMovementTicket as buildMovementTicketBytes, buildReceiptTicket as buildReceiptTicketBytes } from "./sale-tickets";
 import { type ReceiptLine, type ReceiptState, type MovementReceiptState, STALE_SHIFT_HOURS, formatShiftStart, getAutoPrintEnabled, saveAutoPrintEnabled, loadStoredReceipt, saveStoredReceipt } from "./sale-model";
 
@@ -615,6 +616,11 @@ export function Sale() {
   async function checkout() {
     if (cart.length === 0 || !shift) return;
     const orderBeingCharged = chargingOrder;
+    // C7 (dueño, 26/11): un TOTAL de la balanza sin detallar no se cobra (no bajaría stock). Igual sin conexión.
+    if (pendingTotals(cart).length > 0) {
+      setMessage(PENDING_TOTAL_MESSAGE);
+      return;
+    }
     // Etiquetas de una Systel sin su TOTAL: todavía no se sabe qué precio cobró la balanza.
     if (cart.some((l) => l.scalePending)) {
       setMessage("Falta escanear el código del TOTAL del ticket de la balanza: confirma el importe de cada artículo.");

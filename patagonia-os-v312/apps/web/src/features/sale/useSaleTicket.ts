@@ -29,6 +29,8 @@ import { chargedTicketQuestion, detailedTotalKey, SAME_SALE_LABEL_QUESTION, type
 import { hourAr, undoVoidQuestion, voidedTicketQuestion } from "./scale-void-warning";
 import { parseQuantity } from "./quantity";
 import { addDetailLine, detailGroupKeys, detailRemaining } from "./ticket-detail";
+import { addDetailScan, scanTotal } from "./scale-total-detail";
+import { productPrice } from "../pricing/price-lists";
 import { isPackageCode, normalizePackageCode, saleScanProblem } from "../planta/planta-logic";
 import { findPackage } from "../planta/planta-service";
 
@@ -81,6 +83,9 @@ export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrat
       }),
     [baseCart, lineLists, productById, priceListId, zoneListId]
   );
+  /** El carrito de este momento, para lo que corre después de una consulta (escanear no espera a la pantalla). */
+  const cartRef = useRef(cart);
+  cartRef.current = cart;
   // Una línea que se quitó no deja su lista guardada (si vuelve a entrar, sigue al botón de arriba).
   useEffect(() => {
     setLineLists((prev) => {
@@ -512,27 +517,24 @@ export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrat
     const resolved = scan;
     if (resolved.type === "ticket_total") {
       const ticketTotal = resolved.amount;
-      if (cart.some((l) => l.key === resolved.key)) {
-        setMessage("Ese ticket de la balanza ya está cargado en esta venta.");
-      } else if (
-        // Con la balanza imprimiendo un código por producto, el ticket trae también el del total:
-        // si ya se escanearon los productos, cargar el total los cobraría dos veces.
-        cart.some((l) => l.source === "scale") &&
-        !window.confirm("Ya escaneaste productos de la balanza en esta venta. Si son de este mismo ticket, NO cargues también el total (se cobraría dos veces). ¿Cargar el total igual?")
-      ) {
-        setMessage("No se cargó el total del ticket.");
-      } else if (
+      if (
         ticketTotal >= TICKET_TOTAL_CONFIRM_FROM &&
+        !cart.some((l) => l.key === resolved.key || l.detailOf === resolved.key) &&
         !window.confirm(`El ticket de la balanza indica ${formatMoney(ticketTotal)}. ¿Coincide con el TOTAL impreso en el ticket?`)
       ) {
         setMessage("Ticket de la balanza no cargado. Revisá el importe o cargá los productos a mano.");
-      } else {
-        // Decisión del dueño (15/10): con varios productos se cobra el TOTAL directo, sin pedir el detalle (no baja
-        // stock). Un ticket de UN producto trae el código del producto y sí baja stock (etiqueta con importe).
-        setCart((current) => [...current, { key: resolved.key, kind: "manual", name: "Ticket de balanza", unit: "unit", quantity: 1, unitPrice: ticketTotal, source: "scale_total", scaleTickets: 1 }]);
-        setMessage(`Ticket de balanza cargado: ${formatMoney(ticketTotal)}. Trae varios productos: para que descuente stock, tocá "Detallar productos" en esa línea (es opcional).`);
+        done();
+        return;
       }
+      // C7 (dueño, 26/11): un TOTAL solo nunca se cobra sin productos. Se detalla, o confirma las etiquetas ya cargadas.
+      // El carrito de AHORA (esto corre después de consultar si el papel ya se cobró o se anuló).
+      const now = cartRef.current;
+      const r = scanTotal(now, resolved.key, ticketTotal);
+      if (r.kind === "detail" || r.kind === "confirmed") applyTotalScan(now, r.cart);
+      if (r.kind === "detail") setDetailing(resolved.key);
+      setMessage(r.message);
       done();
+      searchInputRef.current?.focus();
       return;
     }
     if (resolved.type === "label") {
@@ -543,8 +545,9 @@ export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrat
       }
       scannedLabels.current.add(raw);
       if (
+        !detailing &&
         cart.some((l) => l.source === "scale_total") &&
-        !window.confirm("En esta venta ya está cargado el TOTAL de un ticket de la balanza. Si este producto es de ese mismo ticket, se cobraría dos veces. ¿Agregarlo igual?")
+        !window.confirm("En esta venta hay un TOTAL de la balanza sin detallar. Si este producto es de ese ticket, tocá Cancelar, después \"Seguir detallando\" en esa línea y escanealo de nuevo (si no, se cobraría dos veces). ¿Agregarlo aparte?")
       ) {
         setMessage("No se agregó el producto.");
         done();
@@ -583,6 +586,26 @@ export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrat
           done();
           return;
         }
+      }
+      // Detallando un TOTAL: la etiqueta es un producto de ese ticket (sus kilos y su importe salen de ese total).
+      const detailKey = detailing;
+      if (detailKey && cartRef.current.some((l) => l.key === detailKey)) {
+        const scalePrice = productPrice(resolved.product, zoneListId);
+        const amount = resolved.amount ?? Math.round(resolved.quantity * scalePrice * 100) / 100;
+        const priced = { ...resolved.product, priceRetail: scalePrice };
+        const r = addDetailScan(cartRef.current, detailKey, priced, resolved.quantity, amount);
+        done();
+        if (!r.ok) {
+          scannedLabels.current.delete(raw);
+          setMessage(`No se agregó: ${r.reason}.`);
+          return;
+        }
+        setCart((current) => {
+          const now = addDetailScan(current, detailKey, priced, resolved.quantity, amount);
+          return now.ok ? now.cart : current;
+        });
+        finishDetailStep(r);
+        return;
       }
       if (resolved.amount !== undefined) {
         // La etiqueta trae el importe (Kretz Aura en Pre-Empaque): se cobra el importe del papel, exacto, en su propia
@@ -882,13 +905,13 @@ ${l.name} ${qty}`);
     const left = detailRemaining(cart, key);
     if (left === null) return;
     setDetailing(key);
-    setMessage(`Detallando el ticket: buscá cada producto del papel y escribí el importe impreso. Faltan ${formatMoney(left)}.`);
+    setMessage(`Detallando el ticket: escaneá la etiqueta de cada producto, o buscalo y escribí el importe impreso. Faltan ${formatMoney(left)}.`);
     searchInputRef.current?.focus();
   }
 
   function stopTicketDetail() {
     setDetailing(null);
-    setMessage("Lo que no se detalló se cobra igual dentro del TOTAL, sin descontar stock.");
+    setMessage("Detalle en pausa. El TOTAL sigue sin detallar: hasta que lo detalles entero (o lo saques) no se puede cobrar.");
   }
 
   function detailProduct(product: Product) {
@@ -902,20 +925,41 @@ ${l.name} ${qty}`);
     setSearch("");
     setHighlightedIndex(-1);
     if (typed === null) return;
-    const r = addDetailLine(cart, detailing, product, parseAmount(typed) || 0);
+    const r = addDetailLine(cart, detailing, { ...product, priceRetail: productPrice(product, zoneListId) }, parseAmount(typed) || 0);
     if (!r.ok) {
       setMessage(`No se agregó: ${r.reason}.`);
       return;
     }
     setCart(r.cart);
+    finishDetailStep(r);
+  }
+
+  function finishDetailStep(r: { cart: TicketLine[]; done: boolean; remaining: number; line: TicketLine }) {
+    const key = r.line.detailOf ?? detailing;
     if (r.done) {
-      const n = r.cart.filter((l) => l.detailOf === detailing).length;
+      const n = r.cart.filter((l) => l.detailOf === key).length;
       setDetailing(null);
-      setMessage(`Ticket detallado: ${n} ${n === 1 ? "producto" : "productos"}. Descuentan stock al cobrar.`);
+      setMessage(`Ticket detallado: ${n} ${n === 1 ? "producto" : "productos"}, suma exacto el TOTAL. Descuentan stock al cobrar.`);
     } else {
-      setMessage(`Agregado: ${product.name}, ${formatMoney(r.line.scaleAmount ?? 0)}. Faltan ${formatMoney(r.remaining)}.`);
+      setMessage(`Agregado: ${r.line.name}, ${formatMoney(r.line.scaleAmount ?? 0)}. Faltan ${formatMoney(r.remaining)} para el TOTAL.`);
     }
     searchInputRef.current?.focus();
+  }
+
+  /** Aplica lo que devolvió scanTotal sobre el carrito real (sin perder lo que se haya agregado mientras tanto). */
+  function applyTotalScan(before: TicketLine[], after: TicketLine[]) {
+    const changed = new Map<string, TicketLine>();
+    before.forEach((l, i) => {
+      if (after[i] && after[i] !== l) changed.set(l.key, after[i]);
+    });
+    const added = after.slice(before.length);
+    setCart((current) => [
+      ...current.map((l) => {
+        const c = changed.get(l.key);
+        return c ? { ...l, key: c.key, detailOf: c.detailOf, scaleTickets: c.scaleTickets, scaleTicket: c.scaleTicket } : l;
+      }),
+      ...added.filter((x) => !current.some((l) => l.key === x.key))
+    ]);
   }
 
   function clearTicket() {

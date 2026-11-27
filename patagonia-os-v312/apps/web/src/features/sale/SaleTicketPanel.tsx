@@ -244,11 +244,14 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
               {line.kind === "manual" && line.source === "scale_total" && (
                 ticket.detailing === line.key ? (
                   <small className="pos-detail-hint">
-                    Falta detallar este importe: buscá cada producto del papel.{" "}
-                    <button type="button" className="link-button" onClick={ticket.stopTicketDetail}>Terminar después</button>
+                    Detallá el ticket: escaneá la etiqueta de cada producto, o buscalo y escribí su importe. Se cobra cuando dé exacto el TOTAL.{" "}
+                    <button type="button" className="link-button" onClick={ticket.stopTicketDetail}>Pausar</button>
                   </small>
                 ) : (
-                  <button type="button" className="link-button" onClick={() => ticket.startTicketDetail(line.key)}>Detallar productos (descuenta stock)</button>
+                  <small className="pos-detail-hint">
+                    Sin detallar: no se puede cobrar así.{" "}
+                    <button type="button" className="link-button" onClick={() => ticket.startTicketDetail(line.key)}>Seguir detallando</button>
+                  </small>
                 )
               )}
             </div>
