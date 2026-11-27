@@ -8,6 +8,7 @@ import { isWeightScaleEnabled, readScaleWeight } from "./scale-weight";
 import { labelWeightProblem, MAX_COUNTER_SCALE_KG, resolveScan, type ScanResolution } from "./scan-resolve";
 import { scanChoiceOptions, type LabelChoiceOption } from "./scale-label-choice";
 import { resolveScaleLabel } from "./scale-label-resolver";
+import type { ScaleConfigStatus } from "./scale-config-cache";
 import { boxProblem, boxTicket, resolveBoxScan } from "./box-label";
 import { useBoxLabelFormats } from "./box-label-service";
 import { noteLabelRead } from "../scales/label-read";
@@ -45,6 +46,8 @@ export interface SaleTicketDeps {
   scaleConfig: ScaleConfig;
   /** La sucursal tiene su formato de etiquetas guardado (no el de fábrica): cuenta como lectura frente a la Systel. */
   scaleCalibrated?: boolean;
+  /** C5: "loading"/"unknown" = todavía no se conoce el formato de la balanza: no se lee ninguna etiqueta. */
+  scaleConfigStatus?: ScaleConfigStatus;
   accounts: TreasuryAccount[];
   shift: PosShift | null;
   busy: boolean;
@@ -61,7 +64,7 @@ export interface SaleTicketDeps {
   boxLabels?: boolean;
 }
 
-export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrated = false, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false, scaleBranchId = null, zoneListId = null, boxLabels = false }: SaleTicketDeps) {
+export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrated = false, scaleConfigStatus = "ready", accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false, scaleBranchId = null, zoneListId = null, boxLabels = false }: SaleTicketDeps) {
   const [search, setSearch] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -438,10 +441,16 @@ export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrat
     // Con el formato de la balanza, un producto sin precio en Patagonia se carga con el precio de lista 1 de la
     // balanza (provisorio: el importe real sale del TOTAL del ticket).
     const scanProducts = systelTicketPilot && systelConfig ? withScalePrices(products, mergedPerPlu(systelTemplatesList())) : products;
-    const label = resolveScaleLabel(raw, { products: scanProducts, config: systelConfig ?? scaleConfig, calibrated: scaleCalibrated || !!systelConfig, setups: papers.setups, zoneListId });
+    const label = resolveScaleLabel(raw, { products: scanProducts, config: systelConfig ?? scaleConfig, calibrated: scaleCalibrated || !!systelConfig, setups: papers.setups, zoneListId, configStatus: systelConfig ? "ready" : scaleConfigStatus });
     if (label.type === "systel") {
       // La lee useScalePapers (avisos de etiqueta repetida, precio, carrito).
       papers.handleScan(raw);
+      setSearch("");
+      setHighlightedIndex(-1);
+      return;
+    }
+    if (label.type === "not_ready") {
+      setMessage(label.message);
       setSearch("");
       setHighlightedIndex(-1);
       return;
@@ -1058,7 +1067,7 @@ ${l.name} ${qty}`);
 
   /** Lista con la que se muestran los precios al buscar: la elegida o la zona del local. */
   const displayListId = priceListId ?? zoneListId;
-  return { priceListId, setPriceListId: choosePriceList, applyPriceListToAll, setLinePriceList, mixedPrices, displayListId, search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, detailing, startTicketDetail, stopTicketDetail, commitScaleTickets, papers, labelChoice, pickLabelChoice, dismissLabelChoice, readingScaleTicket, scaleTicketChoices, setScaleTicketChoices, addScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
+  return { priceListId, setPriceListId: choosePriceList, applyPriceListToAll, setLinePriceList, mixedPrices, displayListId, search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, detailing, startTicketDetail, stopTicketDetail, commitScaleTickets, papers, scaleConfigStatus, labelChoice, pickLabelChoice, dismissLabelChoice, readingScaleTicket, scaleTicketChoices, setScaleTicketChoices, addScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
 }
 
 export type SaleTicket = ReturnType<typeof useSaleTicket>;

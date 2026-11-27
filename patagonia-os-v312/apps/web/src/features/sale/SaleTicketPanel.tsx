@@ -125,6 +125,9 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
       )}
     </div>
 
+    {ticket.scaleConfigStatus === "loading" && (
+      <p className="muted" style={{ fontSize: 13, margin: "4px 0" }}>Cargando la balanza… las etiquetas se leen cuando termine.</p>
+    )}
     {ticket.labelChoice && <ScaleLabelChoice options={ticket.labelChoice.options} note={ticket.labelChoice.note} onPick={ticket.pickLabelChoice} onManual={ticket.dismissLabelChoice} />}
     {ticket.scaleTicketChoices && <ScaleTicketChoices ticket={ticket} />}
 

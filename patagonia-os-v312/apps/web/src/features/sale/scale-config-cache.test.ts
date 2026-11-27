@@ -3,7 +3,7 @@ import { beforeEach, describe, it } from "node:test";
 import { installFakeLocalStorage } from "../scales/test-fake-storage";
 import { DEFAULT_SCALE_CONFIG } from "./scale-barcode";
 import { CARNES_PATAGONIA_CONFIG } from "./scale-real-labels";
-import { cachedScaleConfig, scaleConfigLoaded, scaleConfigOnError } from "./scale-config-cache";
+import { cachedScaleConfig, initialScaleConfigState, isScaleConfigUnknown, SCALE_CONFIG_UNKNOWN, scaleConfigLoaded, scaleConfigOnError } from "./scale-config-cache";
 import { resolveScan } from "./scan-resolve";
 import type { Product } from "@patagonia/domain";
 
@@ -28,5 +28,28 @@ describe("formato de etiquetas cuando falla la carga (auditoría 28/10)", () => 
   it("una sucursal sin calibrar sigue con el formato de fábrica, también sin internet", () => {
     scaleConfigLoaded("b1", null);
     assert.deepEqual(scaleConfigOnError("b1"), { config: DEFAULT_SCALE_CONFIG, calibrated: false, unknown: false });
+  });
+});
+
+describe("C5: al abrir Mostrador o Clientes el formato arranca DESCONOCIDO, no el de fábrica", () => {
+  beforeEach(() => installFakeLocalStorage());
+
+  it("PC nueva o navegador borrado: cargando, no se leen etiquetas hasta que llega la base", () => {
+    const s = initialScaleConfigState("b1");
+    assert.equal(s.status, "loading");
+    assert.equal(s.config.totalLength, SCALE_CONFIG_UNKNOWN.totalLength);
+    assert.equal(isScaleConfigUnknown(s.config), true);
+  });
+
+  it("con la copia de esta PC arranca con esa copia (sirve sin conexión)", () => {
+    scaleConfigLoaded("b1", CARNES_PATAGONIA_CONFIG);
+    const s = initialScaleConfigState("b1");
+    assert.equal(s.status, "ready");
+    assert.deepEqual(s.config, CARNES_PATAGONIA_CONFIG);
+    assert.equal(s.calibrated, true);
+  });
+
+  it("sin sucursal todavía: cargando", () => {
+    assert.equal(initialScaleConfigState(null).status, "loading");
   });
 });

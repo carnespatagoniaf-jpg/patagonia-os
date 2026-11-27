@@ -5,6 +5,7 @@ import { decodeAcross } from "../scales/sale/multi-decode";
 import { addScannedItem, describeItem, emptyPaper } from "../scales/sale/paper";
 import type { ScaleSetup } from "../scales/sale/scale-sale-service";
 import type { ScaleConfig } from "./scale-barcode";
+import { isScaleConfigUnknown, SCALE_CONFIG_LOADING_MESSAGE, SCALE_CONFIG_UNKNOWN_MESSAGE, type ScaleConfigStatus } from "./scale-config-cache";
 import { scanChoiceOptions, type LabelChoiceOption } from "./scale-label-choice";
 import { labelWeightProblem, MAX_COUNTER_SCALE_KG, resolveScan, type ScanChoice, type ScanResolution } from "./scan-resolve";
 
@@ -40,6 +41,12 @@ export interface LabelContext {
    * así que los kilos de una etiqueta con importe salen de ahí, en Mostrador y en Clientes (C4). null = precio general.
    */
   zoneListId?: string | null;
+  /**
+   * C5: "loading" = todavía no llegó el formato de la base ni hay copia en esta PC; "unknown" = no se pudo cargar y no
+   * hay copia. En los dos casos no se lee NINGUNA etiqueta (tampoco los TOTAL ni las lecturas Kretz fijas).
+   * Sin el dato, se deduce del formato (SCALE_CONFIG_UNKNOWN = desconocido).
+   */
+  configStatus?: ScaleConfigStatus;
 }
 
 /** Precio con el que imprimió la balanza del local: el de la zona si tiene, si no el general. */
@@ -62,7 +69,9 @@ export type LabelResolution =
   | { type: "systel"; product: Product; quantity: number; unitPrice: number; scaleKey: string; description: string }
   /** La Systel dice qué pasa con el código (no se agrega nada). */
   | { type: "systel_message"; message: string }
-  | { type: "ambiguous"; options: LabelChoiceOption[]; note?: string };
+  | { type: "ambiguous"; options: LabelChoiceOption[]; note?: string }
+  /** El formato de la balanza todavía no se conoce (C5): no se lee la etiqueta. */
+  | { type: "not_ready"; message: string };
 
 const SAME_KG = 0.0005;
 
@@ -135,6 +144,11 @@ export function resolveScaleLabel(rawInput: string, ctx: LabelContext): LabelRes
   const asScan = (): LabelResolution => (scan.type === "ambiguous" ? { type: "ambiguous", options: scanChoiceOptions(scan.options, priceOf), ...(scan.note ? { note: scan.note } : {}) } : { type: "scan", resolution: scan });
   // Un código idéntico al de un producto gana sobre cualquier lectura de balanza (como siempre).
   if (ctx.products.some((p) => p.code === raw)) return { type: "scan", resolution: scan };
+  // C5: sin formato conocido no se lee ninguna etiqueta de balanza (códigos del rango de comercio "2…" o TOTAL "0000…").
+  const status = ctx.configStatus ?? (isScaleConfigUnknown(ctx.config) ? "unknown" : "ready");
+  if (status !== "ready" && /^(2\d{11,12}|0000\d{8,9})$/.test(raw)) {
+    return { type: "not_ready", message: status === "loading" ? SCALE_CONFIG_LOADING_MESSAGE : SCALE_CONFIG_UNKNOWN_MESSAGE };
+  }
 
   const s = systelReading(raw, ctx.setups, ctx.products);
   if (s.kind === "not_scale") return asScan();

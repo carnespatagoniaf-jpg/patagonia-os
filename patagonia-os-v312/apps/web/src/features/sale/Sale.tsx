@@ -1,4 +1,4 @@
-import { cachedScaleConfig, scaleConfigLoaded, scaleConfigOnError, SCALE_CONFIG_UNKNOWN_MESSAGE, type ScaleConfigState } from "./scale-config-cache";
+import { initialScaleConfigState, scaleConfigLoaded, scaleConfigOnError, SCALE_CONFIG_UNKNOWN_MESSAGE, type ScaleConfigState, type ScaleConfigStatus } from "./scale-config-cache";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Settings } from "lucide-react";
 import * as Sentry from "@sentry/react";
@@ -168,8 +168,11 @@ export function Sale() {
   const profileRef = useRef(profile);
   profileRef.current = profile;
 
-  const [scaleConfig, setScaleConfig] = useState<ScaleConfig>(DEFAULT_SCALE_CONFIG);
-  const [scaleConfigCalibrated, setScaleConfigCalibrated] = useState(false);
+  // C5: nunca el formato de fábrica mientras carga. La copia de esta PC si hay; si no, "cargando" (no se leen etiquetas).
+  const [initialScale] = useState(() => (isSupabaseConfigured ? initialScaleConfigState(branchId ?? null) : { config: DEFAULT_SCALE_CONFIG, calibrated: false, unknown: false, status: "ready" as ScaleConfigStatus }));
+  const [scaleConfig, setScaleConfig] = useState<ScaleConfig>(initialScale.config);
+  const [scaleConfigCalibrated, setScaleConfigCalibrated] = useState(initialScale.calibrated);
+  const [scaleConfigStatus, setScaleConfigStatus] = useState<ScaleConfigStatus>(initialScale.status);
 
 
   // Listas de precios (Mayorista, migración 167): sin listas, Mostrador queda como siempre.
@@ -188,7 +191,7 @@ export function Sale() {
       cancelled = true;
     };
   }, [branchId]);
-  const ticket = useSaleTicket({ products, categories, scaleConfig, scaleCalibrated: scaleConfigCalibrated, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot: SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? ""), scaleBranchId: branchId ?? null, zoneListId, boxLabels: Boolean(profile?.features?.includes("etiquetas_caja")) });
+  const ticket = useSaleTicket({ products, categories, scaleConfig, scaleCalibrated: scaleConfigCalibrated, scaleConfigStatus, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot: SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? ""), scaleBranchId: branchId ?? null, zoneListId, boxLabels: Boolean(profile?.features?.includes("etiquetas_caja")) });
 
   // Pedido que se cobra (Pedidos → "Cobrar en Mostrador", migración 196): se cargan sus productos una sola vez, con la
   // lista de productos ya cargada, y al cobrar queda entregado.
@@ -315,19 +318,26 @@ export function Sale() {
     if (!isSupabaseConfigured || !branchId) return;
     // Nunca el formato de fábrica a ciegas: mientras carga, el último de esta computadora; si falla y no hay, no se
     // leen etiquetas y se avisa (auditoría 28/10: con el de fábrica una etiqueta 1-6-5 se leía como otro producto).
-    const apply = (s: ScaleConfigState) => {
+    let alive = true;
+    const apply = (s: ScaleConfigState, status: ScaleConfigStatus) => {
+      if (!alive) return;
       setScaleConfig(s.config);
       setScaleConfigCalibrated(s.calibrated);
+      setScaleConfigStatus(status);
     };
-    const cached = cachedScaleConfig(branchId);
-    if (cached) apply(cached);
+    // Otra sucursal: arranca de nuevo en su copia o en "cargando" (C5), nunca con el formato de la anterior.
+    const start = initialScaleConfigState(branchId);
+    apply(start, start.status);
     void getBranchScaleConfig(branchId)
-      .then((config) => apply(scaleConfigLoaded(branchId, config)))
+      .then((config) => apply(scaleConfigLoaded(branchId, config), "ready"))
       .catch(() => {
         const s = scaleConfigOnError(branchId);
-        apply(s);
-        if (s.unknown) setMessage(SCALE_CONFIG_UNKNOWN_MESSAGE);
+        apply(s, s.unknown ? "unknown" : "ready");
+        if (s.unknown && alive) setMessage(SCALE_CONFIG_UNKNOWN_MESSAGE);
       });
+    return () => {
+      alive = false;
+    };
   }, [branchId]);
 
   useEffect(() => {
@@ -1206,6 +1216,7 @@ Cancelar = es el mismo papel: no cobrar.`)) {
         onScaleConfigChange={(config) => {
           setScaleConfig(config ?? DEFAULT_SCALE_CONFIG);
           setScaleConfigCalibrated(config !== null);
+          setScaleConfigStatus("ready");
           if (branchId) scaleConfigLoaded(branchId, config);
         }}
         mostradorPin={mostradorPin}

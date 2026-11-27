@@ -8,6 +8,7 @@ import { expectedItemCode } from "../scales/sale/profile";
 import type { ScaleSetup } from "../scales/sale/scale-sale-service";
 import { DEFAULT_SCALE_CONFIG, type ScaleConfig } from "./scale-barcode";
 import { resolveScaleLabel } from "./scale-label-resolver";
+import { SCALE_CONFIG_UNKNOWN } from "./scale-config-cache";
 
 /**
  * C3 (auditoría 26/11): en un local con perfiles Systel (Los gringos), Mostrador probaba primero la lectura Systel y
@@ -112,5 +113,32 @@ describe("C3: resolvedor único (scale-label-resolver.ts)", () => {
   it("el TOTAL 998 con un producto 998 (C2) también llega como ambigua por el resolvedor", () => {
     const r = resolveScaleLabel(withCheck("209980210600"), { products: [product("998", "PECHITO", "kg", 10000)], config: M2, calibrated: true, setups: [] });
     assert.equal(r.type, "ambiguous");
+  });
+});
+
+describe("C5: con el formato todavía desconocido (cargando) no se lee ninguna etiqueta", () => {
+  const products = [matambre, product("7790001000014", "Gaseosa", "unit", 2500)];
+
+  it("REAL TOTAL de la Aura 2099802566003: hoy se cobraba igual con el formato desconocido; ahora 'Cargando la balanza…'", () => {
+    const r = resolveScaleLabel("2099802566003", { products, config: SCALE_CONFIG_UNKNOWN, calibrated: false, setups: [], configStatus: "loading" });
+    assert.equal(r.type, "not_ready");
+    if (r.type === "not_ready") assert.match(r.message, /Cargando la balanza/);
+  });
+
+  it("REAL M2 2000258567506 cargando: no se agrega", () => {
+    const r = resolveScaleLabel("2000258567506", { products, config: SCALE_CONFIG_UNKNOWN, calibrated: false, setups: [lgSetup], configStatus: "loading" });
+    assert.equal(r.type, "not_ready");
+  });
+
+  it("sin conexión y sin copia: el aviso de cargar a mano", () => {
+    const r = resolveScaleLabel("2000258567506", { products, config: SCALE_CONFIG_UNKNOWN, calibrated: false, setups: [], configStatus: "unknown" });
+    assert.ok(r.type === "not_ready" && /a mano|escribí los kilos/.test(r.message));
+  });
+
+  it("el código exacto de un producto y la búsqueda por nombre siguen andando", () => {
+    const a = resolveScaleLabel("7790001000014", { products, config: SCALE_CONFIG_UNKNOWN, calibrated: false, setups: [], configStatus: "loading" });
+    assert.ok(a.type === "scan" && a.resolution.type === "product");
+    const b = resolveScaleLabel("matambre", { products, config: SCALE_CONFIG_UNKNOWN, calibrated: false, setups: [], configStatus: "loading" });
+    assert.ok(b.type === "scan" && b.resolution.type === "search");
   });
 });

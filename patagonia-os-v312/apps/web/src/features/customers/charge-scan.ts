@@ -5,6 +5,7 @@ import { labelWeightProblem, resolveScan, type ScanResolution } from "../sale/sc
 import { resolveScaleLabel } from "../sale/scale-label-resolver";
 import { scanChoiceOptions, type LabelChoiceOption } from "../sale/scale-label-choice";
 import type { ScaleSetup } from "../scales/sale/scale-sale-service";
+import type { ScaleConfigStatus } from "../sale/scale-config-cache";
 
 /**
  * Qué hacer con un código escaneado (o tipeado + Enter) en Clientes → "+ Venta a cuenta". Usa el MISMO resolvedor que
@@ -34,6 +35,8 @@ export interface ChargeScaleContext {
   setups: ScaleSetup[];
   /** Zona de precios del local: los kilos de una etiqueta con importe salen del precio de la balanza (C4). */
   zoneListId?: string | null;
+  /** C5: mientras no se conoce el formato de la balanza, no se lee ninguna etiqueta. */
+  configStatus?: ScaleConfigStatus;
 }
 
 const TOTAL_TICKET_MESSAGE =
@@ -53,7 +56,8 @@ export function resolveChargeScan(rawInput: string, products: Product[], config:
     }
   }
 
-  const label = resolveScaleLabel(raw, { products, config, calibrated: scale.calibrated, setups: scale.setups, zoneListId: scale.zoneListId ?? null });
+  const label = resolveScaleLabel(raw, { products, config, calibrated: scale.calibrated, setups: scale.setups, zoneListId: scale.zoneListId ?? null, configStatus: scale.configStatus });
+  if (label.type === "not_ready") return { type: "error", message: label.message };
   if (label.type === "ambiguous") return { type: "choose", options: label.options, ...(label.note ? { note: label.note } : {}) };
   if (label.type === "systel_message") return { type: "error", message: label.message };
   if (label.type === "systel") {

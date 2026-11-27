@@ -48,5 +48,25 @@ export function scaleConfigOnError(branchId: string): ScaleConfigState {
   return cachedScaleConfig(branchId) ?? { config: SCALE_CONFIG_UNKNOWN, calibrated: false, unknown: true };
 }
 
+/** ¿Es el formato "desconocido" (no se leen etiquetas)? */
+export function isScaleConfigUnknown(config: ScaleConfig): boolean {
+  return !(config.totalLength > 0);
+}
+
+export type ScaleConfigStatus = "loading" | "ready" | "unknown";
+
+/**
+ * C5 (26/11): con qué formato arranca Mostrador o Clientes antes de que conteste la base. Antes era el de fábrica, y la
+ * primera etiqueta de una PC nueva (o con el navegador borrado) se podía cobrar con el formato equivocado. Ahora: la
+ * copia de esta PC si hay (sirve sin conexión); si no, "cargando" (no se lee ninguna etiqueta).
+ */
+export function initialScaleConfigState(branchId: string | null): ScaleConfigState & { status: ScaleConfigStatus } {
+  const cached = branchId ? cachedScaleConfig(branchId) : null;
+  return cached ? { ...cached, status: "ready" } : { config: SCALE_CONFIG_UNKNOWN, calibrated: false, unknown: true, status: "loading" };
+}
+
+export const SCALE_CONFIG_LOADING_MESSAGE =
+  "Cargando la balanza… Todavía no se leen las etiquetas en esta computadora: esperá unos segundos y volvé a escanear (o buscá el producto y escribí los kilos del papel).";
+
 export const SCALE_CONFIG_UNKNOWN_MESSAGE =
   "No se pudo cargar cómo se leen las etiquetas de la balanza en esta sucursal. Hasta que vuelva la conexión, las etiquetas no se leen: buscá el producto y escribí los kilos del ticket.";

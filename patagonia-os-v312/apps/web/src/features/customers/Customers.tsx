@@ -35,7 +35,7 @@ import { cleanCuit } from "../cheques/cheque-logic";
 import { getBranchZone, listPriceLists, setCustomerPriceList } from "../pricing/price-lists-service";
 import { activeList, chargePriceListId, productPrice, sellingLists, type PriceList } from "../pricing/price-lists";
 import { DEFAULT_SCALE_CONFIG, getBranchScaleConfig, type ScaleConfig } from "../sale/scale-config-service";
-import { cachedScaleConfig, scaleConfigLoaded, scaleConfigOnError, type ScaleConfigState } from "../sale/scale-config-cache";
+import { initialScaleConfigState, scaleConfigLoaded, scaleConfigOnError, type ScaleConfigState, type ScaleConfigStatus } from "../sale/scale-config-cache";
 import { useBoxLabelFormats } from "../sale/box-label-service";
 import { chargeScanFromChoice, resolveChargeScan, type ChargeScan } from "./charge-scan";
 import { ScaleLabelChoice } from "../sale/ScaleLabelChoice";
@@ -163,19 +163,31 @@ export function Customers() {
 
   // Lectura de códigos de barra como en Mostrador: formato de etiquetas de la balanza de la sucursal (si falla la
   // carga, el último guardado en esta PC; si no hay, no se leen etiquetas, solo códigos exactos de producto).
-  const [scaleConfig, setScaleConfig] = useState<ScaleConfig>(DEFAULT_SCALE_CONFIG);
-  const [scaleCalibrated, setScaleCalibrated] = useState(false);
+  // C5: nunca el formato de fábrica mientras carga: la copia de esta PC o "cargando" (no se leen etiquetas).
+  const [initialScale] = useState(() => (isSupabaseConfigured ? initialScaleConfigState(branchId ?? null) : { config: DEFAULT_SCALE_CONFIG, calibrated: false, unknown: false, status: "ready" as ScaleConfigStatus }));
+  const [scaleConfig, setScaleConfig] = useState<ScaleConfig>(initialScale.config);
+  const [scaleCalibrated, setScaleCalibrated] = useState(initialScale.calibrated);
+  const [scaleConfigStatus, setScaleConfigStatus] = useState<ScaleConfigStatus>(initialScale.status);
   useEffect(() => {
-    if (!branchId) return;
-    const apply = (st: ScaleConfigState) => {
+    if (!branchId || !isSupabaseConfigured) return;
+    let alive = true;
+    const apply = (st: ScaleConfigState, status: ScaleConfigStatus) => {
+      if (!alive) return;
       setScaleConfig(st.config);
       setScaleCalibrated(st.calibrated);
+      setScaleConfigStatus(status);
     };
-    const cached = cachedScaleConfig(branchId);
-    if (cached) apply(cached);
+    const start = initialScaleConfigState(branchId);
+    apply(start, start.status);
     void getBranchScaleConfig(branchId)
-      .then((config) => apply(scaleConfigLoaded(branchId, config)))
-      .catch(() => apply(scaleConfigOnError(branchId)));
+      .then((config) => apply(scaleConfigLoaded(branchId, config), "ready"))
+      .catch(() => {
+        const st = scaleConfigOnError(branchId);
+        apply(st, st.unknown ? "unknown" : "ready");
+      });
+    return () => {
+      alive = false;
+    };
   }, [branchId]);
   // Las balanzas "artículos + TOTAL" (Systel) de la sucursal, como en Mostrador (C4): mismo resolvedor, misma regla.
   const [scaleSetups, setScaleSetups] = useState<ScaleSetup[]>([]);
@@ -241,7 +253,7 @@ export function Customers() {
     const raw = chargeSearch.trim();
     if (!raw) return;
     setChargeLabelChoice(null);
-    const scan = resolveChargeScan(raw, products, scaleConfig, boxFormats, { calibrated: scaleCalibrated, setups: scaleSetups, zoneListId: branchZone?.id ?? null });
+    const scan = resolveChargeScan(raw, products, scaleConfig, boxFormats, { calibrated: scaleCalibrated, setups: scaleSetups, zoneListId: branchZone?.id ?? null, configStatus: scaleConfigStatus });
     applyChargeScan(scan);
   }
 
@@ -1121,6 +1133,9 @@ export function Customers() {
                         setMessage("No se agregó nada: buscá el producto por nombre y cargá lo que dice el papel.");
                       }}
                     />
+                  )}
+                  {scaleConfigStatus === "loading" && (
+                    <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>Cargando la balanza… las etiquetas se leen cuando termine.</p>
                   )}
                   {products.length === 0 && (
                     <p className="muted" style={{ fontSize: 12, margin: "6px 0 0" }}>Todavía no cargaste productos: usá "+ Sin código" para cargar la venta igual.</p>
