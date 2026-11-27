@@ -22,6 +22,7 @@ import type { SystelTicket } from "../inventory/systel/systel-sales";
 import { chargedScaleTickets } from "./sale-service";
 import { useScalePapers } from "./useScalePapers";
 import { submitScaleSupportReport } from "../scales/support-service";
+import { systelTicketSupportReport } from "./scale-support-redact";
 import type { PosShift } from "./pos-shift-service";
 import { keepCurrentLists, lineGross, lineListFor, roundToPeso, withPriceList, type PaymentRow, type TicketLine } from "./sale-model";
 import { isSupabaseConfigured } from "../../lib/supabase";
@@ -861,11 +862,13 @@ ${l.name} ${qty}`);
           : `Hoy hay ${r.candidates.length} tickets de ${formatMoney(amount)} sin cobrar en la balanza. Elegí cuál es mirando la hora y el N.º de operación impresos en el ticket.`
       );
     }
-    // Todo lo que fue y vino por el cable le llega a soporte (sin pedirle nada al cliente).
+    // A soporte le llega cómo fue la lectura (sin pedirle nada al cliente). C26: solo códigos, formatos y el resultado;
+    // nunca los renglones de venta ni las respuestas de la balanza, que traen los importes de los clientes.
+    const report = systelTicketSupportReport({ code, result: r, context: read.context, log: read.log, events: read.events });
     void submitScaleSupportReport({
-      note: `Systel · Mostrador: detalle del ticket ${code} ($${amount}) · ${r.ok ? `OK: ${r.candidates.length} ticket(s) posible(s)` : `${r.stage}: ${r.reason}`}`,
-      logText: JSON.stringify({ context: read.context, result: r.ok ? r.candidates.map((c) => ({ key: c.key, lines: c.ticket.lines, problem: c.problem })) : r }),
-      connections: [{ displayName: "Systel (Mostrador)", driverId: "systel-cuora_max", status: "lectura", settings: {}, confirmedCapabilities: [], pairedAt: "", connectedNow: true, diagnosticRecord: { log: read.log.slice(-200), linkEvents: read.events.slice(-600) } } as never],
+      note: report.note,
+      logText: report.logText,
+      connections: [{ displayName: "Systel (Mostrador)", driverId: "systel-cuora_max", status: "lectura", settings: {}, confirmedCapabilities: [], pairedAt: "", connectedNow: true, diagnosticRecord: report.diagnosticRecord } as never],
       branchId: null
     }).catch(() => {});
   }
