@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   connectorFor,
+  identifyNetwork,
   foundScales,
   offlineMessage,
   parseConnectStatus,
@@ -153,5 +154,19 @@ describe("Scale Connect en Mis balanzas: agregar", () => {
     assert.equal(found[0].family, "systel");
     assert.equal(whereText(found[0].device), "en COM7");
     assert.equal(whereText(found[1].device), "por red 192.168.0.50");
+  });
+});
+
+describe("identifyNetwork: direcciones de red que busca Scale Connect", () => {
+  it("toma lo escrito con comas o espacios, suma las conocidas, sin repetir, en los dos puertos", () => {
+    assert.deepEqual(identifyNetwork(["192,168,1,50"], ["192.168.1.50", "169.254.137.200"]), [
+      { host: "192.168.1.50", port: 1001 },
+      { host: "192.168.1.50", port: 10001 },
+      { host: "169.254.137.200", port: 1001 },
+      { host: "169.254.137.200", port: 10001 }
+    ]);
+  });
+  it("descarta lo que no es una IP de red local", () => {
+    assert.deepEqual(identifyNetwork(["8.8.8.8", "300.1.1.1", "hola", ""]), []);
   });
 });

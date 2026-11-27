@@ -302,3 +302,23 @@ export function whereText(d: ConnectDevice): string {
   if (d.kind === "tcp" || d.host) return `por red ${d.host ?? ""}`.trim();
   return d.path ? `en ${d.path}` : "";
 }
+
+/** Puertos de las balanzas por red: Kretz Report/NX (1001) y Systel con módulo de red (10001). */
+const NET_SCALE_PORTS = [1001, 10001];
+
+/**
+ * Qué direcciones de red le pide buscar la web a Scale Connect: las que escribió la persona (con comas, puntos de más
+ * o espacios, como en el asistente de red) más las que esta PC ya usó. Solo IP de red local (el servicio igual rechaza
+ * cualquier otra); máximo 5 direcciones, cada una en los dos puertos.
+ */
+export function identifyNetwork(typed: string[], known: string[] = []): Array<{ host: string; port: number }> {
+  const clean = (t: string) => t.trim().replace(/\s*[,;]\s*|\s*\.\s*|\s+/g, ".");
+  const ok = (ip: string) => {
+    const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(ip);
+    if (!m || m.slice(1).some((x) => Number(x) > 255)) return false;
+    const [a, b] = [Number(m[1]), Number(m[2])];
+    return a === 10 || (a === 172 && b >= 16 && b <= 31) || (a === 192 && b === 168) || (a === 169 && b === 254);
+  };
+  const ips = [...new Set([...typed.map(clean), ...known.map(clean)])].filter(ok).slice(0, 5);
+  return ips.flatMap((host) => NET_SCALE_PORTS.map((port) => ({ host, port })));
+}

@@ -1,10 +1,12 @@
 import { useEffect, useRef, useState } from "react";
+import { knownNetAddresses } from "../../inventory/kretz/net-port";
 import { CheckCircle2, Monitor, TriangleAlert } from "lucide-react";
 import type { EngineProduct, ProductProblem } from "../engine/types";
 import { defaultScaleName, lastUseText, registerBranchScale, sameScaleCandidates, type BranchScale, type SameScaleCandidate } from "../registry/branch-scales";
 import {
   foundScales,
   IDENTIFY_SCALE_KEY,
+  identifyNetwork,
   runConnectorJob,
   sendPayload,
   sendResultView,
@@ -161,7 +163,8 @@ export function ConnectorSend(props: {
 
 type AddPhase =
   | { kind: "elegir_pc" }
-  | { kind: "buscando"; pc: ConnectComputer }
+  /** net: direcciones de balanzas por red que escribió la persona (las de esta PC se suman solas). */
+  | { kind: "buscando"; pc: ConnectComputer; net: string[] }
   | { kind: "encontradas"; pc: ConnectComputer; found: FoundScale[] }
   | { kind: "es_la_misma"; pc: ConnectComputer; scale: FoundScale; candidates: SameScaleCandidate[] }
   | { kind: "guardando" }
@@ -171,12 +174,13 @@ type AddPhase =
 export function ConnectorAdd(props: { port: ScaleConnectPort; branchId: string; status: ConnectStatus; known: BranchScale[]; onBack: () => void; onAdded: () => void }) {
   const { port, branchId, status, known, onBack, onAdded } = props;
   const online = status.connectors.filter((c) => c.online);
-  const [phase, setPhase] = useState<AddPhase>(() => (online.length === 1 ? { kind: "buscando", pc: online[0] } : { kind: "elegir_pc" }));
+  const [phase, setPhase] = useState<AddPhase>(() => (online.length === 1 ? { kind: "buscando", pc: online[0], net: [] } : { kind: "elegir_pc" }));
   const [job, setJob] = useState<ConnectJob | null>(null);
   const signal = useUnmountSignal();
   const phaseRef = useRef(phase);
   phaseRef.current = phase;
   const searchedFor = useRef<AddPhase | null>(null);
+  const [ip, setIp] = useState("");
 
   // Cada "buscando" (también "Buscar de nuevo") es un objeto nuevo: una sola búsqueda por cada uno.
   useEffect(() => {
@@ -189,7 +193,7 @@ export function ConnectorAdd(props: { port: ScaleConnectPort; branchId: string; 
       try {
         const run = await runConnectorJob(
           port,
-          { branchId, scaleKey: IDENTIFY_SCALE_KEY, kind: "read", payload: { mode: "identify" }, connector: searching },
+          { branchId, scaleKey: IDENTIFY_SCALE_KEY, kind: "read", payload: { mode: "identify", network: identifyNetwork(searchPhase.net, knownNetAddresses().map((a) => a.host)) }, connector: searching },
           { onProgress: setJob, signal }
         );
         if (!alive() || run.kind === "cancelado") return;
@@ -237,7 +241,7 @@ export function ConnectorAdd(props: { port: ScaleConnectPort; branchId: string; 
           {online.length === 0 && <p className="my-scale-warning">Ninguna computadora con Scale Connect está en línea en esta sucursal. Prendela (o revisá su internet) y probá de nuevo.</p>}
           <div className="my-scale-choices">
             {online.map((c) => (
-              <button key={c.id} className="my-scale-choice" onClick={() => setPhase({ kind: "buscando", pc: c })}>
+              <button key={c.id} className="my-scale-choice" onClick={() => setPhase({ kind: "buscando", pc: c, net: [] })}>
                 <strong>{c.name}</strong>
                 <span>En línea</span>
               </button>
@@ -280,7 +284,12 @@ export function ConnectorAdd(props: { port: ScaleConnectPort; branchId: string; 
             })}
           </ul>
           <div className="my-scale-actions">
-            <button className="secondary" onClick={() => setPhase({ kind: "buscando", pc: phase.pc })}>Buscar de nuevo</button>
+            <button className="secondary" onClick={() => setPhase({ kind: "buscando", pc: phase.pc, net: [] })}>Buscar de nuevo</button>
+          </div>
+          <div className="my-scale-net-search">
+            <p className="muted">¿La balanza va por cable de red y no aparece? Escribí la dirección que muestra la balanza en su menú de red (por ejemplo 192.168.1.50).</p>
+            <input value={ip} onChange={(e) => setIp(e.target.value)} placeholder="Dirección de la balanza" inputMode="decimal" aria-label="Dirección de la balanza por red" />
+            <button className="secondary" disabled={identifyNetwork([ip]).length === 0} onClick={() => setPhase({ kind: "buscando", pc: phase.pc, net: [ip] })}>Buscar en esa dirección</button>
           </div>
         </>
       )}
