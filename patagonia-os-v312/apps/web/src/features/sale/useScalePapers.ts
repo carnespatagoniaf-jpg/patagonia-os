@@ -3,7 +3,7 @@ import type { Product } from "@patagonia/domain";
 import { formatMoney } from "../shifts/format";
 import { decodeAcross } from "../scales/sale/multi-decode";
 import { addScannedItem, describeItem, emptyPaper, type Paper } from "../scales/sale/paper";
-import { loadScaleSetups, type ScaleSetup } from "../scales/sale/scale-sale-service";
+import { branchHasNonSystelScale, loadScaleSetups, type ScaleSetup } from "../scales/sale/scale-sale-service";
 import type { CreatePosSaleInput } from "./sale-service";
 import type { TicketLine } from "./sale-model";
 import { SAME_SALE_LABEL_QUESTION } from "./scale-repeat";
@@ -52,6 +52,8 @@ export function useScalePapers(deps: {
 }) {
   const { enabled, branchId, products, cart, setCart, setMessage } = deps;
   const [setups, setSetups] = useState<ScaleSetup[]>([]);
+  /** false = todas las balanzas activas del local son Systel (el formato de la sucursal no compite). null = no se sabe. */
+  const [otherBrand, setOtherBrand] = useState<boolean | null>(null);
   const [open, setOpen] = useState<OpenPaper>(newPaper);
   const [confirmed, setConfirmed] = useState<ConfirmedPaper[]>([]);
   const seq = useRef(0);
@@ -64,7 +66,10 @@ export function useScalePapers(deps: {
       return;
     }
     let alive = true;
-    const load = () => void loadScaleSetups(branchId).then((s) => alive && setSetups(s));
+    const load = () => {
+      void loadScaleSetups(branchId).then((s) => alive && setSetups(s));
+      void branchHasNonSystelScale(branchId).then((o) => alive && setOtherBrand(o));
+    };
     load();
     // Si el dueño cambió un vínculo en Stock, la caja lo toma al volver a esta pestaña.
     const onVisible = () => document.visibilityState === "visible" && load();
@@ -172,7 +177,7 @@ export function useScalePapers(deps: {
   }
 
   const pendingCount = cart.filter((l) => l.scalePending).length;
-  return { setups, active: setups.length > 0, handleScan, keysToRemove, reset, payload, confirmRepeat, commit, pendingCount };
+  return { setups, otherBrand, active: setups.length > 0, handleScan, keysToRemove, reset, payload, confirmRepeat, commit, pendingCount };
 }
 
 const RECENT_KEY = "patagonia-scale-papers-recent";

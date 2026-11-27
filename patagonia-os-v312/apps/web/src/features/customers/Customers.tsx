@@ -40,7 +40,7 @@ import { useBoxLabelFormats } from "../sale/box-label-service";
 import { chargeScanFromChoice, resolveChargeScan, type ChargeScan } from "./charge-scan";
 import { ScaleLabelChoice } from "../sale/ScaleLabelChoice";
 import type { LabelChoiceOption } from "../sale/scale-label-choice";
-import { loadScaleSetups, type ScaleSetup } from "../scales/sale/scale-sale-service";
+import { branchHasNonSystelScale, loadScaleSetups, type ScaleSetup } from "../scales/sale/scale-sale-service";
 
 /** Valor del selector "Entra a…" para cobrar con cheque (migración 150). */
 const CHEQUE_OPTION = "__cheque";
@@ -191,10 +191,12 @@ export function Customers() {
   }, [branchId]);
   // Las balanzas "artículos + TOTAL" (Systel) de la sucursal, como en Mostrador (C4): mismo resolvedor, misma regla.
   const [scaleSetups, setScaleSetups] = useState<ScaleSetup[]>([]);
+  const [scaleOtherBrand, setScaleOtherBrand] = useState<boolean | null>(null);
   useEffect(() => {
     if (!branchId || !isSupabaseConfigured) return;
     let alive = true;
     void loadScaleSetups(branchId).then((x) => alive && setScaleSetups(x)).catch(() => alive && setScaleSetups([]));
+    void branchHasNonSystelScale(branchId).then((o) => alive && setScaleOtherBrand(o)).catch(() => alive && setScaleOtherBrand(null));
     return () => {
       alive = false;
     };
@@ -253,7 +255,7 @@ export function Customers() {
     const raw = chargeSearch.trim();
     if (!raw) return;
     setChargeLabelChoice(null);
-    const scan = resolveChargeScan(raw, products, scaleConfig, boxFormats, { calibrated: scaleCalibrated, setups: scaleSetups, zoneListId: branchZone?.id ?? null, configStatus: scaleConfigStatus });
+    const scan = resolveChargeScan(raw, products, scaleConfig, boxFormats, { calibrated: scaleCalibrated, branchFormatCompetes: scaleOtherBrand !== false, setups: scaleSetups, zoneListId: branchZone?.id ?? null, configStatus: scaleConfigStatus });
     applyChargeScan(scan);
   }
 

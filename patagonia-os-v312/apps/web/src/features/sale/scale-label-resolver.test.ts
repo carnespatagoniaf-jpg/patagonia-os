@@ -86,6 +86,20 @@ describe("C3: resolvedor único (scale-label-resolver.ts)", () => {
     assert.equal(r.type, "systel");
   });
 
+  it("local solo con Systel y un formato viejo calibrado (Carnes premium, El Dorado, Los gringos…): la Systel, sin preguntar", () => {
+    // Mismo código que el caso ambiguo de arriba, pero todas las balanzas activas del local son Systel.
+    const code = withCheck("200010003500");
+    const ctx = { products: [...products, product("1", "ASADO", "kg", 10000)], config: M2, calibrated: true, setups: [lgSetup] };
+    assert.equal(resolveScaleLabel(code, { ...ctx, branchFormatCompetes: false }).type, "systel");
+    // Sin saber qué balanzas hay (sin dato), compite: ante la duda, se pregunta.
+    assert.equal(resolveScaleLabel(code, ctx).type, "ambiguous");
+  });
+
+  it("local solo con Systel: una etiqueta que la Systel no reconoce todavía se lee con el formato de la sucursal", () => {
+    const r = resolveScaleLabel("2000258567506", { products, config: M2, calibrated: true, setups: [lgSetup], branchFormatCompetes: false });
+    assert.ok(r.type === "scan" && r.resolution.type === "label" && r.resolution.product.code === "2");
+  });
+
   it("formato de la sucursal sin calibrar (de fábrica): la lectura Systel, como siempre", () => {
     const code = withCheck("200010003500");
     const r = resolveScaleLabel(code, { products: [...products, product("1", "ASADO", "kg", 10000)], config: DEFAULT_SCALE_CONFIG, calibrated: false, setups: [lgSetup] });
