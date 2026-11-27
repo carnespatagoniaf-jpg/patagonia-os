@@ -447,7 +447,7 @@ describe("[SIMULADO, protocolo DOCUMENTADO] Funciones 25 (liberar) y 35 (no espe
     const prep = await r.session.prepare(noop);
     assert.equal(cuora.received.filter((x) => x.fn === 35).length, 0, "leer no cambia la configuración");
     assert.match(cuora.config!, /;Sinc=1;/);
-    assert.ok(prep.notes.some((n) => /iniciar sin esperar/.test(n)), "se avisa antes de confirmar la sincronización");
+    assert.ok(prep.notes.some((n) => /arrancar sola/.test(n)), "se avisa antes de confirmar la sincronización");
     // Lo que hace sync() antes de escribir productos (acá se llama directo: la balanza simulada no tiene productos).
     await (r.session as unknown as { ensureNoStartupWait(c: { values: Record<string, string> }): Promise<void> }).ensureNoStartupWait({ values: { Sinc: "1" } });
     assert.match(cuora.config!, /;Sinc=0;/);

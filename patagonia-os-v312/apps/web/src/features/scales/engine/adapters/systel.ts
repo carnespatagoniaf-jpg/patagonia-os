@@ -408,13 +408,13 @@ export class SystelSession implements ScaleSession {
     const skipped = [...(check?.problems ?? []), ...plan.filter((x) => x.action === "omitir").map((x) => ({ code: x.product.code, name: x.product.name, reason: x.reason }))];
     const extra = scaleOnly(backup.plus, this.pushProducts()).length;
     const notes: string[] = [];
-    if (this.startupWaitOn) notes.push("La balanza está configurada para esperar a la PC cada vez que se prende. Al sincronizar, Patagonia además la deja en \"iniciar sin esperar\" (comando oficial de Systel, función 35) y lo comprueba releyendo su configuración.");
+    if (this.startupWaitOn) notes.push("La balanza está configurada para esperar a la computadora cada vez que se prende. Al enviar, Patagonia la deja lista para arrancar sola.");
     if (this.model === "systel-cuora-max" && !systelVerified(backup) && !loadWriteProof(backup, this.number, this.scaleKey)) {
-      notes.push(`Es la primera vez que Patagonia le manda productos a este modelo (${layout ? LAYOUT_INFO[layout].label : "Cuora Max"}). Antes de tocar tus productos, Patagonia crea un producto de prueba, "${PROOF_NAME}" a $1, en un número libre de la balanza, lo relee y lo compara. Si algo no coincide, frena sin tocar tus productos. Ese producto de prueba queda en la balanza: lo podés borrar desde la balanza.`);
+      notes.push(`Es la primera vez que Patagonia le manda productos a esta balanza. Para cuidar tus productos, primero prueba con uno de mentira, "${PROOF_NAME}" a $1, en un número libre. Si algo no sale igual, frena sin tocar nada. Ese producto de prueba queda en la balanza y lo podés borrar desde ahí.`);
     }
     if (!backup.complete) notes.push("No se pudo leer toda la balanza. Probá de nuevo; si sigue, avisá a soporte.");
     const changing = count("actualizar");
-    if (changing) notes.push(`${changing === 1 ? "1 producto que ya está" : `${changing} productos que ya están`} en la balanza cambia de precio o nombre. Los totales de venta que guarda la balanza para ${changing === 1 ? "ese producto" : "esos productos"} podrían volver a cero (no está comprobado). Las ventas de Patagonia no cambian.`);
+    if (changing) notes.push(`${changing === 1 ? "1 producto que ya está" : `${changing} productos que ya están`} en la balanza cambia de precio o nombre. Si usás los totales de venta que guarda la balanza, sacalos antes de enviar: pueden volver a cero. Las ventas de Patagonia no cambian.`);
     if (extra) notes.push(extra === 1 ? "La balanza tiene 1 producto que no está en Patagonia: no se toca." : `La balanza tiene ${extra} productos que no están en Patagonia: no se tocan.`);
     const allowed = canWrite(this.model, "sendProducts") || (this.deps.forceWritable === true && this.model === "systel-cuora-max");
     const writable = allowed && !!layout && backup.complete;
