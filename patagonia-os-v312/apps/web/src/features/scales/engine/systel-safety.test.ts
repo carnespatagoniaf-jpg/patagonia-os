@@ -1,7 +1,7 @@
 import { beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { installFakeLocalStorage } from "../test-fake-storage";
-import { FakeCuora } from "../../inventory/systel/systel-fake";
+import { FakeCuora, fakeReadRecord } from "../../inventory/systel/systel-fake";
 import { SystelClient } from "../../inventory/systel/systel-client";
 import { parsePluAs } from "../../inventory/systel/systel-plu";
 import { planSystelPush, runSystelPush } from "./adapters/systel-push";
@@ -207,12 +207,27 @@ describe("C10: un producto reemplazado o nuevo no hereda datos del registro ante
     assert.equal(now.tail.at(-101), "S", "los ingredientes siguen");
   });
 
-  it("Cuora 2: al reemplazar, la lista 2 del anterior queda en 0", () => {
+  it("Cuora 2: al reemplazar, la lista 2 del anterior queda en 0 (plan)", () => {
     const rec = "00171bola lomo         02050000150000017010000P000000N";
     const plu = parsePluAs("cuora2", rec)!;
     const [item] = planSystelPush([plu], "cuora2", 0, [{ id: "p17", code: "17", name: "CUADRADA", byWeight: true, price: 20500 }], { replace: true });
     assert.equal(item.action, "reemplazar");
     const read = item.data!.slice(0, 53) + item.data!.slice(54);
     assert.deepEqual(parsePluAs("cuora2", read)!.prices, [20500, 0]);
+  });
+});
+
+describe("C11: el tope del código sale del formato que Patagonia escribe en cada producto (20PPPPCCCCCC)", () => {
+  it("Cuora Max con formato general de 5 cifras: el producto 12345 se avisa antes de mandar", async () => {
+    const f = new FakeCuora("max62", { address: 20, protocol: "0062", typeByteAccepted: "ascii" });
+    f.config = "Ton=2;Gris=0;Pap=0;Apa=1;Vel=5;Cpr=0;Sinc=0;E_P=20PPPPPIIIII;E_U=21PPPPPIIIII;Cim=1";
+    f.plus.set(1, fakeReadRecord("max62", { number: 1, name: "ASADO", price: 9000, code: 1, type: "P" }));
+    const { deps } = fakeDb();
+    const s = new SystelSession(f, 20, ctx([P("p1", "1", "ASADO", "kg", 9500), P("pq", "12345", "QUESO", "kg", 9000)]), deps);
+    const prep = await s.prepare(noop);
+    const skip = prep.skipped?.find((x) => x.code === "12345");
+    assert.ok(skip, "el 12345 no puede ir: la etiqueta del producto lleva 4 cifras");
+    assert.match(skip!.reason, /4 cifras/);
+    assert.equal(prep.writes, 1, "solo el 1");
   });
 });

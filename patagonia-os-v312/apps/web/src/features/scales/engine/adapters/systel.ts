@@ -4,7 +4,7 @@ import type { SystelExchangeLog } from "../../../inventory/systel/systel-client"
 import { discoverSystelLink, loadSavedSystelLink, saveSystelLink, type SystelFoundLink } from "../../../inventory/systel/systel-discovery";
 import type { SystelLinkEvent } from "../../../inventory/systel/systel-serial";
 import { LAYOUT_INFO, pluEanSetting, rawToPesos, type SystelLayout } from "../../../inventory/systel/systel-plu";
-import { takeProductBackup } from "../../../inventory/systel/systel-product-barcode";
+import { takeProductBackup, UNIT_TICKET_CODE, WEIGHED_TICKET_CODE } from "../../../inventory/systel/systel-product-barcode";
 import { saveSystelLabelTemplates, saveSystelPluBarcodes } from "../../../sale/systel-label-format";
 import type { ScaleCatalogItem, ScaleLink, ScaleSaleProfile } from "../../sale/profile";
 import type { ScaleSetup } from "../../sale/scale-sale-service";
@@ -49,6 +49,10 @@ export function topPluNumber(layout: SystelLayout, pluCapacity: number): number 
 }
 
 export const PRODUCT_BACKUP_KEY = "patagonia-systel-product-backup";
+
+/** Código de barras propio que Patagonia escribe en cada producto (Cuora Max): por peso y por unidad, 4 cifras de producto. */
+const SYSTEL_WEIGHED_LABEL = WEIGHED_TICKET_CODE;
+const SYSTEL_UNIT_LABEL = UNIT_TICKET_CODE;
 
 /**
  * Cuora Max con PLU de 6 cifras (firmware 6.2 y 7.0): mismas funciones que la 6.0 (protocolo oficial V6.2 y V7.0) y el
@@ -348,8 +352,11 @@ export class SystelSession implements ScaleSession {
     const layout = backup.layout;
     // Etapa 1: revisión previa con los límites que informó ESTA balanza (layout, decimales y formato de etiqueta).
     const values = backup.config?.values ?? {};
+    // C11: el tope del código sale del formato que se ESCRIBE en cada producto (20PPPPCCCCCC: 4 cifras), no del general.
+    // La Cuora 2 no lleva código por producto: imprime con el general, así que ahí manda el general.
+    const labelFormats = layout === "cuora2" ? [values.E_P, values.E_U] : [SYSTEL_WEIGHED_LABEL, SYSTEL_UNIT_LABEL];
     const check: PreflightResult | null = layout
-      ? preflightProducts(this.ctx.products, systelLimits(layoutLimits(layout, backup.signature?.pluCapacity ?? 0), backup.signature?.priceDecimals ?? 0, [values.E_P, values.E_U]))
+      ? preflightProducts(this.ctx.products, systelLimits(layoutLimits(layout, backup.signature?.pluCapacity ?? 0), backup.signature?.priceDecimals ?? 0, labelFormats))
       : null;
     const readyIds = new Set((check?.ready ?? []).map((p) => p.id));
     const products = this.pushProducts().filter((p) => readyIds.has(p.id));
@@ -484,7 +491,7 @@ export class SystelSession implements ScaleSession {
   private async saveForMostrador(st: State, layout: SystelLayout, sent: PushItem[], opts: { keepPrevious: boolean; unknown: number[] }): Promise<void> {
     let catalog: ScaleCatalogItem[] = sent.map((x) => {
       // La Cuora 2 no tiene código por producto: imprime con el formato general de la balanza (tipo 0).
-      const ean = layout === "cuora2" ? { type: 0, config: null } : { type: 1, config: x.product.byWeight ? "20PPPPCCCCCC" : "21PPPPCCCCCC" };
+      const ean = layout === "cuora2" ? { type: 0, config: null } : { type: 1, config: x.product.byWeight ? SYSTEL_WEIGHED_LABEL : SYSTEL_UNIT_LABEL };
       return { code: x.number!, name: x.product.name.slice(0, 18), saleType: x.product.byWeight ? "P" : "U", prices: [x.product.price, 0], eanType: ean.type, eanConfig: ean.config };
     });
     let links: ScaleLink[] = sent.map((x) => ({ code: x.number!, kind: "product" as const, productId: x.product.id }));
