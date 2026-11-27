@@ -141,7 +141,7 @@ jobs:
           $sw = [Diagnostics.Stopwatch]::StartNew()
           while (-not $code -and $sw.Elapsed.TotalMinutes -lt 20) {
             git fetch --quiet origin $branch 2>$null
-            $text = git show "FETCH_HEAD:patagonia-os-v312/apps/connector/e2e/codigo.txt" 2>$null
+            $text = (git show "FETCH_HEAD:patagonia-os-v312/apps/connector/e2e/codigo.txt" 2>$null) -join "`n"
             if ($text -match "run=$run\s+codigo=([2-9A-HJ-NP-Z]{4}-?[2-9A-HJ-NP-Z]{4})") { $code = $Matches[1] } else { Start-Sleep 10 }
           }
           Assert-Check 'Vinculación' 'Llegó el código de vinculación' ([bool]$code) "a los $([math]::Round($sw.Elapsed.TotalSeconds)) s"
