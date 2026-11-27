@@ -38,7 +38,7 @@ export interface LabelSpec {
   sumCode: number | null;
   /** Qué se le manda a la balanza para que imprima así. null = lo decide la conexión, como hoy (Report por red o cable). */
   writer: LabelWriter | null;
-  /** De dónde salió (solo para soporte): "sucursal", "fabrica", "1070", "asignado"… */
+  /** De dónde salió (soporte): "1070", "systel", "asignado"; "223:…" = cargado por la migración 223 (su vuelta atrás lo reconoce). */
   origin?: string;
 }
 
@@ -184,20 +184,25 @@ export function systelTicketCodes(spec: LabelSpec | null | undefined): { weighed
   return { weighed: SYSTEL_WEIGHED_CODE, unit: SYSTEL_UNIT_CODE };
 }
 
-/** El perfil de una Systel a la que Patagonia le escribe el formato por producto (20/21 + producto 4 + cantidad 6). */
+/**
+ * El perfil de una Systel a la que Patagonia le escribe el formato por producto (inicio + producto 4 + cantidad 6).
+ * Sin inicio (o "20"): el de siempre, 20 pesables y 21 unitarios, y el TOTAL de la Cuora (E_S, "22…") queda reservado.
+ * Con inicio propio: el mismo para pesables y unitarios; el TOTAL lo lee el papel de la Systel y no se reserva.
+ */
 export function systelSpec(totalFormat: string | null, prefix: string | null = null): LabelSpec {
-  const total = totalFormat && /^2\d/.test(totalFormat) ? totalFormat.slice(0, 2) : null;
-  const w = prefix ?? "20";
-  const u = prefix ?? "21";
+  const own = prefix !== null && prefix !== "20" ? prefix : null;
+  const t = totalFormat && /^2\d/.test(totalFormat) ? totalFormat.slice(0, 2) : null;
+  const w = own ?? "20";
+  const u = own ?? "21";
   return {
     v: 1,
-    prefixes: { weighed: w, unit: u, total: total && total !== w && total !== u ? total : null },
+    prefixes: { weighed: w, unit: u, total: !own && t && t !== "20" && t !== "21" ? t : null },
     layout: { prefix: 2, code: 4, value: 6, length: 13, divisor: 1000 },
     value: "weight_g",
     unitValue: "units",
     sumCode: null,
     writer: { kind: "systel", weighed: `${w}PPPPCCCCCC`, unit: `${u}PPPPCCCCCC` },
-    origin: prefix ? "asignado" : "systel"
+    origin: own ? "asignado" : "systel"
   };
 }
 
@@ -231,12 +236,12 @@ export type LegacyList = keyof typeof LEGACY_LIST_1070;
  *   hoy (Aura: "2002005"; Systel: 20/21 + producto 4 + cantidad 6; Report: lo decide la conexión → null).
  */
 export function specFromToday(input: { family: ScaleFamilyName; model: string | null; branchConfig: ScaleConfig | null; list?: LegacyList | null; totalFormat?: string | null }): LabelSpec {
-  if (input.list) return specFromKretz1070(LEGACY_LIST_1070[input.list])!;
+  if (input.list) return { ...specFromKretz1070(LEGACY_LIST_1070[input.list])!, origin: "223:lista" };
   const c = input.branchConfig ?? { prefixLength: 1, pluLength: 5, weightLength: 5, weightDivisor: 1000, totalLength: 13, payloadType: "weight" as const };
   const read = {
     layout: { prefix: c.prefixLength, code: c.pluLength, value: c.weightLength, length: c.totalLength, divisor: c.weightDivisor },
     value: valueOfDivisor(c.payloadType, c.weightDivisor),
-    origin: input.branchConfig ? "sucursal" : "fabrica"
+    origin: input.branchConfig ? "223:sucursal" : "223:fabrica"
   };
   if (input.family === "systel") {
     const s = systelSpec(input.totalFormat ?? null);
