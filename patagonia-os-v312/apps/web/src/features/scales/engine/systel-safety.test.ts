@@ -4,7 +4,7 @@ import { installFakeLocalStorage } from "../test-fake-storage";
 import { FakeCuora, fakeReadRecord } from "../../inventory/systel/systel-fake";
 import { SystelClient } from "../../inventory/systel/systel-client";
 import { parsePluAs } from "../../inventory/systel/systel-plu";
-import { planSystelPush, runSystelPush } from "./adapters/systel-push";
+import { ensureSystelSectors, planSystelPush, runSystelPush } from "./adapters/systel-push";
 import { SystelSession, type SystelDeps } from "./adapters/systel";
 import type { EngineContext, EngineProduct } from "./types";
 import type { ScaleLink } from "../sale/profile";
@@ -229,5 +229,90 @@ describe("C11: el tope del código sale del formato que Patagonia escribe en cad
     assert.ok(skip, "el 12345 no puede ir: la etiqueta del producto lleva 4 cifras");
     assert.match(skip!.reason, /4 cifras/);
     assert.equal(prep.writes, 1, "solo el 1");
+  });
+});
+
+describe("C16: sectores y 'no esperar al encender' (35 N) se comprueban antes de seguir", () => {
+  const writer = (f: FakeCuora) => new SystelClient(f, { address: 20, busyRetryMs: [], writes: { products: true, productBarcode: true } });
+
+  it("si no se pudo leer la lista de sectores (función 11), frena", async () => {
+    const f = cuora(); // sin control de sectores: la 11 contesta E4
+    const r = await ensureSystelSectors(writer(f), [1]);
+    assert.equal(r.ok, false);
+    assert.equal(f.received.filter((x) => x.fn === 10).length, 0, "no crea ninguno");
+  });
+
+  it("si la 11 contesta, sigue como siempre", async () => {
+    const f = cuora();
+    f.sectors = new Map([[1, "GENERAL"]]);
+    const r = await ensureSystelSectors(writer(f), [1]);
+    assert.equal(r.ok, true);
+  });
+
+  const SINC_ON = "Ton=2;Gris=0;Pap=0;Apa=1;Vel=5;Cpr=0;Sinc=1;E_P=20PPPPIIIIII;E_U=21PPPPIIIIII;Cim=1";
+
+  it("después de la 35 N, si la configuración no se puede releer, frena sin mandar productos", async () => {
+    const f = cuora();
+    f.config = SINC_ON;
+    const { deps } = fakeDb();
+    const s = new SystelSession(f, 20, ctx([P("p4", "4", "POLLO ENTEROxKG", "kg", 5400)]), deps);
+    const prep = await s.prepare(noop);
+    const orig = f.exchange.bind(f);
+    let sent35 = false;
+    f.exchange = async (frame: Uint8Array) => {
+      if (frame[1] === 35) sent35 = true;
+      if (sent35 && frame[1] === 39) return null;
+      return orig(frame);
+    };
+    const out = await s.sync(prep, noop);
+    assert.ok(sent35);
+    assert.equal(out.ok, false);
+    assert.equal(f.received.filter((x) => x.fn === 61).length, 0);
+  });
+
+  it("si la 35 N cambió otra cosa de la configuración, frena sin mandar productos", async () => {
+    const f = cuora();
+    f.config = SINC_ON;
+    const { deps } = fakeDb();
+    const s = new SystelSession(f, 20, ctx([P("p4", "4", "POLLO ENTEROxKG", "kg", 5400)]), deps);
+    const prep = await s.prepare(noop);
+    const orig = f.exchange.bind(f);
+    f.exchange = async (frame: Uint8Array) => {
+      const r = await orig(frame);
+      if (frame[1] === 35) f.config = f.config!.replace("Ton=2", "Ton=9");
+      return r;
+    };
+    const out = await s.sync(prep, noop);
+    assert.equal(out.ok, false);
+    assert.equal(f.received.filter((x) => x.fn === 61).length, 0);
+  });
+
+  it("si la balanza ignora la 35 N, manda los productos pero avisa que sigue esperando al encender", async () => {
+    const f = cuora();
+    f.config = SINC_ON;
+    const { deps } = fakeDb();
+    const s = new SystelSession(f, 20, ctx([P("p4", "4", "POLLO ENTEROxKG", "kg", 5400)]), deps);
+    const prep = await s.prepare(noop);
+    const orig = f.exchange.bind(f);
+    f.exchange = async (frame: Uint8Array) => {
+      const before = f.config;
+      const r = await orig(frame);
+      if (frame[1] === 35) f.config = before;
+      return r;
+    };
+    const out = await s.sync(prep, noop);
+    assert.equal(out.ok, true, out.message);
+    assert.match(out.message, /esperar a la PC/);
+  });
+
+  it("con la 35 N confirmada, sigue y no avisa nada de más", async () => {
+    const f = cuora();
+    f.config = SINC_ON;
+    const { deps } = fakeDb();
+    const s = new SystelSession(f, 20, ctx([P("p4", "4", "POLLO ENTEROxKG", "kg", 5400)]), deps);
+    const out = await s.sync(await s.prepare(noop), noop);
+    assert.equal(out.ok, true, out.message);
+    assert.doesNotMatch(out.message, /esperar a la PC/);
+    assert.match(f.config!, /Sinc=0/);
   });
 });

@@ -294,13 +294,23 @@ export class SystelSession implements ScaleSession {
    * Si la configuración dice que espera sincronización al encender (";Sinc=1"), se la apaga con la 35 "N" y se relee la
    * 39 para comprobarlo. Así esa balanza no vuelve a quedar trabada al prenderse. Solo si la 39 se pudo leer.
    */
-  private async ensureNoStartupWait(config: { values: Record<string, string> } | null): Promise<void> {
-    if (!config || config.values.Sinc !== "1") return;
+  private async ensureNoStartupWait(config: { values: Record<string, string> } | null): Promise<"ok" | "sigue" | "frenar"> {
+    if (!config || config.values.Sinc !== "1") return "ok";
     this.mark("la balanza espera sincronización al encender (Sinc=1): se apaga con la función 35 N y se relee");
     const c = new SystelClient(this.link, { address: this.address, log: this.log, busyRetryMs: [] });
     const r = await c.disableStartupSyncWait();
     const after = await c.config();
     this.syncWaitFixed = !!(r && r.kind === "ack" && after?.values.Sinc === "0");
+    // C16: antes de seguir se relee. Sin poder releer la configuración no se sabe qué quedó: no se mandan productos.
+    if (!after) return "frenar";
+    // La 35 solo puede tocar "Sinc": si cambió cualquier otro valor, se frena (como con la función 7).
+    const keys = new Set([...Object.keys(config.values), ...Object.keys(after.values)]);
+    const others = [...keys].filter((k) => k !== "Sinc" && config.values[k] !== after.values[k]);
+    if (others.length > 0) {
+      this.mark(`después de la 35 N cambió otra cosa de la configuración (${others.join(", ")}): se frena`);
+      return "frenar";
+    }
+    return this.syncWaitFixed ? "ok" : "sigue";
   }
 
   /** Señales y número con los que atendió esta balanza (se guardan con la conexión). */
@@ -421,7 +431,11 @@ export class SystelSession implements ScaleSession {
     const st = this.state;
     if (!st || !st.backup.layout || prepared.blocker || !prepared.canWrite) throw new Error("primero hay que leer la balanza");
     // Avisado en las notas antes de confirmar "Sincronizar productos".
-    if (this.startupWaitOn) await this.ensureNoStartupWait(st.backup.config);
+    const startup = this.startupWaitOn ? await this.ensureNoStartupWait(st.backup.config) : "ok";
+    if (startup === "frenar") {
+      return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, support: { etapa: "35 N", detail: "después de la función 35 N no se pudo comprobar la configuración (función 39)" } };
+    }
+    const startupNote = startup === "sigue" ? " Ojo: la balanza no aceptó dejar de esperar a la PC cada vez que se prende; si al prenderla se queda trabada, avisá a soporte." : "";
     const layout = st.backup.layout;
     const plan = opts.allowReplace ? planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: true, templates: st.templates, pluCapacity: topPluNumber(layout, st.backup.signature?.pluCapacity ?? 0) }) : st.plan;
     const toWrite = plan.filter((x) => x.action === "crear" || x.action === "actualizar" || x.action === "reemplazar");
@@ -478,8 +492,9 @@ export class SystelSession implements ScaleSession {
     return {
       ok: true,
       verified: written.length,
-      message: pending.length ? `${SENT_AND_CHECKED} ${pending.length === 1 ? "1 producto no se mandó porque en la balanza ese número es" : `${pending.length} productos no se mandaron porque en la balanza esos números son`} de otro producto. Para poner los de Patagonia, tocá "Volver a sincronizar" y marcá "Reemplazarlos por los de Patagonia".` : SENT_AND_CHECKED,
-      pending
+      message: pending.length ? `${SENT_AND_CHECKED} ${pending.length === 1 ? "1 producto no se mandó porque en la balanza ese número es" : `${pending.length} productos no se mandaron porque en la balanza esos números son`} de otro producto. Para poner los de Patagonia, tocá "Volver a sincronizar" y marcá "Reemplazarlos por los de Patagonia".${startupNote}` : SENT_AND_CHECKED + startupNote,
+      pending,
+      ...(startup === "sigue" ? { support: { etapa: "35 N", detail: "la balanza contestó a la 35 N pero sigue con Sinc=1" } } : {})
     };
   }
 

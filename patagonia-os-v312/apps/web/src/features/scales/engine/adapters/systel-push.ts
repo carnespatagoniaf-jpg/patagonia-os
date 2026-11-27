@@ -343,13 +343,13 @@ export const SECTOR_NAME = "GENERAL";
  * Balanza VACÍA: los productos nuevos se arman con el sector de los modelos (systel-empty-template.ts). Si alguien borró
  * los sectores en la balanza, cada producto da E7 (real Los gringos 13/11). Lee los sectores (11), crea solo los que faltan
  * (10, nunca uno que ya está: la 10 también le cambia el nombre) y relee. Si la 11 no se puede leer, no escribe nada y
- * sigue como antes (si falta el sector, el primer producto dará E7 y se frena sin tocar nada).
+ * frena (C16): sin saber qué sectores hay no se dan por buenos.
  */
 export async function ensureSystelSectors(client: SystelClient, needed: number[]): Promise<{ ok: boolean; created: number[]; detail: string }> {
   const want = [...new Set(needed)].filter((n) => Number.isInteger(n) && n >= 1 && n <= 99);
   if (want.length === 0) return { ok: true, created: [], detail: "sin sectores para revisar" };
   const before = await client.sectors();
-  if (!before) return { ok: true, created: [], detail: "no se pudo leer la lista de sectores: no se creó ninguno" };
+  if (!before) return { ok: false, created: [], detail: "no se pudo leer la lista de sectores (función 11): no se creó ninguno ni se mandó ningún producto" };
   const missing = want.filter((n) => !before.some((s) => s.number === n));
   if (missing.length === 0) return { ok: true, created: [], detail: `la balanza ya tiene el sector ${want.join(", ")}` };
   for (const n of missing) {

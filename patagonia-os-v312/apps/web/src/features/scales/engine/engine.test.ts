@@ -259,6 +259,8 @@ describe("[SIMULADO, registros REALES] Mi balanza con una Systel Cuora Max: Pata
   // decía "ya tiene los mismos productos que Patagonia".
   it("balanza vacía (Cuora Max comprobada): igual crea todos los productos y los relee", async () => {
     const f = new FakeCuora("max60", { address: 20, protocol: "0060", typeByteAccepted: "ascii", loteNulOnWrite: true });
+    // C16 (plan balanzas v2): sin poder leer los sectores (función 11) ahora se frena; la balanza simulada los contesta.
+    f.sectors = new Map([[1, "GENERAL           "]]);
     const { deps, calls } = fakeDb({ active: true, links: [] } as unknown as ScaleSetup);
     const s = new SystelSession(f, 20, ctx(PRODUCTS), deps);
     const prep = await s.prepare(noop);
