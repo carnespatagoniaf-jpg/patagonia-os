@@ -55,6 +55,10 @@ jobs:
       - name: Instalar dependencias
         run: npm ci
 
+      # El conector corre los protocolos de la web, que importan @patagonia/domain compilado (dist/).
+      - name: Compilar el dominio
+        run: npm run build -w @patagonia/domain
+
       - name: Pruebas del conector
         run: npm run test -w @patagonia/connector
 
