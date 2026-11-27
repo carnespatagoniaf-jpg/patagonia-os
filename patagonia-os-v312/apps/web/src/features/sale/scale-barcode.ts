@@ -12,6 +12,13 @@ export interface ScaleConfig {
   payloadType: ScalePayloadType;
   /** Solo en el navegador (no se guarda): la sucursal tiene una Aura con inicio "22" además de su formato (AURA_PREFIX_22_BRANCHES). */
   auraPrefix22?: boolean;
+  /**
+   * Solo en el navegador (sale del perfil de la balanza, scales/label-spec.ts): inicio propio 22-29 de una Kretz con
+   * 2-3-7 en centavos. Esas etiquetas se leen como las de la Aura con inicio 22 (producto 998 = TOTAL).
+   */
+  ownPrefix?: string;
+  /** Solo en el navegador: inicio de las etiquetas por UNIDAD de una Systel con inicio propio (si no, "21"). */
+  unitPrefix?: string;
 }
 
 export type ScaleBarcodeResult =

@@ -8,6 +8,8 @@ import type { ScaleConfig } from "./scale-barcode";
 import { isScaleConfigUnknown, SCALE_CONFIG_LOADING_MESSAGE, SCALE_CONFIG_UNKNOWN_MESSAGE, type ScaleConfigStatus } from "./scale-config-cache";
 import { scanChoiceOptions, type LabelChoiceOption } from "./scale-label-choice";
 import { labelWeightProblem, MAX_COUNTER_SCALE_KG, resolveScan, type ScanChoice, type ScanResolution } from "./scan-resolve";
+import { resolveScanByProfiles } from "./scale-profile-scan";
+import type { ScaleLabelProfile } from "../scales/label-spec";
 
 /**
  * Resolvedor ÚNICO de etiquetas de balanza (C3/C4, auditoría 26/11). Lo usan Mostrador y Clientes ("Venta a cuenta").
@@ -47,6 +49,13 @@ export interface LabelContext {
    * Sin el dato, se deduce del formato (SCALE_CONFIG_UNKNOWN = desconocido).
    */
   configStatus?: ScaleConfigStatus;
+  /**
+   * 'balanzas_v2' (interruptor por empresa): los perfiles de etiqueta de cada balanza activa de la sucursal (+ los
+   * anteriores vigentes). Con esto, cada etiqueta se le pregunta a cada balanza (scale-profile-scan.ts) en vez de leerse
+   * con el formato de la sucursal y las listas por cliente. Sin esto (interruptor apagado), todo como antes.
+   * status "loading"/"unknown": no se leen etiquetas (igual que C5).
+   */
+  labelProfiles?: { status: ScaleConfigStatus; profiles: ScaleLabelProfile[] } | null;
 }
 
 /** Precio con el que imprimió la balanza del local: el de la zona si tiene, si no el general. */
@@ -139,13 +148,16 @@ export function resolveScaleLabel(rawInput: string, ctx: LabelContext): LabelRes
   const zone = ctx.zoneListId ?? null;
   const byId = new Map(ctx.products.map((p) => [p.id, p]));
   const scanProducts = zone ? ctx.products.map((p) => ({ ...p, priceRetail: scalePrintedPrice(p, zone) })) : ctx.products;
-  const scan = zone ? withOriginalProducts(resolveScan(raw, scanProducts, ctx.config), byId) : resolveScan(raw, ctx.products, ctx.config);
+  const lp = ctx.labelProfiles;
+  const read = (r: string, ps: Product[]) => (lp ? resolveScanByProfiles(r, ps, lp.profiles, ctx.config) : resolveScan(r, ps, ctx.config));
+  const scan = zone ? withOriginalProducts(read(raw, scanProducts), byId) : read(raw, ctx.products);
   const priceOf = (p: Product) => scalePrintedPrice(p, zone);
   const asScan = (): LabelResolution => (scan.type === "ambiguous" ? { type: "ambiguous", options: scanChoiceOptions(scan.options, priceOf), ...(scan.note ? { note: scan.note } : {}) } : { type: "scan", resolution: scan });
   // Un código idéntico al de un producto gana sobre cualquier lectura de balanza (como siempre).
   if (ctx.products.some((p) => p.code === raw)) return { type: "scan", resolution: scan };
   // C5: sin formato conocido no se lee ninguna etiqueta de balanza (códigos del rango de comercio "2…" o TOTAL "0000…").
-  const status = ctx.configStatus ?? (isScaleConfigUnknown(ctx.config) ? "unknown" : "ready");
+  const baseStatus = ctx.configStatus ?? (isScaleConfigUnknown(ctx.config) ? "unknown" : "ready");
+  const status = lp && lp.status !== "ready" ? lp.status : baseStatus;
   if (status !== "ready" && /^(2\d{11,12}|0000\d{8,9})$/.test(raw)) {
     return { type: "not_ready", message: status === "loading" ? SCALE_CONFIG_LOADING_MESSAGE : SCALE_CONFIG_UNKNOWN_MESSAGE };
   }

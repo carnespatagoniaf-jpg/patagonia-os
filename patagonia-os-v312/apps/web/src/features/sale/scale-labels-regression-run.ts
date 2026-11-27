@@ -1,6 +1,8 @@
 import type { Product } from "@patagonia/domain";
 import type { ScaleConfig } from "./scale-barcode";
 import { labelWeightProblem, resolveScan, type ScanResolution } from "./scan-resolve";
+import { resolveScanByProfiles } from "./scale-profile-scan";
+import type { ScaleLabelProfile } from "../scales/label-spec";
 import { systelConfigForCodeAcross, type SystelLabelTemplates } from "./systel-label-format";
 import { decodeAcross } from "../scales/sale/multi-decode";
 import { addScannedItem, emptyPaper } from "../scales/sale/paper";
@@ -124,4 +126,10 @@ export function readLabel(raw: string, ctx: RegressionContext): RegressionReadin
   const systel = systelConfigForCodeAcross(raw, ctx.plantillas);
   if (systel === "no_soportado") return { resultado: "NO_SOPORTADO", mensaje: "La balanza imprime el código de los productos con un formato que Patagonia no puede leer sin riesgo" };
   return describeResolution(resolveScan(raw, products, systel ?? ctx.formato));
+}
+
+/** 'balanzas_v2': la misma etiqueta leída preguntándole a cada balanza de la sucursal (scale-profile-scan.ts). */
+export function readLabelByProfiles(raw: string, ctx: RegressionContext, profiles: ScaleLabelProfile[]): RegressionReading {
+  if (ctx.lector !== "sucursal") return readLabel(raw, ctx);
+  return describeResolution(resolveScanByProfiles(raw, regressionProducts(ctx.productos), profiles, ctx.formato));
 }
