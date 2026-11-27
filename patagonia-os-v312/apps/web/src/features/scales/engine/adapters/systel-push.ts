@@ -225,7 +225,12 @@ export async function runSystelPush(client: SystelClient, layout: SystelLayout, 
     let ok = false;
     for (let attempt = 0; ; attempt++) {
       // Justo antes de escribir (y antes de cada reintento): la balanza tiene que seguir como cuando se leyó.
-      const fresh = await client.readPlu(layout, n);
+      // Solo E7 ("no existe") cuenta como número libre: un error o el silencio no dicen nada, y ahí no se escribe (C9).
+      const status = await client.readPluStatus(layout, n);
+      if ("error" in status) {
+        return { done, stoppedAt: n, detail: `no se pudo leer el producto ${n} antes de escribirlo (${status.error}): no se escribió`, restored: null };
+      }
+      const fresh = "plu" in status ? status.plu : null;
       if (!isOriginal(fresh?.raw ?? null)) {
         return { done, stoppedAt: n, detail: attempt === 0 ? "la balanza cambió desde que se leyó: no se escribió" : "después de un intento fallido la balanza no quedó como estaba: no se reintentó", restored: null };
       }
@@ -235,13 +240,15 @@ export async function runSystelPush(client: SystelClient, layout: SystelLayout, 
       if (reply && reply.kind === "error" && (!transient || attempt >= WRITE_RETRY_MS.length)) {
         return { done, stoppedAt: n, detail: `la balanza rechazó el producto ${n} (${reply.errorCode}); no cambió nada`, restored: null, rejected: reply.errorCode ?? "error" };
       }
-      back = reply && reply.kind === "error" ? null : await client.readPlu(layout, n);
+      const backStatus = reply && reply.kind === "error" ? null : await client.readPluStatus(layout, n);
+      back = backStatus && "plu" in backStatus ? backStatus.plu : null;
       ok = !!back && sameRecord(layout, expectedRead(layout, item.data!, back.raw[LAYOUT_INFO[layout].pluDigits]), back.raw);
       // Releído igual a lo mandado: quedó bien, aunque la confirmación (ACK) se haya perdido en el cable.
       if (ok) break;
       // Rechazo pasajero (E1/E2/E3: "no guardé nada") o sin respuesta y la balanza sigue como estaba: se vuelve a mandar.
       // REAL Quesar 17/11: E1 en el producto 163 de 241; al repetir todo a mano, pasó entero.
-      const untouched = reply !== null && reply.kind === "error" ? true : isOriginal(back?.raw ?? null);
+      // Una relectura que no contestó no prueba que siga como estaba (un producto nuevo daría "libre" sin serlo).
+      const untouched = reply !== null && reply.kind === "error" ? true : !!backStatus && !("error" in backStatus) && isOriginal(back?.raw ?? null);
       if (!(transient && untouched && attempt < WRITE_RETRY_MS.length)) break;
       await new Promise((r) => setTimeout(r, WRITE_RETRY_MS[attempt]));
       await client.wake();
