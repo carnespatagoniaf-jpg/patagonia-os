@@ -34,6 +34,13 @@ export interface LabelContext {
   config: ScaleConfig;
   /** true = la sucursal tiene un formato guardado (no el de fábrica). */
   calibrated: boolean;
+  /**
+   * false = todas las balanzas registradas y activas de la sucursal son Systel: el formato de la sucursal es un resto de
+   * antes (real: Carnes premium, El Dorado, Los gringos, mercadito isabel y Pollo Pampa tienen uno guardado) y NO compite
+   * con una lectura Systel válida; solo se usa si la Systel no reconoce la etiqueta. Sin el dato (undefined) compite,
+   * que es lo seguro: ante la duda, preguntar.
+   */
+  branchFormatCompetes?: boolean;
   /** Balanzas "artículos + TOTAL" activas de la sucursal. */
   setups: ScaleSetup[];
   /**
@@ -153,8 +160,11 @@ export function resolveScaleLabel(rawInput: string, ctx: LabelContext): LabelRes
   const s = systelReading(raw, ctx.setups, ctx.products);
   if (s.kind === "not_scale") return asScan();
 
-  const others = ctx.calibrated ? scanCandidates(scan) : [];
-  if (s.kind === "invalid") return others.length > 0 ? asScan() : { type: "systel_message", message: s.message };
+  // Lecturas del formato de la sucursal: sirven de respaldo cuando la Systel no reconoce la etiqueta, y compiten con una
+  // lectura Systel válida solo si el local tiene (o puede tener) otra marca de balanza.
+  const fallback = ctx.calibrated ? scanCandidates(scan) : [];
+  const others = ctx.branchFormatCompetes !== false ? fallback : [];
+  if (s.kind === "invalid") return fallback.length > 0 ? asScan() : { type: "systel_message", message: s.message };
   if (s.kind === "blocking") {
     if (others.length === 0) return { type: "systel_message", message: s.message };
     return { type: "ambiguous", options: scanChoiceOptions(others, priceOf), note: `También puede ser de la balanza Systel: ${s.message.replace(/^No se agregó: /, "")}` };

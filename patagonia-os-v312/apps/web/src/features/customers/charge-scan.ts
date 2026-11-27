@@ -31,6 +31,8 @@ export type ChargeScan =
 export interface ChargeScaleContext {
   /** La sucursal tiene su formato de etiquetas guardado (no el de fábrica). */
   calibrated: boolean;
+  /** Ver LabelContext.branchFormatCompetes. */
+  branchFormatCompetes?: boolean;
   /** Balanzas "artículos + TOTAL" (Systel) de la sucursal. */
   setups: ScaleSetup[];
   /** Zona de precios del local: los kilos de una etiqueta con importe salen del precio de la balanza (C4). */
@@ -56,7 +58,7 @@ export function resolveChargeScan(rawInput: string, products: Product[], config:
     }
   }
 
-  const label = resolveScaleLabel(raw, { products, config, calibrated: scale.calibrated, setups: scale.setups, zoneListId: scale.zoneListId ?? null, configStatus: scale.configStatus });
+  const label = resolveScaleLabel(raw, { products, config, calibrated: scale.calibrated, branchFormatCompetes: scale.branchFormatCompetes, setups: scale.setups, zoneListId: scale.zoneListId ?? null, configStatus: scale.configStatus });
   if (label.type === "not_ready") return { type: "error", message: label.message };
   if (label.type === "ambiguous") return { type: "choose", options: label.options, ...(label.note ? { note: label.note } : {}) };
   if (label.type === "systel_message") return { type: "error", message: label.message };
