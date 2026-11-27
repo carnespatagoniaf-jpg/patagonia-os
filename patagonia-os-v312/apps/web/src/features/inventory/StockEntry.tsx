@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState } from "react";
 import type { Product } from "@patagonia/domain";
 import { useBoxLabelFormats } from "../sale/box-label-service";
-import { cachedScaleConfig, scaleConfigLoaded } from "../sale/scale-config-cache";
+import { cachedScaleConfig, SCALE_CONFIG_UNKNOWN, scaleConfigLoaded } from "../sale/scale-config-cache";
 import { DEFAULT_SCALE_CONFIG, getBranchScaleConfig, type ScaleConfig } from "../sale/scale-config-service";
+import { useAuth } from "../auth/AuthProvider";
+import { useScaleLabelProfiles } from "../scales/useScaleLabelProfiles";
 import { quantityNumber } from "../sale/quantity";
 import { findEnteredCodes, listStockEntries, registerStockEntry, undoStockEntry, type StockEntrySummary } from "./inventory-service";
 import { countsAsBox, entryTotals, fmtKg, fmtQty, resolveEntryScan, type EntryLine } from "./stock-entry";
@@ -45,7 +47,9 @@ export function StockEntry({ products, branchId, boxLabels, packages, boxWord, c
   onDone: (message: string) => void;
 }) {
   const { formats } = useBoxLabelFormats(boxLabels);
-  const [scaleConfig, setScaleConfig] = useState<ScaleConfig>(() => cachedScaleConfig(branchId)?.config ?? DEFAULT_SCALE_CONFIG);
+  const [scaleConfig, setScaleConfig] = useState<ScaleConfig>(() => cachedScaleConfig(branchId)?.config ?? SCALE_CONFIG_UNKNOWN);
+  const { profile } = useAuth();
+  const labelProfiles = useScaleLabelProfiles(branchId, Boolean(profile?.features?.includes("balanzas_v2")));
   const [lines, setLines] = useState<EntryLine[]>(() => loadDraft(branchId));
   const [code, setCode] = useState("");
   const [pending, setPending] = useState<Product | null>(null);
@@ -96,7 +100,7 @@ export function StockEntry({ products, branchId, boxLabels, packages, boxWord, c
   function onCodeEnter() {
     const raw = code.trim();
     if (!raw) return;
-    const r = resolveEntryScan(raw, products, formats, scaleConfig, packages);
+    const r = resolveEntryScan(raw, products, formats, scaleConfig, packages, labelProfiles);
     if (r.type === "line") {
       addLine(r.line, r.detail);
       setCode("");

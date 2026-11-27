@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Product } from "@patagonia/domain";
 import { CheckCircle2, TriangleAlert } from "lucide-react";
 import { useAuth } from "../auth/AuthProvider";
+import { useScaleLabelProfiles } from "./useScaleLabelProfiles";
 import { SYSTEL_PILOT_COMPANIES } from "../inventory/systel/systel-pilot";
 import { DEFAULT_SCALE_CONFIG, type ScaleConfig } from "../sale/scale-barcode";
 import { cachedScaleConfig, scaleConfigLoaded } from "../sale/scale-config-cache";
@@ -23,6 +24,7 @@ interface Formats {
  */
 export function LabelTestBox({ products, branchId, onDone }: { products: Product[]; branchId: string; onDone: () => void }) {
   const { profile } = useAuth();
+  const labelProfiles = useScaleLabelProfiles(branchId, Boolean(profile?.features?.includes("balanzas_v2")));
   const pilot = SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? "");
   const [formats, setFormats] = useState<Formats | null>(null);
   const [code, setCode] = useState("");
@@ -50,7 +52,7 @@ export function LabelTestBox({ products, branchId, onDone }: { products: Product
 
   function test() {
     if (!formats) return;
-    const r = labelTestResult(code, { products, ...formats });
+    const r = labelTestResult(code, { products, ...formats, labelProfiles });
     setResult(r);
     setCode("");
     if (r?.ok) {

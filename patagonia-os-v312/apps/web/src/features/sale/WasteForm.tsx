@@ -1,5 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Product } from "@patagonia/domain";
+import { useAuth } from "../auth/AuthProvider";
+import { useScaleLabelProfiles } from "../scales/useScaleLabelProfiles";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { formatMoney } from "../shifts/format";
 import { WASTE_REASON_LABELS } from "../shifts/period-result";
@@ -32,6 +34,8 @@ export function WasteForm({ visible, shift, products, scaleConfig, canVoid, onMe
   onClose: () => void;
 }) {
   const { branchId } = useActiveBranch();
+  const { profile: authProfile } = useAuth();
+  const labelProfiles = useScaleLabelProfiles(branchId ?? null, Boolean(authProfile?.features?.includes("balanzas_v2")));
   const [code, setCode] = useState("");
   const [search, setSearch] = useState("");
   const [productId, setProductId] = useState<string | null>(null);
@@ -82,7 +86,7 @@ export function WasteForm({ visible, shift, products, scaleConfig, canVoid, onMe
 
   function readCode() {
     setError("");
-    const result = describeScaleTicket(code, scaleConfig, products);
+    const result = describeScaleTicket(code, scaleConfig, products, labelProfiles);
     if (!result || result.kind !== "label") {
       setError(result?.kind === "total" ? "Ese es un ticket de total: escaneá la etiqueta del producto." : "Ese código no es una etiqueta de la balanza (o el producto no está cargado).");
       return;

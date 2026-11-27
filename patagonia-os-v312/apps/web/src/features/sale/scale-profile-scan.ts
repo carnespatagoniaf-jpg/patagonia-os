@@ -86,3 +86,15 @@ export function resolveScanByProfiles(rawInput: string, products: Product[], pro
   if (choices.length === 1) return choices[0];
   return { type: "ambiguous", options: choices, note: "La etiqueta la pueden haber impreso dos balanzas de este local (o una con su formato anterior). Mirá el papel y elegí." };
 }
+
+/**
+ * La misma lectura que Mostrador para las OTRAS pantallas que escanean etiquetas de balanza (prueba de etiqueta de Mis
+ * balanzas, Ingreso de stock, Freezer, Decomisos, anular ticket): con 'balanzas_v2' y los perfiles listos, por balanza;
+ * si no, con el formato del local, como siempre. Sin esto, una balanza con inicio propio (22-29) se leía bien en
+ * Mostrador y mal en esas pantallas.
+ */
+export function readScaleCode(raw: string, products: Product[], branchConfig: ScaleConfig, labelProfiles: { status: string; profiles: ScaleLabelProfile[] } | null | undefined): ScanResolution {
+  return labelProfiles && labelProfiles.status === "ready" && labelProfiles.profiles.length > 0
+    ? resolveScanByProfiles(raw, products, labelProfiles.profiles, branchConfig)
+    : resolveScan(raw, products, branchConfig);
+}

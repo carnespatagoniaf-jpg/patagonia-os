@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import type { Product } from "@patagonia/domain";
+import { useAuth } from "../auth/AuthProvider";
+import { useActiveBranch } from "../branches/BranchProvider";
+import { useScaleLabelProfiles } from "../scales/useScaleLabelProfiles";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { parseAmount } from "../../lib/money";
 import { formatMoney } from "../shifts/format";
@@ -29,6 +32,9 @@ export function ScaleVoidForm({ visible, shift, products, scaleConfig, onMessage
   onMessage: (message: string) => void;
   onClose: () => void;
 }) {
+  const { branchId } = useActiveBranch();
+  const { profile: authProfile } = useAuth();
+  const labelProfiles = useScaleLabelProfiles(branchId ?? null, Boolean(authProfile?.features?.includes("balanzas_v2")));
   const [code, setCode] = useState("");
   const [scanned, setScanned] = useState<ScannedScaleTicket | null>(null);
   const [reason, setReason] = useState("");
@@ -60,7 +66,7 @@ export function ScaleVoidForm({ visible, shift, products, scaleConfig, onMessage
   async function readCode() {
     setError("");
     setCharged(null);
-    const result = describeScaleTicket(code, scaleConfig, products);
+    const result = describeScaleTicket(code, scaleConfig, products, labelProfiles);
     if (!result) {
       setScanned(null);
       setError("Ese código no es un ticket de la balanza (o el producto no está cargado en Stock).");

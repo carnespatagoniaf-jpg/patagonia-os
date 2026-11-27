@@ -1,5 +1,7 @@
 import type { Product } from "@patagonia/domain";
 import { parseSystelSumTicket, parseTicketTotalBarcode, parseWeightBarcode, type ScaleConfig } from "./scale-barcode";
+import { readScaleCode } from "./scale-profile-scan";
+import type { ScaleLabelProfile } from "../scales/label-spec";
 
 /**
  * Control de balanza en el cierre (migración 104). Lógica pura, testeada.
@@ -67,9 +69,17 @@ export type ScannedScaleTicket =
  * producto (igual que Mostrador al vender: un código común de góndola también
  * tiene 13 dígitos).
  */
-export function describeScaleTicket(raw: string, config: ScaleConfig, products: Product[]): ScannedScaleTicket | null {
+export function describeScaleTicket(raw: string, config: ScaleConfig, products: Product[], labelProfiles: { status: string; profiles: ScaleLabelProfile[] } | null = null): ScannedScaleTicket | null {
   const code = raw.trim();
   if (!code) return null;
+  // balanzas_v2: la misma lectura por balanza que Mostrador (una etiqueta dudosa no se describe: null).
+  if (labelProfiles && labelProfiles.status === "ready" && labelProfiles.profiles.length > 0) {
+    const r = readScaleCode(code, products, config, labelProfiles);
+    if (r.type === "ticket_total") return { kind: "total", amount: r.amount };
+    if (r.type !== "label") return null;
+    const weightKg = r.product.unit === "kg" ? r.quantity : null;
+    return { kind: "label", plu: r.plu, product: r.product, weightKg, amount: r.amount ?? round2(r.quantity * r.product.priceRetail) };
+  }
   const total = parseTicketTotalBarcode(code);
   if (total !== null && !products.some((p) => p.code === code)) return { kind: "total", amount: total };
 
