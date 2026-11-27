@@ -15,8 +15,9 @@
 -- 3. set_scale_label_spec(sucursal, balanza, perfil): valida el perfil y los inicios contra las otras balanzas activas,
 --    guarda el anterior en el historial por 7 días, reserva los inicios y anota audit_log.
 -- 4. allocate_scale_prefix(sucursal, balanza): la balanza que ya tiene sus inicios (la más vieja) los conserva; la que
---    choca con otra recibe uno libre (Kretz 22-29: 2-3-7 en centavos con 1070 "PP0PP05"; Systel 23-29: el 22 es el
---    TOTAL de la Cuora) y su perfil anterior queda vigente 7 días.
+--    choca con otra recibe uno libre (Kretz 23-29 y el 22 al final: 2-3-7 en centavos con 1070 "PP0PP05"; Systel
+--    23-29: el 22 es el TOTAL de la Cuora, por eso una Kretz lo recibe solo si no queda otro y nunca si el local ya
+--    tiene una Systel) y su perfil anterior queda vigente 7 días.
 -- 5. set_branch_scale_status(sucursal, balanza, estado): inactiva libera sus inicios (owner/admin).
 -- 6. 'balanzas_v2' en la lista de set_company_feature (inyectado como 211/214).
 --
@@ -309,6 +310,11 @@ begin
   select label_spec into v_spec from public.scale_profiles where company_id = c.company_id and branch_id = p_branch_id and scale_key = p_scale_key;
   select coalesce(array_agg(r.prefix), '{}') into v_taken from public.scale_label_prefixes r
   where r.company_id = c.company_id and r.branch_id = p_branch_id and r.scale_key <> p_scale_key and r.active;
+  -- Con una Systel activa en el local, el 22 es el TOTAL de su ticket (E_S de la Cuora): no se le da a una Kretz.
+  if exists (select 1 from public.scale_profiles sp where sp.company_id = c.company_id and sp.branch_id = p_branch_id
+             and sp.scale_key <> p_scale_key and sp.family = 'systel' and sp.status = 'active') then
+    v_taken := v_taken || '22'::text;
+  end if;
 
   -- Ya tiene perfil y sus inicios no chocan con los de nadie: se los queda (la más vieja conserva el suyo).
   if v_spec is not null and public.scale_label_spec_problem(v_spec) is null then
@@ -319,9 +325,10 @@ begin
     end if;
   end if;
 
-  -- Sin perfil y sin otras balanzas con inicio: el de siempre (Kretz 20, Systel 20/21).
+  -- Sin perfil y sin otras balanzas con inicio: el de siempre (Kretz 20, Systel 20/21). El 22 va ÚLTIMO para una Kretz:
+  -- es el TOTAL de la Cuora, y una Systel que se registre DESPUÉS lo imprime igual (sus etiquetas quedarían ambiguas).
   v_candidates := case when c.family = 'systel' then array['20', '23', '24', '25', '26', '27', '28', '29']
-                       else array['20', '22', '23', '24', '25', '26', '27', '28', '29'] end;
+                       else array['20', '23', '24', '25', '26', '27', '28', '29', '22'] end;
   if v_spec is not null then v_candidates := v_candidates[2:]; end if;
   foreach v_prefix in array v_candidates loop
     v_new := public.scale_label_spec_with_prefix(c.family, v_prefix, c.total_format);

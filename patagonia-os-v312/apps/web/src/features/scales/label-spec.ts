@@ -263,9 +263,10 @@ export function specFromToday(input: { family: ScaleFamilyName; model: string | 
 
 /** Inicios que se le pueden asignar a una balanza de esa marca cuando el suyo ya lo usa otra del local. */
 export function allocatablePrefixes(family: ScaleFamilyName): string[] {
-  // Kretz: el 1070 acepta cualquier inicio "2x" (22 comprobado en la Aura real; 22-29 en la Report, a confirmar en el
-  // banco). Systel: el TOTAL de la Cuora sale con "22" (E_S de fábrica): ese no se le da a nadie.
-  return family === "kretz" ? ["22", "23", "24", "25", "26", "27", "28", "29"] : ["23", "24", "25", "26", "27", "28", "29"];
+  // Kretz: el 1070 acepta cualquier inicio "2x" (22 comprobado en la Aura real; 23-29 y la Report, a confirmar en el
+  // banco). El 22 va último: es el TOTAL de la Cuora (E_S de fábrica), y una Systel registrada después lo imprimiría
+  // igual (prueba three-scales-e2e). Systel: nunca el 22.
+  return family === "kretz" ? ["23", "24", "25", "26", "27", "28", "29", "22"] : ["23", "24", "25", "26", "27", "28", "29"];
 }
 
 /**

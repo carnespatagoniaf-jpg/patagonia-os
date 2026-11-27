@@ -98,7 +98,8 @@ describe("Perfil de etiqueta: 1070 e inicio propio", () => {
 
   it("inicios asignables: la Systel nunca recibe el 22 (su TOTAL)", () => {
     assert.ok(!allocatablePrefixes("systel").includes("22"));
-    assert.equal(allocatablePrefixes("kretz")[0], "22");
+    assert.equal(allocatablePrefixes("kretz")[0], "23");
+    assert.equal(allocatablePrefixes("kretz").at(-1), "22", "el 22 (TOTAL de la Cuora) solo si no queda otro");
     assert.ok(prefixesOverlap("2", "22") && prefixesOverlap("20", "20") && !prefixesOverlap("20", "22"));
   });
 

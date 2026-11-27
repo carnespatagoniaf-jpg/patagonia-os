@@ -63,12 +63,13 @@ end $$;
 -- Perfiles para usar como authenticated (las funciones internas están cerradas).
 create temp table specs (k text primary key, s jsonb);
 insert into specs values ('kretz20', public.scale_label_spec_with_prefix('kretz', '20', null)),
-  ('kretz24', public.scale_label_spec_with_prefix('kretz', '24', null)), ('systel24', public.scale_label_spec_with_prefix('systel', '24', null));
+  ('kretz25', public.scale_label_spec_with_prefix('kretz', '25', null)), ('systel24', public.scale_label_spec_with_prefix('systel', '24', null));
 grant select on specs to authenticated;
 
 set local role authenticated;
 
--- 1. El dueño registra dos Kretz en Centro: la primera recibe el inicio de siempre (20), la segunda uno libre (22).
+-- 1. El dueño registra dos Kretz en Centro: la primera recibe el inicio de siempre (20), la segunda uno libre (23; el 22
+--    va último porque es el TOTAL de la Cuora).
 select set_config('request.jwt.claim.sub', '00000000-0000-0000-0000-0000000e2005', true);
 do $$
 declare r jsonb;
@@ -78,7 +79,7 @@ begin
   r := public.allocate_scale_prefix('00000000-0000-0000-0000-0000000e2002', 'kretz-report');
   if r->>'prefix' <> '20' or (r->>'changed')::boolean is not true or r->'spec'->'writer'->>'code' <> '2002005' then raise exception 'primera: %', r; end if;
   r := public.allocate_scale_prefix('00000000-0000-0000-0000-0000000e2002', 'kretz-aura');
-  if r->>'prefix' <> '22' or r->'spec'->'writer'->>'code' <> '2202205' then raise exception 'segunda: %', r; end if;
+  if r->>'prefix' <> '23' or r->'spec'->'writer'->>'code' <> '2302305' then raise exception 'segunda: %', r; end if;
   -- Volver a pedir: cada una conserva el suyo, sin cambios.
   r := public.allocate_scale_prefix('00000000-0000-0000-0000-0000000e2002', 'kretz-report');
   if r->>'prefix' <> '20' or (r->>'changed')::boolean then raise exception 'la vieja cambió: %', r; end if;
@@ -86,15 +87,22 @@ begin
   perform public.register_branch_scale('00000000-0000-0000-0000-0000000e2003', 'kretz-norte', 'Norte', 'kretz', 'kretz', 'Kretz Report', '{}');
   r := public.allocate_scale_prefix('00000000-0000-0000-0000-0000000e2003', 'kretz-norte');
   if r->>'prefix' <> '20' then raise exception 'otra sucursal: %', r; end if;
+  -- Norte: una Systel después (20 ocupado → 23) y otra Kretz → 24.
+  perform public.register_branch_scale('00000000-0000-0000-0000-0000000e2003', 'systel-norte', 'Cuora', 'systel', 'systel', 'Systel Cuora Max', '{}');
+  r := public.allocate_scale_prefix('00000000-0000-0000-0000-0000000e2003', 'systel-norte');
+  if r->>'prefix' <> '23' then raise exception 'systel norte: %', r; end if;
+  perform public.register_branch_scale('00000000-0000-0000-0000-0000000e2003', 'kretz-norte2', 'Aura', 'kretz', 'kretz', 'Kretz Aura', '{}');
+  r := public.allocate_scale_prefix('00000000-0000-0000-0000-0000000e2003', 'kretz-norte2');
+  if r->>'prefix' <> '24' then raise exception 'kretz norte2: %', r; end if;
 end $$;
 
--- 2. Una Systel en el mismo local: 20/21/22 chocan (20 Report, 22 Aura) → 23 para pesables y unitarios.
+-- 2. Una Systel en el mismo local: 20 Report, 23 Aura → 24 para pesables y unitarios.
 do $$
 declare r jsonb;
 begin
   perform public.register_branch_scale('00000000-0000-0000-0000-0000000e2002', 'systel-max', 'Cuora', 'systel', 'systel', 'Systel Cuora Max', '{}');
   r := public.allocate_scale_prefix('00000000-0000-0000-0000-0000000e2002', 'systel-max');
-  if r->>'prefix' <> '23' or r->'spec'->'writer'->>'weighed' <> '23PPPPCCCCCC' or r->'spec'->'writer'->>'unit' <> '23PPPPCCCCCC' then raise exception 'systel: %', r; end if;
+  if r->>'prefix' <> '24' or r->'spec'->'writer'->>'weighed' <> '24PPPPCCCCCC' or r->'spec'->'writer'->>'unit' <> '24PPPPCCCCCC' then raise exception 'systel: %', r; end if;
   if (select count(*) from public.scale_label_prefixes where branch_id = '00000000-0000-0000-0000-0000000e2002' and active) <> 3 then raise exception 'inicios reservados'; end if;
 end $$;
 
@@ -104,7 +112,7 @@ select pg_temp.must_fail($q$select public.set_scale_label_spec('00000000-0000-00
   'mismo inicio que la Report', 'ya lo usa la balanza "Report"');
 select pg_temp.must_fail($q$select public.set_scale_label_spec('00000000-0000-0000-0000-0000000e2002', 'kretz-aura',
   '{"v":1,"prefixes":{"weighed":"2","unit":"2","total":"2"},"layout":{"prefix":1,"code":6,"value":5,"length":13,"divisor":1},"value":"amount_pesos","sumCode":null,"writer":null}'::jsonb)$q$,
-  'inicio "2" se pisa con 20/22/23', 'ya lo usa la balanza');
+  'inicio "2" se pisa con 20/23/24', 'ya lo usa la balanza');
 -- Perfil inválido o de otra marca.
 select pg_temp.must_fail($q$select public.set_scale_label_spec('00000000-0000-0000-0000-0000000e2002', 'kretz-aura', '{"v":2}'::jsonb)$q$, 'perfil inválido', 'Perfil de etiqueta inválido');
 select pg_temp.must_fail($q$select public.set_scale_label_spec('00000000-0000-0000-0000-0000000e2002', 'kretz-aura', (select s from specs where k = 'systel24'))$q$, 'perfil Systel en una Kretz', 'no es de una balanza kretz');
@@ -113,15 +121,15 @@ select pg_temp.must_fail($q$select public.set_scale_label_spec('00000000-0000-00
 do $$
 declare v_hist jsonb;
 begin
-  perform public.set_scale_label_spec('00000000-0000-0000-0000-0000000e2002', 'kretz-aura', (select s from specs where k = 'kretz24'));
+  perform public.set_scale_label_spec('00000000-0000-0000-0000-0000000e2002', 'kretz-aura', (select s from specs where k = 'kretz25'));
   select label_spec_history into v_hist from public.scale_profiles where scale_key = 'kretz-aura';
-  if jsonb_array_length(v_hist) <> 1 or v_hist->0->'spec'->'writer'->>'code' <> '2202205' then raise exception 'historial: %', v_hist; end if;
+  if jsonb_array_length(v_hist) <> 1 or v_hist->0->'spec'->'writer'->>'code' <> '2302305' then raise exception 'historial: %', v_hist; end if;
   if (v_hist->0->>'valid_until')::timestamptz < now() + interval '6 days 23 hours' then raise exception 'vigencia corta'; end if;
-  if not exists (select 1 from public.scale_label_prefixes where scale_key = 'kretz-aura' and prefix = '24') or exists (select 1 from public.scale_label_prefixes where scale_key = 'kretz-aura' and prefix = '22') then
+  if not exists (select 1 from public.scale_label_prefixes where scale_key = 'kretz-aura' and prefix = '25') or exists (select 1 from public.scale_label_prefixes where scale_key = 'kretz-aura' and prefix = '23') then
     raise exception 'inicios de la Aura no se cambiaron';
   end if;
   -- Mismo perfil otra vez: no suma historial.
-  perform public.set_scale_label_spec('00000000-0000-0000-0000-0000000e2002', 'kretz-aura', (select s from specs where k = 'kretz24'));
+  perform public.set_scale_label_spec('00000000-0000-0000-0000-0000000e2002', 'kretz-aura', (select s from specs where k = 'kretz25'));
   if jsonb_array_length((select label_spec_history from public.scale_profiles where scale_key = 'kretz-aura')) <> 1 then raise exception 'historial duplicado'; end if;
 end $$;
 reset role;
