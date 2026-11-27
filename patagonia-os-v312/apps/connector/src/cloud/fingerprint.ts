@@ -5,6 +5,7 @@ import { createHash } from "node:crypto";
 import { execFile } from "node:child_process";
 import { readFile } from "node:fs/promises";
 import os from "node:os";
+import { REG_RELATIVE, systemExe } from "../native/system-exe";
 
 export function fingerprintHash(input: { hostname: string; machineId: string | null }): string {
   const material = `patagonia-scale-connect|${input.hostname.trim().toLowerCase()}|${(input.machineId ?? "").trim().toLowerCase()}`;
@@ -19,7 +20,7 @@ export function parseRegMachineGuid(output: string): string | null {
 
 async function windowsMachineGuid(): Promise<string | null> {
   return new Promise((resolve) => {
-    execFile("reg.exe", ["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid"], { windowsHide: true, timeout: 10_000 }, (error, stdout) => {
+    execFile(systemExe(REG_RELATIVE), ["query", "HKLM\\SOFTWARE\\Microsoft\\Cryptography", "/v", "MachineGuid"], { windowsHide: true, timeout: 10_000 }, (error, stdout) => {
       resolve(error ? null : parseRegMachineGuid(String(stdout)));
     });
   });

@@ -133,9 +133,10 @@ Cómo se arma (`scripts/package-sea.mjs`):
   hasta que el servicio existe; está explicado en el XML), así que el instalador la asigna con
   `sc.exe config … obj=` justo después de instalar y antes del primer inicio. Si Windows no la
   acepta, usa `NT AUTHORITY\LocalService` (tampoco es administrador). Las dos pueden abrir los
-  puertos COM, igual que cualquier usuario. Después deja los datos SOLO para el servicio (modificar), SYSTEM y
-  Administradores (`icacls … /inheritance:r`: `credential.json` va con DPAPI de máquina, que cualquier usuario de la PC
-  podría descifrar si pudiera leer el archivo), da lectura en el programa e inicia el servicio.
+  puertos COM, igual que cualquier usuario. Después cierra la carpeta de datos (dueño
+  Administradores, sin la herencia de ProgramData: solo SYSTEM, Administradores y el servicio la
+  pueden leer, porque ahí está la credencial cifrada con DPAPI de máquina), da permiso de lectura
+  en el programa e inicia el servicio.
 - **Actualizar** = instalar la versión nueva encima (mismo `AppId`): frena el servicio,
   reemplaza los archivos (borra `node_modules` viejo), `refresh` de WinSW y vuelve a iniciar.
   Los datos quedan.
@@ -185,25 +186,6 @@ Mejor una máquina virtual con Windows 10/11 x64 recién instalado (o Windows Sa
 9. Desinstalar: el servicio desaparece (`sc query PatagoniaScaleConnect` → 1060) y
    `C:\ProgramData\Patagonia\ScaleConnect` queda; repetir eligiendo borrar los datos.
 10. Repetir 2 y 9 en silencioso con los comandos de arriba.
-
-### Prueba automática en una PC limpia (`.github/workflows/scale-connect-e2e.yml`)
-
-Cada corrida de `windows-latest` es una Windows recién creada. Se dispara con un push a `prueba/scale-connect-e2e*`.
-Arma e instala (`/VERYSILENT /NUBE=pruebas`), revisa el servicio (automático retrasado, cuenta virtual, permisos de
-ProgramData, `/status`, nube de staging), mata el proceso, `Restart-Service`, vincula con staging por `/vincular` como
-un navegador, levanta una Report y una Cuora simuladas por red (`e2e/simuladores.ts`; el runner no tiene COM), corta
-una balanza a mitad, corta la red con el firewall, desinstala y reinstala, y arranca en frío. Las comprobaciones quedan
-en el resumen de la corrida y los registros en el artefacto.
-
-Lo de la nube lo hace `e2e/conducir-staging.mjs` desde la PC de quien prueba (token de staging, nunca el de producción):
-crea el código de vinculación cuando el workflow llega a "Vincular con staging" (lo sube a `e2e/codigo.txt` con
-`[skip ci]`), registra y vincula las balanzas, encola los trabajos de cada fase y al final compara `scale_jobs` /
-`scale_job_items` con lo que quedó grabado en cada balanza simulada.
-
-```bash
-git push origin HEAD:prueba/scale-connect-e2e
-node apps/connector/e2e/conducir-staging.mjs --empresa "<empresa de pruebas>" --sucursal "<sucursal>"
-```
 
 ### Manifiesto de actualización (`scripts/make-update-manifest.mjs`)
 

@@ -13,6 +13,7 @@ import { execFile } from "node:child_process";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { readJsonFile } from "../storage/atomic-file";
+import { POWERSHELL_RELATIVE, systemExe } from "../native/system-exe";
 
 export interface StoredCredential {
   connectorId: string;
@@ -142,7 +143,7 @@ export const runWindowsPowerShell: PowerShellRunner = (script, input) =>
   new Promise((resolve, reject) => {
     const encoded = Buffer.from(script, "utf16le").toString("base64");
     const child = execFile(
-      "powershell.exe",
+      systemExe(POWERSHELL_RELATIVE),
       ["-NoLogo", "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", encoded],
       { windowsHide: true, timeout: 30_000, maxBuffer: 1024 * 1024 },
       (error, stdout, stderr) => {

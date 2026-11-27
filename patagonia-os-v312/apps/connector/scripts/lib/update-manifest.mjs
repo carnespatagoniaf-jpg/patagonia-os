@@ -136,3 +136,40 @@ export function verifyManifest(manifest, publicKey) {
   if (signature.length !== 64) return { ok: false, reason: "Firma con largo inválido." };
   return verify(null, signedBytes(manifest), publicKey, signature) ? { ok: true } : { ok: false, reason: "La firma no coincide." };
 }
+
+/** Canales que acepta una PC de cada canal: una PC "interno" recibe todo; una "general", solo lo general. */
+const ACCEPTS = { interno: ["interno", "piloto", "general"], piloto: ["piloto", "general"], general: ["general"] };
+
+/**
+ * ¿El servicio instala lo que ofrece este manifiesto? Además de la firma (verifyManifest):
+ * - Solo una versión MÁS NUEVA que la instalada. Un latest.json viejo (firmado de verdad, pero de una versión con un
+ *   error ya arreglado) que alguien vuelva a servir no hace bajar de versión a nadie, y la misma versión no se reinstala.
+ * - Del canal de esta PC (un piloto no le llega a todos).
+ * - La instalada no puede ser más vieja que minVersion (esa PC se reinstala a mano).
+ * - publishedAt no puede venir del futuro (más de un día: reloj o manifiesto armado a mano).
+ */
+export function checkUpdateOffer(manifest, publicKey, { currentVersion, channel = "general", now = new Date() } = {}) {
+  const signed = verifyManifest(manifest, publicKey);
+  if (!signed.ok) return signed;
+  if (typeof currentVersion !== "string" || !SEMVER.test(currentVersion)) return { ok: false, reason: "Versión instalada desconocida." };
+  const accepted = ACCEPTS[channel];
+  if (!accepted) return { ok: false, reason: `Canal de esta PC desconocido: ${channel}` };
+  if (!accepted.includes(manifest.channel)) return { ok: false, reason: `Es del canal ${manifest.channel} y esta PC es ${channel}.` };
+  if (compareVersions(manifest.version, currentVersion) <= 0) {
+    return { ok: false, reason: `Ofrece ${manifest.version} y ya está ${currentVersion}: nunca se baja de versión ni se reinstala la misma.` };
+  }
+  if (compareVersions(currentVersion, manifest.minVersion) < 0) {
+    return { ok: false, reason: `La instalada (${currentVersion}) es anterior a ${manifest.minVersion}: hay que reinstalar a mano.` };
+  }
+  if (Date.parse(manifest.publishedAt) > now.getTime() + 24 * 3600 * 1000) return { ok: false, reason: "publishedAt está en el futuro." };
+  return { ok: true };
+}
+
+/** El instalador bajado es EXACTAMENTE el del manifiesto (tamaño y SHA-256). Si no, no se ejecuta. */
+export function verifyInstaller(bytes, manifest) {
+  const data = Buffer.isBuffer(bytes) ? bytes : Buffer.from(bytes);
+  if (data.length !== manifest.size) return { ok: false, reason: `Pesa ${data.length} bytes y el manifiesto dice ${manifest.size}.` };
+  const actual = createHash("sha256").update(data).digest("hex");
+  if (actual !== manifest.sha256) return { ok: false, reason: "El SHA-256 no coincide con el manifiesto." };
+  return { ok: true };
+}

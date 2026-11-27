@@ -15,13 +15,14 @@
 // Lógica pura y pruebas: ../scale-connect-api/connect.ts.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
-import { clientAddress, generateSecret, json, MAX_PAIR_BODY, pairStatus, parsePairRequest, readJsonLimited, sha256Hex } from "../scale-connect-api/connect.ts";
+import { clientAddress, generateSecret, isJsonRequest, json, MAX_PAIR_BODY, pairStatus, parsePairRequest, readJsonLimited, sha256Hex } from "../scale-connect-api/connect.ts";
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
 const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 
 Deno.serve(async (req) => {
   if (req.method !== "POST") return json({ ok: false, error: "metodo_no_permitido" }, 405);
+  if (!isJsonRequest(req.headers)) return json({ ok: false, error: "tipo_no_soportado" }, 415);
   const body = await readJsonLimited(req, MAX_PAIR_BODY);
   if (!body.ok) return json({ ok: false, error: body.error }, body.error === "muy_grande" ? 413 : 400);
   const parsed = parsePairRequest(body.value);
