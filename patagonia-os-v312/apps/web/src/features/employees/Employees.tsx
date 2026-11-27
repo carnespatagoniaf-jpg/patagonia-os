@@ -12,6 +12,7 @@ import { daysBetweenInclusive, earlierPending, periodBaseSalary, shortDate } fro
 import { parseQuantity } from "../sale/quantity";
 import { EmployeeBranches } from "./EmployeeBranches";
 import { useAuth } from "../auth/AuthProvider";
+import { EmployeeDiscount } from "./EmployeeDiscount";
 import { planAllows } from "../auth/permissions";
 
 const ADJUSTMENT_TYPE_LABELS: Record<PayrollAdjustmentType, string> = {
@@ -438,6 +439,9 @@ export function Employees() {
           <h1>Sueldos y vales</h1>
           <p className="muted">Sueldo, premios, descuentos y vales — enlazado con las salidas de caja.</p>
         </div>
+        {profile?.company_id && (profile.role === "owner" || profile.role === "admin") && (
+          <EmployeeDiscount companyId={profile.company_id} onMessage={setMessage} />
+        )}
       </header>
 
       {message && <div className="message no-print">{message}</div>}

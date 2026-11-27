@@ -11,13 +11,15 @@ import type { SaleTicket } from "./useSaleTicket";
 // medios de pago y barra de cobro. Es solo vista: el estado vive en
 // useSaleTicket y el cobro (checkout) en Sale.tsx.
 
-export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlot, priceSlot, priceLists = [] }: {
+export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlot, valeSlot, priceSlot, priceLists = [] }: {
   ticket: SaleTicket;
   accounts: TreasuryAccount[];
   busy: boolean;
   onCheckout: () => void;
   /** Opción "Factura" (solo si la factura electrónica está activa en el negocio). */
   invoiceSlot?: ReactNode;
+  /** "Se lo lleva un empleado" (vale de mercadería, migración 215). */
+  valeSlot?: ReactNode;
   /** Botón Minorista / Mayorista (solo si la empresa tiene listas de precios). */
   priceSlot?: ReactNode;
   /** Listas que se eligen en Mostrador (sin zonas): cada renglón dice la suya y se puede cambiar. */
@@ -453,6 +455,7 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
               </>
             )}
           </div>
+          {valeSlot}
         </div>
 
         {invoiceSlot}

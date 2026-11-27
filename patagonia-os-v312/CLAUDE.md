@@ -228,6 +228,15 @@ Owner: a separate plan for a client (two butcher shops in Puerto Madryn) moving 
 - **Web**: `features/planta/` (`Planta.tsx` tabs Envasar / Paquetes / Mandar a un local; `PackageLabels.tsx` Code 39 labels, 60 × 40 mm one per page or A4, footer text in localStorage; pure `planta-logic.ts`, tested). Menu "Producto y stock" → Planta.
 - Tests: `tests/sql/194_plan_planta.sql`, passed on staging inside a rolled-back transaction (Management API). Not tried in a browser against real data, nor with a real label printer or scanner.
 
+## Vale de mercadería from Mostrador (migration 215, 2026-11-27)
+
+Owner: an employee takes merchandise and it is deducted from salary. "Phase 3" announced in 066. The cashier builds the ticket as usual and, under the payment methods, "Se lo lleva un empleado" (`EmployeeValeCheckout.tsx`, plan Estándar+) → `register_employee_merchandise_vale(shift, employee, items[{product_id, quantity, price_list_id?}], pin?, detail?)`:
+- Price = `pos_list_unit_price` (same as a sale: chosen list or branch zone) minus `companies.employee_discount_pct` (0–50, `set_employee_discount`, owner/admin, set at the top of Empleados). Total rounded to the peso.
+- Stock: one `inventory_movements` `vale_mercaderia` per line (`reference_type='employee_vale'`); presentaciones follow the 111 trigger. Recipes are NOT exploded (that trigger only keys on pos_sale/customer_charge).
+- Money: NO Treasury movement and NO pos_sale. One `pos_shift_outflows` type `vale_mercaderia` (account null), which `close_payroll_liquidation` (066) already deducts. Cash close is unaffected (`pos_shift_expected` reads treasury only). Lines in `pos_shift_outflow_items`.
+- If the employee has a cashier PIN (117) it is required (`pos_verify_cashier`). Deleting the vale with the existing `delete_pos_shift_outflow` returns the stock (BEFORE DELETE trigger `pos_shift_outflows_return_stock`, movement `vale_mercaderia_anulado`).
+- Pure logic `sale/merchandise-vale.ts` (tested). Tests: `tests/sql/215_vale_mercaderia.sql`.
+
 ## Freezer (migration 214, 2026-11-26; NOT published)
 
 Owner: "saber qué cosas tenemos guardadas en el freezer y cuando se venda se sale". Per-company feature `freezer` (platform panel "Pantallas a pedido"), page `freezer` = tab of Stock, permission `freezer.manage` (admin, manager, production, cashier; owner via `"*"`). Owner chose the scale's normal label, no extra printer.
