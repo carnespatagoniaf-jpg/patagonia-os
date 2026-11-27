@@ -1,0 +1,51 @@
+<!--
+  Configuración de WinSW (https://github.com/winsw/winsw, v3) para Patagonia Scale Connect.
+  Convención de WinSW: su .exe se renombra igual que este XML. En la carpeta del programa:
+    PatagoniaScaleConnect.exe   = WinSW-x64.exe renombrado (el envoltorio del servicio)
+    PatagoniaScaleConnect.xml   = este archivo
+    scale-connect.exe           = el conector (Node SEA)
+  Instalación (como administrador):  PatagoniaScaleConnect.exe install
+  Desinstalación:                    PatagoniaScaleConnect.exe uninstall
+  Ver apps/connector/README.md.
+-->
+<service>
+  <id>PatagoniaScaleConnect</id>
+  <name>Patagonia Scale Connect</name>
+  <description>Conecta las balanzas de esta PC con Patagonia System. Es el único programa que usa sus puertos.</description>
+
+  <executable>%BASE%\scale-connect.exe</executable>
+  <workingdirectory>%BASE%</workingdirectory>
+
+  <!-- Arranca con Windows, aunque nadie inicie sesión. Diferido: espera a que la red y el USB estén listos. -->
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+
+  <!-- Reinicio ante caída: 5 s, 15 s y después cada 60 s. El contador se reinicia tras 1 h sin fallas. -->
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="15 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+
+  <!-- Apagado: WinSW manda Ctrl+C; el servicio interrumpe el trabajo en curso, lo anota y libera los puertos. -->
+  <stoptimeout>15 sec</stoptimeout>
+
+  <!--
+    Cuenta de servicio virtual, sin contraseña y sin privilegios de administrador.
+    Si la versión de WinSW no la acepta, el instalador corre después:
+      sc.exe config PatagoniaScaleConnect obj= "NT SERVICE\PatagoniaScaleConnect"
+    y le da permiso de escritura en %ProgramData%\Patagonia\ScaleConnect:
+      icacls "%ProgramData%\Patagonia\ScaleConnect" /grant "NT SERVICE\PatagoniaScaleConnect:(OI)(CI)M"
+  -->
+  <serviceaccount>
+    <username>NT SERVICE\PatagoniaScaleConnect</username>
+  </serviceaccount>
+
+  <!-- Salida de consola del proceso (la bitácora propia está en logs\connector.log). -->
+  <logpath>%ProgramData%\Patagonia\ScaleConnect\logs\winsw</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>2048</sizeThreshold>
+    <keepFiles>3</keepFiles>
+  </log>
+
+  <env name="NODE_ENV" value="production"/>
+</service>

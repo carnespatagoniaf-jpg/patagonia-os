@@ -1,0 +1,3 @@
+# Datos locales de desarrollo (npm run dev) y salida del empaquetado.
+.data/
+dist/
