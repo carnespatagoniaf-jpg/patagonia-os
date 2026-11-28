@@ -244,7 +244,17 @@ export function SaleTicketPanel({ ticket, accounts, busy, onCheckout, invoiceSlo
                   </small>
                 );
               })()}
-              {line.kind === "manual" && line.source === "scale_total" && (
+              {line.kind === "manual" && line.source === "scale_total" && !ticket.totalNeedsDetail && (
+                ticket.detailing === line.key ? (
+                  <small className="pos-detail-hint">
+                    Falta detallar este importe: buscá cada producto del papel.{" "}
+                    <button type="button" className="link-button" onClick={ticket.stopTicketDetail}>Terminar después</button>
+                  </small>
+                ) : (
+                  <button type="button" className="link-button" onClick={() => ticket.startTicketDetail(line.key)}>Detallar productos (descuenta stock)</button>
+                )
+              )}
+              {line.kind === "manual" && line.source === "scale_total" && ticket.totalNeedsDetail && (
                 ticket.detailing === line.key ? (
                   <small className="pos-detail-hint">
                     Detallá el ticket: escaneá la etiqueta de cada producto, o buscalo y escribí su importe. Se cobra cuando dé exacto el TOTAL.{" "}

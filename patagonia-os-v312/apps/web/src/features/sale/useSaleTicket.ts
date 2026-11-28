@@ -75,9 +75,15 @@ export interface SaleTicketDeps {
    * null = apagado: todo como antes.
    */
   labelProfiles?: LabelProfilesState | null;
+  /**
+   * C7 (TOTAL solo no se cobra, hay que detallarlo) SOLO con balanzas_v2. Dueño, 28/11/2026: "a los clientes que estan
+   * ya funcionando no le toques nada" — sin balanzas_v2, el TOTAL se cobra como en main (decisión del 15/10, detalle
+   * opcional).
+   */
+  totalNeedsDetail?: boolean;
 }
 
-export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrated = false, scaleConfigStatus = "ready", accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false, scaleBranchId = null, zoneListId = null, boxLabels = false, freezer = false, labelProfiles = null }: SaleTicketDeps) {
+export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrated = false, scaleConfigStatus = "ready", accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot = false, scaleBranchId = null, zoneListId = null, boxLabels = false, freezer = false, labelProfiles = null, totalNeedsDetail = false }: SaleTicketDeps) {
   const [search, setSearch] = useState("");
   const [highlightedIndex, setHighlightedIndex] = useState(-1);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -584,6 +590,28 @@ export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrat
     const scan = resolved;
     const applyScaleScan = () => {
     const resolved = scan;
+    if (resolved.type === "ticket_total" && !totalNeedsDetail) {
+      // Como en main (sin balanzas_v2): el TOTAL se cobra directo y "Detallar productos" es opcional.
+      const ticketTotal = resolved.amount;
+      if (cart.some((l) => l.key === resolved.key)) {
+        setMessage("Ese ticket de la balanza ya está cargado en esta venta.");
+      } else if (
+        cart.some((l) => l.source === "scale") &&
+        !window.confirm("Ya escaneaste productos de la balanza en esta venta. Si son de este mismo ticket, NO cargues también el total (se cobraría dos veces). ¿Cargar el total igual?")
+      ) {
+        setMessage("No se cargó el total del ticket.");
+      } else if (
+        ticketTotal >= TICKET_TOTAL_CONFIRM_FROM &&
+        !window.confirm(`El ticket de la balanza indica ${formatMoney(ticketTotal)}. ¿Coincide con el TOTAL impreso en el ticket?`)
+      ) {
+        setMessage("Ticket de la balanza no cargado. Revisá el importe o cargá los productos a mano.");
+      } else {
+        setCart((current) => [...current, { key: resolved.key, kind: "manual", name: "Ticket de balanza", unit: "unit", quantity: 1, unitPrice: ticketTotal, source: "scale_total", scaleTickets: 1 }]);
+        setMessage(`Ticket de balanza cargado: ${formatMoney(ticketTotal)}. Trae varios productos: para que descuente stock, tocá "Detallar productos" en esa línea (es opcional).`);
+      }
+      done();
+      return;
+    }
     if (resolved.type === "ticket_total") {
       const ticketTotal = resolved.amount;
       if (
@@ -616,7 +644,9 @@ export function useSaleTicket({ products, categories, scaleConfig, scaleCalibrat
       if (
         !detailing &&
         cart.some((l) => l.source === "scale_total") &&
-        !window.confirm("En esta venta hay un TOTAL de la balanza sin detallar. Si este producto es de ese ticket, tocá Cancelar, después \"Seguir detallando\" en esa línea y escanealo de nuevo (si no, se cobraría dos veces). ¿Agregarlo aparte?")
+        !window.confirm(totalNeedsDetail
+          ? "En esta venta hay un TOTAL de la balanza sin detallar. Si este producto es de ese ticket, tocá Cancelar, después \"Seguir detallando\" en esa línea y escanealo de nuevo (si no, se cobraría dos veces). ¿Agregarlo aparte?"
+          : "En esta venta ya está cargado el TOTAL de un ticket de la balanza. Si este producto es de ese mismo ticket, se cobraría dos veces. ¿Agregarlo igual?")
       ) {
         setMessage("No se agregó el producto.");
         done();
@@ -1129,7 +1159,7 @@ ${l.name} ${qty}`);
 
   /** Lista con la que se muestran los precios al buscar: la elegida o la zona del local. */
   const displayListId = priceListId ?? zoneListId;
-  return { priceListId, setPriceListId: choosePriceList, applyPriceListToAll, setLinePriceList, mixedPrices, displayListId, search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, detailing, startTicketDetail, stopTicketDetail, commitScaleTickets, papers, scaleConfigStatus, labelChoice, pickLabelChoice, dismissLabelChoice, readingScaleTicket, scaleTicketChoices, setScaleTicketChoices, addScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
+  return { priceListId, setPriceListId: choosePriceList, applyPriceListToAll, setLinePriceList, mixedPrices, displayListId, search, setSearch, highlightedIndex, setHighlightedIndex, showProductTable, setShowProductTable, cart, setCart, itemDiscounts, setItemDiscounts, saleDiscount, setSaleDiscount, saleDiscountMode, setSaleDiscountMode, saleSurcharge, setSaleSurcharge, saleSurchargeMode, setSaleSurchargeMode, showDiscountForm, setShowDiscountForm, showManualForm, setShowManualForm, weighing, setWeighing, manualDesc, setManualDesc, manualPrice, setManualPrice, manualQty, setManualQty, manualUnit, setManualUnit, payments, setPayments, confirmCharge, setConfirmCharge, cashTendered, setCashTendered, focusRowIndex, setFocusRowIndex, searchInputRef, accountSelectRefs, amountInputRefs, cashTenderedRef, chargeButtonRef, grossTotal, itemDiscountTotal, saleSurchargeRaw, saleSurchargeValue, saleDiscountRaw, saleDiscountValue, total, hasAdjustment, isSplit, singleAccount, isSingleCash, tenderedValue, change, splitPaymentsTotal, splitRemaining, filteredProducts, CATEGORY_LESS_LABEL, productGroups, searchMatches, activeMatchIndex, quickAdd, addProductFromSearch, addManualItem, handleSearchKeyDown, removeFromCart, updateCartQuantity, clearTicket, detailing, startTicketDetail, stopTicketDetail, totalNeedsDetail, commitScaleTickets, papers, scaleConfigStatus, labelChoice, pickLabelChoice, dismissLabelChoice, readingScaleTicket, scaleTicketChoices, setScaleTicketChoices, addScaleTicket, addPaymentRow, removePaymentRow, updatePaymentRow, selectSinglePaymentAccount };
 }
 
 export type SaleTicket = ReturnType<typeof useSaleTicket>;

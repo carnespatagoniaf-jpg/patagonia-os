@@ -201,7 +201,7 @@ export function Sale() {
   }, [branchId]);
   // 'balanzas_v2': cada etiqueta se le pregunta a cada balanza de la sucursal (perfiles, con copia en esta PC).
   const labelProfiles = useScaleLabelProfiles(branchId ?? null, Boolean(profile?.features?.includes("balanzas_v2")));
-  const ticket = useSaleTicket({ products, categories, scaleConfig, scaleCalibrated: scaleConfigCalibrated, scaleConfigStatus, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot: SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? ""), scaleBranchId: branchId ?? null, zoneListId, boxLabels: Boolean(profile?.features?.includes("etiquetas_caja")), freezer: Boolean(profile?.features?.includes("freezer")), labelProfiles });
+  const ticket = useSaleTicket({ products, categories, scaleConfig, scaleCalibrated: scaleConfigCalibrated, scaleConfigStatus, accounts, shift, busy, setMessage, setShowShiftTotals, systelTicketPilot: SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? ""), scaleBranchId: branchId ?? null, zoneListId, boxLabels: Boolean(profile?.features?.includes("etiquetas_caja")), freezer: Boolean(profile?.features?.includes("freezer")), labelProfiles, totalNeedsDetail: Boolean(profile?.features?.includes("balanzas_v2")) });
 
   // Pedido que se cobra (Pedidos → "Cobrar en Mostrador", migración 196): se cargan sus productos una sola vez, con la
   // lista de productos ya cargada, y al cobrar queda entregado.
@@ -653,7 +653,7 @@ export function Sale() {
     if (cart.length === 0 || !shift) return;
     const orderBeingCharged = chargingOrder;
     // C7 (dueño, 26/11): un TOTAL de la balanza sin detallar no se cobra (no bajaría stock). Igual sin conexión.
-    if (pendingTotals(cart).length > 0) {
+    if (ticket.totalNeedsDetail && pendingTotals(cart).length > 0) {
       setMessage(PENDING_TOTAL_MESSAGE);
       return;
     }
