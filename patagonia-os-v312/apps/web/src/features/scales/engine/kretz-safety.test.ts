@@ -391,3 +391,26 @@ describe("E20: el driver de la Report confirma con el campo de precio, no con cu
     assert.equal(r.verified, "confirmed");
   });
 });
+
+describe("Paso 0 (Haedo): conectar y leer una Report LT no le escribe NADA", () => {
+  /** Comandos que solo leen (discovery.ts, assertReadOnly): 0001/0002, 1500-1999, 5000-5999. */
+  const readOnly = (c: string) => c === "0001" || c === "0002" || (c >= "1500" && c <= "1999") || (c >= "5000" && c <= "5999");
+  for (const endCode of ["02", "20", "40"]) {
+    it(`lectura completa de 60 productos (fin de lista "${endCode}"): solo comandos de lectura, balanza intacta`, async () => {
+      localStorage.clear();
+      const scale = new FakeReport();
+      scale.endCode = endCode;
+      for (let i = 1; i <= 60; i++) scale.records.set(i, reportRecord(i, `PROD ${i}`, 1000 + i));
+      const before = new Map(scale.records);
+      // Patagonia con productos distintos (precios y nombres cambiados, y uno nuevo): igual NO se manda nada hasta "Enviar".
+      const products = [P("a", "1", "OTRO NOMBRE", "kg", 99999), P("n", "61", "NUEVO", "kg", 5000)];
+      const s = await reportSession(scale, products);
+      const prep = await s.prepare(noop);
+      assert.ok(prep.writes > 0, "hay cambios para enviar, pero prepare no los manda");
+      assert.deepEqual(scale.commands.filter((c) => !readOnly(c)), [], `comandos que no son de lectura: ${scale.commands.filter((c) => !readOnly(c)).join(", ")}`);
+      assert.deepEqual(scale.writes, []);
+      assert.deepEqual(scale.records, before);
+      await s.close?.();
+    });
+  }
+});
