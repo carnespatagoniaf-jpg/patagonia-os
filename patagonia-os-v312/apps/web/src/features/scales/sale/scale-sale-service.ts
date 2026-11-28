@@ -65,6 +65,41 @@ export async function loadScaleSetups(branchId: string): Promise<ScaleSetup[]> {
   }
 }
 
+const OTHER_BRAND_CACHE = (branchId: string) => `patagonia-scale-other-brand-${branchId}`;
+
+/**
+ * ¿La sucursal tiene alguna balanza registrada y activa que NO sea Systel (una Kretz)? Mostrador lo usa para saber si el
+ * formato de etiquetas de la sucursal compite con la lectura Systel (scale-label-resolver, branchFormatCompetes).
+ * Sin conexión usa la última respuesta guardada en esta PC; sin dato, null (el lector entonces compite: pregunta).
+ */
+export async function branchHasNonSystelScale(branchId: string): Promise<boolean | null> {
+  const cached = (): boolean | null => {
+    try {
+      const v = localStorage.getItem(OTHER_BRAND_CACHE(branchId));
+      return v === "1" ? true : v === "0" ? false : null;
+    } catch {
+      return null;
+    }
+  };
+  if (!supabase) return null;
+  try {
+    const { data, error } = await supabase.from("scale_profiles").select("brand, active").eq("branch_id", branchId);
+    if (error) throw toError(error);
+    const rows = (data ?? []) as Array<{ brand: string | null; active: boolean | null }>;
+    const active = rows.filter((r) => r.active !== false);
+    // Sin balanzas registradas no se sabe qué hay en el local: el formato de la sucursal sigue compitiendo.
+    const other = active.length === 0 || active.some((r) => (r.brand ?? "").toLowerCase() !== "systel");
+    try {
+      localStorage.setItem(OTHER_BRAND_CACHE(branchId), other ? "1" : "0");
+    } catch {
+      /* sin almacenamiento: igual se usa la respuesta */
+    }
+    return other;
+  } catch {
+    return cached();
+  }
+}
+
 /**
  * Una balanza de venta de la sucursal (la de `scaleKey`, o la única que haya), o null. Para Stock y para la
  * sincronización de la Systel; Mostrador usa loadScaleSetups.

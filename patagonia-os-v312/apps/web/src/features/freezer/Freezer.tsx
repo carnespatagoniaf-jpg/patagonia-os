@@ -1,6 +1,8 @@
 import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { Product } from "@patagonia/domain";
 import { useAuth } from "../auth/AuthProvider";
+import { useScaleLabelProfiles } from "../scales/useScaleLabelProfiles";
+import { SCALE_CONFIG_UNKNOWN } from "../sale/scale-config-cache";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { isSupabaseConfigured } from "../../lib/supabase";
 import { demoProducts } from "../../lib/demo-data";
@@ -39,7 +41,8 @@ export function Freezer() {
   const [products, setProducts] = useState<Product[]>([]);
   const [packages, setPackages] = useState<FreezerPackage[]>([]);
   const [loading, setLoading] = useState(true);
-  const [scaleConfig, setScaleConfig] = useState<ScaleConfig>(() => (branchId ? cachedScaleConfig(branchId)?.config : undefined) ?? DEFAULT_SCALE_CONFIG);
+  const [scaleConfig, setScaleConfig] = useState<ScaleConfig>(() => (branchId ? cachedScaleConfig(branchId)?.config : undefined) ?? SCALE_CONFIG_UNKNOWN);
+  const labelProfiles = useScaleLabelProfiles(branchId ?? null, Boolean(profile?.features?.includes("balanzas_v2")));
   const [message, setMessage] = useState("");
   const [error, setError] = useState("");
 
@@ -130,7 +133,7 @@ export function Freezer() {
   function onCodeEnter() {
     const raw = code.trim();
     if (!raw) return;
-    const r = resolveEntryScan(raw, activeProducts, formats, scaleConfig, false);
+    const r = resolveEntryScan(raw, activeProducts, formats, scaleConfig, false, labelProfiles);
     if (r.type === "line") {
       addLine({ productId: r.line.productId, name: r.line.name, unit: r.line.unit, quantity: r.line.quantity, code: r.line.code }, r.detail);
       setCode("");

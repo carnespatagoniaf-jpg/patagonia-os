@@ -1,6 +1,6 @@
 import type { SystelClient } from "../../../inventory/systel/systel-client";
 import { toCuoraText } from "../../../inventory/systel/systel-frame";
-import { LAYOUT_INFO, pluEanSetting, priceToRaw, type SystelLayout, type SystelPlu } from "../../../inventory/systel/systel-plu";
+import { emptyPluTail, LAYOUT_INFO, pluEanSetting, priceToRaw, type SystelLayout, type SystelPlu } from "../../../inventory/systel/systel-plu";
 import { buildBarcodeRewrite, sameIgnoringLotePadding, targetCodeFor, writeDataFromRead, type TypeByteMode } from "../../../inventory/systel/systel-product-barcode";
 import { namesEquivalent } from "../matching";
 
@@ -63,11 +63,25 @@ const put = (s: string, at: number, value: string) => s.slice(0, at) + value + s
 const pad = (n: number, w: number) => String(n).padStart(w, "0");
 
 /**
+ * La información extra de un producto (después de la tara) en blanco, como en un producto nuevo: agua, nutrición,
+ * origen, conservación, receta y lote vacíos, sin ingredientes. El código de barras propio (tipo + configuración) se
+ * deja: lo arma después `buildBarcodeRewrite`. Cuora 2: después de la tara solo están los ingredientes.
+ */
+function blankExtras(layout: SystelLayout, r: string, tailAt: number): string {
+  const info = LAYOUT_INFO[layout];
+  if (layout === "cuora2") return r.slice(0, tailAt) + "N";
+  const typeAt = tailAt + info.tailFixed - 14;
+  return r.slice(0, tailAt) + emptyPluTail(layout).slice(0, info.tailFixed - 14) + r.slice(typeAt, typeAt + 13) + "N";
+}
+
+/**
  * Cómo tiene que quedar el registro (en forma de lectura, con gestión) para este producto.
  * Producto nuevo: se arma sobre un producto que la balanza YA tiene (el modelo), igual que los productos de prueba
  * creados en la balanza real de Los gringos (14/10): otro número, nombre, precio (lista 2 en 0), código y forma de venta.
+ * `fresh` (producto nuevo, o un número que tenía OTRO producto y se reemplaza): todas las listas menos la 1 en 0, sin
+ * tara y sin la información extra del registro anterior (C10). El mismo producto con otro precio conserva todo.
  */
-export function desiredRead(layout: SystelLayout, number: number, product: PushProduct, priceRaw: number, current: string | null, template: string | null = null): string | null {
+export function desiredRead(layout: SystelLayout, number: number, product: PushProduct, priceRaw: number, current: string | null, template: string | null = null, fresh = !current): string | null {
   const info = LAYOUT_INFO[layout];
   const o = offsets(layout);
   const saleType = product.byWeight ? "P" : "U";
@@ -77,14 +91,17 @@ export function desiredRead(layout: SystelLayout, number: number, product: PushP
   if (!current) {
     r = put(r, 0, pad(number, o.pd));
     r = put(r, o.pd, "1");
+  }
+  if (fresh) {
     r = put(r, o.pricesAt, "0".repeat(o.codeAt - o.pricesAt));
+    r = blankExtras(layout, r, o.tareAt + info.tareDigits);
   }
   r = put(r, o.nameAt, toCuoraText(product.name, 18));
   r = put(r, o.pricesAt, pad(priceRaw, 6));
   r = put(r, o.codeAt, pad(number, info.codeDigits));
   r = put(r, o.saleAt, saleType);
-  // Producto nuevo: sin la tara del producto que se usó de modelo.
-  if (!product.byWeight || !current) r = put(r, o.tareAt, pad(0, info.tareDigits));
+  // Producto nuevo o reemplazado: sin la tara del producto anterior o del modelo.
+  if (!product.byWeight || fresh) r = put(r, o.tareAt, pad(0, info.tareDigits));
   // Nunca vencimiento en la etiqueta (dueño 2026-11-19, Carnes premium): 0 días = no lo imprime. También en los que ya estaban.
   r = put(r, o.saleAt - 4, "0000");
   return r;
@@ -142,7 +159,8 @@ function restoreData(layout: SystelLayout, read: string, mode: TypeByteMode): st
 }
 
 /** `templates`: modelos para armar productos nuevos cuando la balanza no tiene ninguno (systel-empty-template.ts). */
-export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDecimals: number, products: PushProduct[], opts: { replace?: boolean; mode?: TypeByteMode; templates?: SystelPlu[]; pluCapacity?: number } = {}): PushItem[] {
+/** `ticketCodes` ('balanzas_v2'): el código propio de ESTA balanza (su inicio); sin esto, 20PPPPCCCCCC / 21PPPPCCCCCC. */
+export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDecimals: number, products: PushProduct[], opts: { replace?: boolean; mode?: TypeByteMode; templates?: SystelPlu[]; pluCapacity?: number; ticketCodes?: { weighed: string; unit: string } } = {}): PushItem[] {
   const info = LAYOUT_INFO[layout];
   // El número más alto que acepta ESTA balanza (topPluNumber en systel.ts: firma "P08000" de una Max 6.0); 0 = el del formato.
   const top = Math.min(info.maxPlu, info.maxCode, (opts.pluCapacity ?? 0) > 0 ? opts.pluCapacity! : Infinity);
@@ -167,9 +185,10 @@ export function planSystelPush(plus: SystelPlu[], layout: SystelLayout, priceDec
       return { ...base, number, action: "omitir", reason: `precio fuera de lo que admite la balanza (máximo ${priceDecimals === 2 ? "$9.999,99" : "$999.999"})` };
     }
     const cur = byNumber.get(number) ?? null;
-    const target = targetCodeFor(product.byWeight ? "P" : "U")!;
+    const target = opts.ticketCodes ? (product.byWeight ? opts.ticketCodes.weighed : opts.ticketCodes.unit) : targetCodeFor(product.byWeight ? "P" : "U")!;
     const template = cur ? null : (models.find((p) => (p.saleType === "P" || p.saleType === "C") === product.byWeight) ?? models[0])?.raw ?? null;
-    const read = desiredRead(layout, number, product, priceRaw, cur?.raw ?? null, template);
+    const fresh = !cur || !namesEquivalent(cur.name, product.name);
+    const read = desiredRead(layout, number, product, priceRaw, cur?.raw ?? null, template, fresh);
     let data: string | null;
     if (layout === "cuora2") {
       // Sin código de barras por producto: la etiqueta sale con el formato general de la balanza (el código es el número).
@@ -206,24 +225,54 @@ export interface PushResult {
   rejected?: string;
 }
 
+/**
+ * Reintentos de una escritura que la balanza no hizo: E1 (llegó mal por el cable), E2 (buffer lleno), E3 (no atendió),
+ * o sin respuesta. Antes de cada uno se relee el producto: solo se reintenta si sigue exactamente como estaba.
+ */
+const WRITE_RETRY_ERRORS = new Set(["E1", "E2", "E3"]);
+export const WRITE_RETRY_MS = [300, 1000, 2500];
+
 export async function runSystelPush(client: SystelClient, layout: SystelLayout, plan: PushItem[], onProgress: (done: number, total: number) => void = () => {}, mode: TypeByteMode = "ascii"): Promise<PushResult> {
   const todo = plan.filter((x) => x.data && x.number !== null && (x.action === "crear" || x.action === "actualizar" || x.action === "reemplazar"));
   const done: PushResult["done"] = [];
   for (const [i, item] of todo.entries()) {
     onProgress(i + 1, todo.length);
     const n = item.number!;
-    // Justo antes de escribir: la balanza tiene que seguir como cuando se leyó (si alguien la cambió, se frena).
-    const fresh = await client.readPlu(layout, n);
-    const freshRaw = fresh?.raw ?? null;
-    if (item.current === null ? freshRaw !== null : !freshRaw || !sameRecord(layout, item.current, freshRaw)) {
-      return { done, stoppedAt: n, detail: "la balanza cambió desde que se leyó: no se escribió", restored: null };
+    const isOriginal = (raw: string | null) => (item.current === null ? raw === null : !!raw && sameRecord(layout, item.current, raw));
+    let reply: Awaited<ReturnType<SystelClient["writeProductRecord"]>> = null;
+    let back: SystelPlu | null = null;
+    let ok = false;
+    for (let attempt = 0; ; attempt++) {
+      // Justo antes de escribir (y antes de cada reintento): la balanza tiene que seguir como cuando se leyó.
+      // Solo E7 ("no existe") cuenta como número libre: un error o el silencio no dicen nada, y ahí no se escribe (C9).
+      const status = await client.readPluStatus(layout, n);
+      if ("error" in status) {
+        return { done, stoppedAt: n, detail: `no se pudo leer el producto ${n} antes de escribirlo (${status.error}): no se escribió`, restored: null };
+      }
+      const fresh = "plu" in status ? status.plu : null;
+      if (!isOriginal(fresh?.raw ?? null)) {
+        return { done, stoppedAt: n, detail: attempt === 0 ? "la balanza cambió desde que se leyó: no se escribió" : "después de un intento fallido la balanza no quedó como estaba: no se reintentó", restored: null };
+      }
+      reply = await client.writeProductRecord(layout, n, item.data!);
+      if (reply === "bloqueado") return { done, stoppedAt: n, detail: "escritura bloqueada", restored: null };
+      const transient = reply === null || (reply.kind === "error" && WRITE_RETRY_ERRORS.has(reply.errorCode ?? ""));
+      if (reply && reply.kind === "error" && (!transient || attempt >= WRITE_RETRY_MS.length)) {
+        return { done, stoppedAt: n, detail: `la balanza rechazó el producto ${n} (${reply.errorCode}); no cambió nada`, restored: null, rejected: reply.errorCode ?? "error" };
+      }
+      const backStatus = reply && reply.kind === "error" ? null : await client.readPluStatus(layout, n);
+      back = backStatus && "plu" in backStatus ? backStatus.plu : null;
+      ok = !!back && sameRecord(layout, expectedRead(layout, item.data!, back.raw[LAYOUT_INFO[layout].pluDigits]), back.raw);
+      // Releído igual a lo mandado: quedó bien, aunque la confirmación (ACK) se haya perdido en el cable.
+      if (ok) break;
+      // Rechazo pasajero (E1/E2/E3: "no guardé nada") o sin respuesta y la balanza sigue como estaba: se vuelve a mandar.
+      // REAL Quesar 17/11: E1 en el producto 163 de 241; al repetir todo a mano, pasó entero.
+      // Una relectura que no contestó no prueba que siga como estaba (un producto nuevo daría "libre" sin serlo).
+      const untouched = reply !== null && reply.kind === "error" ? true : !!backStatus && !("error" in backStatus) && isOriginal(back?.raw ?? null);
+      if (!(transient && untouched && attempt < WRITE_RETRY_MS.length)) break;
+      await new Promise((r) => setTimeout(r, WRITE_RETRY_MS[attempt]));
+      await client.wake();
     }
-    const reply = await client.writeProductRecord(layout, n, item.data!);
-    if (reply === "bloqueado") return { done, stoppedAt: n, detail: "escritura bloqueada", restored: null };
-    if (reply && reply.kind === "error") return { done, stoppedAt: n, detail: `la balanza rechazó el producto ${n} (${reply.errorCode}); no cambió nada`, restored: null, rejected: reply.errorCode ?? "error" };
-    const back = await client.readPlu(layout, n);
-    const ok = !!back && sameRecord(layout, expectedRead(layout, item.data!, back.raw[LAYOUT_INFO[layout].pluDigits]), back.raw);
-    if (ok && reply && reply.kind === "ack") {
+    if (ok) {
       done.push({ number: n, action: item.action });
       continue;
     }
@@ -234,7 +283,7 @@ export async function runSystelPush(client: SystelClient, layout: SystelLayout, 
       const again = await client.readPlu(layout, n);
       restored = !!again && sameRecord(layout, item.current, again.raw);
     }
-    return { done, stoppedAt: n, detail: !back ? "no se pudo releer el producto" : ok ? "la balanza no confirmó la escritura" : "lo releído no es lo que se mandó", restored };
+    return { done, stoppedAt: n, detail: !back ? "no se pudo releer el producto" : isOriginal(back.raw) ? "la balanza no guardó el producto después de varios intentos" : "lo releído no es lo que se mandó", restored };
   }
   return { done, stoppedAt: null, detail: "", restored: null };
 }
@@ -295,13 +344,13 @@ export const SECTOR_NAME = "GENERAL";
  * Balanza VACÍA: los productos nuevos se arman con el sector de los modelos (systel-empty-template.ts). Si alguien borró
  * los sectores en la balanza, cada producto da E7 (real Los gringos 13/11). Lee los sectores (11), crea solo los que faltan
  * (10, nunca uno que ya está: la 10 también le cambia el nombre) y relee. Si la 11 no se puede leer, no escribe nada y
- * sigue como antes (si falta el sector, el primer producto dará E7 y se frena sin tocar nada).
+ * frena (C16): sin saber qué sectores hay no se dan por buenos.
  */
 export async function ensureSystelSectors(client: SystelClient, needed: number[]): Promise<{ ok: boolean; created: number[]; detail: string }> {
   const want = [...new Set(needed)].filter((n) => Number.isInteger(n) && n >= 1 && n <= 99);
   if (want.length === 0) return { ok: true, created: [], detail: "sin sectores para revisar" };
   const before = await client.sectors();
-  if (!before) return { ok: true, created: [], detail: "no se pudo leer la lista de sectores: no se creó ninguno" };
+  if (!before) return { ok: false, created: [], detail: "no se pudo leer la lista de sectores (función 11): no se creó ninguno ni se mandó ningún producto" };
   const missing = want.filter((n) => !before.some((s) => s.number === n));
   if (missing.length === 0) return { ok: true, created: [], detail: `la balanza ya tiene el sector ${want.join(", ")}` };
   for (const n of missing) {

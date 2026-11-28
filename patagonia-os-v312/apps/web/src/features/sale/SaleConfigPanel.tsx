@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { parseAmount } from "../../lib/money";
-import { deleteBranchScaleConfig, detectScaleConfig, saveBranchScaleConfig, type ScaleConfig, type ScalePayloadType } from "./scale-config-service";
+import { deleteBranchScaleConfig, detectScaleConfig, type ScaleConfig, type ScalePayloadType } from "./scale-config-service";
+import { saveBranchScaleConfigGuarded } from "../inventory/kretz/branch-scale-guard-service";
 import { ScaleWeightSettings } from "./ScaleWeightSettings";
 import { setMostradorPin } from "./company-settings-service";
 import { isThermalPrintSupported } from "./thermal-printer";
@@ -8,6 +9,10 @@ import { PrinterAgentSettings } from "./PrinterAgentSettings";
 import { SettingSection } from "../../components/SettingSection";
 import type { Product } from "@patagonia/domain";
 import { BoxLabelSettings } from "./BoxLabelSettings";
+import { calibrationStep } from "./scale-calibration-flow";
+import { useAuth } from "../auth/AuthProvider";
+import { can } from "../auth/permissions";
+import type { CalibrationSample } from "./scale-barcode";
 
 // Panel de configuración de Mostrador (engranaje): impresora, balanza (peso
 // directo y calibración de etiquetas) y PIN. El asistente de calibración y el
@@ -41,11 +46,24 @@ export function SaleConfigPanel({
   visible, branchId, canSeeShiftTotals, autoPrintEnabled, onAutoPrintChange, thermalPaired, thermalConnectBusy, onConnectThermal,
   scaleConfigCalibrated, onScaleConfigChange, mostradorPin, onPinChange, onMessage, products, boxLabelsEnabled, canEditBoxFormats
 }: SaleConfigPanelProps) {
+  // scales.send (migración 224): calibrar o borrar el formato de etiqueta de la sucursal. Sin él se ve el estado.
+  const { profile } = useAuth();
+  const canCalibrateScale = can(profile, "scales.send");
   const [scaleWizardCode, setScaleWizardCode] = useState("");
   const [scaleWizardWeight, setScaleWizardWeight] = useState("");
   const [scaleWizardPayload, setScaleWizardPayload] = useState<ScalePayloadType>("weight");
   const [scaleWizardBusy, setScaleWizardBusy] = useState(false);
   const [scaleWizardResult, setScaleWizardResult] = useState<"idle" | "success" | "not_found">("idle");
+  // C6: etiquetas ya escaneadas en esta calibración, y qué falta para estar seguros (N.º de producto u otra etiqueta).
+  const [calSamples, setCalSamples] = useState<CalibrationSample[]>([]);
+  const [calAsk, setCalAsk] = useState<{ ask: "plu" | "label"; message: string } | null>(null);
+  const [calPlu, setCalPlu] = useState("");
+  const [calNote, setCalNote] = useState<string | null>(null);
+  function resetCalibration() {
+    setCalSamples([]);
+    setCalAsk(null);
+    setCalPlu("");
+  }
   const [pinSettingInput, setPinSettingInput] = useState("");
   const [pinSettingBusy, setPinSettingBusy] = useState(false);
   const [agentStatus, setAgentStatus] = useState<"checking" | "up" | "down">("checking");
@@ -53,26 +71,55 @@ export function SaleConfigPanel({
   // Al abrir o cerrar el panel se limpia el resultado del asistente.
   useEffect(() => {
     setScaleWizardResult("idle");
+    resetCalibration();
+    setCalNote(null);
   }, [visible]);
 
   async function handleCalibrateScale() {
     setScaleWizardResult("idle");
+    setCalNote(null);
     if (!branchId) return;
-    const code = scaleWizardCode.trim();
-    const enteredValue = parseAmount(scaleWizardWeight || "0") || Number(scaleWizardWeight);
-    if (!code) { onMessage("Escaneá una etiqueta de tu balanza primero."); return; }
-    if (!Number.isFinite(enteredValue) || enteredValue <= 0) {
-      onMessage(scaleWizardPayload === "weight" ? "Ingresá el peso que mostró la balanza." : "Ingresá el importe que mostró la balanza.");
-      return;
+    let samples: CalibrationSample[];
+    if (calAsk?.ask === "plu") {
+      const plu = calPlu.trim();
+      if (!/^\d+$/.test(plu)) { onMessage("Escribí el número de producto que dice la etiqueta (solo números)."); return; }
+      samples = calSamples.map((x, i) => (i === 0 ? { ...x, plu } : x));
+    } else {
+      const code = scaleWizardCode.trim();
+      const enteredValue = parseAmount(scaleWizardWeight || "0") || Number(scaleWizardWeight);
+      if (!code) { onMessage("Escaneá una etiqueta de tu balanza primero."); return; }
+      if (!Number.isFinite(enteredValue) || enteredValue <= 0) {
+        onMessage(scaleWizardPayload === "weight" ? "Ingresá el peso que mostró la balanza." : "Ingresá el importe que mostró la balanza.");
+        return;
+      }
+      samples = [...calSamples, { code, value: enteredValue }];
     }
     setScaleWizardBusy(true);
     try {
-      const detected = detectScaleConfig(code, enteredValue, scaleWizardPayload);
+      // C6: nunca se guarda con dudas. Si hay dos formatos posibles, se pide el N.º de producto u otra etiqueta.
+      const step = calibrationStep(samples, scaleWizardPayload);
+      if (step.kind === "ask") {
+        setCalSamples(samples);
+        setCalAsk({ ask: step.ask, message: step.message });
+        if (step.ask === "label") {
+          setScaleWizardCode("");
+          setScaleWizardWeight("");
+        }
+        return;
+      }
+      resetCalibration();
+      const detected = step.kind === "save" ? step.config : null;
       if (!detected) {
+        if (step.kind === "ambiguous") setCalNote(step.message);
         setScaleWizardResult("not_found");
         return;
       }
-      await saveBranchScaleConfig(branchId, detected);
+      // C1: con más de una balanza en el local, la calibración no cambia el formato que ya lee la otra.
+      const g = await saveBranchScaleConfigGuarded(branchId, detected);
+      if (!g.saved) {
+        onMessage(g.message);
+        return;
+      }
       onScaleConfigChange(detected);
       setScaleWizardResult("success");
       setScaleWizardCode("");
@@ -156,8 +203,11 @@ export function SaleConfigPanel({
         title="Etiquetas de la balanza"
         status={scaleConfigCalibrated ? "Calibradas" : "Formato Kretz de fábrica"}
         tone={scaleConfigCalibrated ? "ok" : "neutral"}
-        actionLabel={scaleConfigCalibrated ? "Volver a calibrar" : "Calibrar"}
+        actionLabel={!canCalibrateScale ? "Ver" : scaleConfigCalibrated ? "Volver a calibrar" : "Calibrar"}
       >
+        {!canCalibrateScale ? (
+          <p className="setting-help">Tu usuario no puede cambiar el formato de las etiquetas de la balanza. Pedíselo al dueño o a un encargado.</p>
+        ) : (<>
         <p className="setting-help">
           Solo si al escanear una etiqueta de producto el peso o el importe no da bien. Poné un producto en la balanza, escaneá acá su etiqueta y escribí lo que mostró la balanza: el sistema detecta el formato solo. (Los tickets de total de la Kretz Aura no necesitan esto.)
         </p>
@@ -172,6 +222,16 @@ export function SaleConfigPanel({
               Trae el <b>importe</b>
             </label>
           </div>
+          {calAsk && (
+            <p className="setting-help" style={{ margin: 0, color: "#8a4b00", fontWeight: 700 }}>
+              {calAsk.message}{" "}
+              <button type="button" className="link-button" onClick={resetCalibration}>Empezar de nuevo</button>
+            </p>
+          )}
+          {calAsk?.ask === "plu" && (
+            <input name="scale-label-plu" autoComplete="off" inputMode="numeric" placeholder="N.º de producto de la etiqueta (ej. 12)" value={calPlu} onChange={(e) => setCalPlu(e.target.value)} />
+          )}
+          {calAsk?.ask !== "plu" && (<>
           <input
             name="scale-label-code"
             autoComplete="off"
@@ -188,8 +248,9 @@ export function SaleConfigPanel({
             value={scaleWizardWeight}
             onChange={(e) => setScaleWizardWeight(e.target.value)}
           />
+          </>)}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-            <button disabled={scaleWizardBusy} onClick={handleCalibrateScale}>{scaleWizardBusy ? "Detectando…" : "Detectar formato"}</button>
+            <button disabled={scaleWizardBusy} onClick={handleCalibrateScale}>{scaleWizardBusy ? "Detectando…" : calAsk ? "Seguir" : "Detectar formato"}</button>
             {scaleConfigCalibrated && (
               <button className="secondary" onClick={handleResetScaleConfig}>Borrar calibración</button>
             )}
@@ -199,10 +260,11 @@ export function SaleConfigPanel({
           )}
           {scaleWizardResult === "not_found" && (
             <p style={{ margin: 0, color: "#8a4b00", fontWeight: 700 }}>
-              No se pudo detectar con esa etiqueta. Probá con otro producto o peso, o escribinos y lo configuramos nosotros.
+              {calNote ?? "No se pudo detectar con esa etiqueta. Probá con otro producto o peso, o escribinos y lo configuramos nosotros."}
             </p>
           )}
         </div>
+        </>)}
       </SettingSection>
 
       {boxLabelsEnabled && <BoxLabelSettings products={products} canEdit={canEditBoxFormats} />}

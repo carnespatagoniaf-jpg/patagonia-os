@@ -1,5 +1,7 @@
 import type { Product } from "@patagonia/domain";
-import { resolveScan, labelWeightProblem } from "../sale/scan-resolve";
+import { labelWeightProblem } from "../sale/scan-resolve";
+import { readScaleCode } from "../sale/scale-profile-scan";
+import type { ScaleLabelProfile } from "./label-spec";
 import type { ScaleConfig } from "../sale/scale-barcode";
 import { systelConfigForCodeAcross, type SystelLabelTemplates } from "../sale/systel-label-format";
 import { decodeAcross } from "./sale/multi-decode";
@@ -27,12 +29,14 @@ export interface LabelTestDeps {
   setups?: ScaleSetup[];
   /** Formatos Systel (solo empresas piloto, como Mostrador). */
   systelTemplates?: SystelLabelTemplates[];
+  /** Perfiles de cada balanza (balanzas_v2): la prueba lee la etiqueta igual que Mostrador. */
+  labelProfiles?: { status: string; profiles: ScaleLabelProfile[] } | null;
 }
 
 export function labelTestResult(rawInput: string, deps: LabelTestDeps): LabelTestResult | null {
   const raw = rawInput.trim();
   if (!raw) return null;
-  const { products, config, setups = [], systelTemplates = [] } = deps;
+  const { products, config, setups = [], systelTemplates = [], labelProfiles = null } = deps;
 
   const exact = products.find((p) => (p.active ?? true) && p.code === raw);
   if (exact) {
@@ -67,7 +71,7 @@ export function labelTestResult(rawInput: string, deps: LabelTestDeps): LabelTes
     return { ok: false, title: "Formato de etiqueta que Patagonia no puede leer", detail: "La balanza imprime el código con un formato que Patagonia no lee sin riesgo de cargar mal los kilos. Avisale a soporte con una foto de la etiqueta." };
   }
 
-  const r = resolveScan(raw, products, systelConfig ?? config);
+  const r = systelConfig ? readScaleCode(raw, products, systelConfig, null) : readScaleCode(raw, products, config, labelProfiles);
   switch (r.type) {
     case "label": {
       if (labelWeightProblem(r.product.unit, r.quantity) === "excesivo") {

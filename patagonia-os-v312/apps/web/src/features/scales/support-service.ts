@@ -1,6 +1,7 @@
 import { supabase } from "../../lib/supabase";
 import type { DiagnosticReport } from "./diagnostics";
 import type { ScaleConnectionRecord } from "./manager";
+import type { ScaleJobRpc } from "./job-log";
 
 /**
  * "Enviar a soporte" de la pantalla Balanzas: manda el registro de actividad
@@ -63,3 +64,14 @@ export async function submitScaleSupportReport(input: {
   });
   if (error) throw new Error(error.message);
 }
+
+/**
+ * Llamada a las RPC del historial de envíos (migración 220, job-log.ts). null en modo demostración: el historial
+ * queda solo en la bitácora local.
+ */
+export const scaleJobRpc: ScaleJobRpc | null = supabase
+  ? async (fn, args) => {
+      const { data, error } = await supabase!.rpc(fn, args);
+      return { data, error: error ? { code: error.code, message: error.message } : null };
+    }
+  : null;

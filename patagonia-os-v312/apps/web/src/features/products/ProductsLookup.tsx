@@ -9,7 +9,7 @@ import { ScaleButton } from "../scales/ScaleButton";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { useAuth } from "../auth/AuthProvider";
 import { useBranchZone } from "../pricing/useBranchZone";
-import { planAllows } from "../auth/permissions";
+import { can, planAllows } from "../auth/permissions";
 import { compareByCode, getCompanyName, listProductPrices, type ProductPriceRow } from "./products-service";
 import { buildPosterHtml, defaultDetail } from "./price-poster";
 
@@ -120,9 +120,11 @@ export function ProductsLookup() {
         {planAllows(profile, "estandar") && (
           <ScaleButton>
             <MyScale products={products} branchId={branchId} />
-            <ScaleSupportTools>
-              <ScaleSyncPanel products={products} />
-            </ScaleSupportTools>
+            {can(profile, "scales.send") && (
+              <ScaleSupportTools>
+                <ScaleSyncPanel products={products} />
+              </ScaleSupportTools>
+            )}
           </ScaleButton>
         )}
       </header>

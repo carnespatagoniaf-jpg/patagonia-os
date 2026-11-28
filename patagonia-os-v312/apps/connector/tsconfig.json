@@ -1,0 +1,25 @@
+{
+  // Todo el conector, incluido el código de protocolos de la web que importa
+  // src/protocols (apps/web/src/...). Ese código usa tipos del navegador (DOM, Web
+  // Serial): por eso acá va "DOM" y los .d.ts de la web; y la web no usa
+  // noUnusedLocals, por eso acá tampoco. El núcleo del conector (sin protocolos) se
+  // revisa además con tsconfig.core.json: sin DOM y con noUnused*.
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "types": ["node"],
+    "strict": true,
+    "noUnusedLocals": false,
+    "noUnusedParameters": false,
+    "noFallthroughCasesInSwitch": true,
+    "isolatedModules": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "noEmit": true
+  },
+  "include": ["src", "../web/src/webserial.d.ts", "../web/src/vite-env.d.ts"]
+}

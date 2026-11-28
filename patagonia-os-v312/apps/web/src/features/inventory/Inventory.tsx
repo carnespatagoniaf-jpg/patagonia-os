@@ -7,7 +7,7 @@ import { isSupabaseConfigured } from "../../lib/supabase";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { useBranchZone } from "../pricing/useBranchZone";
 import { useAuth } from "../auth/AuthProvider";
-import { isNotButcher, planAllows } from "../auth/permissions";
+import { can, isNotButcher, planAllows } from "../auth/permissions";
 import { parseVariants, variantProducts } from "./product-variants";
 import { adjustProductStock, clearProductPackages, createProduct, deleteProduct, listProductPackages, listProductsForBranch, listProductVatRates, registerProductPackages, setProductActive, setProductsVatRate, setProductStockSource, updateProduct } from "./inventory-service";
 import { getFiscalSettings } from "../invoicing/invoicing-service";
@@ -1007,7 +1007,8 @@ export function Inventory() {
           <div>
             <button className="secondary" onClick={() => downloadScaleExportCsv(scaleProducts, categories)}>Descargar lista para balanza</button>
           </div>
-          {planAllows(profile, "estandar") && (
+          {/* Herramientas técnicas: escriben en la balanza, así que piden scales.send (migración 224). */}
+          {planAllows(profile, "estandar") && can(profile, "scales.send") && (
             <ScaleSupportTools>
               {SYSTEL_PILOT_COMPANIES.has(profile?.company_id ?? "") ? (
                 <SystelPanel products={scaleProducts} pilot extra={<ScaleLinksPanel branchId={branchId} products={scaleProducts} />} />

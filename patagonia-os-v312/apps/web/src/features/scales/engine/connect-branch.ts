@@ -1,5 +1,5 @@
 import { bindingFor, restoreBinding, type ScaleBinding } from "../registry/local-bindings";
-import { findRegistered, legacyCandidate, sameIdentity, type BranchScale, type ScaleFamily } from "../registry/scale-identity";
+import { findRegistered, legacyCandidate, sameIdentity, sameScaleCandidates, type BranchScale, type SameScaleCandidate, type ScaleFamily } from "../registry/scale-identity";
 import { networkPickPending, serialApi, type SerialApi } from "./engine";
 import { FriendlyError, friendlyKind, isPortOpenError } from "./friendly";
 import { usbKeyOf } from "./memory";
@@ -15,9 +15,10 @@ import { emptyDiag, type ConnectDiag, type EngineContext, type ProgressFn, type 
  * - Antes de hablarle se restaura la configuración de conexión de ESA balanza (otra balanza pudo cambiarla).
  * - La balanza que contesta tiene que ser la elegida: se compara lo que contesta (número de balanza, letra) con lo
  *   registrado.
- * - "Agregar balanza" registra SIEMPRE una balanza nueva: el número y el chip del cable no alcanzan para decir que es
- *   la misma (real, Los gringos 19/10: una Systel nueva contestó N.º 20 por un FT232R, igual que la que ya tenían).
- *   Si se parece a una registrada, solo se avisa (`lookalike`).
+ * - "Agregar balanza" nunca decide sola que es la misma: el número y el chip del cable no alcanzan (real, Los gringos
+ *   19/10: una Systel nueva contestó N.º 20 por un FT232R, igual que la que ya tenían). Pero tampoco registra otra
+ *   sola si se parece a una registrada (C22: así quedaron 4 registros de la misma balanza): devuelve `sameAsk` con las
+ *   candidatas, la pantalla pregunta "¿Es la Balanza X?" y la respuesta se aplica con `applySameScaleAnswer`.
  * - Todo lo técnico queda en `ctx.diag` para el reporte a soporte.
  */
 
@@ -30,6 +31,11 @@ export interface BranchConnectResult {
   matched: BranchScale | null;
   /** Al agregar: una registrada de la misma marca con el mismo número (o sin número guardado). Solo para avisar. */
   lookalike: BranchScale | null;
+  /**
+   * Al agregar, si se parece a una o más registradas: "¿es la misma?" con las candidatas (nombre y último uso). Hasta
+   * que la persona conteste no se registra nada. null = es nueva sin dudas, o se reconectó una registrada.
+   */
+  sameAsk: { candidates: SameScaleCandidate[] } | null;
   diag: ConnectDiag;
   /** El contexto que tiene la sesión: al registrar una balanza nueva se le pone su clave (las Systel la usan al guardar). */
   ctx: EngineContext;
@@ -64,6 +70,16 @@ export function busyKind(otherTabs: { busy: number }[] | undefined): "puerto_ocu
 export function candidatePorts(granted: SerialPort[], target: BranchScale, binding: ScaleBinding | null): SerialPort[] {
   if (binding) return binding.usb ? granted.filter((p) => usbKeyOf(p) === binding.usb) : granted;
   return granted.filter((p) => portFitsFamily(usbKeyOf(p), target.family));
+}
+
+/**
+ * La respuesta a "¿Es la Balanza X?": `key` = "Sí, es esa" (se toma como esa registrada: se actualiza, no se crea
+ * otra); null = "No, es otra balanza" (se registra nueva, como antes, y sigue el aviso de que se parece).
+ */
+export function applySameScaleAnswer(result: BranchConnectResult, known: BranchScale[], key: string | null): BranchConnectResult {
+  const chosen = key ? known.find((s) => s.key === key) ?? null : null;
+  result.diag.steps.push(chosen ? `la persona dijo que es la misma que ${chosen.key}` : "la persona dijo que es otra balanza (nueva)");
+  return chosen ? { ...result, matched: chosen, lookalike: null, sameAsk: null } : { ...result, matched: null, sameAsk: null };
 }
 
 export async function connectBranchScale(
@@ -144,13 +160,17 @@ export async function connectBranchScale(
       }
       const family = adapter.family;
       const matched = target;
-      const lookalike = target ? null : findRegistered(opts.known, family, identity) ?? legacyCandidate(opts.known, family);
-      diag.steps.push(`conectada: ${family} ${JSON.stringify(identity)}${matched ? ` = ${matched.key}` : " (nueva)"}${lookalike ? `, parecida a ${lookalike.key}` : ""}`);
+      const candidates = target ? [] : sameScaleCandidates(opts.known, family, identity);
+      const lookalike = target ? null : findRegistered(opts.known, family, identity) ?? legacyCandidate(opts.known, family) ?? opts.known.find((s) => s.key === candidates[0]?.key) ?? null;
+      const sameAsk = candidates.length ? { candidates } : null;
+      diag.steps.push(
+        `conectada: ${family} ${JSON.stringify(identity)}${matched ? ` = ${matched.key}` : sameAsk ? "" : " (nueva)"}${lookalike ? `, parecida a ${lookalike.key}` : ""}${sameAsk ? `; se pregunta si es la misma (${candidates.map((c) => c.key).join(", ")})` : ""}`
+      );
       // Por red la balanza pudo cambiar de dirección y encontrarse sola al abrir (net-port): se guarda la nueva.
       const now = usbKeyOf(port);
       if (now !== usb) diag.steps.push(`la balanza cambió de dirección: ${usb ?? "?"} → ${now ?? "?"}`);
       diag.usb = now;
-      return { session, family, usb: now, identity, matched, lookalike, diag, ctx };
+      return { session, family, usb: now, identity, matched, lookalike, sameAsk, diag, ctx };
     }
   }
   if (busyErr) {

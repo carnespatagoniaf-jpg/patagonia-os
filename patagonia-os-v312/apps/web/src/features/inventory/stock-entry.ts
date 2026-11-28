@@ -4,6 +4,8 @@
 // balanza del local (producto + kilos) o el código de un producto, al que después se le escriben los kilos.
 
 import type { Product } from "@patagonia/domain";
+import { readScaleCode } from "../sale/scale-profile-scan";
+import type { ScaleLabelProfile } from "../scales/label-spec";
 import { productForDigits, readAnyBox, type BoxLabelFormat } from "../sale/box-label";
 import { resolveScan } from "../sale/scan-resolve";
 import type { ScaleConfig } from "../sale/scale-barcode";
@@ -42,7 +44,7 @@ export function countsAsBox(unit: Product["unit"], packages: boolean): boolean {
  * (salvo que sea una etiqueta de balanza de un producto que existe, como en Mostrador), después la etiqueta de la
  * balanza, y si nada de eso, se busca por nombre.
  */
-export function resolveEntryScan(rawInput: string, products: Product[], formats: BoxLabelFormat[], scaleConfig: ScaleConfig, packages: boolean): EntryScan {
+export function resolveEntryScan(rawInput: string, products: Product[], formats: BoxLabelFormat[], scaleConfig: ScaleConfig, packages: boolean, labelProfiles: { status: string; profiles: ScaleLabelProfile[] } | null = null): EntryScan {
   const raw = rawInput.trim();
   if (!raw) return { type: "search", matches: [] };
   const active = products.filter((p) => p.active ?? true);
@@ -50,7 +52,7 @@ export function resolveEntryScan(rawInput: string, products: Product[], formats:
   const exact = active.find((p) => p.code === raw) ?? active.find((p) => p.code.toLowerCase() === raw.toLowerCase());
   if (exact) return { type: "product", product: exact };
 
-  const scale = resolveScan(raw, active, scaleConfig);
+  const scale = readScaleCode(raw, active, scaleConfig, labelProfiles);
 
   const box = formats.length > 0 && scale.type !== "label" ? readAnyBox(raw, formats) : null;
   if (box) {

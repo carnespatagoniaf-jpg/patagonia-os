@@ -1,0 +1,23 @@
+{
+  "_leeme": [
+    "Equivalencia del plan balanzas v2 (scale-labels-equivalence.test.ts): las balanzas registradas de cada contexto 'sucursal' del banco, con lo que les cargaría la migración 223.",
+    "familia/modelo como en scale_profiles; lista = la lista por cliente de weight-barcode.ts que les aplica hoy (sin UUID: el UUID está solo en la 223); total = scale_profiles.total_format (Systel).",
+    "Los contextos 'perfil' (Systel artículos + TOTAL) y 'systel_piloto' no cambian con 'balanzas_v2': se leen igual (decodeAcross / formato informado por la Systel)."
+  ],
+  "contextos": {
+    "carnes-patagonia": [{ "familia": "kretz", "modelo": "Kretz Report" }],
+    "aura-total-2409": [{ "familia": "kretz", "modelo": "Kretz Aura" }],
+    "m2": [{ "familia": "kretz", "modelo": "Kretz Report" }],
+    "los-gringos-sucursal": [{ "familia": "systel", "modelo": "Systel Cuora Max", "total": "22AAIIIIIIII" }],
+    "triples": [{ "familia": "systel", "modelo": "Systel Cuora Max", "total": "22AAIIIIIIII" }],
+    "triples-fabrica": [{ "familia": "systel", "modelo": "Systel Cuora Max", "total": "22AAIIIIIIII" }],
+    "pollo-y-mar": [{ "familia": "kretz", "modelo": "Kretz Aura" }],
+    "pollo-y-mar-fabrica": [{ "familia": "kretz", "modelo": "Kretz Aura" }],
+    "el-dorado-fabrica": [{ "familia": "systel", "modelo": "Systel Cuora Max", "total": "22AAIIIIIIII" }],
+    "oliem": [{ "familia": "kretz", "modelo": "Kretz Report", "lista": "report_plu5" }, { "familia": "kretz", "modelo": "Kretz Report", "lista": "report_plu5" }],
+    "lauda": [{ "familia": "kretz", "modelo": "Kretz Report" }],
+    "carplat": [{ "familia": "kretz", "modelo": "Kretz Report", "lista": "report_peso" }],
+    "el-abastero": [{ "familia": "kretz", "modelo": "Kretz Report", "lista": "report_pesos" }, { "familia": "kretz", "modelo": "Kretz Aura" }],
+    "el-abastero-aura22": [{ "familia": "kretz", "modelo": "Kretz Report", "lista": "report_pesos" }, { "familia": "kretz", "modelo": "Kretz Aura", "lista": "aura_22" }]
+  }
+}

@@ -4,18 +4,21 @@ import type { SystelExchangeLog } from "../../../inventory/systel/systel-client"
 import { discoverSystelLink, loadSavedSystelLink, saveSystelLink, type SystelFoundLink } from "../../../inventory/systel/systel-discovery";
 import type { SystelLinkEvent } from "../../../inventory/systel/systel-serial";
 import { LAYOUT_INFO, pluEanSetting, rawToPesos, type SystelLayout } from "../../../inventory/systel/systel-plu";
-import { takeProductBackup } from "../../../inventory/systel/systel-product-barcode";
+import { takeProductBackup, UNIT_TICKET_CODE, WEIGHED_TICKET_CODE } from "../../../inventory/systel/systel-product-barcode";
 import { saveSystelLabelTemplates, saveSystelPluBarcodes } from "../../../sale/systel-label-format";
 import type { ScaleCatalogItem, ScaleLink, ScaleSaleProfile } from "../../sale/profile";
 import type { ScaleSetup } from "../../sale/scale-sale-service";
 import { canWrite, SCALE_CAPABILITIES, systelLimits, type ScaleModelId } from "../capabilities";
 import { preflightProducts, type PreflightResult } from "../preflight";
 import { FRIENDLY_MESSAGES, FriendlyError, SENT_AND_CHECKED } from "../friendly";
-import type { EngineContext, PendingItem, PreparedSync, ProgressFn, ScaleAdapter, ScaleCatalogEntry, ScaleSession, SyncOutcome } from "../types";
+import type { EngineContext, PendingItem, PreparedSync, ProductProblem, ProgressFn, ScaleAdapter, ScaleCatalogEntry, ScaleSession, SyncOutcome } from "../types";
 import { ensureSystelSectors, planSystelPush, PROOF_NAME, proveSystelWrite, runSystelPush, scaleOnly, type PushItem, type PushProduct, type WriteProofResult } from "./systel-push";
 import type { TypeByteMode } from "../../../inventory/systel/systel-product-barcode";
 import type { SystelPlu } from "../../../inventory/systel/systel-plu";
 import { EMPTY_SCALE_MESSAGE, emptyScaleTemplates } from "./systel-empty-template";
+import { readSystelScoped, systelScopedKey, writeSystelScoped } from "../../../inventory/systel/systel-local-keys";
+import { systelTicketCodes } from "../../label-spec";
+import type { PrefixAllocation } from "../../label-spec-service";
 
 /**
  * Systel (Cuora Max y familia), Patagonia → balanza. Reutiliza, sin cambiarlos:
@@ -50,6 +53,10 @@ export function topPluNumber(layout: SystelLayout, pluCapacity: number): number 
 
 export const PRODUCT_BACKUP_KEY = "patagonia-systel-product-backup";
 
+/** Código de barras propio que Patagonia escribe en cada producto (Cuora Max): por peso y por unidad, 4 cifras de producto. */
+const SYSTEL_WEIGHED_LABEL = WEIGHED_TICKET_CODE;
+const SYSTEL_UNIT_LABEL = UNIT_TICKET_CODE;
+
 /**
  * Cuora Max con PLU de 6 cifras (firmware 6.2 y 7.0): mismas funciones que la 6.0 (protocolo oficial V6.2 y V7.0) y el
  * registro se lee bien en una balanza real (El Dorado, 29/10/2026: firma 0070, formato max7, 254 productos), pero su
@@ -79,31 +86,37 @@ function proofKey(b: Pick<SystelBackup, "signature" | "layout">, number: number)
   return `${b.signature?.protocolVersion ?? "?"}/${b.layout ?? "?"}/${number}`;
 }
 
-export function loadWriteProof(b: Pick<SystelBackup, "signature" | "layout">, number: number): TypeByteMode | null {
+function readProofs(key: string): Record<string, TypeByteMode> {
   try {
-    const all = JSON.parse(localStorage.getItem(WRITE_PROOF_KEY) ?? "{}") as Record<string, TypeByteMode>;
-    return all[proofKey(b, number)] ?? null;
+    return JSON.parse(localStorage.getItem(key) ?? "{}") as Record<string, TypeByteMode>;
   } catch {
-    return null;
+    return {};
   }
 }
 
-function saveWriteProof(b: Pick<SystelBackup, "signature" | "layout">, number: number, mode: TypeByteMode): void {
-  try {
-    const all = JSON.parse(localStorage.getItem(WRITE_PROOF_KEY) ?? "{}") as Record<string, TypeByteMode>;
-    all[proofKey(b, number)] = mode;
-    localStorage.setItem(WRITE_PROOF_KEY, JSON.stringify(all));
-  } catch {
-    // sin localStorage: la próxima vez se repite la prueba, sobre el mismo producto de prueba
-  }
+/** Por balanza (C24); una prueba guardada antes con la clave global de la PC se sigue respetando. */
+export function loadWriteProof(b: Pick<SystelBackup, "signature" | "layout">, number: number, scaleKey?: string): TypeByteMode | null {
+  const k = proofKey(b, number);
+  return readProofs(systelScopedKey(WRITE_PROOF_KEY, scaleKey))[k] ?? readProofs(WRITE_PROOF_KEY)[k] ?? null;
+}
+
+export function saveWriteProof(b: Pick<SystelBackup, "signature" | "layout">, number: number, mode: TypeByteMode, scaleKey?: string): void {
+  const key = systelScopedKey(WRITE_PROOF_KEY, scaleKey);
+  const all = readProofs(key);
+  all[proofKey(b, number)] = mode;
+  // sin localStorage: la próxima vez se repite la prueba, sobre el mismo producto de prueba
+  writeSystelScoped(WRITE_PROOF_KEY, scaleKey, JSON.stringify(all));
 }
 
 export interface SystelDeps {
+  /** 'balanzas_v2': inicio propio de ESTA balanza (la que ya tiene el suyo lo conserva). Sin esto, el de siempre. */
+  allocatePrefix?: (branchId: string, scaleKey: string) => Promise<PrefixAllocation | null>;
   loadSetup: (branchId: string, scaleKey: string) => Promise<ScaleSetup | null>;
   saveCatalog: (branchId: string, profile: Omit<ScaleSaleProfile, "catalog"> & { model?: string }, catalog: ScaleCatalogItem[]) => Promise<unknown>;
   setLinks: (branchId: string, scaleKey: string, links: ScaleLink[]) => Promise<unknown>;
   setActive: (branchId: string, scaleKey: string, active: boolean) => Promise<unknown>;
-  saveLocalBackup: (backup: unknown) => void;
+  /** `scaleKey`: de qué balanza es la copia (cada Systel de la PC tiene la suya). */
+  saveLocalBackup: (backup: unknown, scaleKey?: string) => void;
   /** Solo laboratorio y pruebas: permite escribir aunque el envío de productos no esté comprobado en una balanza real. */
   forceWritable?: boolean;
   /** Guardar con la conexión de esta computadora las señales y el número con los que atendió la balanza. */
@@ -111,11 +124,18 @@ export interface SystelDeps {
 }
 
 /** Copia local del respaldo de productos (la misma que usa "Restaurar desde el respaldo" en el panel de soporte). */
-export function saveProductBackupLocally(backup: unknown): void {
+export function saveProductBackupLocally(backup: unknown, scaleKey?: string): void {
+  // sin localStorage: el respaldo igual va en el resultado para soporte
+  writeSystelScoped(PRODUCT_BACKUP_KEY, scaleKey, JSON.stringify(backup));
+}
+
+/** La copia de esa balanza; si no tiene, la que quedó con la clave global de antes (C24). */
+export function loadProductBackupLocally(scaleKey?: string): unknown {
+  const raw = readSystelScoped(PRODUCT_BACKUP_KEY, scaleKey);
   try {
-    localStorage.setItem(PRODUCT_BACKUP_KEY, JSON.stringify(backup));
+    return raw ? (JSON.parse(raw) as unknown) : null;
   } catch {
-    // sin localStorage: el respaldo igual va en el resultado para soporte
+    return null;
   }
 }
 
@@ -156,6 +176,8 @@ export class SystelSession implements ScaleSession {
   private startupWaitOn = false;
   /** Resultado de la prueba de escritura en esta balanza (solo firmware sin comprobar). */
   private proof: WriteProofResult | null = null;
+  /** Código propio que se escribe en cada producto: el de siempre, o el del perfil de ESTA balanza ('balanzas_v2'). */
+  private codes = { weighed: SYSTEL_WEIGHED_LABEL, unit: SYSTEL_UNIT_LABEL };
 
   constructor(
     private readonly link: SystelLink & { close?: () => Promise<void> },
@@ -290,13 +312,23 @@ export class SystelSession implements ScaleSession {
    * Si la configuración dice que espera sincronización al encender (";Sinc=1"), se la apaga con la 35 "N" y se relee la
    * 39 para comprobarlo. Así esa balanza no vuelve a quedar trabada al prenderse. Solo si la 39 se pudo leer.
    */
-  private async ensureNoStartupWait(config: { values: Record<string, string> } | null): Promise<void> {
-    if (!config || config.values.Sinc !== "1") return;
+  private async ensureNoStartupWait(config: { values: Record<string, string> } | null): Promise<"ok" | "sigue" | "frenar"> {
+    if (!config || config.values.Sinc !== "1") return "ok";
     this.mark("la balanza espera sincronización al encender (Sinc=1): se apaga con la función 35 N y se relee");
     const c = new SystelClient(this.link, { address: this.address, log: this.log, busyRetryMs: [] });
     const r = await c.disableStartupSyncWait();
     const after = await c.config();
     this.syncWaitFixed = !!(r && r.kind === "ack" && after?.values.Sinc === "0");
+    // C16: antes de seguir se relee. Sin poder releer la configuración no se sabe qué quedó: no se mandan productos.
+    if (!after) return "frenar";
+    // La 35 solo puede tocar "Sinc": si cambió cualquier otro valor, se frena (como con la función 7).
+    const keys = new Set([...Object.keys(config.values), ...Object.keys(after.values)]);
+    const others = [...keys].filter((k) => k !== "Sinc" && config.values[k] !== after.values[k]);
+    if (others.length > 0) {
+      this.mark(`después de la 35 N cambió otra cosa de la configuración (${others.join(", ")}): se frena`);
+      return "frenar";
+    }
+    return this.syncWaitFixed ? "ok" : "sigue";
   }
 
   /** Señales y número con los que atendió esta balanza (se guardan con la conexión). */
@@ -335,7 +367,7 @@ export class SystelSession implements ScaleSession {
       const dec = backup.signature?.priceDecimals ?? 0;
       saveSystelPluBarcodes(
         Object.fromEntries(backup.plus.map((p) => {
-          const ean = pluEanSetting(p.raw);
+          const ean = pluEanSetting(p.raw, backup.layout ?? undefined);
           return [String(p.code), { type: ean.type, config: ean.config, p1: rawToPesos(p.prices[0] ?? 0, dec), p2: rawToPesos(p.prices[1] ?? 0, dec), name: p.name.trim(), saleType: p.saleType }];
         })),
         true
@@ -345,15 +377,29 @@ export class SystelSession implements ScaleSession {
 
     onProgress("comparar", "Comparando con los productos de Patagonia…");
     const setup = this.ctx.online && this.ctx.branchId ? await this.deps.loadSetup(this.ctx.branchId, this.scaleKey) : null;
+    // 'balanzas_v2': el inicio de ESTA balanza (si el 20/21 lo usa otra del local, recibe uno libre) y su código propio.
+    if (this.ctx.balanzasV2) {
+      let spec = this.ctx.labelSpec ?? null;
+      // La Cuora 2 no lleva código por producto: imprime con su formato general (E_P/E_U), que Patagonia no le escribe.
+      // Asignarle un inicio propio dejaba su perfil con un inicio que nunca imprime (envios-matriz.test.ts).
+      if (backup.layout !== "cuora2" && this.ctx.online && this.ctx.branchId && this.ctx.scaleKey && this.deps.allocatePrefix) {
+        const a = await this.deps.allocatePrefix(this.ctx.branchId, this.ctx.scaleKey).catch(() => null);
+        if (a) spec = a.spec;
+      }
+      this.codes = systelTicketCodes(spec);
+    }
     const layout = backup.layout;
     // Etapa 1: revisión previa con los límites que informó ESTA balanza (layout, decimales y formato de etiqueta).
     const values = backup.config?.values ?? {};
+    // C11: el tope del código sale del formato que se ESCRIBE en cada producto (20PPPPCCCCCC: 4 cifras), no del general.
+    // La Cuora 2 no lleva código por producto: imprime con el general, así que ahí manda el general.
+    const labelFormats = layout === "cuora2" ? [values.E_P, values.E_U] : [this.codes.weighed, this.codes.unit];
     const check: PreflightResult | null = layout
-      ? preflightProducts(this.ctx.products, systelLimits(layoutLimits(layout, backup.signature?.pluCapacity ?? 0), backup.signature?.priceDecimals ?? 0, [values.E_P, values.E_U]))
+      ? preflightProducts(this.ctx.products, systelLimits(layoutLimits(layout, backup.signature?.pluCapacity ?? 0), backup.signature?.priceDecimals ?? 0, labelFormats))
       : null;
     const readyIds = new Set((check?.ready ?? []).map((p) => p.id));
     const products = this.pushProducts().filter((p) => readyIds.has(p.id));
-    const plan = layout ? planSystelPush(backup.plus, layout, backup.signature?.priceDecimals ?? 0, products, { templates, pluCapacity: topPluNumber(layout, backup.signature?.pluCapacity ?? 0) }) : [];
+    const plan = layout ? planSystelPush(backup.plus, layout, backup.signature?.priceDecimals ?? 0, products, { templates, pluCapacity: topPluNumber(layout, backup.signature?.pluCapacity ?? 0), ticketCodes: this.codes }) : [];
     this.state = { backup, products, plan, setup, templates };
 
     const count = (a: string) => plan.filter((x) => x.action === a).length;
@@ -364,13 +410,13 @@ export class SystelSession implements ScaleSession {
     const skipped = [...(check?.problems ?? []), ...plan.filter((x) => x.action === "omitir").map((x) => ({ code: x.product.code, name: x.product.name, reason: x.reason }))];
     const extra = scaleOnly(backup.plus, this.pushProducts()).length;
     const notes: string[] = [];
-    if (this.startupWaitOn) notes.push("La balanza está configurada para esperar a la PC cada vez que se prende. Al sincronizar, Patagonia además la deja en \"iniciar sin esperar\" (comando oficial de Systel, función 35) y lo comprueba releyendo su configuración.");
-    if (this.model === "systel-cuora-max" && !systelVerified(backup) && !loadWriteProof(backup, this.number)) {
-      notes.push(`Es la primera vez que Patagonia le manda productos a este modelo (${layout ? LAYOUT_INFO[layout].label : "Cuora Max"}). Antes de tocar tus productos, Patagonia crea un producto de prueba, "${PROOF_NAME}" a $1, en un número libre de la balanza, lo relee y lo compara. Si algo no coincide, frena sin tocar tus productos. Ese producto de prueba queda en la balanza: lo podés borrar desde la balanza.`);
+    if (this.startupWaitOn) notes.push("La balanza está configurada para esperar a la computadora cada vez que se prende. Al enviar, Patagonia la deja lista para arrancar sola.");
+    if (this.model === "systel-cuora-max" && !systelVerified(backup) && !loadWriteProof(backup, this.number, this.scaleKey)) {
+      notes.push(`Es la primera vez que Patagonia le manda productos a esta balanza. Para cuidar tus productos, primero prueba con uno de mentira, "${PROOF_NAME}" a $1, en un número libre. Si algo no sale igual, frena sin tocar nada. Ese producto de prueba queda en la balanza y lo podés borrar desde ahí.`);
     }
     if (!backup.complete) notes.push("No se pudo leer toda la balanza. Probá de nuevo; si sigue, avisá a soporte.");
     const changing = count("actualizar");
-    if (changing) notes.push(`${changing === 1 ? "1 producto que ya está" : `${changing} productos que ya están`} en la balanza cambia de precio o nombre. Los totales de venta que guarda la balanza para ${changing === 1 ? "ese producto" : "esos productos"} podrían volver a cero (no está comprobado). Las ventas de Patagonia no cambian.`);
+    if (changing) notes.push(`${changing === 1 ? "1 producto que ya está" : `${changing} productos que ya están`} en la balanza cambia de precio o nombre. Si usás los totales de venta que guarda la balanza, sacalos antes de enviar: pueden volver a cero. Las ventas de Patagonia no cambian.`);
     if (extra) notes.push(extra === 1 ? "La balanza tiene 1 producto que no está en Patagonia: no se toca." : `La balanza tiene ${extra} productos que no están en Patagonia: no se tocan.`);
     const allowed = canWrite(this.model, "sendProducts") || (this.deps.forceWritable === true && this.model === "systel-cuora-max");
     const writable = allowed && !!layout && backup.complete;
@@ -414,9 +460,19 @@ export class SystelSession implements ScaleSession {
     const st = this.state;
     if (!st || !st.backup.layout || prepared.blocker || !prepared.canWrite) throw new Error("primero hay que leer la balanza");
     // Avisado en las notas antes de confirmar "Sincronizar productos".
-    if (this.startupWaitOn) await this.ensureNoStartupWait(st.backup.config);
+    // Cada producto pedido que no quedó grabado y releído igual, con su motivo (envios-fallas.test.ts). Antes un envío
+    // frenado no informaba ninguno y el historial decía "1 fallado" aunque faltaran todos.
+    const notDone = (items: PushItem[], done: { number: number }[], stoppedAt: number | null, detail: string): ProductProblem[] =>
+      items
+        .filter((x) => x.number !== null && (x.action === "crear" || x.action === "actualizar" || x.action === "reemplazar") && !done.some((w) => w.number === x.number))
+        .map((x) => ({ code: x.product.code, name: x.product.name, reason: x.number === stoppedAt ? `no quedó comprobado en la balanza (${detail})` : "no se mandó: el envío se frenó antes de llegar a este producto" }));
+    const startup = this.startupWaitOn ? await this.ensureNoStartupWait(st.backup.config) : "ok";
+    if (startup === "frenar") {
+      return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, failures: notDone(st.plan, [], null, ""), support: { etapa: "35 N", detail: "después de la función 35 N no se pudo comprobar la configuración (función 39)" } };
+    }
+    const startupNote = startup === "sigue" ? " Ojo: la balanza no aceptó dejar de esperar a la PC cada vez que se prende; si al prenderla se queda trabada, avisá a soporte." : "";
     const layout = st.backup.layout;
-    const plan = opts.allowReplace ? planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: true, templates: st.templates, pluCapacity: topPluNumber(layout, st.backup.signature?.pluCapacity ?? 0) }) : st.plan;
+    const plan = opts.allowReplace ? planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: true, templates: st.templates, pluCapacity: topPluNumber(layout, st.backup.signature?.pluCapacity ?? 0), ticketCodes: this.codes }) : st.plan;
     const toWrite = plan.filter((x) => x.action === "crear" || x.action === "actualizar" || x.action === "reemplazar");
 
     let written: { number: number }[] = [];
@@ -424,44 +480,76 @@ export class SystelSession implements ScaleSession {
       onProgress("sincronizar", "Guardando una copia de tu balanza antes de cambiar nada…");
       const writer = this.client(true);
       // Firmware sin comprobar (6.2 / 7.0): primero la prueba en un número libre; sin ella no se toca nada del cliente.
-      let mode: TypeByteMode = systelVerified(st.backup) ? "ascii" : loadWriteProof(st.backup, this.number) ?? "ascii";
-      if (!systelVerified(st.backup) && !loadWriteProof(st.backup, this.number)) {
+      let mode: TypeByteMode = systelVerified(st.backup) ? "ascii" : loadWriteProof(st.backup, this.number, this.scaleKey) ?? "ascii";
+      if (!systelVerified(st.backup) && !loadWriteProof(st.backup, this.number, this.scaleKey)) {
         onProgress("sincronizar", "Probando tu balanza con un producto de prueba…");
         this.proof = await proveSystelWrite(writer, layout, st.backup.plus, st.backup.signature?.priceDecimals ?? 0, st.backup.signature?.pluCapacity ?? 0);
         if (!this.proof.ok || !this.proof.mode) {
-          return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, support: { etapa: "prueba", prueba: this.proof } };
+          return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, failures: notDone(toWrite, [], null, ""), support: { etapa: "prueba", prueba: this.proof } };
         }
         mode = this.proof.mode;
-        saveWriteProof(st.backup, this.number, mode);
+        saveWriteProof(st.backup, this.number, mode, this.scaleKey);
       }
-      const modePlan = mode === "ascii" ? plan : planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: !!opts.allowReplace, mode, templates: st.templates, pluCapacity: topPluNumber(layout, st.backup.signature?.pluCapacity ?? 0) });
+      const modePlan = mode === "ascii" ? plan : planSystelPush(st.backup.plus, layout, st.backup.signature?.priceDecimals ?? 0, st.products, { replace: !!opts.allowReplace, mode, templates: st.templates, pluCapacity: topPluNumber(layout, st.backup.signature?.pluCapacity ?? 0), ticketCodes: this.codes });
       // Balanza vacía: el sector de los modelos tiene que existir (si lo borraron, cada producto da E7).
       if (st.templates.length > 0) {
         onProgress("sincronizar", "Revisando los sectores de tu balanza…");
         const sectors = await ensureSystelSectors(writer, st.templates.map((t) => t.sector));
-        if (!sectors.ok) return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, support: { etapa: "sector", detail: sectors.detail } };
+        if (!sectors.ok) return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, failures: notDone(toWrite, [], null, ""), support: { etapa: "sector", detail: sectors.detail } };
       }
       const existing = toWrite.filter((x) => x.current).map((x) => x.number!);
       if (existing.length) {
         const { backup, missing } = await takeProductBackup(writer, layout, existing);
-        if (missing.length) return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.no_contesta, pending: prepared.pending, support: { etapa: "copia", missing } };
-        this.deps.saveLocalBackup(backup);
+        if (missing.length) return { ok: false, verified: 0, message: FRIENDLY_MESSAGES.no_contesta, pending: prepared.pending, failures: notDone(toWrite, [], null, ""), support: { etapa: "copia", missing } };
+        this.deps.saveLocalBackup(backup, this.scaleKey);
       }
       const r = await runSystelPush(writer, layout, modePlan, (d, t) => onProgress("sincronizar", "Mandando tus productos a la balanza…", d, t), mode);
       written = r.done;
       if (r.stoppedAt !== null) {
-        return { ok: false, verified: r.done.length, message: FRIENDLY_MESSAGES.frenado, pending: prepared.pending, support: { etapa: "envio", stoppedAt: r.stoppedAt, detail: r.detail, restored: r.restored } };
+        // C12: lo que ya quedó grabado y releído igual está en la balanza; Mostrador tiene que reconocerlo igual.
+        // El producto donde frenó solo conserva lo de antes si se comprobó que quedó como estaba.
+        const stopped = plan.find((x) => x.number === r.stoppedAt);
+        const unknown = stopped && stopped.current && r.restored !== true ? [r.stoppedAt] : [];
+        const sentNow = plan.filter((x) => x.number !== null && (x.action === "sin_cambios" || written.some((w) => w.number === x.number)));
+        if (sentNow.length > 0) await this.saveForMostrador(st, layout, sentNow, { keepPrevious: true, unknown });
+        const total = toWrite.length;
+        const partial = written.length > 0 ? ` Quedaron grabados ${written.length} de ${total} productos, y Mostrador ya los reconoce.` : "";
+        return { ok: false, verified: r.done.length, message: FRIENDLY_MESSAGES.frenado + partial, pending: prepared.pending, failures: notDone(toWrite, written, r.stoppedAt, r.detail), support: { etapa: "envio", stoppedAt: r.stoppedAt, detail: r.detail, restored: r.restored, grabados: written.length, total } };
       }
     }
 
     // Mostrador: cada código de la balanza es el producto de Patagonia con ese código (sin vincular a mano).
     onProgress("verificar", "Dejando Mostrador listo…");
     const sent = plan.filter((x) => x.number !== null && (x.action === "sin_cambios" || written.some((w) => w.number === x.number)));
-    const catalog: ScaleCatalogItem[] = sent.map((x) => {
+    await this.saveForMostrador(st, layout, sent, { keepPrevious: false, unknown: [] });
+
+    const pending = opts.allowReplace ? [] : prepared.pending;
+    return {
+      ok: true,
+      verified: written.length,
+      message: pending.length ? `${SENT_AND_CHECKED} ${pending.length === 1 ? "1 producto no se mandó porque en la balanza ese número es" : `${pending.length} productos no se mandaron porque en la balanza esos números son`} de otro producto. Para poner los de Patagonia, tocá "Volver a sincronizar" y marcá "Reemplazarlos por los de Patagonia".${startupNote}` : SENT_AND_CHECKED + startupNote,
+      pending,
+      ...(startup === "sigue" ? { support: { etapa: "35 N", detail: "la balanza contestó a la 35 N pero sigue con Sinc=1" } } : {})
+    };
+  }
+
+  /**
+   * Catálogo y vínculos de Mostrador con lo que la balanza tiene. `keepPrevious` (envío frenado a mitad): lo que no se
+   * llegó a mandar sigue en la balanza como estaba, así que se conserva lo que Mostrador ya sabía de esos números
+   * (salvo `unknown`: el producto donde frenó, si no se pudo comprobar cómo quedó).
+   */
+  private async saveForMostrador(st: State, layout: SystelLayout, sent: PushItem[], opts: { keepPrevious: boolean; unknown: number[] }): Promise<void> {
+    let catalog: ScaleCatalogItem[] = sent.map((x) => {
       // La Cuora 2 no tiene código por producto: imprime con el formato general de la balanza (tipo 0).
-      const ean = layout === "cuora2" ? { type: 0, config: null } : { type: 1, config: x.product.byWeight ? "20PPPPCCCCCC" : "21PPPPCCCCCC" };
+      const ean = layout === "cuora2" ? { type: 0, config: null } : { type: 1, config: x.product.byWeight ? this.codes.weighed : this.codes.unit };
       return { code: x.number!, name: x.product.name.slice(0, 18), saleType: x.product.byWeight ? "P" : "U", prices: [x.product.price, 0], eanType: ean.type, eanConfig: ean.config };
     });
+    let links: ScaleLink[] = sent.map((x) => ({ code: x.number!, kind: "product" as const, productId: x.product.id }));
+    if (opts.keepPrevious && st.setup) {
+      const mine = new Set([...sent.map((x) => x.number!), ...opts.unknown]);
+      catalog = [...catalog, ...(st.setup.profile.catalog ?? []).filter((c) => !mine.has(c.code))];
+      links = [...links, ...st.setup.links.filter((l) => !mine.has(l.code))];
+    }
     const values = st.backup.config?.values ?? {};
     if (this.ctx.online && this.ctx.branchId) {
       await this.deps.saveCatalog(
@@ -469,19 +557,11 @@ export class SystelSession implements ScaleSession {
         { scaleKey: this.scaleKey, brand: "systel", model: this.label, weighedFormat: values.E_P ?? null, unitFormat: values.E_U ?? null, totalFormat: values.E_S ?? null, amountDecimals: st.backup.signature?.priceDecimals ?? 0, genericCodes: [] },
         catalog
       );
-      await this.deps.setLinks(this.ctx.branchId, this.scaleKey, sent.map((x) => ({ code: x.number!, kind: "product" as const, productId: x.product.id })));
+      await this.deps.setLinks(this.ctx.branchId, this.scaleKey, links);
       await this.deps.setActive(this.ctx.branchId, this.scaleKey, true);
     }
     saveSystelLabelTemplates(values);
-    saveSystelPluBarcodes(Object.fromEntries(catalog.map((c) => [String(c.code), { type: c.eanType, config: c.eanConfig, p1: c.prices[0], p2: 0, name: c.name, saleType: c.saleType }])));
-
-    const pending = opts.allowReplace ? [] : prepared.pending;
-    return {
-      ok: true,
-      verified: written.length,
-      message: pending.length ? `${SENT_AND_CHECKED} ${pending.length === 1 ? "1 producto no se mandó porque en la balanza ese número es" : `${pending.length} productos no se mandaron porque en la balanza esos números son`} de otro producto. Para poner los de Patagonia, tocá "Volver a sincronizar" y marcá "Reemplazarlos por los de Patagonia".` : SENT_AND_CHECKED,
-      pending
-    };
+    saveSystelPluBarcodes(Object.fromEntries(catalog.map((c) => [String(c.code), { type: c.eanType, config: c.eanConfig, p1: c.prices[0], p2: c.prices[1] ?? 0, name: c.name, saleType: c.saleType }])));
   }
 
   async close(): Promise<void> {

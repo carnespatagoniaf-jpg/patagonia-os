@@ -1,0 +1,157 @@
+// Canal de Patagonia Scale Connect con la nube (migración 226, plan balanzas v2 §5.4).
+//
+// Lo llama SOLO el servicio de Windows de cada PC vinculada, con el encabezado
+// `x-scale-connector: <id>.<secreto>` (lo entregó scale-connect-pair una vez). No usa la sesión de un usuario:
+// se despliega con --no-verify-jwt (publicar.yml, SIN_SESION). Sin CORS: un navegador no lo puede usar.
+//
+// Rutas (POST, JSON):
+//   /claim      {wait: 0..25}  → {job: {...} | null}       toma el próximo trabajo (consulta larga hasta 25 s)
+//   /progress   {job_id, seq, done, total, text, items[]}  avance y resultados por producto
+//   /finish     {job_id, status, counters, items[], error} cierra el trabajo
+//   /heartbeat  {version, scales[]}                        latido (cada 60 s)
+//   /config     {}                                         sus balanzas (solo las de SU sucursal) y en qué puerto está cada una
+//   /engine     {job_id, action, args}                     lo que el motor de "Mi balanza" le pide a Patagonia durante un
+//                                                          trabajo EN CURSO (migración 227): leer el formato y el catálogo
+//                                                          de la sucursal del trabajo, y escribir por las mismas RPC de la
+//                                                          web en nombre de quien encoló el trabajo
+//   /update     {current_version}                      la versión que le toca a esta PC (migración 229: canal de la empresa
+//                                                          + porcentaje de despliegue) con su manifiesto FIRMADO. La PC
+//                                                          verifica la firma con su clave embebida: desde acá no se puede
+//                                                          hacer instalar nada que no haya firmado Patagonia.
+//   /update-report {result, from, to, message}         lo que pasó con la actualización (instalada, revertida…)
+//   /config además devuelve `update: {version} | null` (la misma oferta, solo la versión).
+//
+// Cada llamada a la base vuelve a validar la credencial (id + SHA-256 del secreto): revocar corta en el próximo
+// pedido, incluso a mitad de una consulta larga. La base limita a 240 pedidos por minuto por conector y nunca
+// devuelve datos de otra empresa (cada función filtra por la empresa del conector).
+// Lógica pura y pruebas: connect.ts / apps/web/src/features/scales/scale-connect-server.test.ts.
+
+import { createClient } from "npm:@supabase/supabase-js@2";
+import {
+  apiRoute,
+  CONNECTOR_HEADER,
+  isJsonRequest,
+  json,
+  longPollClaim,
+  maxBodyFor,
+  parseClaimRequest,
+  parseConnectorCredential,
+  parseEngineRequest,
+  parseFinishRequest,
+  parseHeartbeatRequest,
+  parseProgressRequest,
+  parseUpdateReport,
+  parseUpdateRequest,
+  readJsonLimited,
+  rpcErrorBody,
+  rpcErrorStatus,
+  sha256Hex
+} from "./connect.ts";
+
+const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
+const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+const sleep = (ms: number, signal: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    const t = setTimeout(resolve, ms);
+    signal.addEventListener("abort", () => {
+      clearTimeout(t);
+      resolve();
+    }, { once: true });
+  });
+
+Deno.serve(async (req) => {
+  if (req.method !== "POST") return json({ ok: false, error: "metodo_no_permitido" }, 405);
+  const route = apiRoute(new URL(req.url).pathname);
+  if (!route) return json({ ok: false, error: "no_existe" }, 404);
+
+  if (!isJsonRequest(req.headers)) return json({ ok: false, error: "tipo_no_soportado" }, 415);
+  const credential = parseConnectorCredential(req.headers.get(CONNECTOR_HEADER));
+  if (!credential) return json({ ok: false, error: "credencial_invalida" }, 401);
+  const body = await readJsonLimited(req, maxBodyFor(route));
+  if (!body.ok) return json({ ok: false, error: body.error }, body.error === "muy_grande" ? 413 : 400);
+
+  const admin = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, { auth: { persistSession: false } });
+  const auth = { p_connector_id: credential.id, p_secret_hash: await sha256Hex(credential.secret) };
+  const fail = (error: { code?: string; message?: string }) => json(rpcErrorBody(error), rpcErrorStatus(error.code));
+
+  try {
+    if (route === "claim") {
+      const parsed = parseClaimRequest(body.value);
+      if (!parsed.ok) return json(parsed, 400);
+      // Si el conector cortó (se reinició, se cayó la red), no se toma nada a su nombre: ver longPollClaim.
+      const r = await longPollClaim({
+        claim: async () => {
+          const { data, error } = await admin.rpc("scale_connector_claim_job", auth);
+          return { data, error };
+        },
+        waitSec: parsed.value.waitSec,
+        aborted: () => req.signal.aborted,
+        sleep: (ms) => sleep(ms, req.signal),
+      });
+      if (r.error) return fail(r.error as { code?: string; message?: string });
+      return json({ ok: true, job: r.job });
+    }
+
+    if (route === "progress") {
+      const parsed = parseProgressRequest(body.value);
+      if (!parsed.ok) return json(parsed, 400);
+      const p = parsed.value;
+      const { data, error } = await admin.rpc("scale_connector_job_progress", {
+        ...auth, p_job_id: p.jobId, p_seq: p.seq, p_done: p.done, p_total: p.total, p_text: p.text, p_items: p.items
+      });
+      return error ? fail(error) : json({ ok: true, ...(data ?? {}) });
+    }
+
+    if (route === "finish") {
+      const parsed = parseFinishRequest(body.value);
+      if (!parsed.ok) return json(parsed, 400);
+      const f = parsed.value;
+      const { data, error } = await admin.rpc("scale_connector_finish_job", {
+        ...auth, p_job_id: f.jobId, p_status: f.status, p_counters: f.counters, p_items: f.items, p_error: f.error
+      });
+      return error ? fail(error) : json({ ok: true, result: data });
+    }
+
+    if (route === "heartbeat") {
+      const parsed = parseHeartbeatRequest(body.value);
+      if (!parsed.ok) return json(parsed, 400);
+      const { data, error } = await admin.rpc("scale_connector_heartbeat", { ...auth, p_version: parsed.value.version, p_scales: parsed.value.scales });
+      return error ? fail(error) : json(data);
+    }
+
+    if (route === "engine") {
+      const parsed = parseEngineRequest(body.value);
+      if (!parsed.ok) return json(parsed, 400);
+      const e = parsed.value;
+      const { data, error } = await admin.rpc("scale_connector_engine", { ...auth, p_job_id: e.jobId, p_action: e.action, p_args: e.args });
+      return error ? fail(error) : json({ ok: true, ...(data ?? {}) });
+    }
+
+    if (route === "update") {
+      const parsed = parseUpdateRequest(body.value);
+      if (!parsed.ok) return json(parsed, 400);
+      const { data, error } = await admin.rpc("scale_connector_update_offer", { ...auth, p_current_version: parsed.value.currentVersion });
+      return error ? fail(error) : json({ ok: true, ...(data ?? {}) });
+    }
+
+    if (route === "update-report") {
+      const parsed = parseUpdateReport(body.value);
+      if (!parsed.ok) return json(parsed, 400);
+      const { error } = await admin.rpc("scale_connector_report_update", { ...auth, p_report: parsed.value });
+      return error ? fail(error) : json({ ok: true });
+    }
+
+    const { data, error } = await admin.rpc("scale_connector_config", auth);
+    if (error) return fail(error);
+    // La versión que le toca a esta PC (migración 229), para que el servicio despierte al actualizador. Si la 229
+    // todavía no está, o falla, la configuración sale igual sin ella.
+    let update: { version: string } | null = null;
+    const offer = await admin.rpc("scale_connector_update_offer", { ...auth, p_current_version: null });
+    if (!offer.error && offer.data?.offer?.version) update = { version: String(offer.data.offer.version) };
+    return json({ ok: true, ...(data ?? {}), update });
+  } catch (e) {
+    console.error("scale-connect-api", route, e instanceof Error ? e.message : String(e));
+    return json({ ok: false, error: "error_interno" }, 500);
+  }
+});

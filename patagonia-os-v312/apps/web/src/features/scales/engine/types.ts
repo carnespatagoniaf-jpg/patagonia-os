@@ -1,5 +1,6 @@
 import type { ScaleModelId } from "./capabilities";
 import type { PendingReason } from "./matching";
+import type { LabelSpec } from "../label-spec";
 
 /**
  * Motor de "Mi balanza": un solo recorrido para cualquier marca.
@@ -153,6 +154,13 @@ export interface EngineContext {
   pesosBarcode?: boolean;
   /** Report por USB/Bluetooth: el mismo 2-5-5 con peso que la Report por red (REPORT_PLU5_WEIGHT_COMPANIES, Oliem 25/11/2026). */
   plu5Barcode?: boolean;
+  /**
+   * 'balanzas_v2' (interruptor por empresa): el envío escribe el perfil de etiqueta de ESTA balanza (1070 Kretz o
+   * formato por producto Systel con su inicio) y nunca el formato de la sucursal. Las 3 marcas de arriba no se usan.
+   */
+  balanzasV2?: boolean;
+  /** 'balanzas_v2': el perfil de etiqueta de ESTA balanza (scale_profiles.label_spec), si ya tiene. */
+  labelSpec?: LabelSpec | null;
 }
 
 export interface ScaleAdapter {

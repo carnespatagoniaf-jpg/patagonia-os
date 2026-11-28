@@ -3,7 +3,7 @@ import { useAuth } from "../auth/AuthProvider";
 import { useActiveBranch } from "../branches/BranchProvider";
 import { exportActivityLogText, logScaleActivity } from "../scales/activity-log";
 import { submitScaleSupportReport } from "../scales/support-service";
-import { planAllows } from "../auth/permissions";
+import { can, planAllows } from "../auth/permissions";
 import { formatMoney } from "../shifts/format";
 import {
   autoDetectScale,
@@ -26,11 +26,13 @@ import {
   isScalePortPaired,
   isScaleSerialSupported,
   planScaleSync,
+  readReportProduct,
   readScalePlu,
   saveScaleSerialSettings,
   sendScalePing,
   syncOneProductToScale,
   syncProductsToScale,
+  verifySentReportProducts,
   type ScaleSerialSettings,
   type ScaleSyncableProduct
 } from "./scale-serial";
@@ -39,7 +41,7 @@ import { auraPriceCandidates, parseAuraPlu } from "./kretz/aura-plu";
 import { AURA_TEST_PLUS, AURA_TEST_PRODUCTS, getLastAuraWriteTest, type AuraWriteTestResult } from "./kretz/aura-write-test";
 import { analyzeModelProbe, getLastModelProbe, type ModelProbeResult } from "./kretz/aura-model-probe";
 import { AURA_ITEM_SCALE_CONFIG, planAuraSync, summarizeAuraPlan, type AuraSyncAction } from "./kretz/aura-sync";
-import { saveBranchScaleConfig } from "../sale/scale-config-service";
+import { saveBranchScaleConfigGuarded } from "./kretz/branch-scale-guard-service";
 import { SettingSection } from "../../components/SettingSection";
 
 /** El botón de diagnóstico de la Aura no se muestra todavía (decisión del dueño). */
@@ -264,7 +266,7 @@ export function ScaleSyncPanel({ products, onDownloadCsv }: { products: ScaleSyn
     try {
       const r = await readAuraListOnScale((text) => setScaleLog(text));
       setAuraList({ records: r.records, complete: r.complete, detail: r.detail, readAt: new Date().toISOString() });
-      report(r.complete ? `Listo: ${r.detail}.` : `No se pudo leer la balanza completa: ${r.detail}. No se va a mandar nada hasta poder leerla.`);
+      report(r.complete ? `Listo: ${r.detail}.` : `No se pudo leer toda la balanza. No se cambió nada (${r.detail}). No se va a mandar nada hasta poder leerla entera.`);
     } catch (err) {
       report(err instanceof Error ? err.message : "No se pudo leer la balanza.");
     } finally {
@@ -309,7 +311,10 @@ export function ScaleSyncPanel({ products, onDownloadCsv }: { products: ScaleSyn
               ? " La balanza no contestó el ajuste del código de barras."
               : "";
       if (r.after.length || r.before.length) setAuraList({ records: r.after.length ? r.after : r.before, complete: r.verdict === "ok", detail: r.detail, readAt: new Date().toISOString() });
-      if (r.verdict === "ok") {
+      if (r.verdict === "ok" && barcode && r.barcode !== "ok") {
+        // C13: sin el 1070 confirmado no es "Listo".
+        report(`⚠️ Los productos quedaron, pero el código de barras no: ${r.detail}.${barcodeText} Volvé a mandar; si se repite, avisale al equipo de Patagonia OS.`);
+      } else if (r.verdict === "ok") {
         report(`✅ Listo: ${r.detail}. Los demás productos de la balanza quedaron igual.${barcodeText}`);
       } else {
         const canSend = profile?.role === "owner" || profile?.role === "admin";
@@ -345,8 +350,9 @@ export function ScaleSyncPanel({ products, onDownloadCsv }: { products: ScaleSyn
       // La Report LT no cambia de formato (no se manda el 1070): Mostrador sigue con la calibración que ya lee sus etiquetas.
       if (r.verdict === "ok" && enable && branchId && !report_lt) {
         try {
-          await saveBranchScaleConfig(branchId, AURA_ITEM_SCALE_CONFIG);
-          mostradorText = " Mostrador de esta sucursal ya quedó preparado para leer esos códigos.";
+          // C1: si el local tiene otra balanza y el formato cambiaría, no se toca (lo leería mal).
+          const g = await saveBranchScaleConfigGuarded(branchId, AURA_ITEM_SCALE_CONFIG);
+          mostradorText = g.saved ? " Mostrador de esta sucursal ya quedó preparado para leer esos códigos." : ` ${g.message}`;
         } catch {
           mostradorText = " Pero no se pudo preparar Mostrador: avisale al equipo de Patagonia OS.";
         }
@@ -567,14 +573,36 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
     setScaleLog("");
     setScaleSyncProgress({ done: 0, total: 0 });
     try {
+      // Primero se lee cada número (solo lectura): si la balanza contesta con un error en alguno, no se escribe nada (C8).
+      const toRead = planScaleSync(products).toSend;
+      for (const [i, p] of toRead.entries()) {
+        setScaleLog(`Leyendo la balanza antes de mandar… ${i + 1} de ${toRead.length}`);
+        try {
+          await readReportProduct(p.code);
+        } catch (err) {
+          report(`No se pudo leer toda la balanza. No se cambió nada (${err instanceof Error ? err.message : String(err)}).`);
+          return;
+        }
+      }
       const result = await syncProductsToScale(products, (done, total) => setScaleSyncProgress({ done, total }));
-      const okCount = result.responseCodeCounts["01"] ?? 0;
-      const failedCount = result.attempted - okCount;
+      // C15: un "01" no alcanza (la Report puede contestarlo sin grabar): se relee cada uno antes de contarlo.
+      const notAnswered = new Set([...result.failed, ...result.noResponse, ...result.transportErrors].map((x) => x.product.id));
+      setScaleLog("Comprobando lo que quedó en la balanza…");
+      const check = await verifySentReportProducts(toRead.filter((p) => !notAnswered.has(p.id)), (done, total) => setScaleSyncProgress({ done, total }));
+      const okCount = check.confirmed.length;
+      const failedCount = result.attempted - (result.responseCodeCounts["01"] ?? 0);
       const codesSummary = Object.entries(result.responseCodeCounts)
         .filter(([code]) => code !== "01")
         .map(([code, count]) => `${count} con código "${code}" (${describeResponseCode(code)})`)
         .join(", ");
-      const parts = [`${okCount} enviados con éxito de ${result.attempted} intentados.`];
+      const parts = [`${okCount} enviados y comprobados de ${result.attempted} intentados.`];
+      if (check.notConfirmed.length) {
+        parts.push(
+          `${check.notConfirmed.length} la balanza los aceptó pero al releerlos no quedaron iguales: ` +
+            check.notConfirmed.map((x) => `${x.product.name} (${x.product.code}: ${x.reason})`).join(", ") +
+            "."
+        );
+      }
       if (failedCount > 0 && codesSummary) parts.push(`Fallidos: ${codesSummary}.`);
       if (result.failed.length) {
         parts.push(
@@ -681,6 +709,11 @@ ${sent ? "✅ Listo: el resultado ya le llegó al equipo de Patagonia OS." : "Sa
           "En la balanza: menú de usuario (clave de fábrica 99999) → COMUNI → MODO \"Datos\" y PUERT \"RS-232\"."
         ]
       : ["Cable de PC de la balanza Kretz (o un adaptador USB a serie) conectado a esta computadora."];
+
+  // scales.send (migración 224): casi todo este panel escribe en la balanza o cambia su formato. Sin el permiso, nada.
+  if (!can(profile, "scales.send")) {
+    return <p className="muted">Tu usuario no puede enviar productos a la balanza ni cambiar su configuración.</p>;
+  }
 
   return (
     <>

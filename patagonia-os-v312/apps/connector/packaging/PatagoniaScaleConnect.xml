@@ -1,0 +1,65 @@
+<!--
+  Configuración de WinSW (https://github.com/winsw/winsw, v3) para Patagonia Scale Connect.
+  Convención de WinSW: su .exe se renombra igual que este XML. En la carpeta del programa:
+    PatagoniaScaleConnect.exe   = WinSW-x64.exe renombrado (el envoltorio del servicio)
+    PatagoniaScaleConnect.xml   = este archivo
+    scale-connect.exe           = el conector (Node SEA)
+  Lo instala y lo desinstala packaging/installer.iss (Inno Setup). A mano, como administrador:
+    PatagoniaScaleConnect.exe install   (y después el sc.exe config de la cuenta, ver abajo)
+    PatagoniaScaleConnect.exe uninstall
+  Ver apps/connector/README.md.
+-->
+<service>
+  <id>PatagoniaScaleConnect</id>
+  <name>Patagonia Scale Connect</name>
+  <description>Conecta las balanzas de esta PC con Patagonia System. Es el único programa que usa sus puertos.</description>
+
+  <executable>%BASE%\scale-connect.exe</executable>
+  <workingdirectory>%BASE%</workingdirectory>
+
+  <!-- Arranca con Windows, aunque nadie inicie sesión. Diferido: espera a que la red y el USB estén listos. -->
+  <startmode>Automatic</startmode>
+  <delayedAutoStart>true</delayedAutoStart>
+
+  <!-- Reinicio ante caída: 5 s, 15 s y después cada 60 s. El contador se reinicia tras 1 h sin fallas. -->
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="15 sec"/>
+  <onfailure action="restart" delay="60 sec"/>
+  <resetfailure>1 hour</resetfailure>
+
+  <!-- Apagado: WinSW manda Ctrl+C; el servicio interrumpe el trabajo en curso, lo anota y libera los puertos. -->
+  <stoptimeout>15 sec</stoptimeout>
+
+  <!--
+    Sin "autoRefresh": WinSW (por omisión) al arrancar como servicio compara la fecha de este XML con la del registro y,
+    si el XML es más nuevo, se reconfigura solo abriendo el servicio con TODOS los permisos. El servicio corre con una
+    cuenta que no es administrador (a propósito): eso da "Access is denied" y el servicio no arranca (error 1053,
+    visto en una PC limpia, prueba scale-connect-e2e). La configuración la aplica el instalador como administrador
+    (install, y refresh en cada actualización).
+  -->
+  <autoRefresh>false</autoRefresh>
+
+  <!--
+    Cuenta del servicio: la cuenta virtual "NT SERVICE\PatagoniaScaleConnect" (sin contraseña,
+    sin privilegios de administrador). NO va acá a propósito: WinSW v3.0.0-alpha.11, al
+    instalar, busca el SID de la cuenta (LookupAccountName) para darle el derecho de "iniciar
+    como servicio" ANTES de crear el servicio, y una cuenta virtual no existe hasta que el
+    servicio existe: la instalación falla (y sin <password> además pediría una).
+    Por eso WinSW instala con la cuenta por omisión y el instalador (packaging/installer.iss)
+    corre enseguida, antes del primer inicio:
+      sc.exe config PatagoniaScaleConnect obj= "NT SERVICE\PatagoniaScaleConnect"
+      icacls "%ProgramData%\Patagonia\ScaleConnect" /setowner *S-1-5-32-544 /T
+      icacls "%ProgramData%\Patagonia\ScaleConnect" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F "NT SERVICE\PatagoniaScaleConnect:(OI)(CI)M" /T
+    (la carpeta de datos queda SOLO para SYSTEM, Administradores y el servicio: ahí está la credencial de la PC)
+    `PatagoniaScaleConnect.exe refresh` (actualizaciones) no cambia la cuenta.
+  -->
+
+  <!-- Salida de consola del proceso (la bitácora propia está en logs\connector.log). -->
+  <logpath>%ProgramData%\Patagonia\ScaleConnect\logs\winsw</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>2048</sizeThreshold>
+    <keepFiles>3</keepFiles>
+  </log>
+
+  <env name="NODE_ENV" value="production"/>
+</service>

@@ -18,6 +18,8 @@ export interface BranchScale {
   formats?: CodeFormats | null;
   /** Pasos de la instalación comprobados (migración 165), o null si la base no lo tiene. */
   install?: InstallRecord | null;
+  /** Registro repetido que se unió a otro (migración 225): la clave del que quedó. */
+  mergedInto?: string | null;
 }
 
 export interface CodeFormats {
@@ -39,6 +41,7 @@ export interface ScaleRow {
   unit_format: string | null;
   total_format: string | null;
   install?: InstallRecord | null;
+  merged_into?: string | null;
 }
 
 export function familyOfBrand(brand: string): ScaleFamily {
@@ -58,7 +61,8 @@ export function rowToScale(r: ScaleRow): BranchScale {
     lastSeenAt: r.last_seen_at ?? null,
     sellsWithCodes: !!(r.weighed_format || r.unit_format || r.total_format),
     formats: r.weighed_format || r.unit_format || r.total_format ? { weighed: r.weighed_format, unit: r.unit_format, total: r.total_format } : null,
-    install: r.install ?? null
+    install: r.install ?? null,
+    mergedInto: r.merged_into ?? null
   };
 }
 
@@ -84,6 +88,51 @@ export function findRegistered(scales: BranchScale[], family: ScaleFamily, ident
 export function legacyCandidate(scales: BranchScale[], family: ScaleFamily): BranchScale | null {
   const ofFamily = scales.filter((s) => s.family === family);
   return ofFamily.length === 1 && Object.keys(ofFamily[0].identity).length === 0 ? ofFamily[0] : null;
+}
+
+/** Una registrada que podría ser la balanza recién conectada ("¿Es la Balanza X?"). */
+export interface SameScaleCandidate {
+  key: string;
+  name: string;
+  lastSeenAt: string | null;
+}
+
+const noIdentity = (i: Record<string, unknown> | null | undefined) => !Object.values(i ?? {}).some((v) => v !== undefined && v !== null);
+
+/**
+ * C22: al AGREGAR, las registradas que podrían ser la misma balanza: misma marca y misma identidad de protocolo
+ * (número Systel, letra y equipo Kretz), o sin identidad guardada (de antes de la 134). Lo que distingue a dos
+ * balanzas iguales (el cable, cómo imprimen) es débil, así que no se decide solo: se le pregunta a la persona.
+ * Real (producción, 26/11): Los gringos 4 × {"address":20}, El Abastero 2 × {"letter":"C","equipment":"01"}.
+ * Primero la usada más recientemente.
+ */
+export function sameScaleCandidates(scales: BranchScale[], family: ScaleFamily, identity: Record<string, unknown>): SameScaleCandidate[] {
+  return scales
+    .filter((s) => s.family === family && (noIdentity(s.identity) || noIdentity(identity) || sameIdentity(s.identity, identity)))
+    .sort((a, b) => (b.lastSeenAt ?? "").localeCompare(a.lastSeenAt ?? ""))
+    .map((s) => ({ key: s.key, name: s.name, lastSeenAt: s.lastSeenAt }));
+}
+
+/** "usada hoy 10:15", "usada el 20/11 13:00" o "nunca se conectó". */
+/** Hora y día en Argentina (no la de la máquina: el CI y un servidor corren en UTC). */
+const AR_TZ = "America/Argentina/Buenos_Aires";
+export function arTime(d: Date): string {
+  return d.toLocaleTimeString("es-AR", { hour: "2-digit", hourCycle: "h23", minute: "2-digit", timeZone: AR_TZ });
+}
+export function arDay(d: Date): string {
+  return d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", year: "numeric", timeZone: AR_TZ });
+}
+export function arDayShort(d: Date): string {
+  return d.toLocaleDateString("es-AR", { day: "2-digit", month: "2-digit", timeZone: AR_TZ });
+}
+
+export function lastUseText(lastSeenAt: string | null, now = new Date()): string {
+  if (!lastSeenAt) return "nunca se conectó";
+  const at = new Date(lastSeenAt);
+  if (Number.isNaN(at.getTime())) return "nunca se conectó";
+  const hh = arTime(at);
+  if (arDay(at) === arDay(now)) return `usada hoy ${hh}`;
+  return `usada el ${arDayShort(at)} ${hh}`;
 }
 
 /** Nombre inicial que no se repita en la sucursal: "Systel Cuora Max", "Systel Cuora Max 2"… */

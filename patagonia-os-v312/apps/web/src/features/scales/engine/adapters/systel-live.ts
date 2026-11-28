@@ -1,6 +1,7 @@
 import { loadScaleSetup, saveScaleCatalog, setScaleLinks, setScaleProfileActive } from "../../sale/scale-sale-service";
 import { loadSavedSystelLink, saveSystelLink } from "../../../inventory/systel/systel-discovery";
 import { makeSystelAdapter, saveProductBackupLocally, type SystelDeps } from "./systel";
+import { allocateScalePrefix } from "../../label-spec-service";
 
 /** Systel con la base real de Patagonia (migración 119). Separado para que systel.ts se pruebe sin base. */
 export const SYSTEL_DEPS: SystelDeps = {
@@ -8,6 +9,7 @@ export const SYSTEL_DEPS: SystelDeps = {
   saveCatalog: (branchId, profile, catalog) => saveScaleCatalog(branchId, profile, catalog),
   setLinks: setScaleLinks,
   setActive: setScaleProfileActive,
+  allocatePrefix: allocateScalePrefix,
   saveLocalBackup: saveProductBackupLocally,
   // Si la balanza atendió con otras señales o a otro número, se guarda junto a su conexión (la próxima vez y Mostrador).
   onConnectionHints: (hints) => {

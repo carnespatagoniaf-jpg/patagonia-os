@@ -1,0 +1,364 @@
+﻿; Instalador de Patagonia Scale Connect (Inno Setup 6.3 o posterior). SIN FIRMAR todavía.
+; El archivo va en UTF-8 CON BOM: sin BOM, Inno Setup lo lee como ANSI y rompe los acentos.
+;
+; Se compila con scripts/build-installer.mjs (local y CI), que pasa:
+;   /DAppVersion=0.1.0  /DSourceDir=<dist\PatagoniaScaleConnect>  /DOutputDir=<dist\installer>
+; Antes hay que armar dist\PatagoniaScaleConnect con `npm run package -w @patagonia/connector`.
+;
+; Qué hace:
+;   - Programa en  C:\Program Files\Patagonia\Scale Connect
+;   - Datos en     C:\ProgramData\Patagonia\ScaleConnect   (config, diario, bitácoras; NO se pisan)
+;   - Registra el servicio con WinSW (inicio automático con retardo, reinicio ante caídas),
+;     lo pasa a la cuenta virtual NT SERVICE\PatagoniaScaleConnect (si Windows no la acepta,
+;     a NT AUTHORITY\LocalService), le da permisos y lo inicia.
+;   - Actualización encima: frena el servicio, reemplaza los archivos y lo vuelve a iniciar.
+;   - A qué Patagonia se conecta: parámetro /NUBE=produccion (por omisión) | pruebas | https://…/functions/v1.
+;     Se escribe SOLO "cloud.url" en config.json (scale-connect.exe --set-cloud). Sin /NUBE= y con una dirección ya
+;     guardada (actualización), se mantiene la que estaba: nunca cambia de sistema sola.
+;   - Actualización automática: carpeta C:\ProgramData\Patagonia\ScaleConnect-Updater (solo SYSTEM y Administradores),
+;     guarda este instalador ahí (para volver atrás) y registra la tarea programada como SYSTEM (updater-task.ps1).
+;   - Al terminar abre http://127.0.0.1:9120/vincular (que dice a qué sistema se vincula).
+;   - Desinstalar saca el servicio y deja los datos, salvo que se elija borrarlos
+;     (silencioso: parámetro /BORRARDATOS).
+;
+; Soporte, sin preguntas:
+;   PatagoniaScaleConnect-Setup-X.Y.Z.exe /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /LOG="%TEMP%\scale-connect-setup.log"
+;   PatagoniaScaleConnect-Setup-X.Y.Z.exe /NUBE=pruebas      (PC de prueba contra staging)
+;   "C:\Program Files\Patagonia\Scale Connect\unins000.exe" /VERYSILENT /SUPPRESSMSGBOXES [/BORRARDATOS]
+;
+; Firma: cuando haya certificado, se firma scale-connect.exe ANTES de compilar esto, y el
+; instalador y el desinstalador con SignTool= (ver README, "Qué falta").
+
+#ifndef AppVersion
+  #define AppVersion "0.0.0"
+#endif
+#ifndef SourceDir
+  #define SourceDir "..\dist\PatagoniaScaleConnect"
+#endif
+#ifndef OutputDir
+  #define OutputDir "..\dist\installer"
+#endif
+
+#define AppName "Patagonia Scale Connect"
+#define ServiceId "PatagoniaScaleConnect"
+#define VirtualAccount "NT SERVICE\PatagoniaScaleConnect"
+#define FallbackAccount "NT AUTHORITY\LocalService"
+#define LinkUrl "http://127.0.0.1:9120/vincular"
+; Carpeta del actualizador automático (tarea programada como SYSTEM): SOLO SYSTEM y Administradores. Ahí quedan el
+; instalador de la versión instalada (para volver atrás) y la copia del ejecutable que corre como SYSTEM.
+#define UpdaterSubdir "Patagonia\ScaleConnect-Updater"
+
+[Setup]
+; AppId fijo: es lo que hace que una versión nueva se instale ENCIMA de la anterior. No cambiarlo nunca.
+AppId={{6F3C2B1E-8D47-4A5C-9E21-5B7D0C4A9F13}
+AppName={#AppName}
+AppVersion={#AppVersion}
+AppVerName={#AppName} {#AppVersion}
+AppPublisher=Patagonia System
+AppPublisherURL=https://patagoniasystem.com.ar
+AppSupportURL=https://patagoniasystem.com.ar
+VersionInfoVersion={#AppVersion}
+VersionInfoProductName={#AppName}
+DefaultDirName={autopf}\Patagonia\Scale Connect
+DisableDirPage=yes
+DisableProgramGroupPage=yes
+DisableReadyPage=no
+PrivilegesRequired=admin
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+MinVersion=10.0
+OutputDir={#OutputDir}
+OutputBaseFilename=PatagoniaScaleConnect-Setup-{#AppVersion}
+Compression=lzma2/max
+SolidCompression=yes
+WizardStyle=modern
+; El servicio lo frena el propio instalador (PrepareToInstall), no el Restart Manager.
+CloseApplications=no
+RestartApplications=no
+UninstallDisplayName={#AppName}
+UninstallDisplayIcon={app}\scale-connect.exe
+SetupLogging=yes
+SetupMutex=PatagoniaScaleConnectSetup
+
+[Languages]
+Name: "es"; MessagesFile: "compiler:Languages\Spanish.isl"
+
+[CustomMessages]
+es.OpenLinkPage=Abrir la página para vincular esta PC con Patagonia System
+es.ServiceFailed=No se pudo registrar o iniciar el servicio Patagonia Scale Connect (paso: %1, código %2).%n%nEl programa quedó copiado. Avisá a soporte de Patagonia System.
+es.AskDeleteData=¿Borrar también los datos de Patagonia Scale Connect de esta PC?%n%n(Configuración, vinculación, diario de trabajos y bitácoras, en %1.)%n%nSi vas a reinstalar, elegí No.
+es.StoppingService=Frenando el servicio Patagonia Scale Connect...
+es.CloudFailed=No se pudo guardar a qué Patagonia se conecta esta PC (/NUBE=%1, código %2).%n%nScale Connect quedó instalado. Avisá a soporte de Patagonia System.
+
+[Dirs]
+; Los datos nunca los borra la desinstalación por sí sola (ver CurUninstallStepChanged).
+Name: "{commonappdata}\Patagonia\ScaleConnect"; Flags: uninsneveruninstall
+Name: "{commonappdata}\Patagonia\ScaleConnect\logs"; Flags: uninsneveruninstall
+
+[InstallDelete]
+; En una actualización, las dependencias viejas no deben quedar mezcladas con las nuevas.
+Type: filesandordirs; Name: "{app}\node_modules"
+
+[Files]
+Source: "{#SourceDir}\scale-connect.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\PatagoniaScaleConnect.exe"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\PatagoniaScaleConnect.xml"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\build-info.json"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\updater-task.ps1"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\node_modules\*"; DestDir: "{app}\node_modules"; Flags: ignoreversion recursesubdirs createallsubdirs
+
+[Run]
+; Abre la página de vinculación con el usuario que inició el instalador (no como administrador).
+; Si esa página todavía no existe en esta versión del servicio, igual se abre la dirección.
+Filename: "{#LinkUrl}"; Description: "{cm:OpenLinkPage}"; Flags: shellexec postinstall nowait skipifsilent runasoriginaluser
+
+[Code]
+var
+  ServiceAccountUsed: String;
+
+function WinSW: String;
+begin
+  Result := ExpandConstant('{app}\{#ServiceId}.exe');
+end;
+
+function DataDir: String;
+begin
+  Result := ExpandConstant('{commonappdata}\Patagonia\ScaleConnect');
+end;
+
+function UpdaterDir: String;
+begin
+  Result := ExpandConstant('{commonappdata}\{#UpdaterSubdir}');
+end;
+
+function Run(const FileName, Params: String; var Code: Integer): Boolean;
+begin
+  Log(Format('Ejecuta: %s %s', [FileName, Params]));
+  Result := Exec(FileName, Params, '', SW_HIDE, ewWaitUntilTerminated, Code);
+  Log(Format('  -> ok=%d código=%d', [Ord(Result), Code]));
+end;
+
+function RunOk(const FileName, Params: String): Boolean;
+var
+  Code: Integer;
+begin
+  Result := Run(FileName, Params, Code) and (Code = 0);
+end;
+
+function Sc(const Params: String; var Code: Integer): Boolean;
+begin
+  Result := Run(ExpandConstant('{sys}\sc.exe'), Params, Code);
+end;
+
+function ServiceExists: Boolean;
+var
+  Code: Integer;
+begin
+  // sc query devuelve 1060 si el servicio no existe.
+  Result := Sc('query {#ServiceId}', Code) and (Code = 0);
+end;
+
+procedure StopService;
+var
+  Code: Integer;
+begin
+  // net stop espera a que el servicio quede detenido (2 = ya estaba detenido).
+  Run(ExpandConstant('{sys}\net.exe'), 'stop {#ServiceId}', Code);
+  // Último recurso: si el proceso quedó colgado, los archivos no se podrían reemplazar.
+  Run(ExpandConstant('{sys}\taskkill.exe'), '/F /IM scale-connect.exe', Code);
+  Sleep(1000);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  Result := '';
+  if ServiceExists then
+  begin
+    WizardForm.StatusLabel.Caption := CustomMessage('StoppingService');
+    Log('Actualización: hay un servicio instalado, se frena antes de copiar.');
+    StopService;
+  end;
+end;
+
+procedure ServiceError(const Step: String; Code: Integer);
+begin
+  Log(Format('ERROR del servicio en "%s", código %d', [Step, Code]));
+  SuppressibleMsgBox(FmtMessage(CustomMessage('ServiceFailed'), [Step, IntToStr(Code)]), mbError, MB_OK, IDOK);
+end;
+
+procedure ConfigureCloud;
+var
+  Code: Integer;
+  Nube, Params: String;
+begin
+  Nube := Trim(ExpandConstant('{param:NUBE|}'));
+  if Nube = '' then
+    Params := '--set-cloud produccion --if-missing'
+  else
+    Params := '--set-cloud "' + Nube + '"';
+  Log('Nube: ' + Params);
+  if not (Run(ExpandConstant('{app}\scale-connect.exe'), Params, Code) and (Code = 0)) then
+  begin
+    Log(Format('ERROR al guardar la nube, código %d', [Code]));
+    SuppressibleMsgBox(FmtMessage(CustomMessage('CloudFailed'), [Nube, IntToStr(Code)]), mbError, MB_OK, IDOK);
+  end;
+end;
+
+procedure RegisterAndStartService;
+var
+  Code: Integer;
+begin
+  // 1. Alta (primera vez) o refresco de la configuración (actualización). WinSW toma
+  //    inicio automático con retardo y las acciones de reinicio del XML.
+  if ServiceExists then
+  begin
+    if not (Run(WinSW, 'refresh', Code) and (Code = 0)) then begin ServiceError('refresh', Code); exit; end;
+  end
+  else
+  begin
+    if not (Run(WinSW, 'install', Code) and (Code = 0)) then begin ServiceError('install', Code); exit; end;
+  end;
+
+  // 2. Cuenta del servicio. WinSW v3 no puede instalar con una cuenta virtual (ver el XML),
+  //    así que se cambia acá. Si Windows no la acepta, se usa LocalService: tampoco es
+  //    administrador y también puede abrir los puertos COM.
+  ServiceAccountUsed := '{#VirtualAccount}';
+  if not (Sc('config {#ServiceId} obj= "{#VirtualAccount}"', Code) and (Code = 0)) then
+  begin
+    Log('La cuenta virtual no se pudo asignar; se usa LocalService.');
+    ServiceAccountUsed := '{#FallbackAccount}';
+    if not (Sc('config {#ServiceId} obj= "{#FallbackAccount}" password= ""', Code) and (Code = 0)) then
+    begin
+      ServiceError('cuenta del servicio', Code);
+      exit;
+    end;
+  end;
+  Log('Cuenta del servicio: ' + ServiceAccountUsed);
+
+  // 2b. A qué Patagonia se conecta (config.json → cloud.url). Antes de los permisos, así el archivo nuevo los hereda.
+  ConfigureCloud;
+
+  // 3. Permisos de los datos. ProgramData por defecto deja LEER a cualquier usuario de la PC (y crear archivos):
+  //    la credencial va cifrada con DPAPI de MÁQUINA, que cualquier usuario de esta PC puede descifrar si lee el
+  //    archivo. Por eso la carpeta queda SOLO para SYSTEM, Administradores y la cuenta del servicio:
+  //    a) dueño = Administradores (si alguien creó la carpeta o un archivo antes de instalar, deja de ser suyo);
+  //    b) sin herencia de ProgramData (afuera "Usuarios" y "CREATOR OWNER") y con permisos propios.
+  //    Por SID (S-1-5-18 SYSTEM, S-1-5-32-544 Administradores): en un Windows en castellano los nombres cambian.
+  if not RunOk(ExpandConstant('{sys}\icacls.exe'), '"' + DataDir + '" /setowner *S-1-5-32-544 /T /C /Q') then
+  begin
+    ServiceError('dueño de la carpeta de datos', -1);
+    exit;
+  end;
+  if not RunOk(ExpandConstant('{sys}\icacls.exe'), '"' + DataDir + '" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F "' + ServiceAccountUsed + ':(OI)(CI)M" /T /C /Q') then
+  begin
+    ServiceError('permisos de datos', -1);
+    exit;
+  end;
+  // Lo que ya existía adentro (bitácoras de WinSW, config.json, una instalación vieja) pasa a heredar de la carpeta.
+  RunOk(ExpandConstant('{sys}\icacls.exe'), '"' + DataDir + '\*" /reset /T /C /Q');
+  RunOk(ExpandConstant('{sys}\icacls.exe'), '"' + ExpandConstant('{app}') + '" /grant "' + ServiceAccountUsed + ':(OI)(CI)RX" /T /C /Q');
+
+  // 4. Inicio. WinSW espera a que el servicio quede corriendo.
+  if not (Run(WinSW, 'start', Code) and (Code = 0)) then begin ServiceError('start', Code); exit; end;
+  // Un segundo para que el servicio abra 127.0.0.1:9120 antes de abrir la página.
+  Sleep(1500);
+end;
+
+function PowerShell: String;
+begin
+  Result := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+end;
+
+// Actualización automática (README, "Actualización automática"). El servicio NO es administrador y no puede instalar:
+// lo hace una tarea programada como SYSTEM que corre {app}\scale-connect.exe --update. Acá:
+//   a) la carpeta del actualizador queda SOLO para SYSTEM y Administradores (el servicio no la puede ni leer ni
+//      escribir: ahí está el instalador con el que se vuelve atrás y la copia del ejecutable que corre como SYSTEM);
+//   b) se guarda ESTE instalador como el de la versión instalada (para volver atrás si la próxima falla);
+//   c) se registra la tarea (updater-task.ps1). Si algo falla, el servicio queda igual y la actualización no corre.
+procedure SetupUpdater;
+var
+  Code: Integer;
+  Src, Dest: String;
+begin
+  ForceDirectories(UpdaterDir + '\instaladores');
+  if not RunOk(ExpandConstant('{sys}\icacls.exe'), '"' + UpdaterDir + '" /setowner *S-1-5-32-544 /T /C /Q') then
+  begin
+    Log('ERROR: no se pudo poner el dueño de la carpeta del actualizador; no se registra la tarea.');
+    exit;
+  end;
+  if not RunOk(ExpandConstant('{sys}\icacls.exe'), '"' + UpdaterDir + '" /inheritance:r /grant:r *S-1-5-18:(OI)(CI)F *S-1-5-32-544:(OI)(CI)F /T /C /Q') then
+  begin
+    Log('ERROR: no se pudieron cerrar los permisos de la carpeta del actualizador; no se registra la tarea.');
+    exit;
+  end;
+  RunOk(ExpandConstant('{sys}\icacls.exe'), '"' + UpdaterDir + '\*" /reset /T /C /Q');
+  // avisos\ (pausa.json, resultado.json): lo único que el servicio puede LEER. Escribir, nunca.
+  ForceDirectories(UpdaterDir + '\avisos');
+  if ServiceAccountUsed <> '' then
+    RunOk(ExpandConstant('{sys}\icacls.exe'), '"' + UpdaterDir + '\avisos" /grant "' + ServiceAccountUsed + ':(OI)(CI)RX" /T /C /Q');
+
+  Src := ExpandConstant('{srcexe}');
+  Dest := UpdaterDir + '\instaladores\actual.exe';
+  if CompareText(Src, Dest) <> 0 then
+    if not FileCopy(Src, Dest, False) then
+      Log('No se pudo guardar el instalador para volver atrás: ' + Dest);
+
+  if not (Run(PowerShell, '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\updater-task.ps1') + '" -Exe "' + ExpandConstant('{app}\scale-connect.exe') + '"', Code) and (Code = 0)) then
+    Log(Format('ERROR: no se pudo registrar la tarea del actualizador (código %d).', [Code]));
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    RegisterAndStartService;
+    SetupUpdater;
+  end;
+end;
+
+function HasParam(const Name: String): Boolean;
+var
+  I: Integer;
+begin
+  Result := False;
+  for I := 1 to ParamCount do
+    if CompareText(ParamStr(I), Name) = 0 then Result := True;
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+var
+  Code: Integer;
+  DeleteData: Boolean;
+begin
+  if CurUninstallStep = usUninstall then
+  begin
+    // La tarea del actualizador se va con el programa.
+    if FileExists(ExpandConstant('{app}\updater-task.ps1')) then
+      Run(PowerShell, '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\updater-task.ps1') + '" -Remove', Code);
+    // Antes de borrar archivos: frenar y dar de baja el servicio.
+    if ServiceExists then
+    begin
+      StopService;
+      if not (FileExists(WinSW) and Run(WinSW, 'uninstall', Code) and (Code = 0)) then
+        Sc('delete {#ServiceId}', Code);
+    end;
+  end;
+
+  if CurUninstallStep = usPostUninstall then
+  begin
+    // Lo del actualizador no son datos del cliente (instaladores guardados, copia del ejecutable): siempre se borra.
+    DelTree(UpdaterDir, True, True, True);
+    if UninstallSilent then
+      DeleteData := HasParam('/BORRARDATOS')
+    else
+      DeleteData := MsgBox(FmtMessage(CustomMessage('AskDeleteData'), [DataDir]), mbConfirmation, MB_YESNO or MB_DEFBUTTON2) = IDYES;
+    if DeleteData then
+    begin
+      Log('Se borran los datos: ' + DataDir);
+      DelTree(DataDir, True, True, True);
+      RemoveDir(ExpandConstant('{commonappdata}\Patagonia'));
+    end
+    else
+      Log('Los datos quedan en ' + DataDir);
+  end;
+end;

@@ -6,8 +6,9 @@ import { netPortFor, parseNetKey, type NetAddress } from "../../inventory/kretz/
  * mientras está abierta la lista. Abrir la conexión ya reintenta y, si la balanza cambió de dirección, la busca de
  * nuevo por su marca y la recuerda con la nueva (net-port.ts). Así "PASAR PRODUCTOS" la encuentra sin preguntar nada.
  *
- * Solo con la lista a la vista: el programa de la PC atiende una conexión a la vez, y revisar mientras se pasan
- * productos cortaría el envío.
+ * Solo con la lista a la vista. Y nunca mientras otra pestaña usa esa balanza: el candado entre pestañas
+ * (`NetScalePort.tryOpen`) lo impide, porque con el programa de la PC versión 6 (una conexión a la vez) revisar
+ * mientras se pasan productos cortaba el envío.
  */
 
 export type NetWatchStatus = "revisando" | "ok" | "no";
@@ -23,12 +24,19 @@ export interface NetWatchState {
   address: NetAddress;
 }
 
-/** Revisa una balanza: abre y cierra (no le manda nada). Devuelve dónde contestó, o null si no contestó. */
-export async function checkNetScale(a: NetAddress, portFor: (a: NetAddress) => { open(): Promise<void>; close(): Promise<void>; readable: unknown; net: NetAddress } = netPortFor): Promise<NetAddress | null> {
+type WatchedPort = { open(): Promise<void>; tryOpen?(): Promise<boolean>; close(): Promise<void>; readable: unknown; net: NetAddress };
+
+/**
+ * Revisa una balanza: abre y cierra (no le manda nada). Devuelve dónde contestó, o null si no contestó.
+ * Si otra pestaña (o otra parte de esta) la tiene tomada (candado de scale-lock.ts), no la toca: está andando.
+ */
+export async function checkNetScale(a: NetAddress, portFor: (a: NetAddress) => WatchedPort = netPortFor): Promise<NetAddress | null> {
   const port = portFor(a);
   if (port.readable) return port.net; // abierta por otra cosa: está andando
   try {
-    await port.open();
+    if (port.tryOpen) {
+      if (!(await port.tryOpen())) return port.net; // la está usando otra pestaña
+    } else await port.open();
     await port.close();
     return port.net;
   } catch {

@@ -224,7 +224,7 @@ export async function takeProductBackup(client: SystelClient, layout: SystelLayo
   for (const [i, n] of numbers.entries()) {
     onProgress?.(`Respaldo ${i + 1} de ${numbers.length}`);
     const plu = await client.readPlu(layout, n);
-    if (!plu || pluEanSetting(plu.raw).type === null) missing.push(n);
+    if (!plu || pluEanSetting(plu.raw, layout).type === null) missing.push(n);
     else records.push({ number: n, raw: plu.raw });
   }
   return { backup: { takenAt: new Date().toISOString(), address: client.address, layout, records, digest: backupDigest(records) }, missing };
@@ -233,7 +233,7 @@ export async function takeProductBackup(client: SystelClient, layout: SystelLayo
 /** ¿El respaldo está entero (misma huella) y cada registro tiene la forma de un producto? */
 export function verifyBackup(b: ProductBackup): { ok: boolean; detail: string } {
   if (backupDigest(b.records) !== b.digest) return { ok: false, detail: "la huella no coincide: el respaldo se modificó o está incompleto" };
-  const bad = b.records.filter((r) => pluEanSetting(r.raw).type === null || !r.raw.startsWith(String(r.number).padStart(LAYOUT_INFO[b.layout].pluDigits, "0")));
+  const bad = b.records.filter((r) => pluEanSetting(r.raw, b.layout).type === null || !r.raw.startsWith(String(r.number).padStart(LAYOUT_INFO[b.layout].pluDigits, "0")));
   if (bad.length) return { ok: false, detail: `${bad.length} registros no tienen la forma esperada (${bad.map((r) => r.number).join(", ")})` };
   return { ok: true, detail: `${b.records.length} productos, huella ${b.digest}` };
 }
@@ -241,8 +241,8 @@ export function verifyBackup(b: ProductBackup): { ok: boolean; detail: string } 
 export type CompareState = "igual" | "solo_codigo" | "otra_diferencia" | "sin_lectura";
 
 function sameAsBackup(original: string, now: string, layout: SystelLayout): boolean {
-  const a = pluEanSetting(original);
-  const b = pluEanSetting(now);
+  const a = pluEanSetting(original, layout);
+  const b = pluEanSetting(now, layout);
   return onlyBarcodeChanged(original, now, layout) && a.config === b.config && a.type === b.type;
 }
 

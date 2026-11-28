@@ -2,6 +2,7 @@ import { supabase } from "../../../lib/supabase";
 import type { InstallRecord } from "../install-status";
 import { rowToScale, type BranchScale, type ScaleFamily, type ScaleRow as Row } from "./scale-identity";
 import { toError } from "../../../lib/supabase-error";
+import { parseDuplicateGroups, type DuplicateGroup } from "./scale-merge";
 
 export * from "./scale-identity";
 
@@ -14,6 +15,14 @@ export * from "./scale-identity";
 /** Las balanzas de la sucursal. Si la base todavía no tiene la migración 134, devuelve las de antes (sin nombre). */
 export async function listBranchScales(branchId: string): Promise<BranchScale[]> {
   if (!supabase) return [];
+  // Con los registros unidos (migración 225): vienen todos, también los unidos (MyScale los separa con mergedInto).
+  const withMerged = await supabase
+    .from("scale_profiles")
+    .select("scale_key, name, family, brand, model, identity, active, last_seen_at, weighed_format, unit_format, total_format, install, merged_into")
+    .eq("branch_id", branchId)
+    .order("created_at", { ascending: true });
+  if (!withMerged.error) return ((withMerged.data ?? []) as Row[]).map(rowToScale);
+  if (withMerged.error.code !== "42703") throw withMerged.error;
   // Con el estado de la instalación (migración 165); sin ella, como antes.
   const withInstall = await supabase
     .from("scale_profiles")
@@ -75,5 +84,31 @@ export async function renameBranchScale(branchId: string, key: string, name: str
 export async function removeBranchScale(branchId: string, key: string): Promise<void> {
   if (!supabase) throw new Error("Supabase no está configurado.");
   const { error } = await supabase.rpc("remove_branch_scale", { p_branch_id: branchId, p_scale_key: key });
+  if (error) throw toError(error);
+}
+
+/** Grupos de registros que parecen la misma balanza (migración 225). Sin la migración, ninguno. Solo dueño o administrador. */
+export async function listDuplicateScaleCandidates(branchId: string): Promise<DuplicateGroup[]> {
+  if (!supabase) return [];
+  const { data, error } = await supabase.rpc("list_duplicate_scale_candidates", { p_branch_id: branchId });
+  if (error) {
+    if (error.code === "PGRST202") return [];
+    throw toError(error);
+  }
+  return parseDuplicateGroups(data);
+}
+
+/** Une los registros al que queda. Devuelve lo que contestó la base (con formatos distintos, no une: ver mergeResultText). */
+export async function mergeBranchScales(branchId: string, keepKey: string, mergeKeys: string[]): Promise<unknown> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { data, error } = await supabase.rpc("merge_branch_scales", { p_branch_id: branchId, p_keep_key: keepKey, p_merge_keys: mergeKeys });
+  if (error) throw toError(error);
+  return data;
+}
+
+/** "Son distintas": no se vuelve a preguntar por ese grupo. */
+export async function markScalesDistinct(branchId: string, keys: string[]): Promise<void> {
+  if (!supabase) throw new Error("Supabase no está configurado.");
+  const { error } = await supabase.rpc("mark_scales_distinct", { p_branch_id: branchId, p_keys: keys });
   if (error) throw toError(error);
 }
