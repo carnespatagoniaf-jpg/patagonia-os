@@ -10,12 +10,14 @@ import net from "node:net";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { buildVersion } from "./lib/build-version.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
 const dir = path.resolve(process.argv[2] ?? path.join(root, "dist", "PatagoniaScaleConnect"));
 const exe = path.join(dir, "scale-connect.exe");
 const pkg = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+const expected = buildVersion(pkg.version);
 
 function fail(message) {
   console.error(`FALLÓ: ${message}`);
@@ -25,7 +27,7 @@ function fail(message) {
 // 1. --version
 const version = execFileSync(exe, ["--version"], { encoding: "utf8", timeout: 20_000 }).trim();
 console.log(`> scale-connect.exe --version\n${version}`);
-if (version !== pkg.version) fail(`--version dijo "${version}", se esperaba "${pkg.version}".`);
+if (version !== expected) fail(`--version dijo "${version}", se esperaba "${expected}".`);
 
 // 2. Modo consola con /status
 const freePort = await new Promise((resolve, reject) => {
@@ -80,6 +82,6 @@ console.log(
     2,
   ),
 );
-if (status.version !== pkg.version) fail(`/status dijo versión ${status.version}.`);
+if (status.version !== expected) fail(`/status dijo versión ${status.version}.`);
 if (status.ports?.ok !== true) fail(`No se pudieron listar los puertos (¿no cargó serialport?): ${status.ports?.error}`);
 console.log("OK: el ejecutable arranca, responde /status y carga serialport.");

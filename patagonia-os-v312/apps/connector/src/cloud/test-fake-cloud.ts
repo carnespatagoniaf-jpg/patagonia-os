@@ -8,6 +8,7 @@
 import http from "node:http";
 import { randomBytes, randomUUID } from "node:crypto";
 import type { AddressInfo } from "node:net";
+import { parseUpdateReport, parseUpdateRequest } from "../../../../supabase/functions/scale-connect-api/connect";
 
 type Obj = Record<string, any>;
 
@@ -204,12 +205,19 @@ export class FakeCloud {
           update: this.updateOffer ? { version: this.updateOffer.version } : null,
         });
       }
-      case "update":
+      // Con la misma validación que la Edge Function (connect.ts): un pedido o un informe con otro formato da 400.
+      case "update": {
+        const parsed = parseUpdateRequest(body);
+        if (!parsed.ok) return this.send(res, 400, parsed);
         this.updateRequests.push(body);
         return this.send(res, 200, { ok: true, channel: this.updateChannel, offer: this.updateOffer });
-      case "update-report":
+      }
+      case "update-report": {
+        const parsed = parseUpdateReport(body);
+        if (!parsed.ok) return this.send(res, 400, parsed);
         this.updateReports.push(body);
         return this.send(res, 200, { ok: true });
+      }
       case "engine":
         return this.engine(conn, body, res);
       default:

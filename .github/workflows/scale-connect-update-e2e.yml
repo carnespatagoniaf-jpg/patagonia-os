@@ -1,0 +1,386 @@
+# Actualización automática y firmada de Patagonia Scale Connect, de punta a punta en una PC Windows LIMPIA (cada corrida
+# de windows-latest es una máquina recién creada). TODO contra una nube FALSA local (apps/connector/e2e/nube-falsa.ts):
+# nada va a staging ni a producción.
+#
+# 1. Genera un par Ed25519 EFÍMERO en el runner (RUNNER_TEMP, nunca se sube ni se muestra la privada) y arma tres
+#    instaladores con esa clave pública embebida: A = 9.0.0, B = 9.0.1 (buena), C = 9.0.2 (ROTA a propósito: el XML de
+#    WinSW apunta a un ejecutable que no existe, el servicio no arranca). package.json no se toca: SCALE_CONNECT_VERSION.
+# 2. Levanta la nube falsa (vincular, latido, /claim, /config, /update, /update-report, instaladores por HTTPS con un
+#    certificado propio que se agrega con NODE_EXTRA_CA_CERTS) y una Kretz Report simulada por red (e2e/simuladores.ts).
+# 3. Escenarios: instalar A + vincular; A → B sin intervención (la tarea programada que creó el instalador); un envío de
+#    40 productos en curso no se corta (la actualización espera); C no levanta → vuelve sola a B y queda bloqueada;
+#    firma inválida / SHA-256 distinto / versión menor → no instala; despliegue gradual y freno con la migración 229
+#    real en PGlite.
+#
+# Se dispara SOLO con un push a una rama prueba/scale-connect-actualizacion-e2e* (no con PR, no en main).
+name: Scale Connect (actualización, PC limpia)
+
+on:
+  push:
+    branches:
+      - "prueba/scale-connect-actualizacion-e2e*"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scale-connect-update-e2e-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  E2E_OUT: ${{ github.workspace }}\e2e-salida
+
+jobs:
+  actualizacion:
+    name: Instalar, actualizar, romper y volver atrás
+    runs-on: windows-latest
+    timeout-minutes: 120
+    defaults:
+      run:
+        working-directory: patagonia-os-v312
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          architecture: x64
+          cache: npm
+          cache-dependency-path: patagonia-os-v312/package-lock.json
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Pruebas del conector
+        run: npm run test -w @patagonia/connector
+
+      # ── Clave efímera y certificado de la nube falsa ────────────────────────────────────────────────────────────
+      - name: Clave Ed25519 efímera y certificado HTTPS local
+        run: |
+          Import-Module ./apps/connector/e2e/actualizacion.psm1 -Force
+          $keys = Get-KeysDir
+          New-Item -ItemType Directory -Force $keys | Out-Null
+          # La privada queda en RUNNER_TEMP (fuera del repo y del artefacto), solo para la nube falsa; se borra al final.
+          node -e "const c=require('crypto'),fs=require('fs');const k=c.generateKeyPairSync('ed25519');fs.writeFileSync(process.argv[1],k.privateKey.export({format:'pem',type:'pkcs8'}));fs.writeFileSync(process.argv[2],k.publicKey.export({format:'der',type:'spki'}).toString('base64'))" "$keys\privada.pem" "$keys\publica.b64"
+          if ($LASTEXITCODE) { throw 'No se generó la clave' }
+          $pub = (Get-Content "$keys\publica.b64" -Raw).Trim()
+          "SCALE_CONNECT_UPDATE_PUBKEY=$pub" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          # Certificado para https://127.0.0.1 (los manifiestos exigen https).
+          $openssl = (Get-Command openssl -ErrorAction SilentlyContinue).Source
+          if (-not $openssl) { $openssl = 'C:\Program Files\Git\usr\bin\openssl.exe' }
+          & $openssl req -x509 -newkey rsa:2048 -nodes -keyout "$keys\tls.key" -out "$keys\tls.crt" -days 2 -subj "/CN=127.0.0.1" -addext "subjectAltName=IP:127.0.0.1" -addext "basicConstraints=critical,CA:TRUE" 2>&1 | Out-Null
+          if (-not (Test-Path "$keys\tls.crt")) { throw 'No se generó el certificado' }
+          # Para TODOS los procesos nuevos (la tarea programada corre como SYSTEM; el servicio, con su cuenta virtual).
+          Copy-Item "$keys\tls.crt" "$env:ProgramData\nube-falsa-ca.crt" -Force
+          [Environment]::SetEnvironmentVariable('NODE_EXTRA_CA_CERTS', "$env:ProgramData\nube-falsa-ca.crt", 'Machine')
+          Save-Evidence 'clave-efimera.json' ([pscustomobject]@{ publica = $pub; privada = 'en RUNNER_TEMP, no se sube'; certificado = 'CN=127.0.0.1, 2 días' })
+
+      # ── Tres instaladores ───────────────────────────────────────────────────────────────────────────────────────
+      - name: Instalar Inno Setup
+        run: |
+          $iscc = "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe"
+          if (-not (Test-Path $iscc)) { choco install innosetup -y --no-progress }
+          if (-not (Test-Path $iscc)) { Write-Error "No quedó ISCC.exe en $iscc"; exit 1 }
+          "ISCC=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      - name: Armar A (9.0.0), B (9.0.1) y C (9.0.2, rota)
+        run: |
+          Import-Module ./apps/connector/e2e/actualizacion.psm1 -Force
+          $dir = Get-InstallersDir
+          New-Item -ItemType Directory -Force $dir | Out-Null
+          foreach ($v in '9.0.0', '9.0.1', '9.0.2') {
+            $env:SCALE_CONNECT_VERSION = $v
+            npm run package -w @patagonia/connector; if ($LASTEXITCODE) { throw "package $v" }
+            npm run smoke -w @patagonia/connector; if ($LASTEXITCODE) { throw "smoke $v" }
+            if ($v -eq '9.0.2') {
+              # ROTA a propósito: el servicio (WinSW) apunta a un ejecutable que no existe → no arranca, /status no responde.
+              $xml = 'apps/connector/dist/PatagoniaScaleConnect/PatagoniaScaleConnect.xml'
+              $text = Get-Content $xml -Raw
+              $broken = $text -replace '<executable>%BASE%\\scale-connect.exe</executable>', '<executable>%BASE%\no-existe-a-proposito.exe</executable>'
+              if ($broken -eq $text) { throw 'No se pudo romper el XML de C' }
+              Set-Content -Path $xml -Value $broken -Encoding utf8
+            }
+            npm run installer -w @patagonia/connector; if ($LASTEXITCODE) { throw "installer $v" }
+            Copy-Item "apps/connector/dist/installer/PatagoniaScaleConnect-Setup-$v.exe" $dir
+          }
+          Remove-Item Env:SCALE_CONNECT_VERSION
+          $files = Get-ChildItem $dir | Select-Object Name, Length, @{ n = 'sha256'; e = { (Get-FileHash $_.FullName).Hash.ToLowerInvariant() } }
+          Save-Evidence 'instaladores.json' $files
+          $files | Format-Table | Out-String | Write-Host
+
+      # ── Nube falsa y balanza simulada ───────────────────────────────────────────────────────────────────────────
+      - name: Levantar la nube falsa y la Report simulada
+        run: |
+          Import-Module ./apps/connector/e2e/actualizacion.psm1 -Force
+          $out = Get-E2EOut
+          $keys = Get-KeysDir
+          $node = (Get-Command node).Source
+          $conn = (Resolve-Path 'apps/connector').Path
+          $cmd = "cmd.exe /c `"`"$node`" --import tsx e2e/nube-falsa.ts --dir `"$(Get-InstallersDir)`" --cert `"$keys\tls.crt`" --key `"$keys\tls.key`" --clave `"$keys\privada.pem`" > `"$out\nube-falsa.log`" 2>&1`""
+          Start-Detached $cmd $conn | Out-Null
+          $ip = Get-LanIp
+          "LAN_IP=$ip" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $cmd = "cmd.exe /c `"`"$node`" --import tsx e2e/simuladores.ts --host $ip > `"$out\simuladores.log`" 2>&1`""
+          Start-Detached $cmd $conn | Out-Null
+          Wait-Until { Get-NubeEstado } 60 'nube falsa arriba' | Out-Null
+          Wait-Until { Invoke-Sim -Path '/estado' } 60 'simulador arriba' | Out-Null
+          Assert-Check 'Preparación' 'Nube falsa local arriba (en vez de staging)' $true "$(Get-CloudUrl); instaladores por https://127.0.0.1:9443"
+          Assert-Check 'Preparación' 'Report simulada por red' $true "$ip`:1001"
+
+      # ── 1. Instalación A + vinculación ──────────────────────────────────────────────────────────────────────────
+      - name: Escenario 1 - instalar A y vincular
+        run: |
+          Import-Module ./apps/connector/e2e/actualizacion.psm1 -Force
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          Assert-Check '1 Instalación' 'PC limpia: sin servicio ni datos' ((-not (Get-Service PatagoniaScaleConnect -ErrorAction SilentlyContinue)) -and -not (Test-Path (Get-DataDir))) ''
+          $code = Install-Version '9.0.0' 'setup-A-9.0.0.log' @("/NUBE=$(Get-CloudUrl)")
+          Assert-Check '1 Instalación' 'Instalador A (9.0.0) en silencio' ($code -eq 0) "código $code"
+          $task = Get-ScheduledTask -TaskPath '\Patagonia\' -TaskName 'Actualizador de Patagonia Scale Connect' -ErrorAction SilentlyContinue
+          Save-Evidence 'tarea.xml' ((Export-ScheduledTask -TaskPath '\Patagonia\' -TaskName 'Actualizador de Patagonia Scale Connect') | Out-String)
+          Assert-Check '1 Instalación' 'El instalador registró la tarea programada como SYSTEM' ($task -and $task.Principal.UserId -in @('S-1-5-18', 'SYSTEM')) "$($task.Principal.UserId), acción $($task.Actions[0].Execute) $($task.Actions[0].Arguments)"
+          Assert-Check '1 Instalación' 'Guardó su instalador para volver atrás' (Test-Path (Join-Path (Get-UpdaterDir) 'instaladores\actual.exe')) ''
+          Wait-Until { Get-Status } 60 '/status' | Out-Null
+          # Latido cada 15 s (en vez de 60) para no esperar de más; queda en config.json ANTES de anotarlo.
+          Stop-Service PatagoniaScaleConnect
+          $file = Join-Path (Get-DataDir) 'config.json'
+          $cfg = Get-Content $file -Raw | ConvertFrom-Json
+          $cfg.cloud | Add-Member -Force -NotePropertyName heartbeatMs -NotePropertyValue 15000
+          $cfg | ConvertTo-Json -Depth 10 | Set-Content -Path $file -Encoding utf8
+          Start-Service PatagoniaScaleConnect
+          Wait-Until { Get-Status } 60 '/status' | Out-Null
+          $s = Get-Status
+          Assert-Check '1 Instalación' '/status: 9.0.0, actualización prendida (clave embebida)' ($s.version -eq '9.0.0' -and $s.update.enabled) "versión $($s.version), update.enabled=$($s.update.enabled)"
+          # Vincular como un navegador: GET (token anti-CSRF) y POST con el Origin de la misma página.
+          Invoke-Nube -Method Post -Path '/codigo' -Body @{ codigo = 'E2EA-CTU1' } | Out-Null
+          $page = Invoke-WebRequest -Uri 'http://127.0.0.1:9120/vincular' -UseBasicParsing
+          if ($page.Content -notmatch 'name="csrf" value="([^"]+)"') { throw 'La página no trae el token' }
+          $csrf = $Matches[1]
+          $bad = try { Invoke-WebRequest -Method Post -Uri 'http://127.0.0.1:9120/vincular' -Headers @{ Origin = 'https://evil.example' } -ContentType 'application/x-www-form-urlencoded' -Body "csrf=$csrf&code=E2EA-CTU1&name=x" -UseBasicParsing; 200 } catch { [int]$_.Exception.Response.StatusCode }
+          Assert-Check '1 Vinculación' 'POST desde otro Origin: rechazado' ($bad -eq 403) "HTTP $bad"
+          $body = "csrf=$([uri]::EscapeDataString($csrf))&code=E2EA-CTU1&name=$([uri]::EscapeDataString('Caja e2e'))"
+          $r = Invoke-WebRequest -Method Post -Uri 'http://127.0.0.1:9120/vincular' -Headers @{ Origin = 'http://127.0.0.1:9120' } -ContentType 'application/x-www-form-urlencoded' -Body $body -UseBasicParsing
+          Assert-Check '1 Vinculación' 'Vinculada por /vincular (CSRF + Origin)' ($r.StatusCode -eq 200 -and $r.Content -match 'quedó vinculada') ''
+          $secs = Wait-Until { $x = Get-Status; $x.cloud.paired -and $x.cloud.state -eq 'en_linea' } 120 'en línea con la nube falsa'
+          $snap = Get-LinkSnapshot
+          Save-Evidence 'vinculacion-A.json' $snap
+          Save-Evidence 'config-A.json' (Get-Content $file -Raw)
+          Assert-Check '1 Vinculación' 'En línea; credencial cifrada guardada (no se muestra)' ($snap.credentialExists -and $snap.credentialScheme -eq 'dpapi-machine') "conector $($snap.connectorId), en $secs s"
+          Assert-Check '1 Vinculación' 'La nube vio la huella de la PC' ($snap.fingerprint -match '^[0-9a-f]{64}$') "huella $($snap.fingerprint.Substring(0, 12))…"
+          Add-Timing '1 Instalación A + vinculación' $sw.Elapsed.TotalSeconds 'OK'
+
+      # ── 2. A → B sin intervención ───────────────────────────────────────────────────────────────────────────────
+      - name: Escenario 2 - la nube ofrece B y se actualiza sola
+        timeout-minutes: 15
+        run: |
+          Import-Module ./apps/connector/e2e/actualizacion.psm1 -Force
+          $before = Get-Content (Join-Path (Get-E2EOut) 'vinculacion-A.json') -Raw | ConvertFrom-Json
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          $offerAt = (Get-Date).ToUniversalTime()
+          Invoke-Nube -Method Post -Path '/oferta' -Body @{ version = '9.0.1' } | Out-Null
+          $secs = Wait-ServiceRequest $offerAt
+          Assert-Check '2 A → B' 'El servicio vio la oferta en /config y dejó el pedido' $true "a los $secs s"
+          $cycle = Invoke-UpdateCycle 600
+          $rep = $cycle.report
+          Save-Evidence 'informe-2.json' $rep
+          Assert-Check '2 A → B' '/update-report recibió el éxito' ($rep.result -eq 'instalada' -and $rep.from -eq '9.0.0' -and $rep.to -eq '9.0.1') "$($rep.result): $($rep.message) ($($cycle.seconds) s)"
+          Assert-SameLink '2 A → B' $before '9.0.1' $offerAt
+          $st = Get-UpdaterState
+          Assert-Check '2 A → B' 'estado.json: instalada 9.0.1, anterior 9.0.0 guardada' ($st.installed.version -eq '9.0.1' -and $st.previous.version -eq '9.0.0') "$($st.installed.version) / $($st.previous.version)"
+          $hb = @((Get-NubeEstado).connectors)[0]
+          Assert-Check '2 A → B' 'La nube ve el latido de la 9.0.1' ($hb.version -eq '9.0.1') $hb.version
+          Save-Evidence 'status-2.json' (Get-Status)
+          Add-Timing '2 A → B sin intervención' $sw.Elapsed.TotalSeconds 'OK'
+
+      # ── 3 y 4. Envío en curso + C rota ──────────────────────────────────────────────────────────────────────────
+      - name: Escenario 3 - un envío en curso no se interrumpe
+        timeout-minutes: 25
+        run: |
+          Import-Module ./apps/connector/e2e/actualizacion.psm1 -Force
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          # Agregar la Report de la red como en la web: identificar (solo lee) y vincular la balanza a su puerto.
+          $id = (Invoke-Nube -Method Post -Path '/identificar' -Body @{ host = $env:LAN_IP; port = 1001 }).id
+          Wait-Until { (Invoke-Nube -Path "/trabajo?id=$id").finishedAt } 120 'identificar la Report' 2000 | Out-Null
+          $reg = Invoke-Nube -Method Post -Path '/registrar' -Body @{ jobId = $id; key = 'kretz-1' }
+          Assert-Check '3 Envío en curso' 'Report identificada y vinculada a su puerto' ($reg.ok) "$($reg.device.host):$($reg.device.port)"
+          Start-Sleep -Seconds 20   # un latido: el servicio recibe en /config qué balanza está en qué puerto
+          Invoke-Sim -Method Post -Path '/borrar' | Out-Null
+          Invoke-Sim -Method Post -Path '/lento?ms=450' | Out-Null
+          $job = (Invoke-Nube -Method Post -Path '/envio' -Body @{ key = 'kretz-1'; productos = 40 }).id
+          Wait-Until { $j = Invoke-Nube -Path "/trabajo?id=$job"; $j.status -eq 'running' -and $j.progress.done -ge 5 } 180 'el envío en marcha (5 productos)' 1000 | Out-Null
+          $mid = Invoke-Nube -Path "/trabajo?id=$job"
+          # A mitad del envío: la nube ofrece una versión nueva (C) y se dispara la tarea.
+          $offerAt = (Get-Date).ToUniversalTime()
+          Invoke-Nube -Method Post -Path '/oferta' -Body @{ version = '9.0.2' } | Out-Null
+          Wait-ServiceRequest $offerAt | Out-Null
+          Start-UpdaterTask
+          $kickAt = (Get-Date).ToUniversalTime()
+          Assert-Check '3 Envío en curso' 'Oferta nueva A MITAD del envío' $true "llevaba $($mid.progress.done) de $($mid.progress.total)"
+          # Mientras dura el envío: sigue la 9.0.1 y /status responde todo el tiempo.
+          $samples = @()
+          while ($true) {
+            $j = Invoke-Nube -Path "/trabajo?id=$job"
+            $s = Get-Status
+            $samples += [pscustomobject]@{ at = (Get-Date).ToUniversalTime().ToString('o'); done = $j.progress.done; version = $s.version; paused = $s.update.paused; running = @($s.cloud.currentJobs).Count }
+            if ($j.finishedAt) { break }
+            if ($sw.Elapsed.TotalMinutes -gt 15) { throw 'El envío no terminó' }
+            Start-Sleep -Seconds 2
+          }
+          Save-Evidence 'envio-muestras.json' $samples
+          $j = Invoke-Nube -Path "/trabajo?id=$job"
+          Save-Evidence 'envio-3.json' $j
+          $dur = ([datetime]$j.finishedAt - [datetime]$j.claimedAt).TotalSeconds
+          Assert-Check '3 Envío en curso' 'El envío terminó done con los 40 confirmados' ($j.status -eq 'done' -and $j.confirmed -eq 40 -and $j.failed -eq 0) "$($j.status), $($j.confirmed) confirmados, $($j.failed) fallados, $([math]::Round($dur)) s"
+          $down = @($samples | Where-Object { -not $_.version -or $_.version -ne '9.0.1' })
+          Assert-Check '3 Envío en curso' 'Durante el envío no se instaló nada (siempre 9.0.1, /status siempre respondió)' ($down.Count -eq 0) "$($samples.Count) muestras"
+          Assert-Check '3 Envío en curso' 'Mientras tanto el servicio en pausa (no toma trabajos nuevos)' (@($samples | Where-Object { $_.paused }).Count -gt 0) ''
+          $sim = Save-SimState 'simuladores-3.json'
+          $ev = @($sim.report.eventos)
+          $from = [datetime]$j.claimedAt; $to = [datetime]$j.finishedAt
+          $cuts = @($ev | Where-Object { $_ -match 'CORTE|se cerró|conexión de' } | Where-Object { $t = [datetime]($_.Substring(0, 24)); $t -gt $from -and $t -lt $to })
+          Assert-Check '3 Envío en curso' 'Sin cortes en la balanza durante el envío' ($cuts.Count -eq 0) "$(@($sim.report.plus).Count) PLU grabados; eventos de conexión durante el envío: $($cuts.Count)"
+          Assert-Check '3 Envío en curso' 'La balanza tiene los 40 productos' (@($sim.report.plus).Count -eq 40) ''
+          "ENVIO_FIN=$(([datetime]$j.finishedAt).ToUniversalTime().ToString('o'))" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "OFERTA_C=$($offerAt.ToString('o'))" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Invoke-Sim -Method Post -Path '/lento?ms=0' | Out-Null
+          Add-Timing '3 No interrumpe un envío' $sw.Elapsed.TotalSeconds "OK (envío de $([math]::Round($dur)) s)"
+
+      - name: Escenario 4 - C no levanta y vuelve sola a B
+        timeout-minutes: 20
+        run: |
+          Import-Module ./apps/connector/e2e/actualizacion.psm1 -Force
+          $before = Get-Content (Join-Path (Get-E2EOut) 'vinculacion-A.json') -Raw | ConvertFrom-Json
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          $since = [datetime]$env:OFERTA_C
+          # El informe de la corrida que se disparó en el escenario 3.
+          Wait-Until { @(Get-Reports | Where-Object { $_.to -eq '9.0.2' }).Count -ge 1 } 900 'el informe de la 9.0.2' 3000 | Out-Null
+          $rep = @(Get-Reports | Where-Object { $_.to -eq '9.0.2' })[0]
+          Save-Evidence 'informe-4.json' $rep
+          $installLog = Get-Item (Join-Path (Get-UpdaterDir) 'logs\instalacion-9.0.2.log')
+          $installStart = $installLog.CreationTimeUtc
+          Assert-Check '3 Envío en curso' 'Recién DESPUÉS del envío instaló' ($installStart -gt ([datetime]$env:ENVIO_FIN).ToUniversalTime()) "envío terminó $($env:ENVIO_FIN), instalación empezó $($installStart.ToString('o'))"
+          $ulog = (Get-ChildItem (Join-Path (Get-UpdaterDir) 'logs') -Filter '*.log' | Where-Object { $_.Name -notmatch '^(instalacion|reversion)-' } | Get-Content -Raw) -join "`n"
+          Assert-Check '3 Envío en curso' 'El actualizador anotó que esperaba el trabajo en curso' ($ulog -match 'Esperando a que terminen los trabajos en curso') ''
+          Assert-Check '4 C rota' '/update-report informa la falla y la vuelta atrás' ($rep.result -eq 'revertida' -and $rep.from -eq '9.0.1') "$($rep.result): $($rep.message)"
+          Assert-SameLink '4 C rota' $before '9.0.1' ([datetime]$rep.recibido)
+          $st = Get-UpdaterState
+          Assert-Check '4 C rota' 'La 9.0.2 quedó bloqueada en esta PC' ([bool]$st.blocked.'9.0.2') "$($st.blocked.'9.0.2')"
+          Assert-Check '4 C rota' 'Hay registro de la reversión' (Test-Path (Join-Path (Get-UpdaterDir) 'logs\reversion-9.0.1.log')) ''
+          # Siguiente ciclo con la misma oferta: no la reintenta.
+          $downloads = @((Get-NubeEstado).downloads | Where-Object { $_.name -like '*9.0.2*' }).Count
+          Set-LastCheckHoursAgo 7
+          $cycle = Invoke-UpdateCycle 300
+          Save-Evidence 'informe-4b.json' $cycle.report
+          $after = @((Get-NubeEstado).downloads | Where-Object { $_.name -like '*9.0.2*' }).Count
+          Assert-Check '4 C rota' 'Siguiente ciclo: bloqueada, ni la baja ni la instala' ($cycle.report.result -eq 'bloqueada' -and $after -eq $downloads -and (Get-Status).version -eq '9.0.1') "$($cycle.report.result): $($cycle.report.message); descargas de la 9.0.2: $downloads → $after"
+          Add-Timing '4 Versión rota con vuelta atrás' $sw.Elapsed.TotalSeconds 'OK'
+
+      # ── 5. Autenticidad ─────────────────────────────────────────────────────────────────────────────────────────
+      - name: Escenario 5 - firma inválida, SHA-256 distinto y versión menor
+        timeout-minutes: 20
+        run: |
+          Import-Module ./apps/connector/e2e/actualizacion.psm1 -Force
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          $logs = Join-Path (Get-UpdaterDir) 'logs'
+          $cases = @(
+            @{ name = 'Firma inválida'; offer = @{ version = '9.0.3'; variante = 'firma-mala'; de = '9.0.1' }; match = 'firma'; request = $true },
+            @{ name = 'SHA-256 que no coincide con el archivo'; offer = @{ version = '9.0.4'; variante = 'sha-malo'; de = '9.0.1' }; match = 'SHA-256'; request = $true },
+            @{ name = 'Versión menor (9.0.0)'; offer = @{ version = '9.0.0' }; match = 'nunca se baja'; request = $false }
+          )
+          foreach ($c in $cases) {
+            $t = [Diagnostics.Stopwatch]::StartNew()
+            $offerAt = (Get-Date).ToUniversalTime()
+            Invoke-Nube -Method Post -Path '/oferta' -Body $c.offer | Out-Null
+            if ($c.request) {
+              Wait-ServiceRequest $offerAt | Out-Null
+            } else {
+              Start-Sleep -Seconds 35   # dos latidos: el servicio NO pide una versión menor
+              Assert-Check '5 Autenticidad' 'Versión menor: el servicio ni la pide' (-not ((Get-RequestWrittenAt) -gt $offerAt)) "pedido: $((Get-Status).update.requested)"
+              Set-LastCheckHoursAgo 7
+            }
+            $cycle = Invoke-UpdateCycle 300
+            $rep = $cycle.report
+            Save-Evidence "informe-5-$($c.offer.version).json" $rep
+            $installed = Test-Path (Join-Path $logs "instalacion-$($c.offer.version).log")
+            $dl = @(Get-ChildItem (Join-Path (Get-UpdaterDir) 'descargas') -ErrorAction SilentlyContinue).Count
+            Assert-Check '5 Autenticidad' "$($c.name): no instala y lo informa" ($rep.result -eq 'rechazada' -and $rep.message -match [regex]::Escape($c.match) -and -not $installed -and $dl -eq 0 -and (Get-Status).version -eq '9.0.1' -and (Get-ExeVersion) -eq '9.0.1') "$($rep.result): $($rep.message)"
+            Add-Timing "5 $($c.name)" $t.Elapsed.TotalSeconds 'OK'
+          }
+          $d = @((Get-NubeEstado).downloads)
+          Assert-Check '5 Autenticidad' 'Firma inválida: ni siquiera baja el instalador' (-not ($d | Where-Object { $_.name -like '*9.0.3*' })) ''
+          Assert-Check '5 Autenticidad' 'SHA-256 distinto: lo bajó, lo comparó y no lo ejecutó' ([bool]($d | Where-Object { $_.name -eq 'adulterado-9.0.4.exe' })) ''
+          Invoke-Nube -Method Post -Path '/oferta' -Body @{ version = $null } | Out-Null
+
+      # ── 6. Despliegue gradual y freno (migración 229 real) ──────────────────────────────────────────────────────
+      - name: Escenario 6 - despliegue gradual y freno (229 en PGlite)
+        run: |
+          Import-Module ./apps/connector/e2e/actualizacion.psm1 -Force
+          $sw = [Diagnostics.Stopwatch]::StartNew()
+          $pg = Join-Path $env:RUNNER_TEMP 'pglite'
+          New-Item -ItemType Directory -Force $pg | Out-Null
+          '{"private":true}' | Set-Content (Join-Path $pg 'package.json')
+          npm install --prefix $pg --no-audit --no-fund @electric-sql/pglite@0.3.16; if ($LASTEXITCODE) { throw 'npm install pglite' }
+          node apps/connector/e2e/despliegue-gradual.mjs --pglite $pg --out (Join-Path (Get-E2EOut) 'despliegue-gradual.json') 2>&1 | Tee-Object -FilePath (Join-Path (Get-E2EOut) 'despliegue-gradual.log')
+          $ok = $LASTEXITCODE -eq 0
+          foreach ($c in (Get-Content (Join-Path (Get-E2EOut) 'despliegue-gradual.json') -Raw | ConvertFrom-Json).checks) {
+            Assert-Check '6 Despliegue gradual' $c.name ([bool]$c.ok) $c.detail
+          }
+          Assert-Check '6 Despliegue gradual' 'Script sin errores' $ok ''
+          Add-Timing '6 Despliegue gradual y freno' $sw.Elapsed.TotalSeconds 'OK'
+          Add-Note 'Pendiente' 'Reiniciar Windows de verdad' 'Actions no deja reiniciar el runner: el disparo "al arrancar" de la tarea (3 min después) y una actualización a mitad de un reinicio quedan para la PC real.'
+
+      # ── Evidencia ───────────────────────────────────────────────────────────────────────────────────────────────
+      - name: Juntar registros
+        if: always()
+        run: |
+          Import-Module ./apps/connector/e2e/actualizacion.psm1 -Force
+          $out = Get-E2EOut
+          try { Save-Evidence 'status-final.json' (Get-Status) } catch { }
+          try { Save-Evidence 'nube-estado.json' (Get-NubeEstado) } catch { }
+          try { Save-Evidence 'nube-llamadas.json' (Invoke-Nube -Path '/llamadas?desde=0') } catch { }
+          try { Save-SimState 'simuladores-final.json' | Out-Null } catch { }
+          $data = Get-DataDir
+          if (Test-Path $data) {
+            New-Item -ItemType Directory -Force (Join-Path $out 'datos') | Out-Null
+            Copy-Item -Recurse -Force (Join-Path $data 'logs') (Join-Path $out 'datos') -ErrorAction SilentlyContinue
+            foreach ($f in 'config.json', 'scales.json', 'journal\jobs.json', 'update\pedido.json') { if (Test-Path (Join-Path $data $f)) { Copy-Item (Join-Path $data $f) (Join-Path $out ('datos\' + ($f -replace '\\', '-'))) } }
+          }
+          $upd = Get-UpdaterDir
+          if (Test-Path $upd) {
+            New-Item -ItemType Directory -Force (Join-Path $out 'actualizador') | Out-Null
+            Copy-Item -Recurse -Force (Join-Path $upd 'logs') (Join-Path $out 'actualizador') -ErrorAction SilentlyContinue
+            Copy-Item -Recurse -Force (Join-Path $upd 'avisos') (Join-Path $out 'actualizador') -ErrorAction SilentlyContinue
+            if (Test-Path (Join-Path $upd 'estado.json')) { Copy-Item (Join-Path $upd 'estado.json') (Join-Path $out 'actualizador') }
+            Get-ChildItem -Recurse $upd | Select-Object FullName, Length, LastWriteTimeUtc | ConvertTo-Json | Set-Content (Join-Path $out 'actualizador\archivos.json') -Encoding utf8
+            (icacls $upd) -join "`n" | Set-Content (Join-Path $out 'actualizador\icacls.txt') -Encoding utf8
+          }
+          try { Get-ScheduledTaskInfo -TaskPath '\Patagonia\' -TaskName 'Actualizador de Patagonia Scale Connect' | ConvertTo-Json | Set-Content (Join-Path $out 'tarea-info.json') -Encoding utf8 } catch { }
+          Get-WinEvent -LogName 'Microsoft-Windows-TaskScheduler/Operational' -MaxEvents 300 -ErrorAction SilentlyContinue |
+            Where-Object { $_.Message -match 'Patagonia' } | Select-Object TimeCreated, Id, Message | ConvertTo-Json | Set-Content (Join-Path $out 'eventos-tareas.json') -Encoding utf8
+          Get-WinEvent -FilterHashtable @{ LogName = 'System'; ProviderName = 'Service Control Manager' } -MaxEvents 300 -ErrorAction SilentlyContinue |
+            Where-Object { $_.Message -match 'Scale Connect|PatagoniaScaleConnect' } | Select-Object TimeCreated, Id, Message | ConvertTo-Json | Set-Content (Join-Path $out 'eventos-scm.json') -Encoding utf8
+          Get-CimInstance Win32_Process -Filter "Name='node.exe'" | Where-Object { $_.CommandLine -match 'simuladores|nube-falsa' } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
+          # La privada efímera no queda en ningún lado.
+          Remove-Item -Recurse -Force (Get-KeysDir) -ErrorAction SilentlyContinue
+          $tsv = Join-Path $out 'comprobaciones.tsv'
+          $summary = @('## Scale Connect: actualización automática en una PC limpia', '')
+          $times = Join-Path $out 'tiempos.tsv'
+          if (Test-Path $times) {
+            $summary += @('| Escenario | Resultado | Segundos |', '|---|---|---|')
+            $summary += Get-Content $times | ForEach-Object { $c = $_ -split "`t"; "| $($c[0]) | $($c[1]) | $($c[2]) |" }
+            $summary += ''
+          }
+          if (Test-Path $tsv) {
+            $summary += @('| Área | Comprobación | Resultado | Detalle |', '|---|---|---|---|')
+            $summary += Get-Content $tsv | ForEach-Object { $c = $_ -split "`t"; "| $($c[0]) | $($c[1]) | $($c[2]) | $($c[3]) |" }
+          }
+          $summary | Out-File -FilePath $env:GITHUB_STEP_SUMMARY -Append -Encoding utf8
+
+      - name: Subir registros
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scale-connect-actualizacion-${{ github.run_id }}
+          path: ${{ github.workspace }}\e2e-salida
+          if-no-files-found: warn
+          retention-days: 14

@@ -13,16 +13,18 @@ import { readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { sha256File } from "./lib/download.mjs";
+import { buildVersion } from "./lib/build-version.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
 const source = path.join(root, "dist", "PatagoniaScaleConnect");
 const outputDir = path.join(root, "dist", "installer");
 const pkg = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+const version = buildVersion(pkg.version);
 
-if (!/^\d+\.\d+\.\d+$/.test(pkg.version)) {
+if (!/^\d+\.\d+\.\d+$/.test(version)) {
   // Inno Setup (VersionInfoVersion) solo acepta números.
-  console.error(`La versión ${pkg.version} no es X.Y.Z: el instalador necesita una versión numérica.`);
+  console.error(`La versión ${version} no es X.Y.Z: el instalador necesita una versión numérica.`);
   process.exit(1);
 }
 if (!existsSync(path.join(source, "scale-connect.exe"))) {
@@ -46,7 +48,7 @@ execFileSync(
   iscc,
   [
     "/Qp",
-    `/DAppVersion=${pkg.version}`,
+    `/DAppVersion=${version}`,
     `/DSourceDir=${source}`,
     `/DOutputDir=${outputDir}`,
     path.join(root, "packaging", "installer.iss"),
@@ -54,7 +56,7 @@ execFileSync(
   { stdio: "inherit" },
 );
 
-const name = `PatagoniaScaleConnect-Setup-${pkg.version}.exe`;
+const name = `PatagoniaScaleConnect-Setup-${version}.exe`;
 const installer = path.join(outputDir, name);
 const hash = await sha256File(installer);
 await writeFile(`${installer}.sha256`, `${hash} *${name}\n`);

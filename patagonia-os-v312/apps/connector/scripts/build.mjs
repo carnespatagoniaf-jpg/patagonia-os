@@ -11,10 +11,13 @@ import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { keyIdOf, loadPublicKey } from "./lib/update-manifest.mjs";
+import { buildVersion } from "./lib/build-version.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
 const pkg = JSON.parse(await readFile(path.join(root, "package.json"), "utf8"));
+// La de package.json, o SCALE_CONNECT_VERSION (pruebas; lib/build-version.mjs).
+const version = buildVersion(pkg.version);
 
 const protocols = await build({
   entryPoints: [path.join(root, "src", "protocols", "web-entry.ts")],
@@ -59,17 +62,17 @@ const result = await build({
   // __SCALE_CONNECT_UPDATE_PUBKEY__: clave PÚBLICA Ed25519 de los manifiestos (variable SCALE_CONNECT_UPDATE_PUBKEY; en el
   // CI, la variable del repo). Vacía = la actualización automática queda apagada (src/update/update-key.ts).
   define: {
-    __CONNECTOR_VERSION__: JSON.stringify(pkg.version),
+    __CONNECTOR_VERSION__: JSON.stringify(version),
     __WEB_PROTOCOLS_SOURCE__: JSON.stringify(protocolSource),
     __SCALE_CONNECT_UPDATE_PUBKEY__: JSON.stringify(updatePublicKey),
   },
   // web-runtime.ts usa import.meta.url solo en desarrollo (cuando no hay __WEB_PROTOCOLS_SOURCE__).
   logOverride: { "empty-import-meta": "silent" },
-  banner: { js: `/* Patagonia Scale Connect ${pkg.version} */` },
+  banner: { js: `/* Patagonia Scale Connect ${version} */` },
   logLevel: "warning",
 });
 
 const out = Object.entries(result.metafile.outputs).find(([file]) => file.endsWith(".cjs"));
 const kb = out ? Math.round(out[1].bytes / 1024) : 0;
-console.log(`dist/scale-connect.cjs (${kb} KB) versión ${pkg.version}`);
+console.log(`dist/scale-connect.cjs (${kb} KB) versión ${version}`);
 console.log(`  protocolos de la web: ${Math.round(protocolSource.length / 1024)} KB (${Object.keys(protocols.metafile.inputs).length} archivos)`);

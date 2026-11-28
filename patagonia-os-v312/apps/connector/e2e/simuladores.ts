@@ -72,12 +72,16 @@ function startReport(): Promise<void> {
   return new Promise((resolve, reject) => {
     const server = net.createServer((socket) => {
       reportSockets.add(socket);
-      log(`Report: conexión de ${socket.remoteAddress}:${socket.remotePort}`);
+      const peer = `${socket.remoteAddress}:${socket.remotePort}`;
+      log(`Report: conexión de ${peer}`);
       socket.on("data", (chunk) => {
         const out = report.receive(chunk);
         if (out.length) later(() => socket.destroyed || socket.write(Uint8Array.from(out)));
       });
-      socket.on("close", () => reportSockets.delete(socket));
+      socket.on("close", () => {
+        reportSockets.delete(socket);
+        log(`Report: se cerró la conexión de ${peer}`);
+      });
       socket.on("error", () => undefined);
     });
     server.once("error", reject);
