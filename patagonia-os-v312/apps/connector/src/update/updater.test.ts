@@ -37,6 +37,9 @@ function manifestFor(bytes: Buffer, version: string, opts: { key?: KeyObject; ch
       url: `https://xyz.supabase.co/storage/v1/object/public/scale-connect/${version}/PatagoniaScaleConnect-Setup-${version}.exe`,
       sha256: createHash("sha256").update(bytes).digest("hex"),
       size: bytes.length,
+      // La misma fecha que el reloj fijo de la prueba (abajo): con la fecha real, al día siguiente el manifiesto
+      // quedaba "en el futuro" para ese reloj y la prueba fallaba sola (CI del 28/11/2026).
+      publishedAt: "2026-11-27T12:00:00.000Z",
     },
     opts.key ?? privateKey,
   );
