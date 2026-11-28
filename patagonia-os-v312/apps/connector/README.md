@@ -256,6 +256,17 @@ instalación guarda su propio `.exe` como `instaladores\actual.exe` (para volver
 carpeta. Pruebas: `src/update/*.test.ts` (instalador falso `src/update/testing/fake-installer.mjs` en un proceso aparte;
 nunca uno real) y `scripts/lib/updater-acl.test.mjs` (permisos del `.iss` y de la tarea).
 
+### Prueba en una PC limpia (`.github/workflows/scale-connect-update-e2e.yml`)
+
+Push a `prueba/scale-connect-actualizacion-e2e*`. En `windows-latest`, sin staging ni producción: genera un par Ed25519
+**efímero** (RUNNER_TEMP; se borra al final), arma A = 9.0.0, B = 9.0.1 y C = 9.0.2 rota (su XML de WinSW apunta a un
+ejecutable que no existe) con `SCALE_CONNECT_VERSION=<X.Y.Z>` (`scripts/lib/build-version.mjs`; sin la variable, la de
+`package.json`) y levanta `e2e/nube-falsa.ts` (la nube simulada de las pruebas + instaladores por HTTPS con un
+certificado propio vía `NODE_EXTRA_CA_CERTS`) y la Report simulada. Escenarios: instalar A y vincular; A → B con la tarea
+programada; un envío de 40 productos no se corta (la oferta llega a mitad); C no levanta y vuelve sola a B, queda
+bloqueada; firma inválida, SHA-256 distinto y versión menor no instalan; despliegue gradual y freno con la 229 entera en
+PGlite (`e2e/despliegue-gradual.mjs`). Ayudas en `e2e/actualizacion.psm1`; resumen y registros en el artefacto.
+
 ### Lo que tiene que hacer el dueño (una vez)
 
 ```powershell
@@ -308,8 +319,7 @@ una que se desconecta).
 - Confirmar en el banco que la cuenta virtual abre los COM de cada adaptador (FTDI, CH340,
   PL2303, CP210x).
 - Avisos de licencia de terceros (Node, WinSW, serialport) junto al programa.
-- **Actualización automática:** probarla en una PC limpia (la e2e todavía no cubre la tarea programada ni un instalador
-  real), pantalla en el panel de plataforma para publicar/frenar (hoy por SQL) y correr el script de claves.
+- **Actualización automática:** probarla con un reinicio real de Windows (la e2e de actualización no puede), pantalla en el panel de plataforma para publicar/frenar (hoy por SQL) y correr el script de claves.
 - **Protocolos** Kretz y Systel: pasan a `packages/scale-protocols` y hablan con `ByteLink`.
   Hoy no hay nada de protocolo acá.
 - **Protocolos** Kretz y Systel: pasan a `packages/scale-protocols` y hablan con `ByteLink`.

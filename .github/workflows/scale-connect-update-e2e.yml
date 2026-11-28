@@ -194,15 +194,16 @@ jobs:
 
       # ── 3 y 4. Envío en curso + C rota ──────────────────────────────────────────────────────────────────────────
       - name: Escenario 3 - un envío en curso no se interrumpe
-        timeout-minutes: 25
+        timeout-minutes: 45
         run: |
           Import-Module ./apps/connector/e2e/actualizacion.psm1 -Force
           $sw = [Diagnostics.Stopwatch]::StartNew()
           # Agregar la Report de la red como en la web: identificar (solo lee) y vincular la balanza a su puerto.
           $id = (Invoke-Nube -Method Post -Path '/identificar' -Body @{ host = $env:LAN_IP; port = 1001 }).id
-          Wait-Until { (Invoke-Nube -Path "/trabajo?id=$id").finishedAt } 120 'identificar la Report' 2000 | Out-Null
+          # Prueba también el COM2 del runner (puerto de la placa sin nada): lleva unos minutos.
+          $idSecs = Wait-Until { (Invoke-Nube -Path "/trabajo?id=$id").finishedAt } 900 'identificar la Report' 3000
           $reg = Invoke-Nube -Method Post -Path '/registrar' -Body @{ jobId = $id; key = 'kretz-1' }
-          Assert-Check '3 Envío en curso' 'Report identificada y vinculada a su puerto' ($reg.ok) "$($reg.device.host):$($reg.device.port)"
+          Assert-Check '3 Envío en curso' 'Report identificada y vinculada a su puerto' ($reg.ok) "$($reg.device.host):$($reg.device.port), identificar llevó $idSecs s"
           Start-Sleep -Seconds 20   # un latido: el servicio recibe en /config qué balanza está en qué puerto
           Invoke-Sim -Method Post -Path '/borrar' | Out-Null
           Invoke-Sim -Method Post -Path '/lento?ms=450' | Out-Null
@@ -223,7 +224,7 @@ jobs:
             $s = Get-Status
             $samples += [pscustomobject]@{ at = (Get-Date).ToUniversalTime().ToString('o'); done = $j.progress.done; version = $s.version; paused = $s.update.paused; running = @($s.cloud.currentJobs).Count }
             if ($j.finishedAt) { break }
-            if ($sw.Elapsed.TotalMinutes -gt 15) { throw 'El envío no terminó' }
+            if ($sw.Elapsed.TotalMinutes -gt 35) { throw 'El envío no terminó' }
             Start-Sleep -Seconds 2
           }
           Save-Evidence 'envio-muestras.json' $samples
