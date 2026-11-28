@@ -87,6 +87,20 @@ const scaleReports = [
     log_text: JSON.stringify({ etapa: "conectar", mensaje: "Otro programa tiene tomada la balanza (por ejemplo Qendra, el programa de la balanza, u otra ventana de Chrome o Edge). Cerralo y probá de nuevo.", tecnico: "NetworkError: Failed to open serial port." }) }
 ];
 
+// Versiones de Scale Connect (migraciones 229 y 231).
+const scaleReleases: Array<{ id: string; version: string; channel: string; signed: string; rollout_percent: number; active: boolean; min_version: string; published_at: string; updated_at: string }> = [
+  { id: "rel-1", version: "0.2.0", channel: "stable", signed: "general", rollout_percent: 100, active: true, min_version: "0.1.0", published_at: iso(-20), updated_at: iso(-18) },
+  { id: "rel-2", version: "0.3.0", channel: "pilot", signed: "general", rollout_percent: 10, active: true, min_version: "0.2.0", published_at: iso(-2), updated_at: iso(-2) },
+  { id: "rel-3", version: "0.2.5", channel: "pilot", signed: "piloto", rollout_percent: 50, active: false, min_version: "0.2.0", published_at: iso(-6), updated_at: iso(-5) }
+];
+const scaleInstalled = [
+  { version: "0.3.0", installed: 1, online: 1, failed: 1, rolled_back: 0 },
+  { version: "0.2.5", installed: 1, online: 0, failed: 0, rolled_back: 1 },
+  { version: "0.2.0", installed: 3, online: 3, failed: 0, rolled_back: 0 },
+  { version: "0.1.4", installed: 1, online: 0, failed: 0, rolled_back: 0 }
+];
+const scaleChannels: Record<string, string> = { c1: "pilot" };
+
 function scaleOverview() {
   const open = (c: string) => scaleReports.filter((r) => r.company_id === c && !r.resolved_at).length;
   const lastOpen = (c: string) => scaleReports.find((r) => r.company_id === c && !r.resolved_at);
@@ -170,6 +184,25 @@ function rpc(name: string, args: Record<string, unknown> = {}): unknown {
     case "list_scale_support_access": return [];
     case "scale_support_tools_enabled": return false;
     case "list_scale_support_reports": return scaleReports.map((r) => ({ ...r, user_name: "Cajero", connections: [], user_agent: "Chrome 153", log_text: r.log_text }));
+    case "list_scale_connect_releases": return scaleReleases.map((r) => ({ ...r, installed: scaleInstalled.find((v) => v.version === r.version)?.installed ?? 0, rolled_back: scaleInstalled.find((v) => v.version === r.version)?.rolled_back ?? 0 }));
+    case "admin_scale_connect_versions": return scaleInstalled;
+    case "admin_scale_connect_company_channel": return scaleChannels[String(args.p_company_id)] ?? "stable";
+    case "admin_scale_connect_release_manifest": {
+      const r = scaleReleases.find((x) => x.id === args.p_release_id)!;
+      return { schema: 1, product: "patagonia-scale-connect", version: r.version, channel: r.signed, minVersion: r.min_version };
+    }
+    case "set_scale_connect_release": {
+      const r = scaleReleases.find((x) => x.id === args.p_release_id)!;
+      r.active = Boolean(args.p_active);
+      if (typeof args.p_rollout_percent === "number") r.rollout_percent = args.p_rollout_percent;
+      return null;
+    }
+    case "publish_scale_connect_release": {
+      const m = args.p_manifest as { version: string; channel: string; minVersion: string };
+      scaleReleases.push({ id: `rel-${scaleReleases.length + 1}`, version: m.version, channel: String(args.p_channel), signed: m.channel, rollout_percent: Number(args.p_rollout_percent ?? 0), active: true, min_version: m.minVersion, published_at: iso(0), updated_at: iso(0) });
+      return scaleReleases[scaleReleases.length - 1].id;
+    }
+    case "set_company_scale_connect_channel": scaleChannels[String(args.p_company_id)] = String(args.p_channel); return null;
     case "admin_scale_overview": return scaleOverview();
     case "admin_scale_company_detail": return scaleDetail(String(args.p_company_id));
     case "admin_scale_report_log": {

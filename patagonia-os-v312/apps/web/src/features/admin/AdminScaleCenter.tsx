@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ArrowLeft, Copy, FileText, RefreshCw, Scale } from "lucide-react";
 import { setScaleSupportReportResolved } from "./admin-service";
 import { AdminScaleReports } from "./AdminScaleReports";
+import { AdminScaleConnectVersions, CompanyChannelSelect } from "./AdminScaleConnectVersions";
 import {
   ago,
   classifyScaleCause,
@@ -202,6 +203,8 @@ export function AdminScaleCenter({ onReportsChange }: { onReportsChange?: () => 
           </>
         )}
       </Card>
+      {/* Versiones de Scale Connect publicadas y cuántas PC tiene cada una (migraciones 229 y 231). */}
+      <AdminScaleConnectVersions />
       {/* La bandeja de todos los reportes (la de siempre), debajo: no se duplica, se reusa. */}
       <AdminScaleReports onChange={() => { onReportsChange?.(); void reload(); }} />
     </>
@@ -319,6 +322,7 @@ function ScaleCompanyView({ companyId, rows, onBack, onReportsChange }: { compan
           </Card>
 
           <Card title="Computadoras con Scale Connect">
+            <CompanyChannelSelect companyId={companyId} companyName={name} />
             {detail.connectors.length === 0 ? <p className="pa-muted">No instaló Scale Connect en ninguna PC.</p> : (
               <div className="pa-table-wrap">
                 <table className="pa-table">
