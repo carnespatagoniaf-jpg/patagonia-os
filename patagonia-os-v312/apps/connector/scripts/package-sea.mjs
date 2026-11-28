@@ -25,6 +25,7 @@ import { downloadVerified, sha256File } from "./lib/download.mjs";
 import { cacheDir, resolveNode22 } from "./lib/node22.mjs";
 import { readSignatureInfo, removeSignature } from "./lib/pe-unsign.mjs";
 import { SEA_FUSE, WINSW } from "./lib/pinned.mjs";
+import { buildVersion } from "./lib/build-version.mjs";
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const root = path.resolve(here, "..");
@@ -122,8 +123,8 @@ for (const file of (await listFiles(out)).sort()) {
 }
 await writeFile(
   path.join(out, "build-info.json"),
-  JSON.stringify({ product: "patagonia-scale-connect", version: pkg.version, node: node.version, winsw: WINSW.version, signed: false, builtAt: new Date().toISOString(), files }, null, 2),
+  JSON.stringify({ product: "patagonia-scale-connect", version: buildVersion(pkg.version), node: node.version, winsw: WINSW.version, signed: false, builtAt: new Date().toISOString(), files }, null, 2),
 );
 
 const mb = (files[exeName].bytes / 1024 / 1024).toFixed(1);
-console.log(`Listo: ${out}\n  ${exeName} ${mb} MB, versión ${pkg.version}, SIN FIRMAR.`);
+console.log(`Listo: ${out}\n  ${exeName} ${mb} MB, versión ${buildVersion(pkg.version)}, SIN FIRMAR.`);
