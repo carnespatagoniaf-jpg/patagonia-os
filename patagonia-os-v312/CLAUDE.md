@@ -236,6 +236,15 @@ Behind the per-company switch `companies.features` 'balanzas_v2' (platform panel
 - **Sending**: Kretz (Report/Aura) allocates the prefix, saves the profile of THAT scale and sends its 1070, never the branch format; network Report + 2-3-7 is refused. Systel writes the per-product code with its prefix. `no-client-ids.test.ts` fails on any UUID in the scales code (temporary exception: `weight-barcode.ts`, deleted when 'balanzas_v2' is on for everyone). E2E: `scales/sale/three-scales-e2e.test.ts` (Report + Aura + Systel, 6 orders).
 - Not confirmed on hardware: prefixes 22-29 on the Report (and 23-29 on the Aura), Systel prefixes other than 20/21.
 
+## Vale de mercadería from Mostrador (migration 215, 2026-11-27)
+
+Owner: an employee takes merchandise and it is deducted from salary. "Phase 3" announced in 066. The cashier loads what the employee takes into the Mostrador ticket (without charging it), then "Sacar plata del cajón" → "Vale a un empleado" and, in the "¿De dónde sale?" select (the cash accounts), picks "Mercadería" (`EmployeeValeForm` in `ShiftPanel.tsx`, plan Estándar+). Owner wanted it there and nowhere else ("no quiero más información que ensucie el sistema"): no extra payment method in the ticket. The PIN field only appears when the DB says that employee has one. Calls `register_employee_merchandise_vale(shift, employee, items[{product_id, quantity, price_list_id?}], pin?, detail?)`:
+- Price = `pos_list_unit_price` (same as a sale: chosen list or branch zone) minus `companies.employee_discount_pct` (0–50, `set_employee_discount`, owner/admin, set at the top of Empleados). Total rounded to the peso.
+- Stock: one `inventory_movements` `vale_mercaderia` per line (`reference_type='employee_vale'`); presentaciones follow the 111 trigger. Recipes are NOT exploded (that trigger only keys on pos_sale/customer_charge).
+- Money: NO Treasury movement and NO pos_sale. One `pos_shift_outflows` type `vale_mercaderia` (account null), which `close_payroll_liquidation` (066) already deducts. Cash close is unaffected (`pos_shift_expected` reads treasury only). Lines in `pos_shift_outflow_items`.
+- If the employee has a cashier PIN (117) it is required (`pos_verify_cashier`). Deleting the vale with the existing `delete_pos_shift_outflow` returns the stock (BEFORE DELETE trigger `pos_shift_outflows_return_stock`, movement `vale_mercaderia_anulado`).
+- Pure logic `sale/merchandise-vale.ts` (tested). Tests: `tests/sql/215_vale_mercaderia.sql`.
+
 ## Freezer (migration 214, 2026-11-26; NOT published)
 
 Owner: "saber qué cosas tenemos guardadas en el freezer y cuando se venda se sale". Per-company feature `freezer` (platform panel "Pantallas a pedido"), page `freezer` = tab of Stock, permission `freezer.manage` (admin, manager, production, cashier; owner via `"*"`). Owner chose the scale's normal label, no extra printer.

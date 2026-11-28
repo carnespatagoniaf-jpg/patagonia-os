@@ -15,7 +15,8 @@ import { listProductCategories, type ProductCategory } from "../inventory/produc
 import { useTreasury } from "../shifts/useTreasury";
 import { useSuppliers } from "../purchases/useSuppliers";
 import { useEmployees } from "../employees/useEmployees";
-import { deletePosShiftOutflow, listPosShiftVales, type PosShiftVale } from "../employees/employees-service";
+import { valeReceiptDetail, type MerchandiseValeDone } from "./merchandise-vale";
+import { deletePosShiftOutflow, getEmployeeDiscount, listPosShiftVales, type PosShiftVale } from "../employees/employees-service";
 import { createPosSale, noteOfflineSaleMoved, type CreatePosSaleInput } from "./sale-service";
 import { repeatedPaperTime } from "../scales/sale/scale-sale-service";
 import { authorizeInvoices, getFiscalSettings, getInvoice, invoicePrintFrom, requestInvoice, type FiscalSettings } from "../invoicing/invoicing-service";
@@ -63,6 +64,12 @@ export function Sale() {
   const [openCashierName, setOpenCashierName] = useState("");
   const { suppliers, create: createSupplier } = useSuppliers();
   const { employees } = useEmployees();
+  // Descuento para empleados en los vales de mercadería (migración 215).
+  const [employeeDiscount, setEmployeeDiscountState] = useState(0);
+  useEffect(() => {
+    if (!profile?.company_id || !isSupabaseConfigured) return;
+    void getEmployeeDiscount(profile.company_id).then(setEmployeeDiscountState);
+  }, [profile?.company_id]);
   // "treasury.manage" (dueño/admin) da acceso a la pantalla completa de
   // Tesorería; "pos.treasury" es más angosto y solo destraba estos botones
   // de Mostrador (caja/proveedor/vale) para un cajero, sin abrirle Tesorería
@@ -512,6 +519,22 @@ export function Sale() {
   /** Comprobante de un movimiento (caja, pago a proveedor, vale): saca el ticket
    * de venta viejo de pantalla para que no compita al imprimir, muestra este y,
    * si corresponde, lo imprime solo. */
+  /** Vale de mercadería (migración 215): el ticket no se cobra, se lo lleva un empleado. Papelito para que firme. */
+  async function giveMerchandiseVale(done: MerchandiseValeDone) {
+    clearTicket();
+    setMessage(`Vale de mercadería de ${done.employeeName} por ${formatMoney(done.amount)}: bajó el stock y se le descuenta del sueldo. No salió plata de la caja.`);
+    await publishMovementReceipt({
+      title: "VALE DE MERCADERÍA",
+      date: new Date().toISOString(),
+      amount: done.amount,
+      accountName: "Se descuenta del sueldo",
+      detail: valeReceiptDetail(done.cart, done.discountPct),
+      counterpartLabel: "Empleado",
+      counterpartName: done.employeeName
+    });
+    if (shift) void refreshAfterSale(shift.id);
+  }
+
   async function publishMovementReceipt(data: MovementReceiptState) {
     setReceipt(null);
     setMovementReceipt(data);
@@ -1421,6 +1444,9 @@ Cancelar = es el mismo papel: no cobrar.`)) {
             onCreateSupplier={async (name) => (await createSupplier({ name, category: "" })).id}
             onMessage={setMessage}
             publishReceipt={publishMovementReceipt}
+            valeCart={cart}
+            employeeDiscount={employeeDiscount}
+            onMerchandiseVale={giveMerchandiseVale}
           />
         </div>
       )}
