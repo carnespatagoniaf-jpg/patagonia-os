@@ -1,6 +1,6 @@
 {
   "name": "@patagonia/connector",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "private": true,
   "description": "Patagonia Scale Connect: servicio de Windows dueño de los puertos y conexiones de las balanzas de la PC.",
   "type": "module",
