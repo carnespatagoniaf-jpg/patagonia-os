@@ -81,3 +81,10 @@ test("desinstalar saca la tarea y la carpeta del actualizador", () => {
 test("el script de la tarea es ASCII (PowerShell 5.1 sin BOM lo lee como ANSI)", () => {
   assert.ok(/^[\x00-\x7F]*$/.test(task));
 });
+
+test("la tarea programada no corta al actualizador a mitad: su límite cubre espera de trabajos + instalar + control + vuelta atrás", () => {
+  const m = /-ExecutionTimeLimit \(New-TimeSpan -Minutes (\d+)\)/.exec(task);
+  assert.ok(m, "la tarea tiene que fijar un límite de ejecución");
+  // updater.ts: espera hasta 30 min a que terminen los envíos, ~2 min de control y otra instalación si vuelve atrás.
+  assert.ok(Number(m[1]) >= 45, `límite de ${m[1]} min: Windows podría cortar al actualizador en medio de una instalación`);
+});

@@ -26,6 +26,6 @@ $boot = New-ScheduledTaskTrigger -AtStartup
 $boot.Delay = 'PT3M'
 $every = New-ScheduledTaskTrigger -Once -At ((Get-Date).Date) -RepetitionInterval (New-TimeSpan -Minutes 15) -RepetitionDuration (New-TimeSpan -Days 3650)
 $principal = New-ScheduledTaskPrincipal -UserId 'S-1-5-18' -LogonType ServiceAccount -RunLevel Highest
-$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 10)
+$settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 60)
 Register-ScheduledTask -TaskName $TaskName -TaskPath $TaskPath -Action $action -Trigger @($boot, $every) -Principal $principal -Settings $settings -Description 'Actualiza Patagonia Scale Connect con versiones firmadas por Patagonia System.' -Force | Out-Null
 Write-Output "Tarea registrada: $TaskPath$TaskName"
